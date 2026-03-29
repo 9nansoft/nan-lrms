@@ -1,6 +1,6 @@
 // T048: Dashboard service — province dashboard data from local cache
 import type { DatabaseAdapter } from '@/db/adapter';
-import type { DashboardHospital, DashboardSummary, HighRiskPatient } from '@/types/api';
+import type { DashboardHospital, DashboardSummary, HighRiskPatient, DashboardStageKPIs, DashboardAlerts } from '@/types/api';
 import type { ConnectionStatus, HospitalLevel } from '@/types/domain';
 
 interface DashboardRow {
@@ -229,5 +229,101 @@ export async function getHospitalPatientList(
       perPage,
       totalPages: Math.ceil(total / perPage),
     },
+  };
+}
+
+// T14: Stage KPIs — pregnancy/labor/delivered counts by risk level
+export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageKPIs> {
+  // Pregnancy counts by ANC risk level
+  const pregnancyCounts = await db.query<{ anc_risk_level: string; count: number }>(
+    `SELECT anc_risk_level, COUNT(*) as count FROM maternal_journeys WHERE care_stage = 'PREGNANCY' GROUP BY anc_risk_level`,
+  );
+
+  const pregnancy = { total: 0, low: 0, hr1: 0, hr2: 0, hr3: 0 };
+  for (const row of pregnancyCounts) {
+    const c = Number(row.count);
+    pregnancy.total += c;
+    if (row.anc_risk_level === 'LOW') pregnancy.low = c;
+    else if (row.anc_risk_level === 'HR1') pregnancy.hr1 = c;
+    else if (row.anc_risk_level === 'HR2') pregnancy.hr2 = c;
+    else if (row.anc_risk_level === 'HR3') pregnancy.hr3 = c;
+  }
+
+  // Labor counts by CPD risk level (from existing cpd_scores)
+  const laborCounts = await db.query<{ risk_level: string; count: number }>(
+    `SELECT cs.risk_level, COUNT(*) as count
+     FROM cached_patients cp
+     JOIN cpd_scores cs ON cs.patient_id = cp.id
+       AND cs.id = (SELECT cs2.id FROM cpd_scores cs2 WHERE cs2.patient_id = cp.id ORDER BY cs2.calculated_at DESC LIMIT 1)
+     WHERE cp.labor_status = 'ACTIVE'
+     GROUP BY cs.risk_level`,
+  );
+
+  const labor = { total: 0, low: 0, medium: 0, high: 0 };
+  for (const row of laborCounts) {
+    const c = Number(row.count);
+    labor.total += c;
+    if (row.risk_level === 'LOW') labor.low = c;
+    else if (row.risk_level === 'MEDIUM') labor.medium = c;
+    else if (row.risk_level === 'HIGH') labor.high = c;
+  }
+
+  // Delivered counts (this month) with outcome flags
+  const firstOfMonth = new Date();
+  firstOfMonth.setDate(1);
+  firstOfMonth.setHours(0, 0, 0, 0);
+  const monthStart = firstOfMonth.toISOString();
+
+  const deliveredRows = await db.query<{ total: number; low_apgar: number; lbw: number }>(
+    `SELECT COUNT(*) as total,
+            SUM(CASE WHEN cn.apgar_1min < 7 THEN 1 ELSE 0 END) as low_apgar,
+            SUM(CASE WHEN cn.birth_weight_g < 2500 THEN 1 ELSE 0 END) as lbw
+     FROM cached_newborns cn
+     JOIN maternal_journeys mj ON mj.id = cn.journey_id
+     WHERE mj.care_stage = 'DELIVERED' AND cn.born_at >= ?`,
+    [monthStart],
+  );
+
+  const dr = deliveredRows[0] || { total: 0, low_apgar: 0, lbw: 0 };
+  const totalDelivered = Number(dr.total) || 0;
+  const lowApgar = Number(dr.low_apgar) || 0;
+  const lbw = Number(dr.lbw) || 0;
+
+  return {
+    pregnancy,
+    labor,
+    delivered: {
+      total: totalDelivered,
+      normal: totalDelivered - lowApgar - lbw,
+      lowApgar,
+      lbw,
+    },
+  };
+}
+
+// T14: Dashboard alerts — referral alerts, overdue ANC, in-transit referrals
+export async function getDashboardAlerts(db: DatabaseAdapter): Promise<DashboardAlerts> {
+  // Referral alerts: pending referrals (INITIATED or ACCEPTED)
+  const refAlerts = await db.query<{ count: number }>(
+    `SELECT COUNT(*) as count FROM cached_referrals WHERE status IN ('INITIATED', 'ACCEPTED')`,
+  );
+
+  // Overdue ANC: pregnancies where last_anc_date is > 28 days ago
+  const overdueAnc = await db.query<{ count: number }>(
+    `SELECT COUNT(*) as count FROM maternal_journeys
+     WHERE care_stage = 'PREGNANCY'
+       AND last_anc_date IS NOT NULL
+       AND julianday('now') - julianday(last_anc_date) > 28`,
+  );
+
+  // In-transit referrals
+  const inTransit = await db.query<{ count: number }>(
+    `SELECT COUNT(*) as count FROM cached_referrals WHERE status = 'IN_TRANSIT'`,
+  );
+
+  return {
+    referralAlerts: Number(refAlerts[0]?.count) || 0,
+    overdueAnc: Number(overdueAnc[0]?.count) || 0,
+    inTransitReferrals: Number(inTransit[0]?.count) || 0,
   };
 }
