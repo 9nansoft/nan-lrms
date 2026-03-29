@@ -116,6 +116,18 @@ export async function getActiveJourneys(
   return rows.map(mapRowToJourney);
 }
 
+export async function getJourneyById(
+  db: DatabaseAdapter,
+  journeyId: string,
+): Promise<MaternalJourney | null> {
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM maternal_journeys WHERE id = ?`,
+    [journeyId],
+  );
+  if (rows.length === 0) return null;
+  return mapRowToJourney(rows[0]);
+}
+
 function mapRowToJourney(row: Record<string, unknown>): MaternalJourney {
   return {
     id: row.id as string,

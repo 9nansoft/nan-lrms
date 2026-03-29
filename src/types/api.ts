@@ -206,3 +206,98 @@ export interface SseSyncCompleteEvent {
   patientsUpdated: number;
   timestamp: string;
 }
+
+// --- Maternal Journey API Types ---
+
+export interface JourneyListItem {
+  id: string;
+  hn: string;
+  name: string;
+  age: number;
+  gravida: number;
+  para: number;
+  gaWeeks: number | null;
+  lmp: string | null;
+  edc: string | null;
+  careStage: string;
+  ancRiskLevel: string;
+  ancVisitCount: number;
+  lastAncDate: string | null;
+  hospitalName: string;
+  hcode: string;
+  registeredAt: string;
+}
+
+export interface JourneyListResponse {
+  journeys: JourneyListItem[];
+  pagination: Pagination;
+}
+
+export interface JourneyDetailResponse {
+  journey: JourneyListItem & {
+    currentHospitalName: string;
+    currentHcode: string;
+  };
+  ancVisits: AncVisitEntry[];
+  latestRisk: AncRiskEntry | null;
+  referrals: ReferralListItem[];
+  newborns: NewbornEntry[];
+}
+
+export interface AncVisitEntry {
+  visitDate: string;
+  visitNumber: number;
+  gaWeeks: number | null;
+  fundalHeightCm: number | null;
+  weightKg: number | null;
+  bpSystolic: number | null;
+  bpDiastolic: number | null;
+  fetalHr: number | null;
+}
+
+export interface AncRiskEntry {
+  riskLevel: string;
+  triggeredRules: string[];
+  screenedAt: string;
+  recommendedFacility: string | null;
+}
+
+export interface ReferralListItem {
+  id: string;
+  fromHospital: string;
+  toHospital: string;
+  status: string;
+  reason: string;
+  urgencyLevel: string;
+  initiatedAt: string;
+  arrivedAt: string | null;
+}
+
+export interface NewbornEntry {
+  infantNumber: number;
+  sex: string | null;
+  birthWeightG: number | null;
+  apgar1min: number | null;
+  apgar5min: number | null;
+  bornAt: string;
+}
+
+export interface NewbornKPIsResponse {
+  totalBirths: number;
+  lbwCount: number;
+  lbwRate: number;
+  lowApgarCount: number;
+  avgBirthWeightG: number;
+}
+
+export interface DashboardStageKPIs {
+  pregnancy: { total: number; low: number; hr1: number; hr2: number; hr3: number };
+  labor: { total: number; low: number; medium: number; high: number };
+  delivered: { total: number; normal: number; lowApgar: number; lbw: number };
+}
+
+export interface DashboardAlerts {
+  referralAlerts: number;
+  overdueAnc: number;
+  inTransitReferrals: number;
+}
