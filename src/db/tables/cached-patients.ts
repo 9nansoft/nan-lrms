@@ -28,6 +28,7 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'hematocrit_pct', type: 'decimal', nullable: true },
     { name: 'labor_status', type: 'string', maxLength: 20, defaultValue: 'ACTIVE' },
     { name: 'delivered_at', type: 'datetime', nullable: true },
+    { name: 'journey_id', type: 'uuid', nullable: true, references: { table: 'maternal_journeys', column: 'id' } },
     { name: 'synced_at', type: 'datetime' },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },
@@ -39,5 +40,6 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'idx_cp_labor_status', columns: ['labor_status'] },
     { name: 'idx_cp_cid', columns: ['cid'] },
     { name: 'idx_cp_cid_hash', columns: ['cid_hash'] },
+    { name: 'idx_cp_journey_id', columns: ['journey_id'] },
   ],
 };

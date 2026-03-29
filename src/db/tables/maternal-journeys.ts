@@ -1,0 +1,37 @@
+import type { TableDefinition } from '../table-definition';
+
+export const maternalJourneysTable: TableDefinition = {
+  name: 'maternal_journeys',
+  fields: [
+    { name: 'id', type: 'uuid', primaryKey: true },
+    { name: 'hospital_id', type: 'uuid', references: { table: 'hospitals', column: 'id' } },
+    { name: 'current_hospital_id', type: 'uuid', references: { table: 'hospitals', column: 'id' } },
+    { name: 'hn', type: 'string', maxLength: 20 },
+    { name: 'person_anc_id', type: 'integer', nullable: true },
+    { name: 'name', type: 'string', maxLength: 255 },
+    { name: 'cid', type: 'string', maxLength: 255, nullable: true },
+    { name: 'cid_hash', type: 'string', maxLength: 64, nullable: true },
+    { name: 'age', type: 'integer' },
+    { name: 'gravida', type: 'integer' },
+    { name: 'para', type: 'integer', defaultValue: 0 },
+    { name: 'lmp', type: 'datetime', nullable: true },
+    { name: 'edc', type: 'datetime', nullable: true },
+    { name: 'care_stage', type: 'string', maxLength: 20, defaultValue: 'PREGNANCY' },
+    { name: 'anc_risk_level', type: 'string', maxLength: 10, defaultValue: 'LOW' },
+    { name: 'anc_visit_count', type: 'integer', defaultValue: 0 },
+    { name: 'last_anc_date', type: 'datetime', nullable: true },
+    { name: 'ga_weeks', type: 'integer', nullable: true },
+    { name: 'registered_at', type: 'datetime' },
+    { name: 'stage_changed_at', type: 'datetime' },
+    { name: 'synced_at', type: 'datetime' },
+    { name: 'created_at', type: 'datetime' },
+    { name: 'updated_at', type: 'datetime' },
+  ],
+  indexes: [
+    { name: 'idx_mj_hospital_hn', columns: ['hospital_id', 'hn'], unique: true },
+    { name: 'idx_mj_care_stage', columns: ['care_stage'] },
+    { name: 'idx_mj_anc_risk_level', columns: ['anc_risk_level'] },
+    { name: 'idx_mj_cid_hash', columns: ['cid_hash'] },
+    { name: 'idx_mj_current_hospital', columns: ['current_hospital_id'] },
+  ],
+};
