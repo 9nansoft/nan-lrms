@@ -7,6 +7,7 @@ import { logAccess } from '@/services/audit';
 import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
 import type { PatientDetailResponse } from '@/types/api';
+import { getJourneyByHn } from '@/services/journey';
 
 export async function GET(
   _request: NextRequest,
@@ -128,6 +129,38 @@ export async function GET(
       calculatedAt: cpdScores[0].calculated_at,
     } : null;
 
+    // Look up hospital ID for journey query
+    const hospitals = await db.query<{ id: string }>(
+      'SELECT id FROM hospitals WHERE hcode = ? LIMIT 1',
+      [hcode],
+    );
+    const hospitalId = hospitals.length > 0 ? hospitals[0].id : null;
+
+    // Look up journey context
+    let journeyContext: {
+      journeyId: string;
+      careStage: string;
+      ancRiskLevel: string;
+      ancVisitCount: number;
+      lastAncDate: string | null;
+      lmp: string | null;
+      edc: string | null;
+    } | null = null;
+    if (hospitalId) {
+      const journey = await getJourneyByHn(db, p.hn, hospitalId);
+      if (journey) {
+        journeyContext = {
+          journeyId: journey.id,
+          careStage: journey.careStage,
+          ancRiskLevel: journey.ancRiskLevel,
+          ancVisitCount: journey.ancVisitCount,
+          lastAncDate: journey.lastAncDate,
+          lmp: journey.lmp,
+          edc: journey.edc,
+        };
+      }
+    }
+
     const response: PatientDetailResponse = {
       patient: {
         id: p.id,
@@ -154,6 +187,7 @@ export async function GET(
         syncedAt: p.synced_at,
       },
       cpdScore,
+      ...(journeyContext !== null && { journeyContext }),
     };
 
     return NextResponse.json(response);

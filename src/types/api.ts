@@ -116,6 +116,15 @@ export interface PatientDetailResponse {
     missingFactors: string[];
     calculatedAt: string;
   } | null;
+  journeyContext?: {
+    journeyId: string;
+    careStage: string;
+    ancRiskLevel: string;
+    ancVisitCount: number;
+    lastAncDate: string | null;
+    lmp: string | null;
+    edc: string | null;
+  } | null;
 }
 
 // Vital Signs
