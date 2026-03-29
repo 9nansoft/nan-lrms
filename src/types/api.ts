@@ -216,6 +216,30 @@ export interface SseSyncCompleteEvent {
   timestamp: string;
 }
 
+export interface SseJourneyUpdateEvent {
+  type: 'journey_update';
+  hcode: string;
+  journeyId: string;
+  careStage: string;
+  ancRiskLevel?: string;
+}
+
+export interface SseReferralUpdateEvent {
+  type: 'referral_update';
+  fromHcode: string;
+  toHcode: string;
+  referralId: string;
+  status: string;
+}
+
+export interface SseNewbornUpdateEvent {
+  type: 'newborn_update';
+  hcode: string;
+  journeyId: string;
+  infantNumber: number;
+  birthWeightG?: number;
+}
+
 // --- Maternal Journey API Types ---
 
 export interface JourneyListItem {

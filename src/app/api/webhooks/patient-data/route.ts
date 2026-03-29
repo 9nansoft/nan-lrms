@@ -2,7 +2,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
-import { validateApiKey, validatePayload, processWebhookPayload } from '@/services/webhook';
+import {
+  validateApiKey,
+  validatePayload,
+  processWebhookPayload,
+  processAncWebhook,
+  processReferralWebhook,
+} from '@/services/webhook';
+import type { WebhookAncPayload, WebhookReferralPayload } from '@/services/webhook';
 import { SseManager } from '@/lib/sse';
 
 export async function POST(request: NextRequest) {
@@ -30,8 +37,63 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse and validate payload
+    // Parse body
     const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'Request body must be a JSON object' },
+        { status: 400 },
+      );
+    }
+
+    const sseManager = SseManager.getInstance();
+    const payloadType = (body as Record<string, unknown>).type;
+
+    // Route to the appropriate handler based on payload type
+    if (payloadType === 'anc_data') {
+      const ancPayload = body as WebhookAncPayload;
+      if (!Array.isArray(ancPayload.patients) || ancPayload.patients.length === 0) {
+        return NextResponse.json(
+          { error: '"patients" array is required and must not be empty' },
+          { status: 400 },
+        );
+      }
+      const result = await processAncWebhook(db, keyInfo.hospitalId, ancPayload, sseManager);
+      return NextResponse.json({
+        success: true,
+        ...result,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (payloadType === 'referral_update') {
+      const referralPayload = body as WebhookReferralPayload;
+      if (!referralPayload.referralId || typeof referralPayload.referralId !== 'string') {
+        return NextResponse.json(
+          { error: '"referralId" is required (string)' },
+          { status: 400 },
+        );
+      }
+      if (!referralPayload.status || typeof referralPayload.status !== 'string') {
+        return NextResponse.json(
+          { error: '"status" is required (string)' },
+          { status: 400 },
+        );
+      }
+      const result = await processReferralWebhook(
+        db,
+        keyInfo.hospitalId,
+        referralPayload,
+        sseManager,
+      );
+      return NextResponse.json({
+        success: true,
+        ...result,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Default: labor patient payload (unchanged)
     const validation = validatePayload(body);
     if (!validation.valid || !validation.payload) {
       return NextResponse.json(
@@ -40,8 +102,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Process webhook
-    const sseManager = SseManager.getInstance();
     const result = await processWebhookPayload(
       db,
       keyInfo.hospitalId,

@@ -6,6 +6,8 @@ import { encrypt, getEncryptionKey } from '@/lib/encryption';
 import { upsertCachedPatients, detectChanges, detectTransfers, markPatientsDelivered, calculateAndStoreCpdScores } from '@/services/sync';
 import type { SyncPatientData } from '@/services/sync';
 import { SseManager } from '@/lib/sse';
+import { getJourneyByHn, createJourney } from '@/services/journey';
+import { AncRiskLevel } from '@/types/domain';
 
 // ─── Webhook payload types ───
 
@@ -40,6 +42,60 @@ export interface WebhookResult {
   newAdmissions: number;
   discharges: number;
   transfers: number;
+}
+
+// ─── ANC webhook payload ───
+
+export interface WebhookAncVisit {
+  date: string;
+  visitNumber: number;
+  gaWeeks?: number;
+  fundalHeightCm?: number;
+  weightKg?: number;
+  bpSystolic?: number;
+  bpDiastolic?: number;
+  fetalHr?: number;
+}
+
+export interface WebhookAncPatient {
+  hn: string;
+  name: string;
+  cid?: string;
+  birthday: string;
+  pregNo: number;
+  lmp?: string;
+  edc?: string;
+  riskLevel?: string;
+  visits?: WebhookAncVisit[];
+}
+
+export interface WebhookAncPayload {
+  type: 'anc_data';
+  hospitalCode: string;
+  patients: WebhookAncPatient[];
+}
+
+export interface WebhookAncResult {
+  patientsProcessed: number;
+  created: number;
+  updated: number;
+}
+
+// ─── Referral webhook payload ───
+
+export interface WebhookReferralPayload {
+  type: 'referral_update';
+  hospitalCode: string;
+  referralId: string;
+  status: string;
+  reason?: string;
+  transportMode?: string;
+  arrivedAt?: string;
+}
+
+export interface WebhookReferralResult {
+  referralId: string;
+  status: string;
 }
 
 // ─── API Key management ───
@@ -332,6 +388,150 @@ export async function processWebhookPayload(
     newAdmissions: changes.newAdmissions.length,
     discharges: dischargeCount,
     transfers: transfers.length,
+  };
+}
+
+// ─── ANC webhook processing ───
+
+export async function processAncWebhook(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  payload: WebhookAncPayload,
+  sseManager: SseManager,
+): Promise<WebhookAncResult> {
+  const encryptionKey = getEncryptionKey();
+
+  const hospitalRows = await db.query<{ hcode: string }>(
+    'SELECT hcode FROM hospitals WHERE id = ?',
+    [hospitalId],
+  );
+  const hcode = hospitalRows[0]?.hcode ?? '';
+
+  let created = 0;
+  let updated = 0;
+
+  for (const patient of payload.patients) {
+    const encryptedName = encrypt(patient.name, encryptionKey);
+    const encryptedCid = patient.cid ? encrypt(patient.cid, encryptionKey) : null;
+    const cidHash = patient.cid
+      ? createHash('sha256').update(patient.cid).digest('hex')
+      : null;
+
+    const existing = await getJourneyByHn(db, patient.hn, hospitalId);
+
+    if (existing) {
+      // Update journey with latest data
+      const now = new Date().toISOString();
+      await db.execute(
+        `UPDATE maternal_journeys SET name = ?, cid = ?, cid_hash = ?, lmp = ?, edc = ?, anc_risk_level = ?, synced_at = ?, updated_at = ? WHERE id = ?`,
+        [encryptedName, encryptedCid, cidHash, patient.lmp ?? existing.lmp, patient.edc ?? existing.edc, patient.riskLevel ?? existing.ancRiskLevel, now, now, existing.id],
+      );
+
+      sseManager.broadcast('patient-update', {
+        type: 'journey_update',
+        hcode,
+        journeyId: existing.id,
+        careStage: existing.careStage,
+        ancRiskLevel: patient.riskLevel ?? existing.ancRiskLevel ?? undefined,
+      });
+      updated++;
+    } else {
+      const age = patient.birthday ? Math.floor((Date.now() - new Date(patient.birthday).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : 0;
+      const journey = await createJourney(db, {
+        hospitalId,
+        hn: patient.hn,
+        personAncId: null,
+        name: encryptedName,
+        cid: encryptedCid,
+        cidHash,
+        age,
+        gravida: patient.pregNo,
+        para: 0,
+        lmp: patient.lmp ?? null,
+        edc: patient.edc ?? null,
+        ancRiskLevel: (patient.riskLevel as AncRiskLevel) ?? AncRiskLevel.LOW,
+      });
+
+      sseManager.broadcast('patient-update', {
+        type: 'journey_update',
+        hcode,
+        journeyId: journey.id,
+        careStage: 'PREGNANCY',
+        ancRiskLevel: patient.riskLevel ?? undefined,
+      });
+      created++;
+    }
+  }
+
+  await db.execute(
+    "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE id = ?",
+    [new Date().toISOString(), hospitalId],
+  );
+
+  return {
+    patientsProcessed: payload.patients.length,
+    created,
+    updated,
+  };
+}
+
+// ─── Referral webhook processing ───
+
+export async function processReferralWebhook(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  payload: WebhookReferralPayload,
+  sseManager: SseManager,
+): Promise<WebhookReferralResult> {
+  const hospitalRows = await db.query<{ hcode: string }>(
+    'SELECT hcode FROM hospitals WHERE id = ?',
+    [hospitalId],
+  );
+  const hcode = hospitalRows[0]?.hcode ?? '';
+
+  // Look up the referral by external ID
+  const existing = await db.query<{ id: string; to_hospital_id: string }>(
+    `SELECT id, to_hospital_id FROM cached_referrals WHERE refer_number = ?`,
+    [payload.referralId],
+  );
+
+  if (existing.length > 0) {
+    // Update existing referral status
+    const now = new Date().toISOString();
+    if (payload.status === 'ACCEPTED') {
+      await db.execute(
+        `UPDATE cached_referrals SET status = 'ACCEPTED', accepted_at = ?, updated_at = ? WHERE refer_number = ?`,
+        [now, now, payload.referralId],
+      );
+    } else if (payload.status === 'IN_TRANSIT') {
+      await db.execute(
+        `UPDATE cached_referrals SET status = 'IN_TRANSIT', departed_at = ?, transport_mode = ?, updated_at = ? WHERE refer_number = ?`,
+        [now, payload.transportMode ?? null, now, payload.referralId],
+      );
+    } else if (payload.status === 'ARRIVED') {
+      await db.execute(
+        `UPDATE cached_referrals SET status = 'ARRIVED', arrived_at = ?, updated_at = ? WHERE refer_number = ?`,
+        [payload.arrivedAt ?? now, now, payload.referralId],
+      );
+    }
+
+    const toHcodeRows = await db.query<{ hcode: string }>(
+      'SELECT hcode FROM hospitals WHERE id = ?',
+      [existing[0].to_hospital_id],
+    );
+
+    sseManager.broadcast('patient-update', {
+      type: 'referral_update',
+      fromHcode: hcode,
+      toHcode: toHcodeRows[0]?.hcode ?? '',
+      referralId: payload.referralId,
+      status: payload.status,
+    });
+  }
+
+  return {
+    referralId: payload.referralId,
+    status: payload.status,
   };
 }
 
