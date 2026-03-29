@@ -153,3 +153,140 @@ export interface AuditLog {
   metadata: Record<string, unknown> | null;
   createdAt: Date;
 }
+
+// --- Maternal Journey Continuum (Pregnancy → Labor → Newborn) ---
+
+export enum CareStage {
+  PREGNANCY = 'PREGNANCY',
+  LABOR = 'LABOR',
+  DELIVERED = 'DELIVERED',
+  POSTPARTUM = 'POSTPARTUM',
+}
+
+export enum AncRiskLevel {
+  LOW = 'LOW',
+  HR1 = 'HR1',
+  HR2 = 'HR2',
+  HR3 = 'HR3',
+}
+
+export enum ReferralStatus {
+  INITIATED = 'INITIATED',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  IN_TRANSIT = 'IN_TRANSIT',
+  ARRIVED = 'ARRIVED',
+}
+
+export enum UrgencyLevel {
+  ROUTINE = 'ROUTINE',
+  URGENT = 'URGENT',
+  EMERGENCY = 'EMERGENCY',
+}
+
+export interface MaternalJourney {
+  id: string;
+  hospitalId: string;
+  currentHospitalId: string;
+  hn: string;
+  personAncId: number | null;
+  name: string;
+  cid: string | null;
+  cidHash: string | null;
+  age: number;
+  gravida: number;
+  para: number;
+  lmp: string | null;
+  edc: string | null;
+  careStage: CareStage;
+  ancRiskLevel: AncRiskLevel;
+  ancVisitCount: number;
+  lastAncDate: string | null;
+  gaWeeks: number | null;
+  registeredAt: Date;
+  stageChangedAt: Date;
+  syncedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CachedAncVisit {
+  id: string;
+  journeyId: string;
+  visitDate: string;
+  visitNumber: number;
+  gaWeeks: number | null;
+  gaDays: number | null;
+  fundalHeightCm: number | null;
+  weightKg: number | null;
+  bpSystolic: number | null;
+  bpDiastolic: number | null;
+  fetalHr: number | null;
+  presentation: string | null;
+  engagement: string | null;
+  passQuality: boolean | null;
+  providerCode: string | null;
+  syncedAt: Date;
+  createdAt: Date;
+}
+
+export interface CachedAncRisk {
+  id: string;
+  journeyId: string;
+  riskLevel: AncRiskLevel;
+  triggeredRules: string[];
+  riskFactors: Record<string, unknown>;
+  recommendedFacility: string | null;
+  recommendedProvider: string | null;
+  screenedAt: Date;
+  createdAt: Date;
+}
+
+export interface CachedReferral {
+  id: string;
+  journeyId: string;
+  referNumber: string | null;
+  fromHospitalId: string;
+  toHospitalId: string;
+  status: ReferralStatus;
+  reason: string;
+  diagnosisCode: string | null;
+  urgencyLevel: UrgencyLevel;
+  rejectionReason: string | null;
+  suggestedAlternativeId: string | null;
+  transportMode: string | null;
+  initiatedAt: Date;
+  acceptedAt: Date | null;
+  departedAt: Date | null;
+  arrivedAt: Date | null;
+  rejectedAt: Date | null;
+  initiatedBy: string | null;
+  acceptedBy: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CachedNewborn {
+  id: string;
+  journeyId: string;
+  infantNumber: number;
+  sex: string | null;
+  birthWeightG: number | null;
+  bodyLengthCm: number | null;
+  headCircumCm: number | null;
+  temperature: number | null;
+  heartRate: number | null;
+  respiratoryRate: number | null;
+  apgar1min: number | null;
+  apgar5min: number | null;
+  apgar10min: number | null;
+  resuscitation: Record<string, boolean>;
+  vaccinations: Record<string, boolean>;
+  infantIcd10: string | null;
+  infantHn: string | null;
+  infantAn: string | null;
+  dischargeStatus: string | null;
+  bornAt: Date;
+  syncedAt: Date;
+  createdAt: Date;
+}
