@@ -5,6 +5,12 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import type { HosxpIptRow, HosxpPregnancyRow, HosxpPatientRow } from '@/types/hosxp';
 import { encrypt } from '@/lib/encryption';
 import { calculateAge } from '@/lib/utils';
+import { createJourney, getJourneyByHn, transitionToLabor, transitionToDelivered } from '@/services/journey';
+import { upsertNewborn } from '@/services/newborn';
+import { evaluateAncRisk } from '@/services/anc-risk';
+import type { HosxpPersonAncRow, HosxpAncServiceRow, HosxpAncRiskRow, HosxpAncClassifyingRow, HosxpLabourInfantRow } from '@/types/hosxp';
+import type { AncRiskInput } from '@/config/anc-risk-rules';
+import { AncRiskLevel } from '@/types/domain';
 
 export interface SyncPatientData {
   hn: string;
@@ -693,4 +699,276 @@ export function stopPolling(): void {
   }
   pollingIntervals.clear();
   console.log('Polling stopped');
+}
+
+// --- ANC Sync (Pregnancy Stage) ---
+
+export async function syncAncData(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  ancPatients: HosxpPersonAncRow[],
+  ancServices: HosxpAncServiceRow[],
+  ancRisks: HosxpAncRiskRow[],
+  ancClassifying: HosxpAncClassifyingRow[],
+  encryptionKey: string,
+): Promise<number> {
+  let count = 0;
+
+  for (const anc of ancPatients) {
+    const fullName = `${anc.pname}${anc.fname} ${anc.lname}`.trim();
+    const encryptedName = encrypt(fullName, encryptionKey);
+    const cidHash = anc.cid
+      ? createHash('sha256').update(anc.cid).digest('hex')
+      : null;
+    const encryptedCid = anc.cid ? encrypt(anc.cid, encryptionKey) : null;
+    const age = calculateAge(anc.birthday);
+
+    // Find or create journey
+    let journey = await getJourneyByHn(db, anc.hn, hospitalId);
+    if (!journey) {
+      journey = await createJourney(db, {
+        hospitalId,
+        hn: anc.hn,
+        personAncId: anc.person_anc_id,
+        name: encryptedName,
+        cid: encryptedCid,
+        cidHash,
+        age,
+        gravida: anc.preg_no,
+        para: 0,
+        lmp: anc.lmp,
+        edc: anc.edc,
+        ancRiskLevel: AncRiskLevel.LOW,
+      });
+    } else {
+      // Update existing journey with latest data
+      const now = new Date().toISOString();
+      await db.execute(
+        `UPDATE maternal_journeys SET name = ?, cid = ?, cid_hash = ?, age = ?, lmp = ?, edc = ?, person_anc_id = ?, synced_at = ?, updated_at = ? WHERE id = ?`,
+        [encryptedName, encryptedCid, cidHash, age, anc.lmp, anc.edc, anc.person_anc_id, now, now, journey.id],
+      );
+    }
+
+    // Sync ANC visits
+    const visits = ancServices.filter((s) => s.person_anc_id === anc.person_anc_id);
+    for (const visit of visits) {
+      await upsertAncVisit(db, journey.id, visit);
+    }
+
+    // Update visit count on journey
+    const now = new Date().toISOString();
+    const lastVisit = visits.length > 0
+      ? visits.sort((a, b) => a.service_date.localeCompare(b.service_date)).at(-1)
+      : null;
+    await db.execute(
+      `UPDATE maternal_journeys SET anc_visit_count = ?, last_anc_date = ?, updated_at = ? WHERE id = ?`,
+      [visits.length, lastVisit?.service_date ?? null, now, journey.id],
+    );
+
+    // Evaluate ANC risk
+    const patientRisks = ancRisks.filter((r) => r.person_anc_id === anc.person_anc_id);
+    const patientClassifying = ancClassifying.filter((c) => c.person_anc_id === anc.person_anc_id);
+    const latestVisit = lastVisit;
+
+    const riskInput: AncRiskInput = {
+      age,
+      heightCm: 160, // Default — real value from opdscreen
+      prePregnancyBmi: 22, // Default — real value from opdscreen
+      gravida: anc.preg_no,
+      bpSystolic: latestVisit?.bps ?? 120,
+      bpDiastolic: latestVisit?.bpd ?? 80,
+      o2Sat: 98,
+      hct: 36,
+      hb: 12,
+      hosxpRiskIds: patientRisks.map((r) => r.anc_risk_id),
+      classifyingItems: patientClassifying.map((c) => ({
+        itemId: c.person_anc_classifying_item_id,
+        value: c.check_value,
+      })),
+      rhNegative: false,
+      hbsAgPositive: false,
+      syphilisPositive: false,
+      hivPositive: false,
+      thalassemiaDisease: false,
+      niptHighRisk: false,
+    };
+
+    const riskResult = evaluateAncRisk(riskInput);
+
+    // Save risk assessment
+    await upsertAncRisk(db, journey.id, riskResult, riskInput);
+
+    // Update journey risk level
+    await db.execute(
+      `UPDATE maternal_journeys SET anc_risk_level = ?, updated_at = ? WHERE id = ?`,
+      [riskResult.level, now, journey.id],
+    );
+
+    count++;
+  }
+
+  return count;
+}
+
+async function upsertAncVisit(
+  db: DatabaseAdapter,
+  journeyId: string,
+  visit: HosxpAncServiceRow,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const existing = await db.query<{ id: string }>(
+    `SELECT id FROM cached_anc_visits WHERE journey_id = ? AND visit_date = ?`,
+    [journeyId, visit.service_date],
+  );
+
+  if (existing.length > 0) {
+    await db.execute(
+      `UPDATE cached_anc_visits SET visit_number = ?, ga_weeks = ?, ga_days = ?,
+       fundal_height_cm = ?, weight_kg = ?, bp_systolic = ?, bp_diastolic = ?,
+       fetal_hr = ?, presentation = ?, engagement = ?, pass_quality = ?,
+       provider_code = ?, synced_at = ? WHERE id = ?`,
+      [visit.anc_service_number, visit.pa_week, visit.pa_day,
+       visit.fundal_height, visit.bw, visit.bps, visit.bpd,
+       visit.fetal_heart_rate, visit.baby_position, visit.baby_lead,
+       visit.pass_quality === 'Y' ? 1 : 0, visit.doctor_code, now,
+       existing[0].id],
+    );
+  } else {
+    await db.execute(
+      `INSERT INTO cached_anc_visits (id, journey_id, visit_date, visit_number, ga_weeks, ga_days,
+       fundal_height_cm, weight_kg, bp_systolic, bp_diastolic, fetal_hr,
+       presentation, engagement, pass_quality, provider_code, synced_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [uuidv4(), journeyId, visit.service_date, visit.anc_service_number,
+       visit.pa_week, visit.pa_day, visit.fundal_height, visit.bw,
+       visit.bps, visit.bpd, visit.fetal_heart_rate,
+       visit.baby_position, visit.baby_lead,
+       visit.pass_quality === 'Y' ? 1 : 0, visit.doctor_code, now, now],
+    );
+  }
+}
+
+async function upsertAncRisk(
+  db: DatabaseAdapter,
+  journeyId: string,
+  riskResult: { level: AncRiskLevel; triggeredRules: string[]; recommendation: { facilityTh: string; providerTh: string } },
+  _riskInput: AncRiskInput,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors,
+     recommended_facility, recommended_provider, screened_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [uuidv4(), journeyId, riskResult.level,
+     JSON.stringify(riskResult.triggeredRules), JSON.stringify({}),
+     riskResult.recommendation.facilityTh, riskResult.recommendation.providerTh,
+     now, now],
+  );
+}
+
+// --- Journey-Labor Linking ---
+
+export async function linkJourneyToLabor(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  patientHn: string,
+  cachedPatientId: string,
+): Promise<string> {
+  let journey = await getJourneyByHn(db, patientHn, hospitalId);
+
+  if (journey) {
+    // Link and transition
+    await db.execute(
+      `UPDATE cached_patients SET journey_id = ? WHERE id = ?`,
+      [journey.id, cachedPatientId],
+    );
+    if (journey.careStage === 'PREGNANCY') {
+      await transitionToLabor(db, journey.id);
+    }
+    return journey.id;
+  }
+
+  // Auto-create journey for walk-in labor
+  journey = await createJourney(db, {
+    hospitalId,
+    hn: patientHn,
+    personAncId: null,
+    name: '',
+    cid: null,
+    cidHash: null,
+    age: 0,
+    gravida: 0,
+    para: 0,
+    lmp: null,
+    edc: null,
+    ancRiskLevel: AncRiskLevel.LOW,
+  });
+
+  // Immediately transition to LABOR
+  await transitionToLabor(db, journey.id);
+
+  await db.execute(
+    `UPDATE cached_patients SET journey_id = ? WHERE id = ?`,
+    [journey.id, cachedPatientId],
+  );
+
+  return journey.id;
+}
+
+// --- Newborn Sync ---
+
+export async function syncNewbornData(
+  db: DatabaseAdapter,
+  journeyId: string,
+  infantRows: HosxpLabourInfantRow[],
+): Promise<number> {
+  let count = 0;
+
+  for (const infant of infantRows) {
+    const bornAt = infant.birth_date && infant.birth_time
+      ? `${infant.birth_date}T${infant.birth_time}`
+      : infant.birth_date ?? new Date().toISOString();
+
+    await upsertNewborn(db, {
+      journeyId,
+      infantNumber: infant.infant_number,
+      sex: infant.sex ?? undefined,
+      birthWeightG: infant.birth_weight ?? undefined,
+      bodyLengthCm: infant.body_length ?? undefined,
+      headCircumCm: infant.head_length ?? undefined,
+      temperature: infant.temperature ?? undefined,
+      heartRate: infant.hr ?? undefined,
+      respiratoryRate: infant.rr ?? undefined,
+      apgar1min: infant.apgar_score_min1 ?? undefined,
+      apgar5min: infant.apgar_score_min5 ?? undefined,
+      apgar10min: infant.apgar_score_min10 ?? undefined,
+      resuscitation: {
+        ppv: infant.infant_check_ppv === 'Y',
+        et_tube: infant.infant_check_et_tube === 'Y',
+        chest_pump: infant.infant_check_chest_pump === 'Y',
+        oxygen_box: infant.infant_check_oxygen_box === 'Y',
+        narcan: infant.infant_check_narcan === 'Y',
+      },
+      vaccinations: {
+        bcg: infant.infant_check_bcg === 'Y',
+        hepb: infant.infant_check_hepb === 'Y',
+        vitk: infant.infant_check_vitk === 'Y',
+        eye_paste: infant.infant_check_eyepaste === 'Y',
+        azt: infant.infant_check_azt === 'Y',
+      },
+      infantIcd10: infant.infant_icd10 ?? undefined,
+      infantHn: infant.infant_hn ?? undefined,
+      infantAn: infant.infant_an ?? undefined,
+      dischargeStatus: infant.infant_dchstts ?? undefined,
+      bornAt,
+    });
+    count++;
+  }
+
+  // Transition journey to DELIVERED
+  if (infantRows.length > 0) {
+    await transitionToDelivered(db, journeyId);
+  }
+
+  return count;
 }
