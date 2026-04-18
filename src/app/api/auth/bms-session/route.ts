@@ -1,6 +1,7 @@
 // T087: POST /api/auth/bms-session — pre-validate BMS session
 import { NextRequest, NextResponse } from 'next/server';
 import { validateBmsSession } from '@/lib/auth-utils';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
       expiresAt: identity.expiresAt,
     });
   } catch (error) {
-    console.error('BMS session validation error:', error);
+    logger.error('bms_session_validation_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 },

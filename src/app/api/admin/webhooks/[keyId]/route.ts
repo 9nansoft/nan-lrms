@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { revokeApiKey } from '@/services/webhook';
+import { logger } from '@/lib/logger';
 
 export async function DELETE(
   _request: NextRequest,
@@ -33,7 +34,7 @@ export async function DELETE(
       message: 'API key revoked',
     });
   } catch (error) {
-    console.error('Admin webhooks revoke error:', error);
+    logger.error('admin_webhooks_revoke_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 },

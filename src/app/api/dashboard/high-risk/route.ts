@@ -5,6 +5,7 @@ import { getHighRiskPatients } from '@/services/dashboard';
 import { auth } from '@/lib/auth';
 import { logAccess } from '@/services/audit';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 
 export async function GET() {
   try {
@@ -14,18 +15,17 @@ export async function GET() {
     // Audit logging
     const session = await auth();
     if (session?.user) {
-      const userId = (session.user as unknown as { id?: string }).id ?? 'unknown';
       await logAccess(db, {
-        userId,
+        userId: session.user.id,
         action: 'VIEW_HIGH_RISK_PATIENTS',
         resourceType: 'DASHBOARD',
-      }).catch(() => {}); // Don't fail request on audit error
+      }).catch((error) => logger.warn('audit_log_failed', { action: 'VIEW_HIGH_RISK_PATIENTS', error }));
     }
 
     const patients = await getHighRiskPatients(db);
     return NextResponse.json({ patients });
   } catch (error) {
-    console.error('High-risk patients API error:', error);
+    logger.error('high_risk_patients_api_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

@@ -48,8 +48,7 @@ export default auth((req) => {
 
   // Admin-only route protection
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-    const userRole = (session.user as unknown as { role?: string }).role;
-    if (userRole !== 'ADMIN') {
+    if (session.user.role !== 'ADMIN') {
       return addSecurityHeaders(NextResponse.redirect(new URL('/', req.url)));
     }
   }

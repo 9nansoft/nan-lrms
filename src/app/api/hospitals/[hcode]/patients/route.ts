@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { getHospitalPatientList } from '@/services/dashboard';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 
 export async function GET(
   request: NextRequest,
@@ -31,7 +32,7 @@ export async function GET(
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error('Patients API error:', error);
+    logger.error('patients_api_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

@@ -8,6 +8,7 @@ import type { SyncPatientData } from '@/services/sync';
 import { SseManager } from '@/lib/sse';
 import { getActiveJourneyByCid, getJourneyByHn, createJourney } from '@/services/journey';
 import { AncRiskLevel } from '@/types/domain';
+import { logger } from '@/lib/logger';
 
 // ─── Webhook payload types ───
 
@@ -514,12 +515,15 @@ export async function processAncWebhook(
       const daysSinceUpdate = Math.floor(
         (Date.now() - existing.updatedAt.getTime()) / (1000 * 60 * 60 * 24),
       );
-      console.warn(
-        `[PREGNANCY_OVERLAP] CID hash ${cidHash.slice(0, 8)}... ` +
-        `ครรภ์ใหม่ (pregNo=${patient.pregNo}) ขณะที่ครรภ์เดิม (pregNo=${existing.gravida}, stage=${existing.careStage}) ` +
-        `ยังไม่สิ้นสุด | journey=${existing.id} | ` +
-        `อัพเดทล่าสุด ${daysSinceUpdate} วันที่แล้ว | hospital=${hcode}`,
-      );
+      logger.warn('pregnancy_overlap', {
+        cidHashPrefix: cidHash.slice(0, 8),
+        newPregNo: patient.pregNo,
+        oldPregNo: existing.gravida,
+        oldCareStage: existing.careStage,
+        journeyId: existing.id,
+        daysSinceUpdate,
+        hcode,
+      });
       sseManager.broadcast('patient-update', {
         type: 'pregnancy_overlap_warning',
         hcode,
@@ -727,11 +731,13 @@ export async function processReferralCreate(
 
   // Warn if patient has no active monitoring data in the system
   if (!hasMonitoringData) {
-    console.warn(
-      `[REFERRAL_NO_MONITORING] referralId=${payload.referralId} CID hash ${cidHash.slice(0, 8)}... ` +
-      `ไม่พบข้อมูลฝากครรภ์หรือข้อมูลคลอดในระบบ | HN=${payload.hn} | from=${fromHcode} → to=${payload.toHospitalCode} | ` +
-      `สร้าง journey ใหม่อัตโนมัติ — ต้องตรวจสอบข้อมูลผู้ป่วย`,
-    );
+    logger.warn('referral_no_monitoring', {
+      referralId: payload.referralId,
+      cidHashPrefix: cidHash.slice(0, 8),
+      hn: payload.hn,
+      fromHcode,
+      toHospitalCode: payload.toHospitalCode,
+    });
     sseManager.broadcast('patient-update', {
       type: 'referral_no_monitoring_warning',
       fromHcode,

@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 
 export async function GET() {
   try {
@@ -36,7 +37,7 @@ export async function GET() {
       totalPending,
     });
   } catch (error) {
-    console.error('Dashboard referrals error:', error);
+    logger.error('dashboard_referrals_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

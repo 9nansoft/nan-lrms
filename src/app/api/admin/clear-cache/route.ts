@@ -3,14 +3,14 @@ import { NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { auth } from '@/lib/auth';
+import { logger } from '@/lib/logger';
 
 export async function POST() {
   try {
     await ensureInit();
 
     const session = await auth();
-    const userRole = (session?.user as unknown as { role?: string })?.role;
-    if (userRole !== 'ADMIN') {
+    if (session?.user?.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Admin role required' }, { status: 403 });
     }
 
@@ -39,7 +39,7 @@ export async function POST() {
       message: 'All cached patient data cleared. Hospitals reset to UNKNOWN status.',
     });
   } catch (error) {
-    console.error('Clear cache error:', error);
+    logger.error('clear_cache_failed', { error });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

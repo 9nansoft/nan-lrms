@@ -2,6 +2,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 import type { NewbornEntry } from '@/types/api';
 
 export async function GET(
@@ -29,7 +30,7 @@ export async function GET(
 
     return NextResponse.json({ newborns });
   } catch (error) {
-    console.error('Newborns API error:', error);
+    logger.error('newborns_api_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

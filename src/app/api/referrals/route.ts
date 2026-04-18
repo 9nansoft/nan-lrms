@@ -4,6 +4,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { initiateReferral, getPendingReferrals } from '@/services/referral';
 import { UrgencyLevel } from '@/types/domain';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(referral, { status: 201 });
   } catch (error) {
-    console.error('Referral POST error:', error);
+    logger.error('referral_create_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
     const referrals = await getPendingReferrals(db, hospital, dir);
     return NextResponse.json(referrals);
   } catch (error) {
-    console.error('Referral GET error:', error);
+    logger.error('referral_list_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

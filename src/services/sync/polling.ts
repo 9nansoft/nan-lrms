@@ -15,6 +15,7 @@ import {
   type SyncPatientData,
 } from './patient';
 import { calculateAndStoreCpdScores } from './cpd-persist';
+import { logger } from '@/lib/logger';
 
 const pollingIntervals: Map<string, ReturnType<typeof setInterval>> = new Map();
 
@@ -23,18 +24,25 @@ const pollingIntervals: Map<string, ReturnType<typeof setInterval>> = new Map();
 
 interface SyncState {
   inProgress: boolean;
+  syncStartedAt: number;
   lastSyncAt: number;
   lastJwtRefreshAt: number;
 }
 
 const syncStates: Map<string, SyncState> = new Map();
 const SYNC_COOLDOWN_MS = 10_000;
+const SYNC_TIMEOUT_MS = 60_000; // Force-release lock if sync runs longer than this
 
 function getSyncState(hospitalId: string): SyncState {
   let state = syncStates.get(hospitalId);
   if (!state) {
-    state = { inProgress: false, lastSyncAt: 0, lastJwtRefreshAt: 0 };
+    state = { inProgress: false, syncStartedAt: 0, lastSyncAt: 0, lastJwtRefreshAt: 0 };
     syncStates.set(hospitalId, state);
+  }
+  // Auto-release stuck locks (e.g. process crashed or HOSxP request hung)
+  if (state.inProgress && Date.now() - state.syncStartedAt > SYNC_TIMEOUT_MS) {
+    console.warn(`[SYNC] Force-releasing stuck sync lock for hospital ${hospitalId} after ${SYNC_TIMEOUT_MS}ms`);
+    state.inProgress = false;
   }
   return state;
 }
@@ -96,6 +104,7 @@ export async function requestImmediateSync(
   const config = configs[0];
 
   state.inProgress = true;
+  state.syncStartedAt = Date.now();
 
   try {
     const encryptionKey = process.env.ENCRYPTION_KEY ?? '';
@@ -122,7 +131,7 @@ export async function requestImmediateSync(
           [jwt, dbType, sessionConfig.expiresAt.toISOString(), hospitalId],
         );
         state.lastJwtRefreshAt = now;
-        console.log(`[SYNC] JWT refreshed for hospital ${hospitalId}`);
+        logger.info('jwt_refreshed', { hospitalId });
       } catch {
         if (!jwt) {
           return { synced: false, reason: 'error', lastSyncAt: null };
@@ -146,7 +155,7 @@ export async function requestImmediateSync(
       patientsCount: countResult[0]?.cnt ?? 0,
     };
   } catch (error) {
-    console.error(`[SYNC] Immediate sync failed for hospital ${hospitalId}:`, error);
+    logger.error('immediate_sync_failed', { hospitalId, error });
     return { synced: false, reason: 'error', lastSyncAt: null };
   } finally {
     state.inProgress = false;
@@ -271,7 +280,7 @@ export async function pollHospital(
       [new Date().toISOString(), hospitalId],
     );
   } catch (error) {
-    console.error(`Polling failed for hospital ${hospitalId}:`, error);
+    logger.error('polling_failed', { hospitalId, error });
     await db.execute(
       "UPDATE hospitals SET connection_status = 'OFFLINE' WHERE id = ?",
       [hospitalId],
@@ -305,7 +314,7 @@ export async function startPolling(db: DatabaseAdapter, sseManager: SseManager):
 
   const numHospitals = configs.length;
   if (numHospitals === 0) {
-    console.log('No hospitals with BMS config found. Polling not started.');
+    logger.info('polling_skipped_no_hospitals', {});
     return;
   }
 
@@ -323,6 +332,7 @@ export async function startPolling(db: DatabaseAdapter, sseManager: SseManager):
 
         try {
           state.inProgress = true;
+          state.syncStartedAt = Date.now();
 
           let jwt = config.session_jwt;
           let bmsUrl = config.tunnel_url;
@@ -362,7 +372,7 @@ export async function startPolling(db: DatabaseAdapter, sseManager: SseManager):
           await pollHospital(db, config.hospital_id, config.tunnel_url, bmsUrl, jwt!, dbType, encryptionKey, sseManager);
           state.lastSyncAt = Date.now();
         } catch (error) {
-          console.error(`Poll cycle failed for hospital ${config.hospital_id}:`, error);
+          logger.error('poll_cycle_failed', { hospitalId: config.hospital_id, error });
         } finally {
           state.inProgress = false;
         }
@@ -372,7 +382,7 @@ export async function startPolling(db: DatabaseAdapter, sseManager: SseManager):
     }, delay);
   }
 
-  console.log(`Polling started for ${numHospitals} hospitals (stagger: ${staggerMs}ms)`);
+  logger.info('polling_started', { numHospitals, staggerMs });
 }
 
 export function stopPolling(): void {
@@ -380,5 +390,5 @@ export function stopPolling(): void {
     clearInterval(interval);
   }
   pollingIntervals.clear();
-  console.log('Polling stopped');
+  logger.info('polling_stopped', {});
 }

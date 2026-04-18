@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { confirmArrival } from '@/services/referral';
+import { logger } from '@/lib/logger';
 
 export async function PATCH(
   request: NextRequest,
@@ -25,7 +26,7 @@ export async function PATCH(
     const referral = await confirmArrival(db, id, String(receivingAn));
     return NextResponse.json(referral);
   } catch (error) {
-    console.error('Referral arrive error:', error);
+    logger.error('referral_arrive_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

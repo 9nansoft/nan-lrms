@@ -5,6 +5,7 @@ import { getProvinceDashboard, getStageKPIs, getDashboardAlerts } from '@/servic
 import { auth } from '@/lib/auth';
 import { logAccess } from '@/services/audit';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 
 export async function GET() {
   try {
@@ -14,12 +15,11 @@ export async function GET() {
     // T091: Audit logging
     const session = await auth();
     if (session?.user) {
-      const userId = (session.user as unknown as { id?: string }).id ?? 'unknown';
       await logAccess(db, {
-        userId,
+        userId: session.user.id,
         action: 'VIEW_DASHBOARD',
         resourceType: 'DASHBOARD',
-      }).catch(() => {}); // Don't fail request on audit error
+      }).catch((error) => logger.warn('audit_log_failed', { action: 'VIEW_DASHBOARD', error }));
     }
 
     const [result, stageKPIs, alerts] = await Promise.all([
@@ -29,7 +29,7 @@ export async function GET() {
     ]);
     return NextResponse.json({ ...result, stageKPIs, alerts });
   } catch (error) {
-    console.error('Dashboard API error:', error);
+    logger.error('dashboard_api_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

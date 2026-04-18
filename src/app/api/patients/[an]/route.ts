@@ -6,6 +6,7 @@ import { auth } from '@/lib/auth';
 import { logAccess } from '@/services/audit';
 import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
+import { logger } from '@/lib/logger';
 import type { PatientDetailResponse } from '@/types/api';
 import { getJourneyByHn } from '@/services/journey';
 
@@ -26,13 +27,12 @@ export async function GET(
     // T091: Audit logging
     const session = await auth();
     if (session?.user) {
-      const userId = (session.user as unknown as { id?: string }).id ?? 'unknown';
       await logAccess(db, {
-        userId,
+        userId: session.user.id,
         action: 'VIEW_PATIENT',
         resourceType: 'PATIENT',
         resourceId: an,
-      }).catch(() => {});
+      }).catch((error) => logger.warn('audit_log_failed', { action: 'VIEW_PATIENT', resourceId: an, error }));
     }
 
     // Query patient with hospital info
@@ -192,7 +192,7 @@ export async function GET(
 
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Patient detail API error:', error);
+    logger.error('patient_detail_api_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error', code: 'INTERNAL_ERROR' },
       { status: 500 },

@@ -5,6 +5,7 @@ import { ensureInit } from '@/lib/ensure-init';
 import { BmsSessionClient } from '@/lib/bms-session';
 import { getQuery, CHECK_TABLES, DATABASE_VERSION } from '@/config/hosxp-queries';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
+import { logger } from '@/lib/logger';
 
 export async function POST(
   _request: NextRequest,
@@ -69,7 +70,7 @@ export async function POST(
       tablesFound,
     });
   } catch (error) {
-    console.error('Test connection error:', error);
+    logger.error('test_connection_failed', { error });
     return NextResponse.json({
       connected: false,
       error: error instanceof Error ? error.message : 'Connection failed',

@@ -6,6 +6,7 @@ import { ensureInit } from '@/lib/ensure-init';
 import { auth } from '@/lib/auth';
 import { requestImmediateSync } from '@/services/sync';
 import { SseManager } from '@/lib/sse';
+import { logger } from '@/lib/logger';
 
 export async function POST() {
   try {
@@ -20,13 +21,7 @@ export async function POST() {
     const sseManager = SseManager.getInstance();
 
     // Get hospital info from the user's session (set during BMS login)
-    const userProfile = session.user as unknown as {
-      hospitalCode?: string;
-      hospitalName?: string;
-      tunnelUrl?: string;
-      databaseType?: string;
-    };
-    const hospitalCode = userProfile.hospitalCode;
+    const hospitalCode = session.user.hospitalCode;
     if (!hospitalCode) {
       return NextResponse.json({ synced: false, reason: 'no_hospital_code', lastSyncAt: null });
     }
@@ -41,7 +36,7 @@ export async function POST() {
       // Auto-register hospital from user's BMS profile
       const hospitalId = uuidv4();
       const now = new Date().toISOString();
-      const hospitalName = userProfile.hospitalName || `รพ.${hospitalCode}`;
+      const hospitalName = session.user.hospitalName || `รพ.${hospitalCode}`;
 
       await db.execute(
         `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
@@ -50,22 +45,26 @@ export async function POST() {
       );
 
       // Also store BMS tunnel config if available
-      if (userProfile.tunnelUrl) {
+      if (session.user.tunnelUrl) {
         await db.execute(
           `INSERT INTO hospital_bms_config (id, hospital_id, tunnel_url, database_type, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          [uuidv4(), hospitalId, userProfile.tunnelUrl, userProfile.databaseType || 'postgresql', now, now],
+          [uuidv4(), hospitalId, session.user.tunnelUrl, session.user.databaseType || 'postgresql', now, now],
         );
       }
 
-      console.log(`[SYNC] Auto-registered hospital: ${hospitalName} (${hospitalCode}) tunnel: ${userProfile.tunnelUrl || 'none'}`);
+      logger.info('hospital_auto_registered', {
+        hospitalName,
+        hospitalCode,
+        tunnelUrl: session.user.tunnelUrl || 'none',
+      });
       hospitals = [{ id: hospitalId }];
     }
 
     const result = await requestImmediateSync(db, hospitals[0].id, sseManager);
     return NextResponse.json({ ...result, hcode: hospitalCode });
   } catch (error) {
-    console.error('Sync trigger error:', error);
+    logger.error('sync_trigger_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 },

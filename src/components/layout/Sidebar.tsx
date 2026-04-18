@@ -42,7 +42,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { data: session } = useSession();
 
-  const userRole = (session?.user as unknown as { role?: string })?.role;
+  const userRole = session?.user?.role;
   const userName = session?.user?.name ?? 'ผู้ใช้';
 
   const handleLogout = useCallback(() => {

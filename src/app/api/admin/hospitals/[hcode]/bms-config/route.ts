@@ -4,6 +4,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { BmsSessionClient } from '@/lib/bms-session';
 import { v4 as uuidv4 } from 'uuid';
+import { logger } from '@/lib/logger';
 
 export async function PUT(
   request: NextRequest,
@@ -94,7 +95,7 @@ export async function PUT(
       databaseType,
     });
   } catch (error) {
-    console.error('BMS config update error:', error);
+    logger.error('bms_config_update_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 },

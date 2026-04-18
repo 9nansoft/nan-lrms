@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 
 export async function GET() {
   try {
@@ -44,7 +45,7 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    console.error('Admin hospitals API error:', error);
+    logger.error('admin_hospitals_api_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 },

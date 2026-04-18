@@ -47,7 +47,7 @@ export function TopBar({ className }: TopBarProps) {
   const clock = useBangkokClock();
 
   const userName = session?.user?.name ?? 'ผู้ใช้';
-  const userRole = (session?.user as unknown as { role?: string })?.role;
+  const userRole = session?.user?.role;
   const roleLabel = userRole ? ROLE_LABELS[userRole] ?? userRole : '';
   const userInitial = userName.charAt(0).toUpperCase();
 

@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import type { DatabaseAdapter } from '../adapter';
 import { encrypt } from '@/lib/encryption';
 import { calculateCpdScore } from '@/services/cpd-score';
+import { logger } from '@/lib/logger';
 
 const DEMO_ENCRYPTION_KEY = 'a'.repeat(64); // dev-only key
 
@@ -123,15 +124,14 @@ export async function seedDemoData(db: DatabaseAdapter): Promise<void> {
     'SELECT COUNT(*) as count FROM cached_patients',
   );
   if (existing[0].count > 0) {
-    console.log('[DEMO] Demo data already seeded — skipping');
+    logger.info('demo_seed_skipped', { reason: 'already_seeded' });
     return;
   }
 
   const now = new Date();
   const encKey = process.env.ENCRYPTION_KEY || DEMO_ENCRYPTION_KEY;
 
-  console.log('[DEMO] ─────────────────────────────────────────');
-  console.log('[DEMO] Seeding demo patient data...');
+  logger.info('demo_seed_started', {});
 
   let patientCount = 0;
   let vitalCount = 0;
@@ -144,7 +144,7 @@ export async function seedDemoData(db: DatabaseAdapter): Promise<void> {
       [p.hospitalHcode],
     );
     if (hospitalRows.length === 0) {
-      console.warn(`[DEMO] Hospital ${p.hospitalHcode} not found — skipping patient ${p.name}`);
+      logger.warn('demo_seed_hospital_missing', { hospitalHcode: p.hospitalHcode });
       continue;
     }
     const hospitalId = hospitalRows[0].id;
@@ -231,8 +231,12 @@ export async function seedDemoData(db: DatabaseAdapter): Promise<void> {
     );
     cpdCount++;
 
-    const riskEmoji = cpdResult.riskLevel === 'HIGH' ? '🔴' : cpdResult.riskLevel === 'MEDIUM' ? '🟡' : '🟢';
-    console.log(`[DEMO]   ${riskEmoji} ${p.name} (${p.an}) → CPD: ${cpdResult.score.toFixed(1)} [${cpdResult.riskLevel}] @ รพ.${p.hospitalHcode}`);
+    logger.info('demo_patient_seeded', {
+      an: p.an,
+      cpdScore: Number(cpdResult.score.toFixed(1)),
+      riskLevel: cpdResult.riskLevel,
+      hospitalHcode: p.hospitalHcode,
+    });
   }
 
   // Set some hospitals to ONLINE status
@@ -244,8 +248,10 @@ export async function seedDemoData(db: DatabaseAdapter): Promise<void> {
     );
   }
 
-  console.log('[DEMO] ─────────────────────────────────────────');
-  console.log(`[DEMO] ✓ Seeded: ${patientCount} patients, ${vitalCount} vital signs, ${cpdCount} CPD scores`);
-  console.log(`[DEMO] ✓ Hospitals online: ${usedHcodes.join(', ')}`);
-  console.log('[DEMO] ─────────────────────────────────────────');
+  logger.info('demo_seed_completed', {
+    patientCount,
+    vitalCount,
+    cpdCount,
+    hospitalsOnline: usedHcodes,
+  });
 }

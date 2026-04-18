@@ -1,4 +1,6 @@
-// T026: cached_patients table definition
+// cached_patients — current/recent labor admission (one row per AN per hospital).
+// NOT a duplicate of maternal_journeys: this table tracks the *admission*,
+// while maternal_journeys tracks the *pregnancy*. See ./README.md for the model.
 import type { TableDefinition } from '../table-definition';
 
 export const cachedPatientsTable: TableDefinition = {
@@ -41,5 +43,6 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'idx_cp_cid', columns: ['cid'] },
     { name: 'idx_cp_cid_hash', columns: ['cid_hash'] },
     { name: 'idx_cp_journey_id', columns: ['journey_id'] },
+    { name: 'idx_cp_hospital_status_created', columns: ['hospital_id', 'labor_status', 'created_at'] },
   ],
 };

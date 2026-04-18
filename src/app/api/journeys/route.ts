@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 import type { JourneyListItem, JourneyListResponse } from '@/types/api';
 
 export async function GET(request: NextRequest) {
@@ -72,7 +73,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Journeys API error:', error);
+    logger.error('journeys_api_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

@@ -16,6 +16,8 @@ import type {
   WebhookReferralUpdatePayload,
 } from '@/services/webhook';
 import { SseManager } from '@/lib/sse';
+import { logger } from '@/lib/logger';
+import { apiError } from '@/lib/api-errors';
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,10 +27,7 @@ export async function POST(request: NextRequest) {
     // Extract API key from Authorization header
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Missing or invalid Authorization header. Use: Bearer <api-key>' },
-        { status: 401 },
-      );
+      return NextResponse.json(apiError('MISSING_AUTH'), { status: 401 });
     }
 
     const rawKey = authHeader.slice(7);
@@ -36,19 +35,13 @@ export async function POST(request: NextRequest) {
     // Validate API key
     const keyInfo = await validateApiKey(db, rawKey);
     if (!keyInfo) {
-      return NextResponse.json(
-        { error: 'Invalid or revoked API key' },
-        { status: 401 },
-      );
+      return NextResponse.json(apiError('INVALID_API_KEY'), { status: 401 });
     }
 
     // Parse body
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
-      return NextResponse.json(
-        { error: 'Request body must be a JSON object' },
-        { status: 400 },
-      );
+      return NextResponse.json(apiError('INVALID_JSON'), { status: 400 });
     }
 
     const sseManager = SseManager.getInstance();
@@ -63,7 +56,7 @@ export async function POST(request: NextRequest) {
       );
       if (hospRows.length > 0 && hospRows[0].hcode !== payloadHospCode) {
         return NextResponse.json(
-          { error: `hospitalCode "${payloadHospCode}" ไม่ตรงกับ API key ของโรงพยาบาล "${hospRows[0].hcode}"` },
+          apiError('HOSPITAL_CODE_MISMATCH', { expected: hospRows[0].hcode, received: payloadHospCode }),
           { status: 403 },
         );
       }
@@ -73,10 +66,7 @@ export async function POST(request: NextRequest) {
     if (payloadType === 'anc_data') {
       const ancPayload = body as WebhookAncPayload;
       if (!Array.isArray(ancPayload.patients) || ancPayload.patients.length === 0) {
-        return NextResponse.json(
-          { error: '"patients" array is required and must not be empty' },
-          { status: 400 },
-        );
+        return NextResponse.json(apiError('PATIENTS_REQUIRED'), { status: 400 });
       }
       const result = await processAncWebhook(db, keyInfo.hospitalId, ancPayload, sseManager);
       return NextResponse.json({
@@ -89,41 +79,15 @@ export async function POST(request: NextRequest) {
     // CREATE referral — sent by sending hospital (รพ.ต้นทาง)
     if (payloadType === 'referral') {
       const referralPayload = body as WebhookReferralCreatePayload;
-      if (!referralPayload.referralId || typeof referralPayload.referralId !== 'string') {
-        return NextResponse.json(
-          { error: '"referralId" is required (string)' },
-          { status: 400 },
-        );
-      }
-      if (!referralPayload.hn || typeof referralPayload.hn !== 'string') {
-        return NextResponse.json(
-          { error: '"hn" is required (string) — patient HN at sending hospital' },
-          { status: 400 },
-        );
-      }
-      if (!referralPayload.cid || typeof referralPayload.cid !== 'string') {
-        return NextResponse.json(
-          { error: '"cid" is required (string) — เลขบัตรประชาชน 13 หลัก' },
-          { status: 400 },
-        );
-      }
-      if (!referralPayload.name || typeof referralPayload.name !== 'string') {
-        return NextResponse.json(
-          { error: '"name" is required (string) — ชื่อ-นามสกุลผู้ป่วย' },
-          { status: 400 },
-        );
-      }
-      if (!referralPayload.toHospitalCode || typeof referralPayload.toHospitalCode !== 'string') {
-        return NextResponse.json(
-          { error: '"toHospitalCode" is required (string) — HCODE รพ.ปลายทาง' },
-          { status: 400 },
-        );
-      }
-      if (referralPayload.action !== 'delete' && (!referralPayload.reason || typeof referralPayload.reason !== 'string')) {
-        return NextResponse.json(
-          { error: '"reason" is required (string) — เหตุผลการส่งต่อ' },
-          { status: 400 },
-        );
+      const missing: string[] = [];
+      if (!referralPayload.referralId || typeof referralPayload.referralId !== 'string') missing.push('referralId');
+      if (!referralPayload.hn || typeof referralPayload.hn !== 'string') missing.push('hn');
+      if (!referralPayload.cid || typeof referralPayload.cid !== 'string') missing.push('cid');
+      if (!referralPayload.name || typeof referralPayload.name !== 'string') missing.push('name');
+      if (!referralPayload.toHospitalCode || typeof referralPayload.toHospitalCode !== 'string') missing.push('toHospitalCode');
+      if (referralPayload.action !== 'delete' && (!referralPayload.reason || typeof referralPayload.reason !== 'string')) missing.push('reason');
+      if (missing.length > 0) {
+        return NextResponse.json(apiError('REFERRAL_FIELD_REQUIRED', { missing }), { status: 400 });
       }
       const result = await processReferralCreate(db, keyInfo.hospitalId, referralPayload, sseManager);
       return NextResponse.json({
@@ -136,23 +100,12 @@ export async function POST(request: NextRequest) {
     // UPDATE referral status — sent by receiving hospital (รพ.ปลายทาง)
     if (payloadType === 'referral_update') {
       const referralPayload = body as WebhookReferralUpdatePayload;
-      if (!referralPayload.referralId || typeof referralPayload.referralId !== 'string') {
-        return NextResponse.json(
-          { error: '"referralId" is required (string)' },
-          { status: 400 },
-        );
-      }
-      if (!referralPayload.fromHospitalCode || typeof referralPayload.fromHospitalCode !== 'string') {
-        return NextResponse.json(
-          { error: '"fromHospitalCode" is required (string) — HCODE รพ.ต้นทาง' },
-          { status: 400 },
-        );
-      }
-      if (referralPayload.action !== 'delete' && (!referralPayload.status || typeof referralPayload.status !== 'string')) {
-        return NextResponse.json(
-          { error: '"status" is required (string) — ACCEPTED | IN_TRANSIT | ARRIVED | REJECTED' },
-          { status: 400 },
-        );
+      const missing: string[] = [];
+      if (!referralPayload.referralId || typeof referralPayload.referralId !== 'string') missing.push('referralId');
+      if (!referralPayload.fromHospitalCode || typeof referralPayload.fromHospitalCode !== 'string') missing.push('fromHospitalCode');
+      if (referralPayload.action !== 'delete' && (!referralPayload.status || typeof referralPayload.status !== 'string')) missing.push('status (ACCEPTED|IN_TRANSIT|ARRIVED|REJECTED)');
+      if (missing.length > 0) {
+        return NextResponse.json(apiError('REFERRAL_FIELD_REQUIRED', { missing }), { status: 400 });
       }
       const result = await processReferralUpdate(db, keyInfo.hospitalId, referralPayload, sseManager);
       return NextResponse.json({
@@ -166,7 +119,7 @@ export async function POST(request: NextRequest) {
     const validation = validatePayload(body);
     if (!validation.valid || !validation.payload) {
       return NextResponse.json(
-        { error: validation.error },
+        apiError('VALIDATION_FAILED', validation.error ?? 'unknown validation error'),
         { status: 400 },
       );
     }
@@ -184,9 +137,9 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Webhook processing error:', error);
+    logger.error('webhook_processing_failed', { error });
     return NextResponse.json(
-      { error: 'Internal server error' },
+      apiError('INTERNAL_ERROR'),
       { status: 500 },
     );
   }

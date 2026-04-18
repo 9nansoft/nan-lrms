@@ -1,7 +1,6 @@
 // T085: NextAuth.js v5 configuration with BMS Session auth
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
-import { UserRole } from '@/types/domain';
 import { validateBmsSession } from '@/lib/auth-utils';
 
 export { mapPositionToRole, validateBmsSession } from '@/lib/auth-utils';
@@ -37,23 +36,21 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     jwt({ token, user }) {
       if (user) {
-        const u = user as unknown as { role: UserRole; hospitalCode: string; hospitalName: string; tunnelUrl: string; databaseType: string };
-        token.role = u.role;
-        token.hospitalCode = u.hospitalCode;
-        token.hospitalName = u.hospitalName;
-        token.tunnelUrl = u.tunnelUrl;
-        token.databaseType = u.databaseType;
+        token.role = user.role;
+        token.hospitalCode = user.hospitalCode;
+        token.hospitalName = user.hospitalName;
+        token.tunnelUrl = user.tunnelUrl;
+        token.databaseType = user.databaseType;
       }
       return token;
     },
     session({ session, token }) {
       if (session.user) {
-        const s = session.user as unknown as { role: UserRole; hospitalCode: string; hospitalName: string; tunnelUrl: string; databaseType: string };
-        s.role = token.role as UserRole;
-        s.hospitalCode = token.hospitalCode as string;
-        s.hospitalName = token.hospitalName as string;
-        s.tunnelUrl = token.tunnelUrl as string;
-        s.databaseType = token.databaseType as string;
+        session.user.role = token.role;
+        session.user.hospitalCode = token.hospitalCode;
+        session.user.hospitalName = token.hospitalName;
+        session.user.tunnelUrl = token.tunnelUrl;
+        session.user.databaseType = token.databaseType;
       }
       return session;
     },

@@ -4,6 +4,8 @@ import { createHash } from 'crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
+import { apiError } from '@/lib/api-errors';
 
 interface CheckResult {
   canRefer: boolean;
@@ -37,15 +39,12 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
+      return NextResponse.json(apiError('INVALID_JSON'), { status: 400 });
     }
 
     const { cid } = body as { cid?: string };
     if (!cid || typeof cid !== 'string' || cid.length !== 13) {
-      return NextResponse.json(
-        { error: '"cid" is required (string, 13 digits) — เลขบัตรประชาชน' },
-        { status: 400 },
-      );
+      return NextResponse.json(apiError('CID_REQUIRED'), { status: 400 });
     }
 
     const cidHash = createHash('sha256').update(cid).digest('hex');
@@ -155,7 +154,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error('Referral check error:', error);
+    logger.error('referral_check_failed', { error });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

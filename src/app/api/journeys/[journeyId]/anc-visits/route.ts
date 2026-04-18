@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 import type { AncVisitEntry } from '@/types/api';
 
 export async function GET(
@@ -30,7 +31,7 @@ export async function GET(
 
     return NextResponse.json({ visits });
   } catch (error) {
-    console.error('ANC visits API error:', error);
+    logger.error('anc_visits_api_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

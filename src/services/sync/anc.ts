@@ -22,6 +22,7 @@ import { evaluateAncRisk } from '@/services/anc-risk';
 import type { AncRiskInput } from '@/config/anc-risk-rules';
 import { HOSXP_RISK_TO_LAB_FLAGS } from '@/config/anc-risk-rules';
 import { AncRiskLevel } from '@/types/domain';
+import { logger } from '@/lib/logger';
 
 export async function syncAncData(
   db: DatabaseAdapter,
@@ -63,11 +64,14 @@ export async function syncAncData(
       const daysSinceUpdate = Math.floor(
         (Date.now() - journey.updatedAt.getTime()) / (1000 * 60 * 60 * 24),
       );
-      console.warn(
-        `[PREGNANCY_OVERLAP] HN=${anc.hn} ` +
-        `ครรภ์ใหม่ (pregNo=${anc.preg_no}) ขณะที่ครรภ์เดิม (pregNo=${journey.gravida}, stage=${journey.careStage}) ` +
-        `ยังไม่สิ้นสุด | journey=${journey.id} | อัพเดทล่าสุด ${daysSinceUpdate} วันที่แล้ว`,
-      );
+      logger.warn('pregnancy_overlap', {
+        hn: anc.hn,
+        newPregNo: anc.preg_no,
+        oldPregNo: journey.gravida,
+        oldCareStage: journey.careStage,
+        journeyId: journey.id,
+        daysSinceUpdate,
+      });
     }
 
     const shouldCreateNew = !journey || isNewPregnancy;

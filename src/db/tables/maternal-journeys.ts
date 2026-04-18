@@ -1,3 +1,6 @@
+// maternal_journeys — lifetime pregnancy record (one row per pregnancy per CID).
+// Source of truth for care_stage, ancRiskLevel, current_hospital_id.
+// Linked to cached_patients via cached_patients.journey_id. See ./README.md.
 import type { TableDefinition } from '../table-definition';
 
 export const maternalJourneysTable: TableDefinition = {
@@ -37,5 +40,6 @@ export const maternalJourneysTable: TableDefinition = {
     { name: 'idx_mj_cid_hash', columns: ['cid_hash'] },
     { name: 'idx_mj_current_hospital', columns: ['current_hospital_id'] },
     { name: 'idx_mj_location', columns: ['changwat_code', 'amphur_code', 'tambon_code'] },
+    { name: 'idx_mj_hospital_stage', columns: ['current_hospital_id', 'care_stage'] },
   ],
 };

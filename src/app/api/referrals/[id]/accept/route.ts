@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { acceptReferral } from '@/services/referral';
+import { logger } from '@/lib/logger';
 
 export async function PATCH(
   request: NextRequest,
@@ -25,7 +26,7 @@ export async function PATCH(
     const referral = await acceptReferral(db, id, String(acceptedBy));
     return NextResponse.json(referral);
   } catch (error) {
-    console.error('Referral accept error:', error);
+    logger.error('referral_accept_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

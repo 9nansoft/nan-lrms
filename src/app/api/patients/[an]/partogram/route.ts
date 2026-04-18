@@ -4,6 +4,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
 import { generatePartogramEntries } from '@/services/partogram';
+import { logger } from '@/lib/logger';
 import type { PartogramResponse } from '@/types/api';
 
 export async function GET(
@@ -60,7 +61,7 @@ export async function GET(
 
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Partogram API error:', error);
+    logger.error('partogram_api_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error', code: 'INTERNAL_ERROR' },
       { status: 500 },

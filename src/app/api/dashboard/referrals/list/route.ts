@@ -2,6 +2,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { logger } from '@/lib/logger';
 import type { ReferralListItem, ReferralListResponse } from '@/types/api';
 
 export async function GET(request: NextRequest) {
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Dashboard referrals list error:', error);
+    logger.error('dashboard_referrals_list_failed', { error });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
       { status: 500 },

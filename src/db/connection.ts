@@ -1,6 +1,7 @@
 // T023: Connection factory — NODE_ENV-based routing
 
 import type { DatabaseAdapter } from './adapter';
+import { logger } from '@/lib/logger';
 
 let instance: DatabaseAdapter | null = null;
 
@@ -16,7 +17,7 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
     const path = process.env.NODE_ENV === 'test' ? ':memory:' : (process.env.SQLITE_PATH ?? 'dev.sqlite');
     instance = new SqliteAdapter(path);
     if (process.env.NODE_ENV !== 'test') {
-      console.log(`[DB] SQLite connected: ${path}`);
+      logger.info('sqlite_connected', { path });
     }
   } else {
     const { PostgresAdapter } = await import('./postgres-adapter');

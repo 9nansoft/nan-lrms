@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { createApiKey, listApiKeys } from '@/services/webhook';
+import { logger } from '@/lib/logger';
 
 export async function GET() {
   try {
@@ -27,7 +28,7 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    console.error('Admin webhooks list error:', error);
+    logger.error('admin_webhooks_list_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 },
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
       message: 'API key created. Save this key — it will not be shown again.',
     }, { status: 201 });
   } catch (error) {
-    console.error('Admin webhooks create error:', error);
+    logger.error('admin_webhooks_create_failed', { error });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 },

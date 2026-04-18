@@ -1,5 +1,6 @@
 // T085: Auth utility functions — separated from NextAuth config for testability
 import { UserRole } from '@/types/domain';
+import { logger } from '@/lib/logger';
 
 export function mapPositionToRole(position: string): UserRole {
   const lower = position.toLowerCase();
@@ -29,7 +30,7 @@ export async function validateBmsSession(
 ): Promise<BmsUserIdentity | null> {
   // Dev auth bypass — accept any session ID as admin
   if (process.env.DEV_AUTH_BYPASS === 'true') {
-    console.log(`[AUTH] Dev bypass: session "${sessionId}" → ADMIN`);
+    logger.info('auth_dev_bypass', { sessionId, role: 'ADMIN' });
     return {
       name: 'Dev Admin (ผู้ดูแลระบบ)',
       role: UserRole.ADMIN,

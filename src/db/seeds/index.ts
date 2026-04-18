@@ -3,6 +3,7 @@ import type { DatabaseAdapter } from '../adapter';
 import { DataSeeder } from './seeder';
 import { HospitalSeeder } from './hospital-seeder';
 import { AdminSeeder } from './admin-seeder';
+import { logger } from '@/lib/logger';
 
 export class SeedOrchestrator {
   private seeders: DataSeeder[];
@@ -16,9 +17,9 @@ export class SeedOrchestrator {
       const shouldRun = await seeder.shouldRun(db);
       if (shouldRun) {
         const count = await seeder.seed(db);
-        console.log(`${seeder.getName()}: seeded ${count} records`);
+        logger.info('seeder_completed', { seeder: seeder.getName(), count });
       } else {
-        console.log(`${seeder.getName()}: skipped (already seeded)`);
+        logger.info('seeder_skipped', { seeder: seeder.getName() });
       }
     }
   }
