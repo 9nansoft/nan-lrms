@@ -11,6 +11,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Opt actions into Node 24 runtime ahead of GitHub's June 2026 default.
+# This affects only the runtime that runs the actions themselves (e.g.
+# actions/checkout); the Node version used for our build is set via
+# actions/setup-node below.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   test:
     name: Lint, typecheck, test, build
