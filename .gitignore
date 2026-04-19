@@ -56,6 +56,11 @@ dev.sqlite-wal
 screenshots/
 *-current.png
 *-clean.png
+*-test.png
+
+# Local tool state (not checked in)
+.playwright-mcp/
+.superpowers/
 
 # Misc
 *.tmp
