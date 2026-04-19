@@ -156,6 +156,56 @@ export interface PartogramResponse {
   };
 }
 
+// Partograph CDSS (Clinical Decision Support) — ported from HOSxP Pascal
+// PartographCDSSUnit.pas. See docs/plans/2026-04-19-partograph-support.md.
+export type CdssSeverity = 'INFO' | 'WARN' | 'ALERT' | 'CRITICAL';
+export type CdssSection =
+  | 'FHR' | 'LIQUOR' | 'MOULDING' | 'CERVIX' | 'DESCENT'
+  | 'CONTRACTIONS' | 'OXY' | 'PULSE' | 'BP' | 'TEMP' | 'URINE' | 'TIME';
+
+export interface CdssAlertDto {
+  severity: CdssSeverity;
+  section: CdssSection;
+  message: string;
+  obsIndex: number;
+}
+
+export interface PartographObservationDto {
+  id: string;
+  observeDatetime: string;
+  hourNo: number | null;
+  fetalHeartRate: number | null;
+  amnioticFluid: string | null;
+  amnioticTypeName: string | null;
+  moulding: string | null;
+  cervicalDilationCm: number | null;
+  descentOfHead: string | null;
+  contractionPer10Min: number | null;
+  contractionDurationSec: number | null;
+  contractionStrength: string | null;
+  oxytocinUml: number | null;
+  oxytocinDropsMin: number | null;
+  drugsIvFluids: string | null;
+  pulse: number | null;
+  bpSystolic: number | null;
+  bpDiastolic: number | null;
+  temperature: number | null;
+  urineVolumeMl: number | null;
+  urineProtein: string | null;
+  urineGlucose: string | null;
+  urineAcetone: string | null;
+  note: string | null;
+  entryStaff: string | null;
+}
+
+export interface SsePartographSeverityChangedEvent {
+  type: 'partograph_severity_changed';
+  hcode: string;
+  an: string;
+  severity: CdssSeverity | null;
+  alertCount: number;
+}
+
 // Contractions
 export interface ContractionEntry {
   measuredAt: string;
