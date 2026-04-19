@@ -9,6 +9,7 @@ import {
   deleteVitalSign,
   upsertPregnancy,
   upsertLabour,
+  upsertLabor,
 } from '@/services/maternity-ward';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 
@@ -518,5 +519,55 @@ describe('upsertLabour', () => {
       hcode: '10670',
       fieldsTouched: ['g', 'ga', 'anc_count'],
     });
+  });
+});
+
+// ─── Task 44: legacy `labor` table upsert ──────────────────────────────────
+describe('upsertLabor', () => {
+  beforeEach(() => mockFetch.mockReset());
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('calls restUpdate keyed by an + audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    await upsertLabor(
+      cfg,
+      userInfo,
+      'AN1',
+      { mother_gvalue: 3, mother_hct: 36, mother_aging: 28 },
+      '10670',
+    );
+    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/labor/AN1');
+    expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
+    await new Promise((r) => setTimeout(r, 0));
+    const auditBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(auditBody).toMatchObject({
+      entity: 'labor',
+      op: 'update',
+      resourceId: 'AN1',
+      hcode: '10670',
+      fieldsTouched: ['mother_gvalue', 'mother_hct', 'mother_aging'],
+    });
+  });
+
+  it('does not throw if audit fails', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockRejectedValueOnce(new Error('audit endpoint down'));
+    await expect(
+      upsertLabor(cfg, userInfo, 'AN1', { mother_gvalue: 3 }, '10670'),
+    ).resolves.not.toThrow();
   });
 });
