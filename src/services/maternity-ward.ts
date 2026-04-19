@@ -4,6 +4,7 @@ import {
   MATERNITY_WARDS,
   PATIENT_LABOR_BY_AN,
   PATIENT_LABOUR_BY_AN,
+  PATIENT_LABOUR_MED_BY_AN,
   PATIENT_PARTOGRAPH_BY_AN,
   PATIENT_PREGNANCY_BY_AN,
   PATIENT_VITAL_SIGNS_BY_AN,
@@ -17,6 +18,7 @@ import type {
   BedOccupancy,
   BedSlot,
   LaborRecord,
+  LabourMedRow,
   LabourRecord,
   MaternityWard,
   PartographRow,
@@ -110,4 +112,16 @@ export async function getPatientLabor(
   const sql = getQuery(PATIENT_LABOR_BY_AN, DEFAULT_DIALECT);
   const r = await executeSql<LaborRecord>(sql, config, { an });
   return r.data[0] ?? null;
+}
+
+// Task 34: read all free-text labour-medication rows for an admission. The
+// underlying labour_medication table has a labour_medication_id PK, so the
+// caller can use it directly as the React key (unlike vital-signs in Task 31).
+export async function getPatientLabourMedications(
+  config: ConnectionConfig,
+  an: string,
+): Promise<LabourMedRow[]> {
+  const sql = getQuery(PATIENT_LABOUR_MED_BY_AN, DEFAULT_DIALECT);
+  const r = await executeSql<LabourMedRow>(sql, config, { an });
+  return r.data;
 }
