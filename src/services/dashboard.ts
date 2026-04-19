@@ -109,6 +109,8 @@ interface HighRiskRow {
   hcode: string;
   admit_date: string | null;
   last_vital_at: string | null;
+  partograph_severity: string | null;
+  partograph_alert_count: number | null;
 }
 
 export async function getHighRiskPatients(
@@ -127,6 +129,8 @@ export async function getHighRiskPatients(
       h.name AS hospital_name,
       h.hcode,
       cp.admit_date,
+      cp.partograph_severity,
+      cp.partograph_alert_count,
       (SELECT MAX(cv.measured_at) FROM cached_vital_signs cv WHERE cv.patient_id = cp.id) AS last_vital_at
     FROM cached_patients cp
     INNER JOIN cpd_scores cs ON cs.patient_id = cp.id
@@ -154,6 +158,8 @@ export async function getHighRiskPatients(
     hcode: row.hcode,
     admitDate: row.admit_date,
     lastVitalAt: row.last_vital_at,
+    partographSeverity: (row.partograph_severity as CdssSeverity | null) ?? null,
+    partographAlertCount: row.partograph_alert_count ?? null,
   }));
 }
 

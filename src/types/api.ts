@@ -241,6 +241,8 @@ export interface HighRiskPatient {
   hcode: string;
   admitDate: string | null;
   lastVitalAt: string | null;
+  partographSeverity: CdssSeverity | null;
+  partographAlertCount: number | null;
 }
 
 export interface HighRiskPatientsResponse {
