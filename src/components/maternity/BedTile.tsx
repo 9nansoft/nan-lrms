@@ -37,6 +37,7 @@ export function BedTile({ bedno, bedLock, occupant, onClick }: BedTileProps) {
       >
         <Lock className="h-5 w-5" aria-hidden />
         <span className="mt-1 text-xs">ล็อก</span>
+        <span className="sr-only">เตียง {bedno}</span>
         <span className="text-sm font-semibold">{bedno}</span>
       </div>
     );
@@ -49,6 +50,7 @@ export function BedTile({ bedno, bedLock, occupant, onClick }: BedTileProps) {
         className="flex h-32 w-32 flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-slate-400"
       >
         <span className="text-xs">ว่าง</span>
+        <span className="sr-only">เตียง {bedno}</span>
         <span className="text-sm font-semibold">{bedno}</span>
       </div>
     );
