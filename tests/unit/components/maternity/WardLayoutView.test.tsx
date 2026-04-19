@@ -66,7 +66,11 @@ describe('WardLayoutView', () => {
   it('forwards onBedClick to BedTile', () => {
     const onBedClick = vi.fn();
     render(<WardLayoutView beds={beds} occupancy={occupancy} onBedClick={onBedClick} />);
-    const button = screen.getByRole('button', { name: /เตียง 01/i });
+    // Task 52: the DnD wrapper around an occupied tile also exposes role="button"
+    // (via @dnd-kit's attributes), so we can no longer rely solely on getByRole.
+    // Match the inner BedTile by its aria-label which only the real <button>
+    // element carries.
+    const button = screen.getByLabelText('เตียง 01');
     button.click();
     expect(onBedClick).toHaveBeenCalledWith('AN1');
   });

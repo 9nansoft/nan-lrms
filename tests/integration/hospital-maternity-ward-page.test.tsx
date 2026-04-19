@@ -38,6 +38,11 @@ vi.mock('@/services/maternity-ward', () => ({
   listMaternityWards: vi.fn(),
   listWardBedsInventory: vi.fn(),
   listWardBedsOccupancy: vi.fn(),
+  // Task 51-52: page now lazy-loads bed-move reasons and triggers movePatientBed
+  // on drag-drop confirm. Stub both with safe defaults so the page render path
+  // is independent of these flows in this Task 25 test.
+  getBedMoveReasons: vi.fn().mockResolvedValue([]),
+  movePatientBed: vi.fn().mockResolvedValue(undefined),
 }));
 
 import {
@@ -211,11 +216,14 @@ describe('Hospital maternity ward page (full render)', () => {
     window.history.replaceState({}, '', 'http://localhost/?bms-session-id=SID');
 
     render(PAGE);
+    // Task 52: the DnD wrapper around an occupied tile also exposes role="button"
+    // (via @dnd-kit's attributes), so disambiguate via aria-label which only the
+    // inner BedTile carries.
     await waitFor(
-      () => expect(screen.getByRole('button', { name: /เตียง 01/i })).toBeInTheDocument(),
+      () => expect(screen.getByLabelText('เตียง 01')).toBeInTheDocument(),
       { timeout: 2000 },
     );
-    fireEvent.click(screen.getByRole('button', { name: /เตียง 01/i }));
+    fireEvent.click(screen.getByLabelText('เตียง 01'));
 
     // Drawer should now be visible with the patient's AN in header + 10 tabs
     await waitFor(() => expect(screen.getByText(/AN1/)).toBeInTheDocument(), {

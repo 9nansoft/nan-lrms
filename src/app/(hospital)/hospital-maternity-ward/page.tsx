@@ -4,18 +4,43 @@
 // button. Task 40 wires the PatientDrawer: clicking a bed opens the drawer
 // with the matching occupant; closing resets selection.
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useBmsSession } from '@/hooks/useBmsSession';
 import { useMaternityWardState } from '@/hooks/useMaternityWardState';
-import { WardLayoutView } from '@/components/maternity/WardLayoutView';
+import {
+  WardLayoutView,
+  type BedMovePayload,
+} from '@/components/maternity/WardLayoutView';
 import { PatientDrawer } from '@/components/maternity/PatientDrawer';
+import {
+  getBedMoveReasons,
+  movePatientBed,
+} from '@/services/maternity-ward';
 import { RefreshCw } from 'lucide-react';
 
 export default function HospitalMaternityWardPage() {
-  const { isReady, error: sessionError } = useBmsSession();
+  const { isReady, error: sessionError, config, userInfo } = useBmsSession();
   const { wards, ward, beds, occupancy, isLoading, error, mutateBeds, mutateOccupancy } =
     useMaternityWardState();
   const [selectedAn, setSelectedAn] = useState<string | null>(null);
+  const [reasons, setReasons] = useState<string[]>([]);
+
+  // Lazy-load the reason list once a session is available. Failures fall back
+  // to an empty list — the modal Confirm button stays disabled in that case.
+  useEffect(() => {
+    if (!config) return;
+    let cancelled = false;
+    getBedMoveReasons(config)
+      .then((rs) => {
+        if (!cancelled) setReasons(rs);
+      })
+      .catch(() => {
+        if (!cancelled) setReasons([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config]);
 
   if (sessionError) {
     return (
@@ -60,6 +85,36 @@ export default function HospitalMaternityWardPage() {
     void mutateOccupancy();
   };
 
+  const handleBedMove = async (payload: BedMovePayload) => {
+    if (!config || !userInfo) return;
+    try {
+      await movePatientBed(config, userInfo, userInfo.hospcode, {
+        an: payload.an,
+        oldWard: ward!,
+        oldBedno: payload.oldBedno,
+        newWard: ward!,
+        newBedno: payload.newBedno,
+        newRoomno: payload.newRoomno,
+        reason: payload.reason,
+      });
+      await Promise.all([mutateBeds(), mutateOccupancy()]);
+    } catch (e) {
+      // TODO: replace with the shared toast component when available.
+      console.error('[bed-move] movePatientBed failed:', e);
+    }
+  };
+
+  const handleMoveRejected = (reason: 'locked' | 'occupied' | 'no-op') => {
+    const msg =
+      reason === 'locked'
+        ? 'เตียงถูกล็อก'
+        : reason === 'occupied'
+          ? 'เตียงไม่ว่าง'
+          : 'เตียงเดิม — ไม่ต้องย้าย';
+    // TODO: replace with the shared toast component when available.
+    console.warn(`[bed-move] rejected: ${msg}`);
+  };
+
   return (
     <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -77,7 +132,14 @@ export default function HospitalMaternityWardPage() {
         </button>
       </header>
 
-      <WardLayoutView beds={beds} occupancy={occupancy} onBedClick={setSelectedAn} />
+      <WardLayoutView
+        beds={beds}
+        occupancy={occupancy}
+        onBedClick={setSelectedAn}
+        onBedMove={(p) => void handleBedMove(p)}
+        onMoveRejected={handleMoveRejected}
+        reasons={reasons}
+      />
       <PatientDrawer
         open={selectedAn !== null}
         occupant={selectedOccupant}
