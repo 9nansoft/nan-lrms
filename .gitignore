@@ -52,6 +52,9 @@ dev.sqlite-wal
 *.sqlite-shm
 *.sqlite-wal
 
+# Dev pglite database (in-process Postgres)
+.pglite-data/
+
 # Screenshots
 screenshots/
 *-current.png

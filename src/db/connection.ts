@@ -11,10 +11,25 @@ export function isSqliteEnabled(): boolean {
   return process.env.NODE_ENV === 'test' || process.env.USE_SQLITE === 'true';
 }
 
+// In-process Postgres dev mode via @electric-sql/pglite. Useful when you
+// want real Postgres dialect without standing up a server. Persists to a
+// local directory so data survives restarts.
+export function isPgliteEnabled(): boolean {
+  return process.env.USE_PGLITE === 'true';
+}
+
 export async function getDatabase(): Promise<DatabaseAdapter> {
   if (instance) return instance;
 
-  if (isSqliteEnabled()) {
+  if (isPgliteEnabled()) {
+    const { PgliteAdapter } = await import('./pglite-adapter');
+    const { PGlite } = await import('@electric-sql/pglite');
+    const path = process.env.PGLITE_PATH ?? './.pglite-data';
+    instance = new PgliteAdapter(new PGlite(path));
+    if (process.env.NODE_ENV !== 'test') {
+      logger.info('pglite_connected', { path });
+    }
+  } else if (isSqliteEnabled()) {
     const { SqliteAdapter } = await import('./sqlite-adapter');
     const path = process.env.NODE_ENV === 'test' ? ':memory:' : (process.env.SQLITE_PATH ?? 'dev.sqlite');
     instance = new SqliteAdapter(path);
