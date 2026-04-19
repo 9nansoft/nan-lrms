@@ -1,5 +1,5 @@
 // Integration tests: sync data pipeline — HOSxP data -> cached patients -> CPD scores
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { SqliteAdapter } from '@/db/sqlite-adapter';
@@ -10,11 +10,15 @@ import {
   transformHosxpPatient,
   upsertCachedPatients,
   detectChanges,
+  pollHospital,
   type SyncPatientData,
 } from '@/services/sync';
 import { calculateCpdScore } from '@/services/cpd-score';
 import { generateKey, encrypt } from '@/lib/encryption';
+import { BmsSessionClient } from '@/lib/bms-session';
+import type { SseManager } from '@/lib/sse';
 import type { HosxpIptRow, HosxpPregnancyRow, HosxpPatientRow } from '@/types/hosxp';
+import type { BmsQueryResult } from '@/types/bms-session';
 import { RiskLevel } from '@/types/domain';
 
 const TEST_ENCRYPTION_KEY = generateKey();
@@ -474,5 +478,152 @@ describe('Sync Pipeline Integration', () => {
     const matchedHospitalIds = matches.map((m) => m.hospital_id);
     expect(matchedHospitalIds).toContain(hospitals[0].id);
     expect(matchedHospitalIds).toContain(hospitals[1].id);
+  });
+
+  // -----------------------------------------------------------------------
+  // T18: Partograph sync via pollHospital()
+  // -----------------------------------------------------------------------
+  describe('partograph sync via pollHospital', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('pulls partograph rows, persists them, and rolls up severity', async () => {
+      // Seed an active patient with a known AN that the mock partograph
+      // row will reference (so AN-resolution inside pollHospital() finds it).
+      const now = new Date().toISOString();
+      const patientId = uuidv4();
+      await db.execute(
+        `INSERT INTO cached_patients
+           (id, hospital_id, hn, an, name, age, admit_date,
+            labor_status, synced_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
+        [patientId, hospitalId, 'HN-PG1', 'AN-PG1',
+         encrypt('นาง ทดสอบ พาร์โต', TEST_ENCRYPTION_KEY), 30,
+         '2026-04-19T08:00:00Z', now, now, now],
+      );
+
+      // Mock BmsSessionClient.executeQuery so that:
+      //   - the partograph SQL returns one moulding=+++ row (-> CRITICAL)
+      //   - the active-patient SQL returns the same patient (so the
+      //     existing pre-partograph flow sees the row as still admitted)
+      //   - any other query returns an empty data array
+      const partographRow = {
+        ipt_labour_partograph_id: 9001,
+        ipt_labour_id: 1,
+        an: 'AN-PG1',
+        observe_datetime: '2026-04-19T10:00:00Z',
+        hour_no: 1,
+        fetal_heart_rate: 130,
+        amniotic_fluid: 'Clear',
+        labour_amniotic_type_id: null,
+        amniotic_type_name: null,
+        moulding: '+++',
+        cervical_dilation_cm: 5,
+        descent_of_head: '3/5',
+        contraction_per_10min: 3,
+        contraction_duration_sec: 40,
+        contraction_strength: 'M',
+        oxytocin_uml: null,
+        oxytocin_drops_min: null,
+        drugs_iv_fluids: null,
+        pulse: 80,
+        bp_systolic: 120,
+        bp_diastolic: 80,
+        temperature: 36.8,
+        urine_volume_ml: null,
+        urine_protein: null,
+        urine_glucose: null,
+        urine_acetone: null,
+        note: null,
+        entry_staff: 'NURSE1',
+        entry_datetime: '2026-04-19T10:05:00Z',
+      };
+
+      const activePatientRow = {
+        an: 'AN-PG1',
+        hn: 'HN-PG1',
+        regdate: '2026-04-19',
+        regtime: '08:00:00',
+        ward: 'LR',
+        pname: 'นาง',
+        fname: 'ทดสอบ',
+        lname: 'พาร์โต',
+        cid: '1234567890123',
+        birthday: '1995-01-01',
+        sex: '2',
+        preg_number: 2,
+        ga: 39,
+        anc_count: 5,
+        anc_complete: 'Y',
+        labor_date: null,
+      };
+
+      const wrapResult = (
+        data: Record<string, unknown>[],
+      ): BmsQueryResult => ({
+        data,
+        field: [],
+        field_name: [],
+        record_count: data.length,
+      });
+
+      vi.spyOn(BmsSessionClient.prototype, 'executeQuery')
+        .mockImplementation(async (sql: string): Promise<BmsQueryResult> => {
+          if (sql.includes('ipt_labour_partograph')) {
+            return wrapResult([partographRow]);
+          }
+          if (sql.includes('FROM ipt')) {
+            return wrapResult([activePatientRow]);
+          }
+          return wrapResult([]);
+        });
+
+      const sseManager = { broadcast: vi.fn() } as unknown as SseManager;
+
+      await pollHospital(
+        db,
+        hospitalId,
+        'http://tunnel.test',
+        'http://bms.test',
+        'jwt-test',
+        'postgresql',
+        TEST_ENCRYPTION_KEY,
+        sseManager,
+      );
+
+      // Partograph row landed in cache.
+      const obs = await db.query<{
+        moulding: string | null;
+        source_pk: string;
+        patient_id: string;
+      }>(
+        'SELECT moulding, source_pk, patient_id FROM cached_partograph_observations',
+      );
+      expect(obs).toHaveLength(1);
+      expect(obs[0].moulding).toBe('+++');
+      expect(obs[0].source_pk).toBe('9001');
+
+      // Severity rolled up onto cached_patients.
+      const patientAfter = await db.query<{
+        partograph_severity: string | null;
+        partograph_alert_count: number | null;
+      }>(
+        'SELECT partograph_severity, partograph_alert_count FROM cached_patients WHERE an = ?',
+        ['AN-PG1'],
+      );
+      expect(patientAfter[0].partograph_severity).toBe('CRITICAL');
+      expect(patientAfter[0].partograph_alert_count).toBeGreaterThan(0);
+
+      // SSE broadcast included the severity-changed event.
+      const broadcastMock = sseManager.broadcast as unknown as ReturnType<typeof vi.fn>;
+      const severityCalls = broadcastMock.mock.calls.filter(
+        (c: unknown[]) => {
+          const data = c[1] as { type?: string } | undefined;
+          return data?.type === 'partograph_severity_changed';
+        },
+      );
+      expect(severityCalls.length).toBeGreaterThanOrEqual(1);
+    });
   });
 });

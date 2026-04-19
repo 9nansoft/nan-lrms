@@ -5,7 +5,11 @@ import { BmsSessionClient } from '@/lib/bms-session';
 import { SseManager } from '@/lib/sse';
 import { encrypt } from '@/lib/encryption';
 import { calculateAge } from '@/lib/utils';
-import { getQuery, ACTIVE_LABOR_PATIENTS } from '@/config/hosxp-queries';
+import {
+  getQuery,
+  ACTIVE_LABOR_PATIENTS,
+  PARTOGRAPH_OBSERVATIONS,
+} from '@/config/hosxp-queries';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
 import {
   upsertCachedPatients,
@@ -14,6 +18,10 @@ import {
   markPatientsDelivered,
   type SyncPatientData,
 } from './patient';
+import {
+  upsertPartographObservations,
+  type PartographRow,
+} from './partograph';
 import { calculateAndStoreCpdScores } from './cpd-persist';
 import { logger } from '@/lib/logger';
 
@@ -254,6 +262,128 @@ export async function pollHospital(
     }
 
     await calculateAndStoreCpdScores(db, hospitalId, sseManager);
+
+    // Pull partograph observations for currently-admitted patients.
+    // Must run AFTER upsertCachedPatients() so AN -> patient_id lookup works.
+    try {
+      const partographSql = getQuery(PARTOGRAPH_OBSERVATIONS, databaseType);
+      const partographResult = await client.executeQuery(partographSql, bmsUrl, jwt);
+
+      if (partographResult.data.length > 0) {
+        // Resolve AN -> patient_id once for the batch.
+        const ans = Array.from(
+          new Set(partographResult.data.map((r) => String(r.an))),
+        );
+        const placeholders = ans.map(() => '?').join(',');
+        const patientRows = await db.query<{ id: string; an: string }>(
+          `SELECT id, an FROM cached_patients
+             WHERE hospital_id = ? AND an IN (${placeholders})`,
+          [hospitalId, ...ans],
+        );
+        const patientByAn = new Map(patientRows.map((p) => [p.an, p.id]));
+
+        const rows: PartographRow[] = partographResult.data
+          .map((row) => {
+            const pid = patientByAn.get(String(row.an));
+            if (!pid) return null;
+            const r: PartographRow = {
+              hospitalId,
+              patientId: pid,
+              sourceSystem: 'hosxp',
+              sourcePk: String(row.ipt_labour_partograph_id),
+              observeDatetime: String(row.observe_datetime),
+              hourNo: row.hour_no != null ? Number(row.hour_no) : null,
+              fetalHeartRate:
+                row.fetal_heart_rate != null
+                  ? Number(row.fetal_heart_rate)
+                  : null,
+              amnioticFluid: (row.amniotic_fluid as string | null) ?? null,
+              amnioticTypeId:
+                row.labour_amniotic_type_id != null
+                  ? Number(row.labour_amniotic_type_id)
+                  : null,
+              amnioticTypeName:
+                (row.amniotic_type_name as string | null) ?? null,
+              moulding: (row.moulding as string | null) ?? null,
+              cervicalDilationCm:
+                row.cervical_dilation_cm != null
+                  ? Number(row.cervical_dilation_cm)
+                  : null,
+              descentOfHead: (row.descent_of_head as string | null) ?? null,
+              contractionPer10Min:
+                row.contraction_per_10min != null
+                  ? Number(row.contraction_per_10min)
+                  : null,
+              contractionDurationSec:
+                row.contraction_duration_sec != null
+                  ? Number(row.contraction_duration_sec)
+                  : null,
+              contractionStrength:
+                (row.contraction_strength as string | null) ?? null,
+              oxytocinUml:
+                row.oxytocin_uml != null ? Number(row.oxytocin_uml) : null,
+              oxytocinDropsMin:
+                row.oxytocin_drops_min != null
+                  ? Number(row.oxytocin_drops_min)
+                  : null,
+              drugsIvFluids: (row.drugs_iv_fluids as string | null) ?? null,
+              pulse: row.pulse != null ? Number(row.pulse) : null,
+              bpSystolic:
+                row.bp_systolic != null ? Number(row.bp_systolic) : null,
+              bpDiastolic:
+                row.bp_diastolic != null ? Number(row.bp_diastolic) : null,
+              temperature:
+                row.temperature != null ? Number(row.temperature) : null,
+              urineVolumeMl:
+                row.urine_volume_ml != null
+                  ? Number(row.urine_volume_ml)
+                  : null,
+              urineProtein: (row.urine_protein as string | null) ?? null,
+              urineGlucose: (row.urine_glucose as string | null) ?? null,
+              urineAcetone: (row.urine_acetone as string | null) ?? null,
+              note: (row.note as string | null) ?? null,
+              entryStaff: (row.entry_staff as string | null) ?? null,
+              entryDatetime:
+                row.entry_datetime != null
+                  ? String(row.entry_datetime)
+                  : null,
+            };
+            return r;
+          })
+          .filter((r): r is PartographRow => r !== null);
+
+        const partographResultStats = await upsertPartographObservations(
+          db,
+          hospitalId,
+          rows,
+        );
+
+        // Broadcast severity transitions only — not every observation.
+        for (const sc of partographResultStats.severityChanges) {
+          sseManager.broadcast('patient-update', {
+            type: 'partograph_severity_changed',
+            hcode,
+            an: sc.an,
+            severity: sc.to,
+            alertCount: sc.alertCount,
+          });
+        }
+
+        logger.info('partograph_sync_complete', {
+          hospitalId,
+          observationsUpserted: partographResultStats.upserted,
+          patientsTouched: rows.length,
+          severityChanges: partographResultStats.severityChanges.length,
+        });
+      }
+    } catch (partographError) {
+      // Partograph fetch failure should not abort the rest of the polling
+      // cycle (patient list, CPD scores, transfers were already persisted).
+      logger.error('partograph_sync_failed', {
+        hospitalId,
+        error: partographError,
+      });
+    }
 
     const changes = detectChanges(patients, existingAns);
 
