@@ -1,4 +1,4 @@
-import type { BmsSessionResponse } from '@/types/bms-browser';
+import type { BmsSessionResponse, ConnectionConfig, UserInfo } from '@/types/bms-browser';
 
 export const PASTE_JSON_URL = 'https://hosxp.net/phapi/PasteJSON';
 export const APP_IDENTIFIER = 'KK-LRMS.Web';
@@ -31,4 +31,24 @@ export async function retrieveBmsSession(sessionId: string): Promise<BmsSessionR
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export function extractConnectionConfig(r: BmsSessionResponse): ConnectionConfig {
+  if (!r.jwt) throw new Error('BMS session response missing jwt');
+  if (!r.bms_url) throw new Error('BMS session response missing bms_url');
+  return {
+    apiUrl: r.bms_url.replace(/\/$/, ''),
+    bearerToken: r.jwt,
+    appIdentifier: APP_IDENTIFIER,
+  };
+}
+
+export function extractUserInfo(r: BmsSessionResponse): UserInfo {
+  const ui = (r.user_info ?? {}) as Record<string, unknown>;
+  return {
+    loginname: String(ui.loginname ?? ui.username ?? ''),
+    fullname: String(ui.fullname ?? ui.name ?? ''),
+    hospcode: String(ui.hospcode ?? ui.hospital_code ?? ''),
+    ...ui,
+  };
 }

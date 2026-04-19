@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { retrieveBmsSession } from '@/lib/bms-browser-client';
+import {
+  retrieveBmsSession,
+  extractConnectionConfig,
+  extractUserInfo,
+  APP_IDENTIFIER,
+} from '@/lib/bms-browser-client';
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -34,5 +39,32 @@ describe('bms-browser-client.retrieveBmsSession', () => {
       text: async () => 'session expired',
     });
     await expect(retrieveBmsSession('SID-X')).rejects.toThrow();
+  });
+});
+
+describe('extractConnectionConfig', () => {
+  it('extracts apiUrl + bearerToken + appIdentifier', () => {
+    const r = { jwt: 'eyJ...', bms_url: 'https://t.example/api' };
+    const c = extractConnectionConfig(r);
+    expect(c).toEqual({
+      apiUrl: 'https://t.example/api',
+      bearerToken: 'eyJ...',
+      appIdentifier: APP_IDENTIFIER,
+    });
+  });
+
+  it('throws when bms_url missing', () => {
+    expect(() => extractConnectionConfig({ jwt: 'x' } as never)).toThrow(/bms_url/);
+  });
+
+  it('throws when jwt missing', () => {
+    expect(() => extractConnectionConfig({ bms_url: 'x' } as never)).toThrow(/jwt/);
+  });
+});
+
+describe('extractUserInfo', () => {
+  it('returns user_info subfield', () => {
+    const r = { user_info: { loginname: 'n1', fullname: 'Nurse', hospcode: '10670' } };
+    expect(extractUserInfo(r as never)).toMatchObject({ loginname: 'n1', hospcode: '10670' });
   });
 });
