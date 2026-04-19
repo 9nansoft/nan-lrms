@@ -448,3 +448,62 @@ export async function deleteLabourMedication(
     staff: userInfo.loginname,
   });
 }
+
+// ─── Task 46: labour_stage_medication CRUD ─────────────────────────────────
+// Although the underlying schema marks labour_stage_medication_id as auto-
+// increment, the BMS REST endpoint expects the PK in the body, so we mint via
+// get_serialnumber for safety and consistency with the other tabs.
+export async function upsertStageMedication(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  an: string,
+  row: Partial<StageMedRow>,
+  hcode: string,
+): Promise<StageMedRow> {
+  const isNew = row.labour_stage_medication_id === undefined;
+  if (isNew) {
+    const id = await mintSerial('labour_stage_medication_id', config);
+    const payload = { ...row, labour_stage_medication_id: id, an };
+    await restInsert('labour_stage_medication', payload, config);
+    fireAudit({
+      entity: 'labour_stage_medication',
+      op: 'insert',
+      resourceId: String(id),
+      hcode,
+      staff: userInfo.loginname,
+    });
+    return payload as StageMedRow;
+  }
+  const { labour_stage_medication_id, ...fields } = row;
+  await restUpdate(
+    'labour_stage_medication',
+    String(labour_stage_medication_id),
+    fields,
+    config,
+  );
+  fireAudit({
+    entity: 'labour_stage_medication',
+    op: 'update',
+    resourceId: String(labour_stage_medication_id),
+    hcode,
+    staff: userInfo.loginname,
+    fieldsTouched: Object.keys(fields),
+  });
+  return row as StageMedRow;
+}
+
+export async function deleteStageMedication(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  id: number,
+  hcode: string,
+): Promise<void> {
+  await restDelete('labour_stage_medication', id, config);
+  fireAudit({
+    entity: 'labour_stage_medication',
+    op: 'delete',
+    resourceId: String(id),
+    hcode,
+    staff: userInfo.loginname,
+  });
+}
