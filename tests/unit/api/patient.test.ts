@@ -16,7 +16,7 @@ describe('Patient Detail API Logic', () => {
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ['hosp-1', '10670', 'รพ.ชุมแพ', 'M1', 1, 'ONLINE', new Date().toISOString(), new Date().toISOString()],
+      ['hosp-1', '10670', 'รพ.ขอนแก่น', 'A_S', 1, 'ONLINE', new Date().toISOString(), new Date().toISOString()],
     );
 
     // Seed a patient
@@ -74,8 +74,8 @@ describe('Patient Detail API Logic', () => {
 
     expect(result.length).toBe(1);
     expect(result[0].hcode).toBe('10670');
-    expect(result[0].hospital_name).toBe('รพ.ชุมแพ');
-    expect(result[0].level).toBe('M1');
+    expect(result[0].hospital_name).toBe('รพ.ขอนแก่น');
+    expect(result[0].level).toBe('A_S');
   });
 
   it('retrieves latest CPD score for patient', async () => {

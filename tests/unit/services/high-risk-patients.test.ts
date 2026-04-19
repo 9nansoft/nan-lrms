@@ -282,7 +282,7 @@ describe('getHighRiskPatients', () => {
 
   it('should include patients from multiple hospitals', async () => {
     const hospitals = await db.query<{ id: string; hcode: string }>(
-      "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670', '10671') ORDER BY hcode",
+      "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670', '11000') ORDER BY hcode",
     );
     const now = new Date().toISOString();
 
@@ -302,7 +302,7 @@ describe('getHighRiskPatients', () => {
     expect(result).toHaveLength(2);
     const hcodes = result.map((r) => r.hcode);
     expect(hcodes).toContain('10670');
-    expect(hcodes).toContain('10671');
+    expect(hcodes).toContain('11000');
   });
 
   it('should return all expected fields with correct types', async () => {

@@ -29,7 +29,7 @@ async function seedFixtures(db: SqliteAdapter) {
   await db.execute(
     `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [hospBId, '10671', 'รพ.B', 'A_S', 1, 'ONLINE', now, now],
+    [hospBId, '11000', 'รพ.B', 'A_S', 1, 'ONLINE', now, now],
   );
 
   const journeyId = uuidv4();
@@ -265,7 +265,7 @@ describe('Referral API — PATCH reject', () => {
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [altHospId, '10672', 'รพ.C', 'M2', 1, 'ONLINE', now, now],
+      [altHospId, '11002', 'รพ.C', 'M2', 1, 'ONLINE', now, now],
     );
 
     const ref = await initiateReferral(db, {

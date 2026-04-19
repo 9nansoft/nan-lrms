@@ -30,7 +30,7 @@ describe('api-errors', () => {
   });
 
   it('accepts structured details object', () => {
-    const err = apiError('HOSPITAL_CODE_MISMATCH', { expected: '10679', received: '10737' });
-    expect(err.details).toEqual({ expected: '10679', received: '10737' });
+    const err = apiError('HOSPITAL_CODE_MISMATCH', { expected: '11004', received: '10737' });
+    expect(err.details).toEqual({ expected: '11004', received: '10737' });
   });
 });

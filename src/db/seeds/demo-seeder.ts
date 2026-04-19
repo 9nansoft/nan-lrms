@@ -29,7 +29,7 @@ interface DemoPatient {
 
 // Realistic demo patients across multiple hospitals, various risk levels
 const DEMO_PATIENTS: DemoPatient[] = [
-  // รพ.ชุมแพ (10670) — 2 patients, 1 high-risk
+  // รพ.ขอนแก่น (10670) — 2 patients, 1 high-risk
   {
     name: 'นางสาว สมหญิง ใจดี',
     cid: '0000000000001',
@@ -48,24 +48,24 @@ const DEMO_PATIENTS: DemoPatient[] = [
     hospitalHcode: '10670', admitHoursAgo: 4,
     cervixReadings: [2, 3, 4],
   },
-  // รพ.น้ำพอง (10671) — 1 patient, medium risk
+  // รพ.น้ำพอง (11000) — 1 patient, medium risk
   {
     name: 'นาง รัตนา พรมมา',
     cid: '0000000000003',
     hn: 'HN-003', an: 'AN-2026-003',
     age: 32, gravida: 3, gaWeeks: 39, ancCount: 5,
     heightCm: 152, weightDiffKg: 15, fundalHeightCm: 35, usWeightG: 3500, hematocritPct: 33,
-    hospitalHcode: '10671', admitHoursAgo: 6,
+    hospitalHcode: '11000', admitHoursAgo: 6,
     cervixReadings: [4, 5, 6],
   },
-  // รพ.บ้านไผ่ (10672) — 2 patients, 1 high-risk
+  // รพ.บ้านไผ่ (11002) — 2 patients, 1 high-risk
   {
     name: 'นางสาว วิภา ศรีสวัสดิ์',
     cid: '0000000000004',
     hn: 'HN-004', an: 'AN-2026-004',
     age: 17, gravida: 1, gaWeeks: 41, ancCount: 1,
     heightCm: 145, weightDiffKg: 20, fundalHeightCm: 40, usWeightG: 4200, hematocritPct: 28,
-    hospitalHcode: '10672', admitHoursAgo: 12,
+    hospitalHcode: '11002', admitHoursAgo: 12,
     cervixReadings: [2, 3, 3, 4, 4, 5],
   },
   {
@@ -74,27 +74,27 @@ const DEMO_PATIENTS: DemoPatient[] = [
     hn: 'HN-005', an: 'AN-2026-005',
     age: 25, gravida: 2, gaWeeks: 37, ancCount: 9,
     heightCm: 160, weightDiffKg: 10, fundalHeightCm: 30, usWeightG: 2800, hematocritPct: 38,
-    hospitalHcode: '10672', admitHoursAgo: 2,
+    hospitalHcode: '11002', admitHoursAgo: 2,
     cervixReadings: [3],
   },
-  // รพ.พล (10673) — 1 patient, low risk
+  // รพ.พล (11004) — 1 patient, low risk
   {
     name: 'นาง จันทร์ทิพย์ สุขสันต์',
     cid: '0000000000006',
     hn: 'HN-006', an: 'AN-2026-006',
     age: 30, gravida: 2, gaWeeks: 38, ancCount: 10,
     heightCm: 162, weightDiffKg: 11, fundalHeightCm: 31, usWeightG: 2900, hematocritPct: 37,
-    hospitalHcode: '10673', admitHoursAgo: 3,
+    hospitalHcode: '11004', admitHoursAgo: 3,
     cervixReadings: [5, 6, 7, 8],
   },
-  // รพ.ภูเวียง (10674) — 2 patients
+  // รพ.ภูเวียง (11008) — 2 patients
   {
     name: 'นางสาว อรุณี ชัยชนะ',
     cid: '0000000000007',
     hn: 'HN-007', an: 'AN-2026-007',
     age: 22, gravida: 1, gaWeeks: 39, ancCount: 6,
     heightCm: 155, weightDiffKg: 14, fundalHeightCm: 34, usWeightG: 3300, hematocritPct: 34,
-    hospitalHcode: '10674', admitHoursAgo: 5,
+    hospitalHcode: '11008', admitHoursAgo: 5,
     cervixReadings: [3, 4, 5, 6],
   },
   {
@@ -103,17 +103,17 @@ const DEMO_PATIENTS: DemoPatient[] = [
     hn: 'HN-008', an: 'AN-2026-008',
     age: 35, gravida: 4, gaWeeks: 40, ancCount: 3,
     heightCm: 150, weightDiffKg: 16, fundalHeightCm: 36, usWeightG: 3600, hematocritPct: 31,
-    hospitalHcode: '10674', admitHoursAgo: 10,
+    hospitalHcode: '11008', admitHoursAgo: 10,
     cervixReadings: [2, 3, 4, 5, 5, 6],
   },
-  // รพ.หนองเรือ (10675) — 1 patient, high risk
+  // รพ.หนองเรือ (10997) — 1 patient, high risk
   {
     name: 'นางสาว น้ำฝน มีสุข',
     cid: '0000000000009',
     hn: 'HN-009', an: 'AN-2026-009',
     age: 16, gravida: 1, gaWeeks: 42, ancCount: 0,
     heightCm: 143, weightDiffKg: 22, fundalHeightCm: 42, usWeightG: 4500, hematocritPct: 26,
-    hospitalHcode: '10675', admitHoursAgo: 14,
+    hospitalHcode: '10997', admitHoursAgo: 14,
     cervixReadings: [1, 2, 2, 3, 3, 3, 4],
   },
 ];

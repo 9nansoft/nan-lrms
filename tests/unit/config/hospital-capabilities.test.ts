@@ -13,14 +13,16 @@ describe('Hospital Capabilities Configuration', () => {
     expect(kkHosp!.name).toBe('รพ.ขอนแก่น');
     expect(kkHosp!.referTo).toBeNull();
 
-    const sirin = HOSPITAL_CAPABILITIES.find((h) => h.hcode === '10675');
+    // รพ.สิรินธร — MOPH hcode 12275, M1 referral
+    const sirin = HOSPITAL_CAPABILITIES.find((h) => h.hcode === '12275');
     expect(sirin).toBeDefined();
     expect(sirin!.minGaWeeks).toBe(32);
     expect(sirin!.minFetalWeightG).toBe(1500);
   });
 
   it('รพ.พล has GA>=35, FW>=2000, refers to รพ.ขอนแก่น', () => {
-    const phon = HOSPITAL_CAPABILITIES.find((h) => h.hcode === '10679');
+    // รพ.พล — MOPH hcode 11004
+    const phon = HOSPITAL_CAPABILITIES.find((h) => h.hcode === '11004');
     expect(phon).toBeDefined();
     expect(phon!.minGaWeeks).toBe(35);
     expect(phon!.minFetalWeightG).toBe(2000);
@@ -28,7 +30,8 @@ describe('Hospital Capabilities Configuration', () => {
   });
 
   it('รพ.บ้านไผ่ has GA>=34, FW>=1800', () => {
-    const banphai = HOSPITAL_CAPABILITIES.find((h) => h.hcode === '10674');
+    // รพ.บ้านไผ่ — MOPH hcode 11002
+    const banphai = HOSPITAL_CAPABILITIES.find((h) => h.hcode === '11002');
     expect(banphai).toBeDefined();
     expect(banphai!.minGaWeeks).toBe(34);
     expect(banphai!.minFetalWeightG).toBe(1800);
@@ -57,17 +60,19 @@ describe('Hospital Capabilities Configuration', () => {
     });
 
     it('returns referTo when GA below minimum', () => {
-      const result = findCapableHospital('10679', 30, 2500, AncRiskLevel.LOW);
+      // รพ.พล (11004) — GA<35 triggers refer to KK Regional (10670)
+      const result = findCapableHospital('11004', 30, 2500, AncRiskLevel.LOW);
       expect(result).toBe('10670');
     });
 
     it('returns referTo when fetal weight below minimum', () => {
-      const result = findCapableHospital('10679', 37, 1500, AncRiskLevel.LOW);
+      // รพ.พล (11004) — FW<2000 triggers refer to KK Regional (10670)
+      const result = findCapableHospital('11004', 37, 1500, AncRiskLevel.LOW);
       expect(result).toBe('10670');
     });
 
     it('returns null when case is within capability', () => {
-      const result = findCapableHospital('10679', 37, 2500, AncRiskLevel.LOW);
+      const result = findCapableHospital('11004', 37, 2500, AncRiskLevel.LOW);
       expect(result).toBeNull();
     });
 
@@ -77,9 +82,9 @@ describe('Hospital Capabilities Configuration', () => {
     });
 
     it('returns referTo when risk exceeds maxRiskLevel', () => {
-      // รพ.อุบลรัตน์ maxRiskLevel=HR1, patient is HR2
-      const result = findCapableHospital('10677', 37, 2500, AncRiskLevel.HR2);
-      expect(result).toBe('10676');
+      // รพ.อุบลรัตน์ (11001) maxRiskLevel=HR1, patient is HR2 — refer to น้ำพอง (11000)
+      const result = findCapableHospital('11001', 37, 2500, AncRiskLevel.HR2);
+      expect(result).toBe('11000');
     });
   });
 });

@@ -394,7 +394,7 @@ describe('Sync Pipeline Integration', () => {
   // -----------------------------------------------------------------------
   it('handles multiple patients across multiple hospitals in single pipeline run', async () => {
     const hospitals = await db.query<{ id: string; hcode: string }>(
-      "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670','10671','10672') ORDER BY hcode",
+      "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670','11000','11002') ORDER BY hcode",
     );
     const now = new Date().toISOString();
 
@@ -441,7 +441,7 @@ describe('Sync Pipeline Integration', () => {
   // -----------------------------------------------------------------------
   it('cross-hospital CID matching works through full pipeline', async () => {
     const hospitals = await db.query<{ id: string; hcode: string }>(
-      "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670','10671') ORDER BY hcode",
+      "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670','11000') ORDER BY hcode",
     );
     const now = new Date().toISOString();
 

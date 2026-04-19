@@ -22,7 +22,7 @@ describe('Dashboard Service', () => {
 
   it('should return all hospitals with zero counts when no patients', async () => {
     const result = await getProvinceDashboard(db);
-    expect(result.hospitals).toHaveLength(25);
+    expect(result.hospitals).toHaveLength(26);
     for (const h of result.hospitals) {
       expect(h.counts.total).toBe(0);
       expect(h.counts.low).toBe(0);
@@ -82,7 +82,7 @@ describe('Dashboard Service', () => {
     it('should aggregate counts across all hospitals', () => {
       const hospitals = [
         { hcode: '10670', counts: { low: 1, medium: 2, high: 0, total: 3 } },
-        { hcode: '10671', counts: { low: 0, medium: 1, high: 1, total: 2 } },
+        { hcode: '11000', counts: { low: 0, medium: 1, high: 1, total: 2 } },
       ];
       const summary = getSummaryTotals(hospitals as any);
       expect(summary.totalLow).toBe(1);

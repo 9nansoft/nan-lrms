@@ -26,7 +26,7 @@ describe('Health Check', () => {
     expect(status.database).toBe('connected');
     expect(status.uptime).toBeGreaterThanOrEqual(0);
     expect(status.hospitalConnections).toBeDefined();
-    expect(status.hospitalConnections.total).toBe(25); // seeded KK hospitals
+    expect(status.hospitalConnections.total).toBe(26); // seeded KK hospitals
   });
 
   it('should report hospital connection counts', async () => {
@@ -34,6 +34,6 @@ describe('Health Check', () => {
     const status = await getHealthStatus(db);
     expect(status.hospitalConnections.online).toBe(0);
     expect(status.hospitalConnections.offline).toBe(0);
-    expect(status.hospitalConnections.unknown).toBe(25);
+    expect(status.hospitalConnections.unknown).toBe(26);
   });
 });

@@ -360,11 +360,11 @@ describe('Sync Service', () => {
       const hospital10670 = await db.query<{ id: string }>(
         "SELECT id FROM hospitals WHERE hcode = '10670'",
       );
-      const hospital10671 = await db.query<{ id: string }>(
-        "SELECT id FROM hospitals WHERE hcode = '10671'",
+      const hospital11000 = await db.query<{ id: string }>(
+        "SELECT id FROM hospitals WHERE hcode = '11000'",
       );
       const hospitalIdA = hospital10670[0].id;
-      const hospitalIdB = hospital10671[0].id;
+      const hospitalIdB = hospital11000[0].id;
       const cidHash = createHash('sha256').update('0000000000001').digest('hex');
 
       // Insert same patient at two hospitals with same cid_hash but different HN/AN
@@ -417,11 +417,11 @@ describe('Sync Service', () => {
       const hospital10670 = await db.query<{ id: string }>(
         "SELECT id FROM hospitals WHERE hcode = '10670'",
       );
-      const hospital10671 = await db.query<{ id: string }>(
-        "SELECT id FROM hospitals WHERE hcode = '10671'",
+      const hospital11000 = await db.query<{ id: string }>(
+        "SELECT id FROM hospitals WHERE hcode = '11000'",
       );
       const hospitalIdA = hospital10670[0].id;
-      const hospitalIdB = hospital10671[0].id;
+      const hospitalIdB = hospital11000[0].id;
       const cidHash = createHash('sha256').update('0000000000001').digest('hex');
 
       // Patient exists at hospital A (ACTIVE)
@@ -527,11 +527,11 @@ describe('Sync Service', () => {
       const hospital10670 = await db.query<{ id: string }>(
         "SELECT id FROM hospitals WHERE hcode = '10670'",
       );
-      const hospital10671 = await db.query<{ id: string }>(
-        "SELECT id FROM hospitals WHERE hcode = '10671'",
+      const hospital11000 = await db.query<{ id: string }>(
+        "SELECT id FROM hospitals WHERE hcode = '11000'",
       );
       const hospitalIdA = hospital10670[0].id;
-      const hospitalIdB = hospital10671[0].id;
+      const hospitalIdB = hospital11000[0].id;
       const cidHash = createHash('sha256').update('0000000000001').digest('hex');
 
       // Patient at hospital A is already DELIVERED
@@ -576,11 +576,11 @@ describe('Sync Service', () => {
       const hospital10670 = await db.query<{ id: string }>(
         "SELECT id FROM hospitals WHERE hcode = '10670'",
       );
-      const hospital10671 = await db.query<{ id: string }>(
-        "SELECT id FROM hospitals WHERE hcode = '10671'",
+      const hospital11000 = await db.query<{ id: string }>(
+        "SELECT id FROM hospitals WHERE hcode = '11000'",
       );
       const hospitalIdA = hospital10670[0].id;
-      const hospitalIdB = hospital10671[0].id;
+      const hospitalIdB = hospital11000[0].id;
       const cidHash = createHash('sha256').update('0000000000001').digest('hex');
 
       // Patient at hospital A already marked as TRANSFERRED

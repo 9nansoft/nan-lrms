@@ -32,7 +32,7 @@ async function seedRealisticData(db: DatabaseAdapter): Promise<SeededData> {
 
   // Get 3 hospitals seeded by the orchestrator
   const hospitals = await db.query<{ id: string; hcode: string }>(
-    "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670','10671','10672') ORDER BY hcode",
+    "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670','11000','11002') ORDER BY hcode",
   );
   const hospitalIds: Record<string, string> = {};
   for (const h of hospitals) hospitalIds[h.hcode] = h.id;
@@ -74,7 +74,7 @@ async function seedRealisticData(db: DatabaseAdapter): Promise<SeededData> {
         hematocrit_pct, labor_status, synced_at, created_at, updated_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
-      p2Id, hospitalIds['10671'], 'HN-0002', 'AN-0002',
+      p2Id, hospitalIds['11000'], 'HN-0002', 'AN-0002',
       encrypt('นาง วิภา น้ำพอง', TEST_ENCRYPTION_KEY),
       encrypt(cidRaw2, TEST_ENCRYPTION_KEY), cidHash2,
       26, 2, 40, 3,
@@ -93,7 +93,7 @@ async function seedRealisticData(db: DatabaseAdapter): Promise<SeededData> {
         hematocrit_pct, labor_status, synced_at, created_at, updated_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
-      p3Id, hospitalIds['10672'], 'HN-0003', 'AN-0003',
+      p3Id, hospitalIds['11002'], 'HN-0003', 'AN-0003',
       encrypt('น.ส. สุดา บ้านไผ่', TEST_ENCRYPTION_KEY),
       encrypt(cidRaw3, TEST_ENCRYPTION_KEY), cidHash3,
       22, 2, 38, 6,
@@ -112,7 +112,7 @@ async function seedRealisticData(db: DatabaseAdapter): Promise<SeededData> {
         hematocrit_pct, labor_status, synced_at, created_at, updated_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
-      p4Id, hospitalIds['10671'], 'HN-0004', 'AN-0004',
+      p4Id, hospitalIds['11000'], 'HN-0004', 'AN-0004',
       encrypt('นาง สมหญิง ชุมแพ', TEST_ENCRYPTION_KEY),
       encrypt(cidRaw1, TEST_ENCRYPTION_KEY), cidHash1,
       32, 1, 42, 2,
@@ -290,17 +290,17 @@ describe('Full Flow Integration Tests', () => {
       expect(h10670!.counts.total).toBe(1);
 
       // Hospital 10671: 2 ACTIVE patients (P2=MEDIUM, P4=HIGH)
-      const h10671 = result.hospitals.find((h) => h.hcode === '10671');
-      expect(h10671).toBeDefined();
-      expect(h10671!.counts.high).toBe(1);
-      expect(h10671!.counts.medium).toBe(1);
-      expect(h10671!.counts.total).toBe(2);
+      const h11000 = result.hospitals.find((h) => h.hcode === '11000');
+      expect(h11000).toBeDefined();
+      expect(h11000!.counts.high).toBe(1);
+      expect(h11000!.counts.medium).toBe(1);
+      expect(h11000!.counts.total).toBe(2);
 
       // Hospital 10672: 1 ACTIVE patient (P3=LOW)
-      const h10672 = result.hospitals.find((h) => h.hcode === '10672');
-      expect(h10672).toBeDefined();
-      expect(h10672!.counts.low).toBe(1);
-      expect(h10672!.counts.total).toBe(1);
+      const h11002 = result.hospitals.find((h) => h.hcode === '11002');
+      expect(h11002).toBeDefined();
+      expect(h11002!.counts.low).toBe(1);
+      expect(h11002!.counts.total).toBe(1);
 
       // Summary totals
       expect(result.summary.totalHigh).toBe(2);
@@ -312,12 +312,12 @@ describe('Full Flow Integration Tests', () => {
     it('summary aggregates correctly even with hospitals having zero patients', async () => {
       const result = await getProvinceDashboard(db);
 
-      // Total hospitals should be 25 (all KK community hospitals)
-      expect(result.hospitals).toHaveLength(25);
+      // Total hospitals should be 26 (all KK community hospitals per MOPH)
+      expect(result.hospitals).toHaveLength(26);
 
       // Most hospitals should have zero patients
       const emptyHospitals = result.hospitals.filter((h) => h.counts.total === 0);
-      expect(emptyHospitals.length).toBe(22); // 25 - 3 with patients
+      expect(emptyHospitals.length).toBe(23); // 26 - 3 with patients
     });
   });
 
@@ -555,7 +555,7 @@ describe('Full Flow Integration Tests', () => {
 
     it('filters patients by date range', async () => {
       // Hospital 10671: P2 admitted 2026-03-02, P4 admitted 2026-03-05
-      const result = await getHospitalPatientList(db, '10671', {
+      const result = await getHospitalPatientList(db, '11000', {
         status: 'active',
         dateFrom: '2026-03-04',
         dateTo: '2026-03-06',
@@ -565,14 +565,14 @@ describe('Full Flow Integration Tests', () => {
 
     it('pagination works correctly', async () => {
       // Hospital 10671 has 2 active patients
-      const page1 = await getHospitalPatientList(db, '10671', {
+      const page1 = await getHospitalPatientList(db, '11000', {
         status: 'active', perPage: 1, page: 1,
       });
       expect(page1.patients).toHaveLength(1);
       expect(page1.pagination.total).toBe(2);
       expect(page1.pagination.totalPages).toBe(2);
 
-      const page2 = await getHospitalPatientList(db, '10671', {
+      const page2 = await getHospitalPatientList(db, '11000', {
         status: 'active', perPage: 1, page: 2,
       });
       expect(page2.patients).toHaveLength(1);
@@ -749,15 +749,15 @@ describe('Full Flow Integration Tests', () => {
         [new Date().toISOString()],
       );
       await db.execute(
-        "UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '10671'",
+        "UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '11000'",
       );
 
       const result = await getProvinceDashboard(db);
       const h10670 = result.hospitals.find((h) => h.hcode === '10670');
-      const h10671 = result.hospitals.find((h) => h.hcode === '10671');
+      const h11000 = result.hospitals.find((h) => h.hcode === '11000');
 
       expect(h10670!.connectionStatus).toBe('ONLINE');
-      expect(h10671!.connectionStatus).toBe('OFFLINE');
+      expect(h11000!.connectionStatus).toBe('OFFLINE');
     });
   });
 
@@ -767,22 +767,22 @@ describe('Full Flow Integration Tests', () => {
   describe('Scenario 8: Health check reflects system state', () => {
     it('health endpoint shows correct connection summary', async () => {
       // Mark 2 hospitals ONLINE, 1 OFFLINE
-      await db.execute("UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode IN ('10670','10671')");
-      await db.execute("UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '10672'");
+      await db.execute("UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode IN ('10670','11000')");
+      await db.execute("UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '11002'");
       // Rest remain UNKNOWN
 
       const health = await getHealthStatus(db);
 
       expect(health.database).toBe('connected');
-      expect(health.hospitalConnections.total).toBe(25);
+      expect(health.hospitalConnections.total).toBe(26);
       expect(health.hospitalConnections.online).toBe(2);
       expect(health.hospitalConnections.offline).toBe(1);
-      expect(health.hospitalConnections.unknown).toBe(22);
+      expect(health.hospitalConnections.unknown).toBe(23);
     });
 
     it('status is degraded when any hospital is offline', async () => {
       await db.execute("UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode = '10670'");
-      await db.execute("UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '10671'");
+      await db.execute("UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '11000'");
 
       const health = await getHealthStatus(db);
       expect(health.status).toBe('degraded');
@@ -790,7 +790,7 @@ describe('Full Flow Integration Tests', () => {
 
     it('status is healthy when no hospital is offline', async () => {
       // Note: UNKNOWN does NOT cause degraded -- only OFFLINE does
-      await db.execute("UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode IN ('10670','10671')");
+      await db.execute("UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode IN ('10670','11000')");
       // Rest are UNKNOWN
 
       const health = await getHealthStatus(db);

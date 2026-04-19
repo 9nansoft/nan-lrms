@@ -24,7 +24,7 @@ describe('Referral Workflow Service', () => {
     // Seed hospitals
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at) VALUES
-       ('${fromHospId}', '10679', 'รพ.พล', 'M2', 1, 'ONLINE', datetime('now'), datetime('now'))`,
+       ('${fromHospId}', '11004', 'รพ.พล', 'F2', 1, 'ONLINE', datetime('now'), datetime('now'))`,
     );
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at) VALUES

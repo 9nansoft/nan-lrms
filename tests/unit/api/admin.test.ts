@@ -16,12 +16,12 @@ describe('Admin API Logic', () => {
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ['hosp-1', '10670', 'รพ.ชุมแพ', 'M1', 1, 'ONLINE', now, now],
+      ['hosp-1', '10670', 'รพ.ขอนแก่น', 'A_S', 1, 'ONLINE', now, now],
     );
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ['hosp-2', '10671', 'รพ.น้ำพอง', 'M1', 1, 'OFFLINE', now, now],
+      ['hosp-2', '11000', 'รพ.น้ำพอง', 'M1', 1, 'OFFLINE', now, now],
     );
   });
 
@@ -55,7 +55,7 @@ describe('Admin API Logic', () => {
     expect(configuredHospital?.database_type).toBe('postgresql');
 
     // Second hospital has no BMS config
-    const unconfiguredHospital = hospitals.find((h) => h.hcode === '10671');
+    const unconfiguredHospital = hospitals.find((h) => h.hcode === '11000');
     expect(unconfiguredHospital?.tunnel_url).toBeNull();
   });
 

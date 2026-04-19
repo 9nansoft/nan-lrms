@@ -26,7 +26,7 @@ describe('Journey API Logic', () => {
     );
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES (?, '10671', 'รพ.ชุมแพ', 'M1', 1, 'ONLINE', ?, ?)`,
+       VALUES (?, '11000', 'รพ.น้ำพอง', 'F2', 1, 'ONLINE', ?, ?)`,
       [hospital2Id, now, now],
     );
   });
@@ -356,7 +356,7 @@ describe('Journey API Logic', () => {
       };
 
       expect(referral.fromHospital).toBe('รพ.ขอนแก่น');
-      expect(referral.toHospital).toBe('รพ.ชุมแพ');
+      expect(referral.toHospital).toBe('รพ.น้ำพอง');
       expect(referral.status).toBe('INITIATED');
       expect(referral.urgencyLevel).toBe('URGENT');
     });

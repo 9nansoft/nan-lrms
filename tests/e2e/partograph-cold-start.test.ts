@@ -98,15 +98,24 @@ describe('partograph cold-start E2E (blank pglite → live routes)', () => {
     }
   });
 
-  it('hospital seeder populated all 25 Khon Kaen community hospitals', async () => {
+  it('hospital seeder populated all 26 Khon Kaen hospitals (per MOPH)', async () => {
     const rows = await app.db.query<{ count: number | string }>(
       'SELECT COUNT(*) AS count FROM hospitals',
     );
     // pg returns COUNT(*) as a string; coerce before comparing.
-    expect(Number(rows[0].count)).toBe(25);
+    expect(Number(rows[0].count)).toBe(26);
 
-    // Spot-check that no out-of-province hospital sneaks in. รพ.วังสะพุง
-    // is in Loei (hcode 11446) and was removed from the seed list.
+    // Spot-check the canonical KK Regional Hospital is present at hcode 10670
+    // (per MOPH `hospcode` table — chwpart='40', hospital_type_id=5).
+    const regional = await app.db.query<{ hcode: string; name: string }>(
+      'SELECT hcode, name FROM hospitals WHERE hcode = ?',
+      ['10670'],
+    );
+    expect(regional).toHaveLength(1);
+    expect(regional[0].name).toBe('รพ.ขอนแก่น');
+
+    // Spot-check no out-of-province hospital sneaks in. รพ.วังสะพุง (hcode
+    // 11446, Loei province) was wrongly in the original seed list.
     const stray = await app.db.query<{ hcode: string }>(
       'SELECT hcode FROM hospitals WHERE hcode = ?',
       ['11446'],
