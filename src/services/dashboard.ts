@@ -28,7 +28,7 @@ export interface DashboardResult {
 export async function getProvinceDashboard(db: DatabaseAdapter): Promise<DashboardResult> {
   // Get all active hospitals
   const hospitals = await db.query<DashboardRow>(
-    "SELECT hcode, name, level, connection_status, last_sync_at, is_active FROM hospitals WHERE is_active = 1 ORDER BY name",
+    "SELECT hcode, name, level, connection_status, last_sync_at, is_active FROM hospitals WHERE is_active = true ORDER BY name",
   );
 
   // Get patient counts per hospital grouped by risk level
@@ -41,7 +41,7 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
       COUNT(cp.id) as count
     FROM hospitals h
     LEFT JOIN cached_patients cp ON cp.hospital_id = h.id AND cp.labor_status = 'ACTIVE'
-    WHERE h.is_active = 1
+    WHERE h.is_active = true
     GROUP BY h.id, h.hcode, risk_level
   `);
 
