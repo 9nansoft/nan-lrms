@@ -2,11 +2,14 @@
 import { executeSql } from '@/lib/bms-browser-client';
 import {
   MATERNITY_WARDS,
+  PATIENT_COMPLICATIONS_BY_LABOUR_ID,
+  PATIENT_INFANTS_BY_AN,
   PATIENT_LABOR_BY_AN,
   PATIENT_LABOUR_BY_AN,
   PATIENT_LABOUR_MED_BY_AN,
   PATIENT_PARTOGRAPH_BY_AN,
   PATIENT_PREGNANCY_BY_AN,
+  PATIENT_STAGE_MED_BY_AN,
   PATIENT_VITAL_SIGNS_BY_AN,
   WARD_BEDS_INVENTORY,
   WARD_BEDS_OCCUPANCY,
@@ -17,12 +20,15 @@ import type { ConnectionConfig } from '@/types/bms-browser';
 import type {
   BedOccupancy,
   BedSlot,
+  ComplicationRow,
+  InfantRow,
   LaborRecord,
   LabourMedRow,
   LabourRecord,
   MaternityWard,
   PartographRow,
   PregnancyRecord,
+  StageMedRow,
   VitalSignRow,
 } from '@/types/maternity-ward';
 
@@ -123,5 +129,41 @@ export async function getPatientLabourMedications(
 ): Promise<LabourMedRow[]> {
   const sql = getQuery(PATIENT_LABOUR_MED_BY_AN, DEFAULT_DIALECT);
   const r = await executeSql<LabourMedRow>(sql, config, { an });
+  return r.data;
+}
+
+// Task 35: read delivery-room (stage) medication rows for an admission. Joined
+// to s_drugitems / opduser server-side so the result already carries
+// medication_name + staff_name; rows are PK'd by labour_stage_medication_id.
+export async function getPatientStageMedications(
+  config: ConnectionConfig,
+  an: string,
+): Promise<StageMedRow[]> {
+  const sql = getQuery(PATIENT_STAGE_MED_BY_AN, DEFAULT_DIALECT);
+  const r = await executeSql<StageMedRow>(sql, config, { an });
+  return r.data;
+}
+
+// Task 36: read labour complications for a given ipt_labour_id (NOT an — the
+// underlying ipt_labour_complication table foreign-keys on ipt_labour_id).
+// Callers must first resolve the labour record via getPatientLabour.
+export async function getPatientComplications(
+  config: ConnectionConfig,
+  iptLabourId: number,
+): Promise<ComplicationRow[]> {
+  const sql = getQuery(PATIENT_COMPLICATIONS_BY_LABOUR_ID, DEFAULT_DIALECT);
+  const r = await executeSql<ComplicationRow>(sql, config, { ipt_labour_id: iptLabourId });
+  return r.data;
+}
+
+// Task 37: read newborn + ipt_labour_infant join for an admission. The
+// underlying join uses ipt_newborn LEFT JOIN ipt_labour_infant on .an, so a
+// stillbirth (no infant row) still surfaces the newborn record.
+export async function getPatientInfants(
+  config: ConnectionConfig,
+  an: string,
+): Promise<InfantRow[]> {
+  const sql = getQuery(PATIENT_INFANTS_BY_AN, DEFAULT_DIALECT);
+  const r = await executeSql<InfantRow>(sql, config, { an });
   return r.data;
 }
