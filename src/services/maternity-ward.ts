@@ -7,6 +7,7 @@ import {
   restUpdate,
 } from '@/lib/bms-browser-client';
 import {
+  BED_MOVE_REASONS,
   MATERNITY_WARDS,
   PATIENT_COMPLICATIONS_BY_LABOUR_ID,
   PATIENT_INFANTS_BY_AN,
@@ -24,6 +25,7 @@ import {
 } from '@/config/hosxp-queries';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 import type {
+  BedMoveArgs,
   BedOccupancy,
   BedSlot,
   ComplicationRow,
@@ -661,6 +663,72 @@ export async function deleteInfant(
     op: 'delete',
     resourceId: String(iptNewbornId),
     hcode,
+    staff: userInfo.loginname,
+  });
+}
+
+// ─── Task 51: getBedMoveReasons + movePatientBed (composite iptadm + iptbedmove) ──
+// Lookup the configured reason values from iptbedmove_reason. The list is small
+// enough to fetch on demand whenever the modal opens; we don't cache between
+// opens because admins may add new reasons via HOSxP without restarting clients.
+export async function getBedMoveReasons(config: ConnectionConfig): Promise<string[]> {
+  const sql = getQuery(BED_MOVE_REASONS, DEFAULT_DIALECT);
+  const r = await executeSql<{ reason: string }>(sql, config);
+  return r.data.map((x) => x.reason);
+}
+
+// movePatientBed mirrors the HOSxPDMU flow: PUT iptadm.bedno/roomno first so the
+// occupancy view flips immediately, then mint a fresh iptbedmove_id and INSERT
+// the audit row. Two-step write — if iptadm succeeds and the iptbedmove insert
+// fails the bed will appear moved while the audit history is missing the row.
+// The caller's UI surfaces a Thai-language inconsistency message in that case
+// (matching the Task 50 dischargePatient pattern).
+export async function movePatientBed(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  hcode: string,
+  args: BedMoveArgs,
+): Promise<void> {
+  // 1. Update iptadm.bedno + roomno for the patient
+  await restUpdate(
+    'iptadm',
+    args.an,
+    { bedno: args.newBedno, roomno: args.newRoomno },
+    config,
+  );
+  // 2. Mint a fresh iptbedmove_id
+  const id = await mintSerial('iptbedmove_id', config);
+  // 3. Insert iptbedmove audit row with split date/time + entry_datetime
+  const now = new Date();
+  const movedate = now.toISOString().slice(0, 10); // YYYY-MM-DD
+  const movetime = now.toISOString().slice(11, 19); // HH:mm:ss
+  const entry_datetime = now.toISOString().slice(0, 19).replace('T', ' '); // YYYY-MM-DD HH:mm:ss
+  await restInsert(
+    'iptbedmove',
+    {
+      iptbedmove_id: id,
+      an: args.an,
+      oward: args.oldWard,
+      obedno: args.oldBedno,
+      nward: args.newWard,
+      nbedno: args.newBedno,
+      nroomno: args.newRoomno,
+      movereason: args.reason,
+      staff: userInfo.loginname,
+      movedate,
+      movetime,
+      entry_datetime,
+    },
+    config,
+  );
+  // 4. Audit (fire-and-forget) — entity is iptadm because that's the row that
+  // actually changed; iptbedmove is the immutable audit trail row.
+  fireAudit({
+    entity: 'iptadm',
+    op: 'bed_move',
+    resourceId: args.an,
+    hcode,
+    fieldsTouched: ['bedno', 'roomno'],
     staff: userInfo.loginname,
   });
 }

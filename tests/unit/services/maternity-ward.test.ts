@@ -20,6 +20,8 @@ import {
   upsertLabourInfant,
   deleteInfant,
   dischargePatient,
+  movePatientBed,
+  getBedMoveReasons,
 } from '@/services/maternity-ward';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 
@@ -1177,5 +1179,209 @@ describe('dischargePatient', () => {
         dchstts: '1',
       }),
     ).resolves.not.toThrow();
+  });
+});
+
+// ─── Task 51: movePatientBed (composite write to iptadm + iptbedmove) ──────
+describe('getBedMoveReasons', () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it('returns the reason string array from BMS /api/sql', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      clone: function () {
+        return this;
+      },
+      json: async () => ({
+        data: [{ reason: 'ตามคำขอ' }, { reason: 'ฉุกเฉิน' }],
+        MessageCode: 200,
+        Message: 'ok',
+      }),
+    });
+    const reasons = await getBedMoveReasons(cfg);
+    expect(reasons).toEqual(['ตามคำขอ', 'ฉุกเฉิน']);
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.sql).toContain('FROM iptbedmove_reason');
+  });
+});
+
+describe('movePatientBed', () => {
+  beforeEach(() => mockFetch.mockReset());
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('calls restUpdate(iptadm, an, {bedno, roomno}) first', async () => {
+    // 1) restUpdate ipt adm → ok
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    // 2) callFunction get_serialnumber → 77
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 77 }),
+    });
+    // 3) restInsert iptbedmove → ok
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+    });
+    // 4) audit POST → ok
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    await movePatientBed(cfg, userInfo, '10670', {
+      an: 'AN1',
+      oldWard: '03',
+      oldBedno: '01',
+      newWard: '03',
+      newBedno: '05',
+      newRoomno: 'LR2',
+      reason: 'ตามคำขอ',
+    });
+
+    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/iptadm/AN1');
+    expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
+    const admBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(admBody).toEqual({ bedno: '05', roomno: 'LR2' });
+  });
+
+  it('calls callFunction(get_serialnumber, iptbedmove_id) second', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 77 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    await movePatientBed(cfg, userInfo, '10670', {
+      an: 'AN1',
+      oldWard: '03',
+      oldBedno: '01',
+      newWard: '03',
+      newBedno: '05',
+      newRoomno: 'LR2',
+      reason: 'ตามคำขอ',
+    });
+
+    expect(mockFetch.mock.calls[1][0]).toContain('/api/function?name=get_serialnumber');
+    const fnBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(fnBody).toEqual({ id_field: 'iptbedmove_id' });
+  });
+
+  it('calls restInsert(iptbedmove, {...}) third with all expected fields', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 77 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    await movePatientBed(cfg, userInfo, '10670', {
+      an: 'AN1',
+      oldWard: '03',
+      oldBedno: '01',
+      newWard: '03',
+      newBedno: '05',
+      newRoomno: 'LR2',
+      reason: 'ตามคำขอ',
+    });
+
+    expect(mockFetch.mock.calls[2][0]).toBe('https://t.example/api/api/rest/iptbedmove');
+    expect(mockFetch.mock.calls[2][1].method).toBe('POST');
+    const insertBody = JSON.parse(mockFetch.mock.calls[2][1].body);
+    expect(insertBody).toMatchObject({
+      iptbedmove_id: 77,
+      an: 'AN1',
+      oward: '03',
+      obedno: '01',
+      nward: '03',
+      nbedno: '05',
+      nroomno: 'LR2',
+      movereason: 'ตามคำขอ',
+      staff: 'nurse1',
+    });
+    // Date/time fields are present and shaped like YYYY-MM-DD / HH:mm:ss
+    expect(insertBody.movedate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(insertBody.movetime).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    expect(insertBody.entry_datetime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  it('fires audit POST after the inserts succeed', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 77 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    await movePatientBed(cfg, userInfo, '10670', {
+      an: 'AN1',
+      oldWard: '03',
+      oldBedno: '01',
+      newWard: '03',
+      newBedno: '05',
+      newRoomno: 'LR2',
+      reason: 'ตามคำขอ',
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockFetch.mock.calls[3][0]).toBe('/api/hospital/audit-log');
+    const auditBody = JSON.parse(mockFetch.mock.calls[3][1].body);
+    expect(auditBody).toMatchObject({
+      entity: 'iptadm',
+      op: 'bed_move',
+      resourceId: 'AN1',
+      hcode: '10670',
+      staff: 'nurse1',
+      fieldsTouched: ['bedno', 'roomno'],
+    });
   });
 });
