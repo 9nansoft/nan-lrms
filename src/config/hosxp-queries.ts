@@ -387,3 +387,149 @@ export const PATIENT_ADDRESS: SqlQueryTemplate = {
       FROM patient p
       WHERE p.hn IN (?)`,
 };
+
+// =============================================================================
+// Maternity-ward SQL templates (Task 9)
+// All 17 templates below back the hospital maternity-ward UI. Each has both
+// postgresql and mysql variants, follows portability rules (no NOW/CURDATE,
+// no INTERVAL date arithmetic, no backticks, single-quoted string literals),
+// and column/table existence has been verified against the live HOSxP schema.
+// =============================================================================
+
+// List of maternity wards available at the hospital
+export const MATERNITY_WARDS: SqlQueryTemplate = {
+  postgresql: `SELECT ward, name, real_bedcount FROM ward WHERE is_maternity_ward = 'Y' AND ward_active = 'Y' ORDER BY name`,
+  mysql: `SELECT ward, name, real_bedcount FROM ward WHERE is_maternity_ward = 'Y' AND ward_active = 'Y' ORDER BY name`,
+};
+
+// Bed inventory for a ward (rooms + beds, regardless of occupancy)
+export const WARD_BEDS_INVENTORY: SqlQueryTemplate = {
+  postgresql: `SELECT b.bedno, b.roomno, b.bed_order, b.bed_lock, b.bed_status_type_id, r.name AS room_name, r.display_number AS room_display_number FROM bedno b JOIN roomno r ON r.roomno = b.roomno WHERE r.ward = $1 ORDER BY r.display_number, b.bed_order, b.bedno`,
+  mysql: `SELECT b.bedno, b.roomno, b.bed_order, b.bed_lock, b.bed_status_type_id, r.name AS room_name, r.display_number AS room_display_number FROM bedno b JOIN roomno r ON r.roomno = b.roomno WHERE r.ward = ? ORDER BY r.display_number, b.bed_order, b.bedno`,
+};
+
+// Bed occupancy snapshot for a ward (active admissions joined to bed assignment +
+// patient demographics + most-recent partograph observation)
+export const WARD_BEDS_OCCUPANCY: SqlQueryTemplate = {
+  postgresql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward,
+       iptadm.bedno, iptadm.roomno, iptadm.bedtype,
+       roomno.name AS roomname,
+       p.pname, p.fname, p.lname, p.birthday,
+       il.g AS gravida, il.ga,
+       di.name AS incharge_doctor_name,
+       (SELECT MAX(observe_datetime) FROM ipt_labour_partograph
+         WHERE an = i.an) AS last_observation_at,
+       (SELECT cervical_dilation_cm FROM ipt_labour_partograph
+         WHERE an = i.an ORDER BY observe_datetime DESC LIMIT 1) AS last_cervix_cm
+  FROM ipt i
+  JOIN iptadm ON iptadm.an = i.an
+  LEFT JOIN patient p ON p.hn = i.hn
+  LEFT JOIN ipt_labour il ON il.an = i.an
+  LEFT JOIN doctor di ON di.code = i.incharge_doctor
+  LEFT JOIN roomno ON roomno.roomno = iptadm.roomno
+ WHERE i.ward = $1 AND i.confirm_discharge = 'N'
+ ORDER BY iptadm.bedno`,
+  mysql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward,
+       iptadm.bedno, iptadm.roomno, iptadm.bedtype,
+       roomno.name AS roomname,
+       p.pname, p.fname, p.lname, p.birthday,
+       il.g AS gravida, il.ga,
+       di.name AS incharge_doctor_name,
+       (SELECT MAX(observe_datetime) FROM ipt_labour_partograph
+         WHERE an = i.an) AS last_observation_at,
+       (SELECT cervical_dilation_cm FROM ipt_labour_partograph
+         WHERE an = i.an ORDER BY observe_datetime DESC LIMIT 1) AS last_cervix_cm
+  FROM ipt i
+  JOIN iptadm ON iptadm.an = i.an
+  LEFT JOIN patient p ON p.hn = i.hn
+  LEFT JOIN ipt_labour il ON il.an = i.an
+  LEFT JOIN doctor di ON di.code = i.incharge_doctor
+  LEFT JOIN roomno ON roomno.roomno = iptadm.roomno
+ WHERE i.ward = ? AND i.confirm_discharge = 'N'
+ ORDER BY iptadm.bedno`,
+};
+
+// All partograph observations for a single admission (chronological)
+export const PATIENT_PARTOGRAPH_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT * FROM ipt_labour_partograph WHERE an = $1 ORDER BY observe_datetime`,
+  mysql: `SELECT * FROM ipt_labour_partograph WHERE an = ? ORDER BY observe_datetime`,
+};
+
+// Pregnancy vital-sign rows for a single admission
+export const PATIENT_VITAL_SIGNS_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT * FROM ipt_pregnancy_vital_sign WHERE an = $1`,
+  mysql: `SELECT * FROM ipt_pregnancy_vital_sign WHERE an = ?`,
+};
+
+// Pre-labour summary record (ipt_labour) for a single admission
+export const PATIENT_LABOUR_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT * FROM ipt_labour WHERE an = $1`,
+  mysql: `SELECT * FROM ipt_labour WHERE an = ?`,
+};
+
+// Pregnancy summary record (ipt_pregnancy) for a single admission
+export const PATIENT_PREGNANCY_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT * FROM ipt_pregnancy WHERE an = $1`,
+  mysql: `SELECT * FROM ipt_pregnancy WHERE an = ?`,
+};
+
+// Labor stage record (labor table) for a single admission
+export const PATIENT_LABOR_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT * FROM labor WHERE an = $1`,
+  mysql: `SELECT * FROM labor WHERE an = ?`,
+};
+
+// Labour-medication rows (free-text meds) for a single admission
+export const PATIENT_LABOUR_MED_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT * FROM labour_medication WHERE an = $1`,
+  mysql: `SELECT * FROM labour_medication WHERE an = ?`,
+};
+
+// Stage-medication rows (delivery-room meds keyed to drug master) with friendly
+// medication + staff names joined in
+export const PATIENT_STAGE_MED_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT lsm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name, o.name AS staff_name FROM labour_stage_medication lsm LEFT JOIN s_drugitems s ON s.icode = lsm.icode LEFT JOIN opduser o ON o.loginname = lsm.staff WHERE lsm.an = $1 ORDER BY lsm.medication_date, lsm.medication_time`,
+  mysql: `SELECT lsm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name, o.name AS staff_name FROM labour_stage_medication lsm LEFT JOIN s_drugitems s ON s.icode = lsm.icode LEFT JOIN opduser o ON o.loginname = lsm.staff WHERE lsm.an = ? ORDER BY lsm.medication_date, lsm.medication_time`,
+};
+
+// Labour complications keyed by ipt_labour_id (NOT an), joined to lookup name
+export const PATIENT_COMPLICATIONS_BY_LABOUR_ID: SqlQueryTemplate = {
+  postgresql: `SELECT lc.*, lcl.name AS complication_name FROM ipt_labour_complication lc LEFT JOIN labour_complication lcl ON lcl.labour_complication_id = lc.labour_complication_id WHERE lc.ipt_labour_id = $1`,
+  mysql: `SELECT lc.*, lcl.name AS complication_name FROM ipt_labour_complication lc LEFT JOIN labour_complication lcl ON lcl.labour_complication_id = lc.labour_complication_id WHERE lc.ipt_labour_id = ?`,
+};
+
+// Newborn + ipt_labour_infant join for a single admission
+export const PATIENT_INFANTS_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT n.*, li.* FROM ipt_newborn n LEFT JOIN ipt_labour_infant li ON li.an = n.an WHERE n.an = $1`,
+  mysql: `SELECT n.*, li.* FROM ipt_newborn n LEFT JOIN ipt_labour_infant li ON li.an = n.an WHERE n.an = ?`,
+};
+
+// Lookup: bed-move reason values
+export const BED_MOVE_REASONS: SqlQueryTemplate = {
+  postgresql: `SELECT reason FROM iptbedmove_reason ORDER BY reason`,
+  mysql: `SELECT reason FROM iptbedmove_reason ORDER BY reason`,
+};
+
+// Lookup: drug master autocomplete (typeahead) — caller passes 'name%' or '%name%'
+export const DRUG_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT icode, CONCAT(name, ' ', strength, ' ', units) AS label FROM s_drugitems WHERE name LIKE $1 ORDER BY name LIMIT 50`,
+  mysql: `SELECT icode, CONCAT(name, ' ', strength, ' ', units) AS label FROM s_drugitems WHERE name LIKE ? ORDER BY name LIMIT 50`,
+};
+
+// Lookup: labour-complication codes
+export const LABOUR_COMPLICATION_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT labour_complication_id, name FROM labour_complication ORDER BY name`,
+  mysql: `SELECT labour_complication_id, name FROM labour_complication ORDER BY name`,
+};
+
+// Lookup: discharge-type codes
+export const DCH_TYPE_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT dchtype, name FROM dchtype ORDER BY name`,
+  mysql: `SELECT dchtype, name FROM dchtype ORDER BY name`,
+};
+
+// Lookup: discharge-status codes
+export const DCH_STTS_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT dchstts, name FROM dchstts ORDER BY name`,
+  mysql: `SELECT dchstts, name FROM dchstts ORDER BY name`,
+};
