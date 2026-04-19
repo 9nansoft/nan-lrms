@@ -215,14 +215,19 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sorted.map((patient) => (
+                {sorted.map((patient) => {
+                  // Critical glow fires for HIGH CPD risk OR CRITICAL partograph severity —
+                  // either signal warrants the red row accent on kiosk monitor.
+                  const isCriticalGlow =
+                    patient.riskLevel === 'HIGH' || patient.partographSeverity === 'CRITICAL';
+                  return (
                   <TableRow
                     key={patient.an}
                     data-testid="patient-row"
                     className={cn(
                       'cursor-pointer hover:bg-slate-50 transition-colors',
-                      patient.riskLevel === 'HIGH' && 'border-l-2 border-l-red-400',
-                      patient.riskLevel === 'MEDIUM' && 'border-l-2 border-l-amber-400',
+                      isCriticalGlow && 'border-l-2 border-l-red-400',
+                      !isCriticalGlow && patient.riskLevel === 'MEDIUM' && 'border-l-2 border-l-amber-400',
                     )}
                     onClick={() => handleRowClick(patient.hcode, patient.an)}
                   >
@@ -254,7 +259,8 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
                       {formatRelativeTime(patient.lastVitalAt)}
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -264,14 +270,17 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
       {/* Mobile Card List */}
       {!isLoading && sorted.length > 0 && (
         <div className="md:hidden px-4 pb-4 space-y-3">
-          {sorted.map((patient) => (
+          {sorted.map((patient) => {
+            const isCriticalGlow =
+              patient.riskLevel === 'HIGH' || patient.partographSeverity === 'CRITICAL';
+            return (
             <div
               key={patient.an}
               data-testid="patient-row"
               className={cn(
                 'cursor-pointer rounded-xl border p-4 transition-colors hover:bg-slate-50',
-                patient.riskLevel === 'HIGH' && 'border-l-4 border-l-red-400',
-                patient.riskLevel === 'MEDIUM' && 'border-l-4 border-l-amber-400',
+                isCriticalGlow && 'border-l-4 border-l-red-400',
+                !isCriticalGlow && patient.riskLevel === 'MEDIUM' && 'border-l-4 border-l-amber-400',
               )}
               onClick={() => handleRowClick(patient.hcode, patient.an)}
               role="button"
@@ -311,7 +320,8 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
                 Vital: {formatRelativeTime(patient.lastVitalAt)}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
