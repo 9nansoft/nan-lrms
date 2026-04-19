@@ -2,6 +2,7 @@
 import { executeSql } from '@/lib/bms-browser-client';
 import {
   MATERNITY_WARDS,
+  PATIENT_LABOR_BY_AN,
   PATIENT_LABOUR_BY_AN,
   PATIENT_PARTOGRAPH_BY_AN,
   PATIENT_PREGNANCY_BY_AN,
@@ -15,6 +16,7 @@ import type { ConnectionConfig } from '@/types/bms-browser';
 import type {
   BedOccupancy,
   BedSlot,
+  LaborRecord,
   LabourRecord,
   MaternityWard,
   PartographRow,
@@ -95,5 +97,17 @@ export async function getPatientPregnancy(
 ): Promise<PregnancyRecord | null> {
   const sql = getQuery(PATIENT_PREGNANCY_BY_AN, DEFAULT_DIALECT);
   const r = await executeSql<PregnancyRecord>(sql, config, { an });
+  return r.data[0] ?? null;
+}
+
+// Task 33: read the single legacy `labor` (note: BMS spelling is American)
+// row for an admission. Distinct from ipt_labour: the labor table holds the
+// delivery-room outcome whereas ipt_labour holds the admission-time summary.
+export async function getPatientLabor(
+  config: ConnectionConfig,
+  an: string,
+): Promise<LaborRecord | null> {
+  const sql = getQuery(PATIENT_LABOR_BY_AN, DEFAULT_DIALECT);
+  const r = await executeSql<LaborRecord>(sql, config, { an });
   return r.data[0] ?? null;
 }

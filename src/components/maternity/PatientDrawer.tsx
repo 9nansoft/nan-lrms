@@ -10,6 +10,7 @@ import type { BedOccupancy } from '@/types/maternity-ward';
 import { PartographTab } from '@/components/maternity/tabs/PartographTab';
 import { VitalsTab } from '@/components/maternity/tabs/VitalsTab';
 import { PreLabourTab } from '@/components/maternity/tabs/PreLabourTab';
+import { StageTab } from '@/components/maternity/tabs/StageTab';
 
 export interface PatientDrawerProps {
   open: boolean;
@@ -159,6 +160,8 @@ export function PatientDrawer({ open, occupant, onClose }: PatientDrawerProps) {
                       <VitalsTab an={occupant.an} />
                     ) : t.value === 'prelabour' ? (
                       <PreLabourTab an={occupant.an} />
+                    ) : t.value === 'stage' ? (
+                      <StageTab an={occupant.an} />
                     ) : (
                       <TabPlaceholder name={t.value} />
                     )}
