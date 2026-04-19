@@ -58,6 +58,8 @@ export interface PatientListItem {
     dilationCm: number;
     measuredAt: string;
   } | null;
+  partographSeverity: CdssSeverity | null;
+  partographAlertCount: number | null;
   syncedAt: string;
 }
 
@@ -151,8 +153,16 @@ export interface PartogramEntry {
 
 export interface PartogramResponse {
   partogram: {
-    startTime: string;
-    entries: PartogramEntry[];
+    startTime: string;                            // unchanged — admit_date
+    entries: PartogramEntry[];                    // EXISTING — back-compat for LaborProgressCard
+    observations: PartographObservationDto[];     // NEW
+    alerts: CdssAlertDto[];                       // NEW
+    severity: {
+      highest: CdssSeverity | null;
+      counts: { critical: number; alert: number; warn: number; info: number };
+    };
+    source: 'hosxp' | 'webhook' | 'mixed' | 'none';
+    lastObservedAt: string | null;
   };
 }
 
