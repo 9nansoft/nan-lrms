@@ -2,6 +2,7 @@ import type {
   BmsFunctionResponse,
   BmsSessionResponse,
   ConnectionConfig,
+  RestApiResponse,
   SqlApiResponse,
   SqlParams,
   UserInfo,
@@ -31,7 +32,9 @@ class BmsClientError extends Error {
     | 'database_error'
     | 'query_timed_out'
     | 'rate_limited'
-    | 'body_error';
+    | 'body_error'
+    | 'rest_failed'
+    | 'rest_timed_out';
 
   constructor(kind: BmsClientError['kind'], message: string, options?: ErrorOptions) {
     super(message, options);
@@ -270,6 +273,152 @@ export async function callFunction<T = BmsFunctionResponse>(
     throw new Error('Unable to connect to the BMS API. Please check your connection.', {
       cause: error,
     });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Extract a human-readable error message from a non-OK REST response.
+ * Tries JSON body first (Message/message/errors), then plain text, then statusText.
+ */
+async function extractRestErrorMessage(response: Response): Promise<string> {
+  try {
+    const body = (await response.clone().json()) as {
+      Message?: unknown;
+      message?: unknown;
+      errors?: unknown;
+      Errors?: unknown;
+    };
+    const head = body?.Message ?? body?.message;
+    const errorsArr = body?.errors ?? body?.Errors;
+    const errorList = Array.isArray(errorsArr) ? errorsArr.map((e) => String(e)).join('; ') : '';
+    const headText = typeof head === 'string' ? head : head == null ? '' : JSON.stringify(head);
+    if (headText && errorList) return `${headText}: ${errorList}`;
+    if (errorList) return errorList;
+    if (headText) return headText;
+    return JSON.stringify(body);
+  } catch {
+    try {
+      const text = await response.text();
+      if (text) return text.slice(0, 500);
+    } catch {
+      // ignore
+    }
+    return response.statusText || `HTTP ${response.status}`;
+  }
+}
+
+export async function restInsert(
+  table: string,
+  data: Record<string, unknown>,
+  config: ConnectionConfig,
+  marketplaceToken?: string,
+): Promise<RestApiResponse> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
+  try {
+    const url = `${config.apiUrl}/api/rest/${encodeURIComponent(table)}`;
+    const body = marketplaceToken ? { 'marketplace-token': marketplaceToken, ...data } : data;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.bearerToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const msg = await extractRestErrorMessage(response);
+      throw new BmsClientError('rest_failed', `REST POST ${table}: ${msg}`);
+    }
+    return (await response.json()) as RestApiResponse;
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new BmsClientError('rest_timed_out', `REST insert timed out after ${QUERY_TIMEOUT_MS / 1000}s`, {
+        cause: error,
+      });
+    }
+    if (error instanceof BmsClientError) throw error;
+    throw new Error('Unable to connect to the BMS REST API.', { cause: error });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function restUpdate(
+  table: string,
+  resourceId: string | number,
+  data: Record<string, unknown>,
+  config: ConnectionConfig,
+  marketplaceToken?: string,
+): Promise<RestApiResponse> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
+  try {
+    const url = `${config.apiUrl}/api/rest/${encodeURIComponent(table)}/${encodeURIComponent(String(resourceId))}`;
+    const body = marketplaceToken ? { 'marketplace-token': marketplaceToken, ...data } : data;
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${config.bearerToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const msg = await extractRestErrorMessage(response);
+      throw new BmsClientError('rest_failed', `REST PUT ${table}/${resourceId}: ${msg}`);
+    }
+    return (await response.json()) as RestApiResponse;
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new BmsClientError('rest_timed_out', `REST update timed out after ${QUERY_TIMEOUT_MS / 1000}s`, {
+        cause: error,
+      });
+    }
+    if (error instanceof BmsClientError) throw error;
+    throw new Error('Unable to connect to the BMS REST API.', { cause: error });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function restDelete(
+  table: string,
+  resourceId: string | number,
+  config: ConnectionConfig,
+  marketplaceToken?: string,
+): Promise<RestApiResponse> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
+  try {
+    let url = `${config.apiUrl}/api/rest/${encodeURIComponent(table)}/${encodeURIComponent(String(resourceId))}`;
+    if (marketplaceToken) {
+      url += `?marketplace-token=${encodeURIComponent(marketplaceToken)}`;
+    }
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${config.bearerToken}`,
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const msg = await extractRestErrorMessage(response);
+      throw new BmsClientError('rest_failed', `REST DELETE ${table}/${resourceId}: ${msg}`);
+    }
+    return (await response.json()) as RestApiResponse;
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new BmsClientError('rest_timed_out', `REST delete timed out after ${QUERY_TIMEOUT_MS / 1000}s`, {
+        cause: error,
+      });
+    }
+    if (error instanceof BmsClientError) throw error;
+    throw new Error('Unable to connect to the BMS REST API.', { cause: error });
   } finally {
     clearTimeout(timeoutId);
   }

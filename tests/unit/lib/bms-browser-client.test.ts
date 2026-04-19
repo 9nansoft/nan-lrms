@@ -5,6 +5,9 @@ import {
   extractUserInfo,
   executeSql,
   callFunction,
+  restInsert,
+  restUpdate,
+  restDelete,
   APP_IDENTIFIER,
 } from '@/lib/bms-browser-client';
 import type { ConnectionConfig } from '@/types/bms-browser';
@@ -219,5 +222,96 @@ describe('callFunction', () => {
       json: async () => ({ MessageCode: 500, Message: 'Session unauthorized — fake' }),
     });
     await expect(callFunction('x', cfg)).rejects.toThrow('Session unauthorized — fake');
+  });
+});
+
+describe('REST CRUD', () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  describe('restInsert', () => {
+    it('POSTs to /api/rest/{table} with bearer + body', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+      });
+      const r = await restInsert('iptbedmove', { an: 'AN1', oward: 'A' }, cfg);
+      expect(r.MessageCode).toBe(200);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://t.example/api/api/rest/iptbedmove',
+        expect.objectContaining({ method: 'POST' }),
+      );
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body).toEqual({ an: 'AN1', oward: 'A' });
+    });
+
+    it('merges marketplace-token into body when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ MessageCode: 200, Message: 'ok' }),
+      });
+      await restInsert('x', { a: 1 }, cfg, 'MKT-TOKEN');
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body['marketplace-token']).toBe('MKT-TOKEN');
+      expect(body.a).toBe(1);
+    });
+
+    it('throws REST POST prefix on HTTP error', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false, status: 500, statusText: 'Internal',
+        text: async () => 'oops',
+      });
+      await expect(restInsert('x', {}, cfg)).rejects.toThrow(/REST POST x:/);
+    });
+  });
+
+  describe('restUpdate', () => {
+    it('PUTs to /api/rest/{table}/{id} URL-encoded', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+      });
+      await restUpdate('ipt_labour_partograph', 'id 123', { x: 2 }, cfg);
+      expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/ipt_labour_partograph/id%20123');
+      expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
+    });
+
+    it('throws REST PUT prefix on HTTP error', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false, status: 404, statusText: 'Not Found',
+        text: async () => '',
+      });
+      await expect(restUpdate('x', 1, {}, cfg)).rejects.toThrow(/REST PUT x\/1:/);
+    });
+  });
+
+  describe('restDelete', () => {
+    it('DELETEs from /api/rest/{table}/{id}', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ MessageCode: 200, Message: 'ok' }),
+      });
+      await restDelete('iptbedmove', 99, cfg);
+      expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/iptbedmove/99');
+      expect(mockFetch.mock.calls[0][1].method).toBe('DELETE');
+    });
+
+    it('appends marketplace-token to query string (not body) when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ MessageCode: 200, Message: 'ok' }),
+      });
+      await restDelete('iptbedmove', 99, cfg, 'MKT');
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        'https://t.example/api/api/rest/iptbedmove/99?marketplace-token=MKT',
+      );
+    });
+
+    it('throws REST DELETE prefix on HTTP error', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false, status: 403, statusText: 'Forbidden',
+        text: async () => '',
+      });
+      await expect(restDelete('x', 1, cfg)).rejects.toThrow(/REST DELETE x\/1:/);
+    });
   });
 });
