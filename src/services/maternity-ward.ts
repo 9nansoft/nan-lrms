@@ -27,6 +27,7 @@ import type {
   BedOccupancy,
   BedSlot,
   ComplicationRow,
+  DischargeArgs,
   InfantRow,
   LaborRecord,
   LabourMedRow,
@@ -661,5 +662,44 @@ export async function deleteInfant(
     resourceId: String(iptNewbornId),
     hcode,
     staff: userInfo.loginname,
+  });
+}
+
+// ─── Task 50: dischargePatient (composite write to ipt + iptadm) ───────────
+// Two-step write: ipt holds the discharge facts (dchdate/dchtime/dchtype/dchstts);
+// iptadm tracks bed-out timestamps (outdate/outtime). The ipt write must succeed
+// first because the iptadm row is downstream — if ipt fails, we surface the
+// error and stop. If ipt succeeds and iptadm fails, the caller's UI surfaces a
+// Thai message naming the inconsistency. Audit fires once after both writes.
+export async function dischargePatient(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  hcode: string,
+  args: DischargeArgs,
+): Promise<void> {
+  await restUpdate(
+    'ipt',
+    args.an,
+    {
+      dchdate: args.dchdate,
+      dchtime: args.dchtime,
+      dchtype: args.dchtype,
+      dchstts: args.dchstts,
+    },
+    config,
+  );
+  await restUpdate(
+    'iptadm',
+    args.an,
+    { outdate: args.dchdate, outtime: args.dchtime },
+    config,
+  );
+  fireAudit({
+    entity: 'ipt',
+    op: 'discharge',
+    resourceId: args.an,
+    hcode,
+    staff: userInfo.loginname,
+    fieldsTouched: ['dchdate', 'dchtime', 'dchtype', 'dchstts'],
   });
 }

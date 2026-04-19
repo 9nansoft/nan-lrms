@@ -19,6 +19,7 @@ import {
   upsertNewborn,
   upsertLabourInfant,
   deleteInfant,
+  dischargePatient,
 } from '@/services/maternity-ward';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 
@@ -1077,5 +1078,104 @@ describe('deleteInfant', () => {
       op: 'delete',
       resourceId: '11',
     });
+  });
+});
+
+// ─── Task 50: dischargePatient (composite write to ipt + iptadm) ───────────
+describe('dischargePatient', () => {
+  beforeEach(() => mockFetch.mockReset());
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('updates ipt + iptadm sequentially and fires audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    await dischargePatient(cfg, userInfo, '10670', {
+      an: 'AN1',
+      dchdate: '2026-04-19',
+      dchtime: '14:30:00',
+      dchtype: '1',
+      dchstts: '1',
+    });
+
+    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/ipt/AN1');
+    expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
+    const iptBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(iptBody).toEqual({
+      dchdate: '2026-04-19',
+      dchtime: '14:30:00',
+      dchtype: '1',
+      dchstts: '1',
+    });
+    expect(mockFetch.mock.calls[1][0]).toBe('https://t.example/api/api/rest/iptadm/AN1');
+    const admBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(admBody).toEqual({ outdate: '2026-04-19', outtime: '14:30:00' });
+    await new Promise((r) => setTimeout(r, 0));
+    const auditBody = JSON.parse(mockFetch.mock.calls[2][1].body);
+    expect(auditBody).toMatchObject({
+      entity: 'ipt',
+      op: 'discharge',
+      resourceId: 'AN1',
+      hcode: '10670',
+    });
+  });
+
+  it('throws if ipt update fails (does not write iptadm)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      clone: function () {
+        return this;
+      },
+      json: async () => ({ Message: 'boom' }),
+      text: async () => 'boom',
+    });
+    await expect(
+      dischargePatient(cfg, userInfo, '10670', {
+        an: 'AN1',
+        dchdate: '2026-04-19',
+        dchtime: '14:30:00',
+        dchtype: '1',
+        dchstts: '1',
+      }),
+    ).rejects.toThrow();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw if audit fails', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockRejectedValueOnce(new Error('audit endpoint down'));
+    await expect(
+      dischargePatient(cfg, userInfo, '10670', {
+        an: 'AN1',
+        dchdate: '2026-04-19',
+        dchtime: '14:30:00',
+        dchtype: '1',
+        dchstts: '1',
+      }),
+    ).resolves.not.toThrow();
   });
 });

@@ -1,15 +1,22 @@
 /* @vitest-environment jsdom */
 /* @vitest-environment-options { "url": "http://localhost/" } */
 // Task 39: DischargeTab read-only — TDD: write tests FIRST. Like BedTab, this
-// tab consumes BedOccupancy directly. Discharge fields (dchdate/dchtime/...)
-// aren't in the occupancy snapshot because we filter on confirm_discharge='N',
-// so the read-only display is a "still admitted" placeholder echoing
-// regdate/regtime.
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+// tab consumes BedOccupancy directly.
+// Task 50: extended with discharge form CRUD tests.
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
+vi.mock('@/hooks/useBmsSession', () => ({ useBmsSession: vi.fn() }));
+vi.mock('@/services/maternity-ward', () => ({ dischargePatient: vi.fn() }));
+import { useBmsSession } from '@/hooks/useBmsSession';
+import { dischargePatient } from '@/services/maternity-ward';
 import { DischargeTab } from '@/components/maternity/tabs/DischargeTab';
 import type { BedOccupancy } from '@/types/maternity-ward';
+
+const mockBmsSession = useBmsSession as unknown as ReturnType<typeof vi.fn>;
+const mockDischarge = dischargePatient as unknown as ReturnType<typeof vi.fn>;
+const cfg = { apiUrl: 'https://t.example/api', bearerToken: 'B', appIdentifier: 'X' };
+const userInfo = { loginname: 'n1', fullname: 'N', hospcode: '10670' };
 
 const baseOccupant: BedOccupancy = {
   an: 'AN1',
@@ -32,6 +39,12 @@ const baseOccupant: BedOccupancy = {
   last_cervix_cm: null,
 };
 
+beforeEach(() => {
+  mockBmsSession.mockReset();
+  mockBmsSession.mockReturnValue({ config: cfg, userInfo });
+  mockDischarge.mockReset();
+});
+
 describe('DischargeTab', () => {
   it('shows admitted message + admit timestamp when occupant present', () => {
     render(<DischargeTab occupant={baseOccupant} />);
@@ -42,5 +55,72 @@ describe('DischargeTab', () => {
   it('shows ไม่พบข้อมูล when occupant is null', () => {
     render(<DischargeTab occupant={null} />);
     expect(screen.getByText(/ไม่พบข้อมูล/)).toBeInTheDocument();
+  });
+});
+
+describe('DischargeTab CRUD', () => {
+  it('shows the discharge form with date/time/type/status inputs', () => {
+    render(<DischargeTab occupant={baseOccupant} />);
+    expect(screen.getByLabelText('dchdate')).toBeInTheDocument();
+    expect(screen.getByLabelText('dchtime')).toBeInTheDocument();
+    expect(screen.getByLabelText('dchtype')).toBeInTheDocument();
+    expect(screen.getByLabelText('dchstts')).toBeInTheDocument();
+  });
+
+  it('blocks save when date is empty (Thai validation message)', () => {
+    render(<DischargeTab occupant={baseOccupant} />);
+    fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
+    expect(screen.getByText(/กรุณาระบุวันที่และเวลาจำหน่าย/)).toBeInTheDocument();
+    expect(mockDischarge).not.toHaveBeenCalled();
+  });
+
+  it('confirms then calls dischargePatient with all four fields', async () => {
+    const origConfirm = window.confirm;
+    window.confirm = vi.fn().mockReturnValue(true);
+    mockDischarge.mockResolvedValue(undefined);
+    render(<DischargeTab occupant={baseOccupant} />);
+    fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
+    fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
+    expect(window.confirm).toHaveBeenCalled();
+    await waitFor(() => expect(mockDischarge).toHaveBeenCalled());
+    const args = mockDischarge.mock.calls[0][3];
+    expect(args).toMatchObject({
+      an: 'AN1',
+      dchdate: '2026-04-19',
+      dchtime: '14:30:00',
+      dchtype: '1',
+      dchstts: '1',
+    });
+    await waitFor(() =>
+      expect(screen.getByText(/ดำเนินการจำหน่ายเรียบร้อย/)).toBeInTheDocument(),
+    );
+    window.confirm = origConfirm;
+  });
+
+  it('does not fire dischargePatient when confirm returns false', () => {
+    const origConfirm = window.confirm;
+    window.confirm = vi.fn().mockReturnValue(false);
+    render(<DischargeTab occupant={baseOccupant} />);
+    fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
+    fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
+    expect(window.confirm).toHaveBeenCalled();
+    expect(mockDischarge).not.toHaveBeenCalled();
+    window.confirm = origConfirm;
+  });
+
+  it('surfaces Thai error when dischargePatient throws', async () => {
+    const origConfirm = window.confirm;
+    window.confirm = vi.fn().mockReturnValue(true);
+    mockDischarge.mockRejectedValue(new Error('rest 500'));
+    render(<DischargeTab occupant={baseOccupant} />);
+    fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
+    fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
+    await waitFor(() =>
+      expect(screen.getByText(/จำหน่ายไม่สำเร็จ.*rest 500/)).toBeInTheDocument(),
+    );
+    window.confirm = origConfirm;
   });
 });
