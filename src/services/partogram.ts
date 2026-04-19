@@ -239,8 +239,147 @@ function analyzeLiquorMoulding(obs: PartographObservationDto[]): CdssAlertDto[] 
   }
   return out;
 }
-function analyzeCervix(_obs: PartographObservationDto[]): CdssAlertDto[] {
-  return [];
+// Hours between two ISO datetime strings. Replaces Pascal `(t2 - t1) * 24`.
+function hoursBetween(later: string, earlier: string): number {
+  return (Date.parse(later) - Date.parse(earlier)) / 3600000;
+}
+
+// LCG hours-at-cm threshold table. Pascal: PartographCDSSUnit.pas:159–173.
+function lcgTimeThreshold(cm: number): number {
+  switch (Math.round(cm)) {
+    case 5: return 6.0;
+    case 6: return 5.0;
+    case 7: return 3.0;
+    case 8: return 2.5;
+    case 9: return 2.0;
+    default: return 0;
+  }
+}
+
+// Earliest index whose dilation >= cm. Pascal FirstIndexAtDilation.
+function firstIndexAtDilation(
+  obsList: PartographObservationDto[], cm: number,
+): number {
+  for (let i = 0; i < obsList.length; i++) {
+    const d = obsList[i].cervicalDilationCm;
+    if (d !== null && d >= cm) return i;
+  }
+  return -1;
+}
+
+// Format a number with one decimal — equivalent to Pascal Format('%.1f').
+function fmt1(n: number): string {
+  return n.toFixed(1);
+}
+
+// Rules 10–14: cervix progression.
+// Pascal: PartographCDSSUnit.pas:257–353.
+function analyzeCervix(obs: PartographObservationDto[]): CdssAlertDto[] {
+  const out: CdssAlertDto[] = [];
+  if (obs.length === 0) return out;
+
+  // Rules 10/11 — Alert/Action line, anchored at first dil >= 4 cm.
+  const firstActiveIdx = firstIndexAtDilation(obs, 4);
+  if (firstActiveIdx >= 0) {
+    const anchorDt = obs[firstActiveIdx].observeDatetime;
+    const anchorDil = obs[firstActiveIdx].cervicalDilationCm ?? 0;
+    for (let i = firstActiveIdx + 1; i < obs.length; i++) {
+      const d = obs[i].cervicalDilationCm;
+      if (d === null || d <= 0) continue;
+      const expected = anchorDil + hoursBetween(obs[i].observeDatetime, anchorDt);
+      if (d < expected - 4) {
+        out.push({
+          severity: 'CRITICAL', section: 'CERVIX', obsIndex: i,
+          message: `ปากมดลูก ${fmt1(d)} ซม. เลย Action line (คาด ${fmt1(expected)}+)`,
+        });
+      } else if (d < expected) {
+        out.push({
+          severity: 'ALERT', section: 'CERVIX', obsIndex: i,
+          message: `ปากมดลูก ${fmt1(d)} ซม. เลย Alert line (คาด ${fmt1(expected)})`,
+        });
+      }
+    }
+  }
+
+  // Rule 12 — Latent phase prolonged: ALL obs <4 cm AND span >8 h.
+  let allLatent = true;
+  let latentStart: string | null = null;
+  for (let i = 0; i < obs.length; i++) {
+    const d = obs[i].cervicalDilationCm;
+    if (d !== null && d >= 4) {
+      allLatent = false;
+      break;
+    }
+    const dt = obs[i].observeDatetime;
+    const ms = Date.parse(dt);
+    if (Number.isFinite(ms) && ms > 0) {
+      if (latentStart === null || Date.parse(dt) < Date.parse(latentStart)) {
+        latentStart = dt;
+      }
+    }
+  }
+  if (allLatent && obs.length > 0 && latentStart !== null) {
+    const lastDt = obs[obs.length - 1].observeDatetime;
+    const latentH = hoursBetween(lastDt, latentStart);
+    if (latentH > 8) {
+      out.push({
+        severity: 'ALERT', section: 'CERVIX', obsIndex: obs.length - 1,
+        message: `Latent phase ยาวนาน (${Math.round(latentH)} ชม.)`,
+      });
+    }
+  }
+
+  // Rule 13 — LCG time-per-cm stall, levels 5..9.
+  for (let curCm = 5; curCm <= 9; curCm++) {
+    let firstAtIdx = -1;
+    for (let k = 0; k < obs.length; k++) {
+      const d = obs[k].cervicalDilationCm;
+      if (d !== null && d >= curCm && d < curCm + 1) {
+        firstAtIdx = k;
+        break;
+      }
+    }
+    if (firstAtIdx < 0) continue;
+    const thresholdH = lcgTimeThreshold(curCm);
+    // Latest obs still at this cm level (Pascal scans High->firstAtIdx,
+    // breaks on first match — i.e. the latest match).
+    for (let k = obs.length - 1; k >= firstAtIdx; k--) {
+      const d = obs[k].cervicalDilationCm;
+      if (d !== null && d >= curCm && d < curCm + 1) {
+        const hoursAtLevel = hoursBetween(
+          obs[k].observeDatetime, obs[firstAtIdx].observeDatetime,
+        );
+        if (hoursAtLevel > thresholdH) {
+          out.push({
+            severity: 'ALERT', section: 'CERVIX', obsIndex: k,
+            message: `หยุดที่ ${curCm} ซม. นาน ${fmt1(hoursAtLevel)} ชม. (เกณฑ์ LCG ${fmt1(thresholdH)} ชม.)`,
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  // Rule 14 — Active-phase arrest: last two obs both >=5 cm, |Δ|<0.5, span >2 h.
+  if (obs.length >= 2) {
+    const i = obs.length - 1;
+    const cur = obs[i].cervicalDilationCm;
+    const prev = obs[i - 1].cervicalDilationCm;
+    if (cur !== null && prev !== null && cur >= 5 && prev >= 5 &&
+        Math.abs(cur - prev) < 0.5) {
+      const spanH = hoursBetween(
+        obs[i].observeDatetime, obs[i - 1].observeDatetime,
+      );
+      if (spanH > 2) {
+        out.push({
+          severity: 'CRITICAL', section: 'CERVIX', obsIndex: i,
+          message: `Labour arrest: ไม่มีความก้าวหน้า ${fmt1(spanH)} ชม. ในระยะ active`,
+        });
+      }
+    }
+  }
+
+  return out;
 }
 function analyzeContractions(_obs: PartographObservationDto[]): CdssAlertDto[] {
   return [];
