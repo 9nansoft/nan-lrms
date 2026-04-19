@@ -566,3 +566,100 @@ export async function deleteComplication(
     staff: userInfo.loginname,
   });
 }
+
+// ─── Task 48: ipt_newborn + ipt_labour_infant CRUD (composite write) ───────
+// Two-table write: each infant has a parent ipt_newborn row and a child
+// ipt_labour_infant row. For v1 the same fields (sex, birth_weight) are mirrored
+// to both tables on save — simplifies the UI without sacrificing correctness for
+// the minimal field set. Future versions can split fields once we wire a
+// dedicated infant form. Delete tears down child first, then parent (FK order).
+export async function upsertNewborn(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  an: string,
+  row: Partial<InfantRow>,
+  hcode: string,
+): Promise<InfantRow> {
+  const isNew = row.ipt_newborn_id === undefined;
+  if (isNew) {
+    const id = await mintSerial('ipt_newborn_id', config);
+    const payload = { ...row, ipt_newborn_id: id, an };
+    await restInsert('ipt_newborn', payload, config);
+    fireAudit({
+      entity: 'ipt_newborn',
+      op: 'insert',
+      resourceId: String(id),
+      hcode,
+      staff: userInfo.loginname,
+    });
+    return payload as InfantRow;
+  }
+  const { ipt_newborn_id, ipt_labour_infant_id: _drop, ...fields } = row;
+  void _drop;
+  await restUpdate('ipt_newborn', String(ipt_newborn_id), fields, config);
+  fireAudit({
+    entity: 'ipt_newborn',
+    op: 'update',
+    resourceId: String(ipt_newborn_id),
+    hcode,
+    staff: userInfo.loginname,
+    fieldsTouched: Object.keys(fields),
+  });
+  return row as InfantRow;
+}
+
+export async function upsertLabourInfant(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  an: string,
+  row: Partial<InfantRow>,
+  hcode: string,
+): Promise<InfantRow> {
+  const isNew = row.ipt_labour_infant_id === undefined;
+  if (isNew) {
+    const id = await mintSerial('ipt_labour_infant_id', config);
+    const payload = { ...row, ipt_labour_infant_id: id, an };
+    await restInsert('ipt_labour_infant', payload, config);
+    fireAudit({
+      entity: 'ipt_labour_infant',
+      op: 'insert',
+      resourceId: String(id),
+      hcode,
+      staff: userInfo.loginname,
+    });
+    return payload as InfantRow;
+  }
+  const { ipt_labour_infant_id, ipt_newborn_id: _drop, ...fields } = row;
+  void _drop;
+  await restUpdate('ipt_labour_infant', String(ipt_labour_infant_id), fields, config);
+  fireAudit({
+    entity: 'ipt_labour_infant',
+    op: 'update',
+    resourceId: String(ipt_labour_infant_id),
+    hcode,
+    staff: userInfo.loginname,
+    fieldsTouched: Object.keys(fields),
+  });
+  return row as InfantRow;
+}
+
+export async function deleteInfant(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  iptNewbornId: number,
+  iptLabourInfantId: number | undefined,
+  hcode: string,
+): Promise<void> {
+  // FK order: child first (ipt_labour_infant references ipt_newborn).
+  if (iptLabourInfantId !== undefined) {
+    await restDelete('ipt_labour_infant', iptLabourInfantId, config);
+  }
+  await restDelete('ipt_newborn', iptNewbornId, config);
+  fireAudit({
+    entity: 'ipt_newborn',
+    op: 'delete',
+    resourceId: String(iptNewbornId),
+    hcode,
+    staff: userInfo.loginname,
+  });
+}

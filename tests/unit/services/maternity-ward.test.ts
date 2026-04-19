@@ -16,6 +16,9 @@ import {
   deleteStageMedication,
   upsertComplication,
   deleteComplication,
+  upsertNewborn,
+  upsertLabourInfant,
+  deleteInfant,
 } from '@/services/maternity-ward';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 
@@ -922,6 +925,157 @@ describe('deleteComplication', () => {
       entity: 'ipt_labour_complication',
       op: 'delete',
       resourceId: '88',
+    });
+  });
+});
+
+// ─── Task 48: ipt_newborn + ipt_labour_infant CRUD ─────────────────────────
+describe('upsertNewborn', () => {
+  beforeEach(() => mockFetch.mockReset());
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('insert: mints serial then restInsert + audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 200 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    const r = await upsertNewborn(
+      cfg,
+      userInfo,
+      'AN1',
+      { sex: 'M', birth_weight: 3200 },
+      '10670',
+    );
+    expect(r.ipt_newborn_id).toBe(200);
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/function?name=get_serialnumber');
+    expect(mockFetch.mock.calls[1][0]).toBe('https://t.example/api/api/rest/ipt_newborn');
+    const body = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(body).toMatchObject({ ipt_newborn_id: 200, an: 'AN1', sex: 'M' });
+  });
+
+  it('update: skips serial mint, calls restUpdate + audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    await upsertNewborn(
+      cfg,
+      userInfo,
+      'AN1',
+      { ipt_newborn_id: 11, sex: 'F' },
+      '10670',
+    );
+    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/ipt_newborn/11');
+    expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
+  });
+});
+
+describe('upsertLabourInfant', () => {
+  beforeEach(() => mockFetch.mockReset());
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('insert: mints serial + restInsert + audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 300 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    const r = await upsertLabourInfant(
+      cfg,
+      userInfo,
+      'AN1',
+      { sex: 'M', birth_weight: 3200 },
+      '10670',
+    );
+    expect(r.ipt_labour_infant_id).toBe(300);
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      'https://t.example/api/api/rest/ipt_labour_infant',
+    );
+  });
+
+  it('update: skips serial mint, calls restUpdate', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    await upsertLabourInfant(
+      cfg,
+      userInfo,
+      'AN1',
+      { ipt_labour_infant_id: 22, sex: 'F' },
+      '10670',
+    );
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      'https://t.example/api/api/rest/ipt_labour_infant/22',
+    );
+  });
+});
+
+describe('deleteInfant', () => {
+  beforeEach(() => mockFetch.mockReset());
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('deletes both ipt_newborn and ipt_labour_infant rows + fires audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok' }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok' }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    await deleteInfant(cfg, userInfo, 11, 22, '10670');
+    // First call: delete the labour_infant child
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/rest/ipt_labour_infant/22');
+    // Second call: delete the newborn parent
+    expect(mockFetch.mock.calls[1][0]).toContain('/api/rest/ipt_newborn/11');
+    await new Promise((r) => setTimeout(r, 0));
+    const body = JSON.parse(mockFetch.mock.calls[2][1].body);
+    expect(body).toMatchObject({
+      entity: 'ipt_newborn',
+      op: 'delete',
+      resourceId: '11',
     });
   });
 });
