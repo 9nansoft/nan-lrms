@@ -1,5 +1,5 @@
 // Integration tests: webhook pipeline — external hospital data -> cached patients -> CPD -> dashboard
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import { SqliteAdapter } from '@/db/sqlite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
@@ -651,6 +651,101 @@ describe('Webhook Pipeline Integration', () => {
       expect(result.discharges).toBe(0);
       const dischargeEvents = sseManager.getEventsByType('patient_discharged');
       expect(dischargeEvents).toHaveLength(0);
+    });
+  });
+
+  // ─── Scenario 11: partograph webhook through the route handler ───
+  describe('partograph webhook', () => {
+    it('routes type:partograph payloads end-to-end through POST /api/webhooks/patient-data', async () => {
+      // Stub the request-scoped DB / init / SSE singleton so the route
+      // handler reuses our in-memory adapter and mock SSE.
+      const dbConnection = await import('@/db/connection');
+      const ensureInit = await import('@/lib/ensure-init');
+      const sseModule = await import('@/lib/sse');
+      const { POST } = await import('@/app/api/webhooks/patient-data/route');
+
+      const dbSpy = vi.spyOn(dbConnection, 'getDatabase').mockResolvedValue(db);
+      const initSpy = vi.spyOn(ensureInit, 'ensureInit').mockResolvedValue(undefined);
+      const sseSpy = vi
+        .spyOn(sseModule.SseManager, 'getInstance')
+        .mockReturnValue(sseManager as unknown as SseManager);
+
+      try {
+        // Seed the patient row so the AN can resolve.
+        const { v4: uuid } = await import('uuid');
+        const { encrypt } = await import('@/lib/encryption');
+        const now = new Date().toISOString();
+        await db.execute(
+          `INSERT INTO cached_patients
+             (id, hospital_id, hn, an, name, age, admit_date, labor_status,
+              synced_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            uuid(), webhookHospitalId, 'HN-PG', 'AN-PG',
+            encrypt('นาง ทดสอบ Partograph', TEST_ENCRYPTION_KEY),
+            28, '2026-04-19T08:00:00+07:00', 'ACTIVE', now, now, now,
+          ],
+        );
+
+        const { rawKey } = await createApiKey(db, webhookHospitalId, 'Partograph Key');
+
+        // Happy path
+        const goodReq = new Request('http://localhost/api/webhooks/patient-data', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${rawKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'partograph',
+            hospitalCode: '99901',
+            observations: [{
+              an: 'AN-PG',
+              externalObservationId: 'EXT-PG-1',
+              observeDatetime: '2026-04-19T08:00:00+07:00',
+              fetalHeartRate: 140,
+              cervicalDilationCm: 4,
+            }],
+          }),
+        });
+        const goodRes = await POST(goodReq as unknown as import('next/server').NextRequest);
+        const goodBody = await goodRes.json();
+        expect(goodRes.status).toBe(200);
+        expect(goodBody.success).toBe(true);
+        expect(goodBody.observationsAccepted).toBe(1);
+
+        const stored = await db.query<{ source_pk: string }>(
+          `SELECT source_pk FROM cached_partograph_observations WHERE hospital_id = ?`,
+          [webhookHospitalId],
+        );
+        expect(stored).toHaveLength(1);
+        expect(stored[0].source_pk).toBe('EXT-PG-1');
+
+        // Bad payload — missing externalObservationId → 400
+        const badReq = new Request('http://localhost/api/webhooks/patient-data', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${rawKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'partograph',
+            hospitalCode: '99901',
+            observations: [{
+              an: 'AN-PG',
+              observeDatetime: '2026-04-19T09:00:00+07:00',
+            }],
+          }),
+        });
+        const badRes = await POST(badReq as unknown as import('next/server').NextRequest);
+        const badBody = await badRes.json();
+        expect(badRes.status).toBe(400);
+        expect(JSON.stringify(badBody)).toContain('externalObservationId');
+      } finally {
+        dbSpy.mockRestore();
+        initSpy.mockRestore();
+        sseSpy.mockRestore();
+      }
     });
   });
 
