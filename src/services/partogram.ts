@@ -152,8 +152,50 @@ export function countBySeverity(alerts: CdssAlertDto[], s: CdssSeverity): number
 }
 
 // Each analyzer is a small pure function. T8–T14 fill in the bodies in place.
-function analyzeFhr(_obs: PartographObservationDto[]): CdssAlertDto[] {
-  return [];
+
+// Rules 1–4: fetal heart rate.
+// Pascal: PartographCDSSUnit.pas:200–226.
+function analyzeFhr(obs: PartographObservationDto[]): CdssAlertDto[] {
+  const out: CdssAlertDto[] = [];
+  let consecLow = 0;
+  let consecHigh = 0;
+  for (let i = 0; i < obs.length; i++) {
+    const fhr = obs[i].fetalHeartRate;
+    // Pascal: if FHR <= 0 then Continue (does NOT reset counters).
+    if (fhr === null || fhr <= 0) continue;
+
+    // Rule 1: critical out-of-range.
+    if (fhr < 100 || fhr > 180) {
+      out.push({
+        severity: 'CRITICAL', section: 'FHR', obsIndex: i,
+        message: `FHR ${fhr} ครั้ง/นาที (ผิดปกติรุนแรง)`,
+      });
+    } else if (fhr < 110 || fhr > 160) {
+      // Rule 2: alert outside reassuring band.
+      out.push({
+        severity: 'ALERT', section: 'FHR', obsIndex: i,
+        message: `FHR ${fhr} ครั้ง/นาที (นอกช่วง 110-160)`,
+      });
+    }
+
+    // Rules 3 & 4: consecutive low/high tracking. Pascal increments BEFORE
+    // checking, so the first qualifying reading sets the counter to 1.
+    if (fhr < 110) consecLow += 1; else consecLow = 0;
+    if (fhr > 160) consecHigh += 1; else consecHigh = 0;
+    if (consecLow === 2) {
+      out.push({
+        severity: 'CRITICAL', section: 'FHR', obsIndex: i,
+        message: 'หัวใจทารกเต้นช้าต่อเนื่อง 2 ครั้ง',
+      });
+    }
+    if (consecHigh === 2) {
+      out.push({
+        severity: 'CRITICAL', section: 'FHR', obsIndex: i,
+        message: 'หัวใจทารกเต้นเร็วต่อเนื่อง 2 ครั้ง',
+      });
+    }
+  }
+  return out;
 }
 function analyzeLiquorMoulding(_obs: PartographObservationDto[]): CdssAlertDto[] {
   return [];
