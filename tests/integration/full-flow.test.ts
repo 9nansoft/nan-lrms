@@ -312,12 +312,12 @@ describe('Full Flow Integration Tests', () => {
     it('summary aggregates correctly even with hospitals having zero patients', async () => {
       const result = await getProvinceDashboard(db);
 
-      // Total hospitals should be 26 (all KK community hospitals)
-      expect(result.hospitals).toHaveLength(26);
+      // Total hospitals should be 25 (all KK community hospitals)
+      expect(result.hospitals).toHaveLength(25);
 
       // Most hospitals should have zero patients
       const emptyHospitals = result.hospitals.filter((h) => h.counts.total === 0);
-      expect(emptyHospitals.length).toBe(23); // 26 - 3 with patients
+      expect(emptyHospitals.length).toBe(22); // 25 - 3 with patients
     });
   });
 
@@ -774,10 +774,10 @@ describe('Full Flow Integration Tests', () => {
       const health = await getHealthStatus(db);
 
       expect(health.database).toBe('connected');
-      expect(health.hospitalConnections.total).toBe(26);
+      expect(health.hospitalConnections.total).toBe(25);
       expect(health.hospitalConnections.online).toBe(2);
       expect(health.hospitalConnections.offline).toBe(1);
-      expect(health.hospitalConnections.unknown).toBe(23);
+      expect(health.hospitalConnections.unknown).toBe(22);
     });
 
     it('status is degraded when any hospital is offline', async () => {

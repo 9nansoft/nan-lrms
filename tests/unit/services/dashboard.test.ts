@@ -22,7 +22,7 @@ describe('Dashboard Service', () => {
 
   it('should return all hospitals with zero counts when no patients', async () => {
     const result = await getProvinceDashboard(db);
-    expect(result.hospitals).toHaveLength(26);
+    expect(result.hospitals).toHaveLength(25);
     for (const h of result.hospitals) {
       expect(h.counts.total).toBe(0);
       expect(h.counts.low).toBe(0);

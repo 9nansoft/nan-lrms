@@ -13,12 +13,20 @@ export class SqliteAdapter extends DatabaseAdapter {
     this.db.pragma('foreign_keys = ON');
   }
 
+  // better-sqlite3 only binds numbers/strings/bigints/buffers/null. JS booleans
+  // throw — but Postgres + pglite accept them. To let the seeders + business
+  // code use idiomatic `true/false` for BOOLEAN columns, coerce here at the
+  // adapter boundary (SQLite stores them as INTEGER 1/0 either way).
+  private static coerceParams(params: unknown[]): unknown[] {
+    return params.map((p) => (typeof p === 'boolean' ? (p ? 1 : 0) : p));
+  }
+
   async execute(sql: string, params: unknown[] = []): Promise<void> {
-    this.db.prepare(sql).run(...params);
+    this.db.prepare(sql).run(...SqliteAdapter.coerceParams(params));
   }
 
   async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
-    return this.db.prepare(sql).all(...params) as T[];
+    return this.db.prepare(sql).all(...SqliteAdapter.coerceParams(params)) as T[];
   }
 
   async getTableNames(): Promise<string[]> {

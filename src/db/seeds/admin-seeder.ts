@@ -19,7 +19,7 @@ export class AdminSeeder extends DataSeeder {
     const now = new Date().toISOString();
     await db.execute(
       'INSERT INTO users (id, bms_user_name, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [uuidv4(), 'admin', 'ADMIN', 1, now, now],
+      [uuidv4(), 'admin', 'ADMIN', true, now, now],
     );
     return 1;
   }

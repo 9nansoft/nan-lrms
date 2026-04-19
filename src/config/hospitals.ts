@@ -84,7 +84,10 @@ export const KK_HOSPITALS: KkHospitalSeed[] = [
   { hcode: '10689', name: 'รพ.โนนศิลา', level: HospitalLevel.F2 },
   { hcode: '10690', name: 'รพ.เขาสวนกวาง', level: HospitalLevel.F1 },
   { hcode: '11445', name: 'รพ.เปือยน้อย', level: HospitalLevel.F2 },
-  { hcode: '11446', name: 'รพ.วังสะพุง', level: HospitalLevel.F2 },
+  // รพ.วังสะพุง (hcode 11446) was removed — it is in Loei province, not
+  // Khon Kaen. KK has 26 districts; Mueang Khon Kaen is served by
+  // รพศ.ขอนแก่น (the Regional Hospital, separately managed) so this
+  // community-hospital list contains 25 entries.
   { hcode: '10998', name: 'รพ.แวงใหญ่', level: HospitalLevel.F2 },
   { hcode: '10999', name: 'รพ.แวงน้อย', level: HospitalLevel.F2 },
   { hcode: '11000', name: 'รพ.เวียงเก่า', level: HospitalLevel.F3 },

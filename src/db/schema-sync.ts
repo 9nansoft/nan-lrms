@@ -26,7 +26,11 @@ const TYPE_MAP: Record<DriverType, Record<AbstractFieldType, string>> = {
     boolean: 'BOOLEAN',
     datetime: 'TIMESTAMPTZ',
     json: 'JSONB',
-    'string[]': 'TEXT[]',
+    // The only `string[]` field today (cpd_scores.missing_factors) is written
+    // via JSON.stringify and read via JSON.parse, so storage is JSON in TEXT
+    // rather than a native Postgres array. Mapping to TEXT[] here would
+    // reject the JSON literal at INSERT time.
+    'string[]': 'TEXT',
   },
 };
 

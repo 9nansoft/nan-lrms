@@ -21,7 +21,7 @@ describe('SeedOrchestrator', () => {
     const seeder = new HospitalSeeder();
     expect(await seeder.shouldRun(db)).toBe(true);
     const count = await seeder.seed(db);
-    expect(count).toBe(26);
+    expect(count).toBe(25);
     expect(await seeder.shouldRun(db)).toBe(false);
   });
 
@@ -38,7 +38,7 @@ describe('SeedOrchestrator', () => {
     await orchestrator.run(db);
 
     const hospitals = await db.query<{ count: number }>('SELECT COUNT(*) as count FROM hospitals');
-    expect(hospitals[0].count).toBe(26);
+    expect(hospitals[0].count).toBe(25);
 
     const users = await db.query<{ count: number }>('SELECT COUNT(*) as count FROM users');
     expect(users[0].count).toBe(1);
@@ -51,6 +51,6 @@ describe('SeedOrchestrator', () => {
     await orchestrator.run(db);
 
     const hospitals = await db.query<{ count: number }>('SELECT COUNT(*) as count FROM hospitals');
-    expect(hospitals[0].count).toBe(26);
+    expect(hospitals[0].count).toBe(25);
   });
 });

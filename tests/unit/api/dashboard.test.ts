@@ -20,9 +20,9 @@ describe('Dashboard API Logic', () => {
     await db.close();
   });
 
-  it('returns dashboard with all 26 hospitals', async () => {
+  it('returns dashboard with all 25 KK hospitals', async () => {
     const result = await getProvinceDashboard(db);
-    expect(result.hospitals).toHaveLength(26);
+    expect(result.hospitals).toHaveLength(25);
     // Verify each hospital has required fields
     for (const h of result.hospitals) {
       expect(h.hcode).toBeTruthy();
