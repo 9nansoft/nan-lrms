@@ -3,8 +3,10 @@ import {
   listMaternityWards,
   listWardBedsInventory,
   listWardBedsOccupancy,
+  upsertPartograph,
+  deletePartograph,
 } from '@/services/maternity-ward';
-import type { ConnectionConfig } from '@/types/bms-browser';
+import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -168,5 +170,152 @@ describe('listWardBedsOccupancy', () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.params).toEqual({ ward: '03' });
     expect(body.sql).toContain("i.confirm_discharge = 'N'");
+  });
+});
+
+describe('upsertPartograph', () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('insert: mints serial via callFunction then restInsert + audit', async () => {
+    // 1) callFunction → returns Value 99
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 99 }),
+    });
+    // 2) restInsert → ok
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+    });
+    // 3) audit POST → ok (fire-and-forget)
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    const result = await upsertPartograph(
+      cfg,
+      userInfo,
+      'AN1',
+      { cervical_dilation_cm: 4, fetal_heart_rate: 140 },
+      '10670',
+    );
+    expect(result.ipt_labour_partograph_id).toBe(99);
+
+    // Verify call sequence
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/function?name=get_serialnumber');
+    expect(mockFetch.mock.calls[1][0]).toBe('https://t.example/api/api/rest/ipt_labour_partograph');
+    expect(mockFetch.mock.calls[1][1].method).toBe('POST');
+    const insertBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(insertBody).toMatchObject({
+      ipt_labour_partograph_id: 99,
+      an: 'AN1',
+      cervical_dilation_cm: 4,
+    });
+
+    // Audit call (fire-and-forget — let microtask queue drain)
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockFetch.mock.calls[2][0]).toBe('/api/hospital/audit-log');
+    const auditBody = JSON.parse(mockFetch.mock.calls[2][1].body);
+    expect(auditBody).toMatchObject({
+      entity: 'ipt_labour_partograph',
+      op: 'insert',
+      resourceId: '99',
+      hcode: '10670',
+      staff: 'nurse1',
+    });
+  });
+
+  it('update: skips serial mint, calls restUpdate + audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    await upsertPartograph(
+      cfg,
+      userInfo,
+      'AN1',
+      { ipt_labour_partograph_id: 7, cervical_dilation_cm: 5 },
+      '10670',
+    );
+    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/ipt_labour_partograph/7');
+    expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
+    const putBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(putBody).toEqual({ cervical_dilation_cm: 5 });
+    expect(putBody.ipt_labour_partograph_id).toBeUndefined();
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockFetch.mock.calls[1][0]).toBe('/api/hospital/audit-log');
+    const auditBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(auditBody).toMatchObject({
+      entity: 'ipt_labour_partograph',
+      op: 'update',
+      resourceId: '7',
+      hcode: '10670',
+      staff: 'nurse1',
+      fieldsTouched: ['cervical_dilation_cm'],
+    });
+  });
+
+  it('does not throw if audit POST returns non-ok (fire-and-forget)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockRejectedValueOnce(new Error('audit endpoint down'));
+    await expect(
+      upsertPartograph(
+        cfg,
+        userInfo,
+        'AN1',
+        { ipt_labour_partograph_id: 1, cervical_dilation_cm: 4 },
+        '10670',
+      ),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('deletePartograph', () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('calls restDelete and fires audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok' }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    await deletePartograph(cfg, userInfo, 42, '10670');
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/rest/ipt_labour_partograph/42');
+    expect(mockFetch.mock.calls[0][1].method).toBe('DELETE');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockFetch.mock.calls[1][0]).toBe('/api/hospital/audit-log');
+    const auditBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(auditBody).toMatchObject({
+      entity: 'ipt_labour_partograph',
+      op: 'delete',
+      resourceId: '42',
+      hcode: '10670',
+      staff: 'nurse1',
+    });
   });
 });

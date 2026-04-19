@@ -1,5 +1,11 @@
 'use client';
-import { executeSql } from '@/lib/bms-browser-client';
+import {
+  callFunction,
+  executeSql,
+  restDelete,
+  restInsert,
+  restUpdate,
+} from '@/lib/bms-browser-client';
 import {
   MATERNITY_WARDS,
   PATIENT_COMPLICATIONS_BY_LABOUR_ID,
@@ -16,7 +22,7 @@ import {
   getQuery,
   type DatabaseDialect,
 } from '@/config/hosxp-queries';
-import type { ConnectionConfig } from '@/types/bms-browser';
+import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 import type {
   BedOccupancy,
   BedSlot,
@@ -166,4 +172,100 @@ export async function getPatientInfants(
   const sql = getQuery(PATIENT_INFANTS_BY_AN, DEFAULT_DIALECT);
   const r = await executeSql<InfantRow>(sql, config, { an });
   return r.data;
+}
+
+// ─── Task 41: shared CRUD helpers (canonical pattern reused by Tasks 42–50) ───
+
+interface AuditPayload {
+  entity: string;
+  op: string;
+  resourceId: string;
+  hcode: string;
+  staff?: string;
+  fieldsTouched?: string[];
+}
+
+/**
+ * Fire-and-forget audit POST to /api/hospital/audit-log.
+ * Never throws — the audit sink is best-effort by design (see route handler).
+ * Intentionally NOT exported: every CRUD service call site must funnel through
+ * upsert/delete so the audit trail stays uniform.
+ */
+function fireAudit(payload: AuditPayload): void {
+  void fetch('/api/hospital/audit-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => undefined);
+}
+
+/**
+ * Mint a fresh primary-key value via BMS get_serialnumber. The id_field
+ * parameter is the column name (e.g. 'ipt_labour_partograph_id'); BMS resolves
+ * the underlying sequence/table itself.
+ */
+async function mintSerial(idField: string, config: ConnectionConfig): Promise<number> {
+  const r = await callFunction<{ Value: number }>('get_serialnumber', config, {
+    id_field: idField,
+  });
+  return Number(r.Value);
+}
+
+// Task 41: insert-or-update a single partograph row. Insert path mints a fresh
+// PK via get_serialnumber; update path strips the PK from the body since BMS
+// /api/rest/{table}/{id} carries it in the URL.
+export async function upsertPartograph(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  an: string,
+  row: Partial<PartographRow>,
+  hcode: string,
+): Promise<PartographRow> {
+  const isNew = row.ipt_labour_partograph_id === undefined;
+  if (isNew) {
+    const id = await mintSerial('ipt_labour_partograph_id', config);
+    const payload = { ...row, ipt_labour_partograph_id: id, an };
+    await restInsert('ipt_labour_partograph', payload, config);
+    fireAudit({
+      entity: 'ipt_labour_partograph',
+      op: 'insert',
+      resourceId: String(id),
+      hcode,
+      staff: userInfo.loginname,
+    });
+    return payload as PartographRow;
+  }
+  const { ipt_labour_partograph_id, ...fields } = row;
+  await restUpdate(
+    'ipt_labour_partograph',
+    String(ipt_labour_partograph_id),
+    fields,
+    config,
+  );
+  fireAudit({
+    entity: 'ipt_labour_partograph',
+    op: 'update',
+    resourceId: String(ipt_labour_partograph_id),
+    hcode,
+    staff: userInfo.loginname,
+    fieldsTouched: Object.keys(fields),
+  });
+  return row as PartographRow;
+}
+
+// Task 41: delete a partograph row by PK and emit an audit entry.
+export async function deletePartograph(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  id: number,
+  hcode: string,
+): Promise<void> {
+  await restDelete('ipt_labour_partograph', id, config);
+  fireAudit({
+    entity: 'ipt_labour_partograph',
+    op: 'delete',
+    resourceId: String(id),
+    hcode,
+    staff: userInfo.loginname,
+  });
 }
