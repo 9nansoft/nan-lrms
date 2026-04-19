@@ -1,5 +1,11 @@
 // T067: Partogram service — alert/action line calculations
-import type { PartogramEntry } from '@/types/api';
+// CDSS analyzers (T7–T14) ported from HOSxP PartographCDSSUnit.pas.
+import type {
+  PartogramEntry,
+  CdssSeverity,
+  CdssAlertDto,
+  PartographObservationDto,
+} from '@/types/api';
 
 interface AlertLinePoint {
   measuredAt: string;
@@ -114,3 +120,85 @@ function interpolateLineValue(
 
   return null;
 }
+
+// ============================================================================
+// CDSS (Clinical Decision Support) — ported from PartographCDSSUnit.pas
+// ============================================================================
+
+const SEVERITY_RANK: Record<CdssSeverity, number> = {
+  INFO: 0, WARN: 1, ALERT: 2, CRITICAL: 3,
+};
+
+export interface PartographHeader {
+  an: string;
+  hn?: string;
+  patientName?: string;
+  gpal?: string;
+  age?: string;
+  admitAt?: string;
+}
+
+export function highestSeverity(alerts: CdssAlertDto[]): CdssSeverity | null {
+  if (alerts.length === 0) return null;
+  let best: CdssSeverity = 'INFO';
+  for (const a of alerts) {
+    if (SEVERITY_RANK[a.severity] > SEVERITY_RANK[best]) best = a.severity;
+  }
+  return best;
+}
+
+export function countBySeverity(alerts: CdssAlertDto[], s: CdssSeverity): number {
+  return alerts.filter((a) => a.severity === s).length;
+}
+
+// Each analyzer is a small pure function. T8–T14 fill in the bodies in place.
+function analyzeFhr(_obs: PartographObservationDto[]): CdssAlertDto[] {
+  return [];
+}
+function analyzeLiquorMoulding(_obs: PartographObservationDto[]): CdssAlertDto[] {
+  return [];
+}
+function analyzeCervix(_obs: PartographObservationDto[]): CdssAlertDto[] {
+  return [];
+}
+function analyzeContractions(_obs: PartographObservationDto[]): CdssAlertDto[] {
+  return [];
+}
+function analyzeMaternal(_obs: PartographObservationDto[]): CdssAlertDto[] {
+  return [];
+}
+function analyzeUrine(_obs: PartographObservationDto[]): CdssAlertDto[] {
+  return [];
+}
+function analyzeTimeGaps(_obs: PartographObservationDto[]): CdssAlertDto[] {
+  return [];
+}
+
+export function analyzePartograph(
+  _header: PartographHeader,
+  observations: PartographObservationDto[],
+): CdssAlertDto[] {
+  if (observations.length === 0) return [];
+  return [
+    ...analyzeFhr(observations),
+    ...analyzeLiquorMoulding(observations),
+    ...analyzeCervix(observations),
+    ...analyzeContractions(observations),
+    ...analyzeMaternal(observations),
+    ...analyzeUrine(observations),
+    ...analyzeTimeGaps(observations),
+  ];
+}
+
+// Internal exports for per-analyzer tests (T8–T14). These reference the
+// hoisted function declarations above; replacing the function body in place
+// (rather than reassigning the binding) keeps these references live.
+export const _internals = {
+  analyzeFhr,
+  analyzeLiquorMoulding,
+  analyzeCervix,
+  analyzeContractions,
+  analyzeMaternal,
+  analyzeUrine,
+  analyzeTimeGaps,
+};
