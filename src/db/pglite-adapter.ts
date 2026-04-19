@@ -7,14 +7,12 @@
 import type { PGlite, Transaction as PgliteTransaction } from '@electric-sql/pglite';
 import { DatabaseAdapter, type ColumnInfo } from './adapter';
 
+// Naive `?` -> `$N` rewrite. Unsafe for `?` inside string literals
+// (e.g. `WHERE note = 'why?'`) and jsonb operators (`?`, `?|`, `?&`).
+// Today's queries don't hit those; revisit if a jsonb query lands.
 function rewritePlaceholders(sql: string): string {
   let i = 0;
   return sql.replace(/\?/g, () => `$${++i}`);
-}
-
-// Minimal surface of pglite/Transaction we use — query() with text + params.
-interface PgliteQueryRunner {
-  query<T>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
 }
 
 export class PgliteAdapter extends DatabaseAdapter {
@@ -77,7 +75,7 @@ export class PgliteAdapter extends DatabaseAdapter {
 // Transactional adapter — uses the pglite Transaction handle so all writes
 // participate in the surrounding BEGIN/COMMIT.
 class PgliteTransactionAdapter extends DatabaseAdapter {
-  constructor(private tx: PgliteQueryRunner & PgliteTransaction) {
+  constructor(private tx: PgliteTransaction) {
     super();
   }
 

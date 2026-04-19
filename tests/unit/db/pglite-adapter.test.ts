@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { PgliteAdapter } from '@/db/pglite-adapter';
 
@@ -10,6 +10,10 @@ describe('PgliteAdapter', () => {
     await adapter.execute(
       'CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)',
     );
+  });
+
+  afterEach(async () => {
+    await adapter.close();
   });
 
   it('rewrites ? placeholders to $N for postgres', async () => {
