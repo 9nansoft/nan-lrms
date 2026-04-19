@@ -1,4 +1,5 @@
 import type {
+  BmsFunctionResponse,
   BmsSessionResponse,
   ConnectionConfig,
   SqlApiResponse,
@@ -149,6 +150,93 @@ export async function executeSql<T = Record<string, unknown>>(
     ) {
       throw error;
     }
+    throw new Error('Unable to connect to the BMS API. Please check your connection.', {
+      cause: error,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function callFunction<T = BmsFunctionResponse>(
+  name: string,
+  config: ConnectionConfig,
+  payload: Record<string, unknown> = {},
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
+
+  // Sentinel marker for body-level errors so the catch allowlist passes them through.
+  const BODY_ERROR_MARKER = '__BMS_FUNCTION_BODY_ERROR__:';
+
+  try {
+    const response = await fetch(
+      `${config.apiUrl}/api/function?name=${encodeURIComponent(name)}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.bearerToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      },
+    );
+
+    if (response.status === 429) {
+      let retryInfo = '';
+      const retryAfter = response.headers.get('Retry-After');
+      if (retryAfter) {
+        retryInfo = ` กรุณารอ ${retryAfter} วินาทีแล้วลองใหม่`;
+      }
+      try {
+        const errorData = (await response.json()) as { message?: string; error?: string };
+        const detail = errorData.message || errorData.error;
+        if (detail) {
+          retryInfo = `: ${detail}`;
+        }
+      } catch {
+        // ignore JSON parse errors
+      }
+      throw new Error(
+        `มีการร้องขอบ่อยเกินไป (HTTP 429).${retryInfo} กรุณารอสักครู่แล้วลองใหม่อีกครั้ง`,
+      );
+    }
+
+    if (response.status === 501) {
+      throw new Error('Session unauthorized. Please reconnect with a valid session ID.');
+    }
+
+    if (!response.ok) {
+      throw new Error(`Function API returned HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = (await response.json()) as BmsFunctionResponse;
+    // Some BMS functions return 200 HTTP but error in body (e.g. MessageCode 500).
+    // Tag the message so the catch-block allowlist re-throws it verbatim.
+    if (result.MessageCode && result.MessageCode >= 400 && result.Message) {
+      throw new Error(`${BODY_ERROR_MARKER}${result.Message}`);
+    }
+    return result as T;
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Function call timed out after 60 seconds.', { cause: error });
+    }
+
+    if (error instanceof Error && error.message.startsWith(BODY_ERROR_MARKER)) {
+      throw new Error(error.message.slice(BODY_ERROR_MARKER.length));
+    }
+
+    if (
+      error instanceof Error &&
+      (error.message.startsWith('Session unauthorized') ||
+        error.message.startsWith('Function API returned') ||
+        error.message.startsWith('Function call timed out') ||
+        error.message.startsWith('มีการร้องขอบ่อยเกินไป'))
+    ) {
+      throw error;
+    }
+
     throw new Error('Unable to connect to the BMS API. Please check your connection.', {
       cause: error,
     });

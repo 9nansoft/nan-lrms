@@ -4,6 +4,7 @@ import {
   extractConnectionConfig,
   extractUserInfo,
   executeSql,
+  callFunction,
   APP_IDENTIFIER,
 } from '@/lib/bms-browser-client';
 import type { ConnectionConfig } from '@/types/bms-browser';
@@ -142,5 +143,64 @@ describe('executeSql', () => {
       json: async () => ({ data: [], MessageCode: 409, Message: 'syntax error' }),
     });
     await expect(executeSql('SELECT bad', cfg)).rejects.toThrow(/Database error/);
+  });
+});
+
+describe('callFunction', () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it('POSTs payload to /api/function?name=X with bearer', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 12345 }),
+    });
+    const r = await callFunction('get_serialnumber', cfg, { id_field: 'iptbedmove_id' });
+    expect((r as { Value: number }).Value).toBe(12345);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://t.example/api/api/function?name=get_serialnumber',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer BEARER',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body).toEqual({ id_field: 'iptbedmove_id' });
+  });
+
+  it('URL-encodes the function name', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok' }),
+    });
+    await callFunction('weird name with spaces', cfg);
+    expect(mockFetch.mock.calls[0][0]).toContain('name=weird%20name%20with%20spaces');
+  });
+
+  it('throws unauthorized on HTTP 501', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false, status: 501, statusText: 'Not Implemented',
+      text: async () => '',
+    });
+    await expect(callFunction('x', cfg)).rejects.toThrow(/Session unauthorized/);
+  });
+
+  it('throws Thai retry on HTTP 429', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false, status: 429, statusText: 'Too Many Requests',
+      headers: { get: () => null },
+      json: async () => ({}),
+    });
+    await expect(callFunction('x', cfg)).rejects.toThrow(/มีการร้องขอบ่อยเกินไป/);
+  });
+
+  it('throws Message verbatim when MessageCode >= 400 in 200 body', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ MessageCode: 500, Message: 'internal failure' }),
+    });
+    await expect(callFunction('x', cfg)).rejects.toThrow('internal failure');
   });
 });
