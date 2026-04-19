@@ -294,6 +294,87 @@ export const REFEROUT_PREGNANCY: SqlQueryTemplate = {
       ORDER BY ro.refer_date DESC`,
 };
 
+// Partograph observations for currently-admitted labour patients.
+// Joins ipt_labour_partograph (raw observations) to labour_amniotic_type
+// for the human-readable amniotic-fluid label, and gates on ipt.dchdate IS NULL
+// so we only sync rows for patients still in the labour ward. Ordering by
+// (an, observe_datetime) makes the subsequent CDSS analyzers' chronological
+// scan deterministic.
+export const PARTOGRAPH_OBSERVATIONS: SqlQueryTemplate = {
+  postgresql: `
+    SELECT lp.ipt_labour_partograph_id,
+           lp.ipt_labour_id,
+           lp.an,
+           lp.observe_datetime,
+           lp.hour_no,
+           lp.fetal_heart_rate,
+           lp.amniotic_fluid,
+           lp.labour_amniotic_type_id,
+           lat.labour_amniotic_type_name AS amniotic_type_name,
+           lp.moulding,
+           lp.cervical_dilation_cm,
+           lp.descent_of_head,
+           lp.contraction_per_10min,
+           lp.contraction_duration_sec,
+           lp.contraction_strength,
+           lp.oxytocin_uml,
+           lp.oxytocin_drops_min,
+           lp.drugs_iv_fluids,
+           lp.pulse,
+           lp.bp_systolic,
+           lp.bp_diastolic,
+           lp.temperature,
+           lp.urine_volume_ml,
+           lp.urine_protein,
+           lp.urine_glucose,
+           lp.urine_acetone,
+           lp.note,
+           lp.entry_staff,
+           lp.entry_datetime
+      FROM ipt_labour_partograph lp
+      LEFT JOIN labour_amniotic_type lat
+             ON lat.labour_amniotic_type_id = lp.labour_amniotic_type_id
+      JOIN ipt i ON i.an = lp.an
+     WHERE i.dchdate IS NULL
+     ORDER BY lp.an, lp.observe_datetime`,
+  mysql: `
+    SELECT lp.ipt_labour_partograph_id,
+           lp.ipt_labour_id,
+           lp.an,
+           lp.observe_datetime,
+           lp.hour_no,
+           lp.fetal_heart_rate,
+           lp.amniotic_fluid,
+           lp.labour_amniotic_type_id,
+           lat.labour_amniotic_type_name AS amniotic_type_name,
+           lp.moulding,
+           lp.cervical_dilation_cm,
+           lp.descent_of_head,
+           lp.contraction_per_10min,
+           lp.contraction_duration_sec,
+           lp.contraction_strength,
+           lp.oxytocin_uml,
+           lp.oxytocin_drops_min,
+           lp.drugs_iv_fluids,
+           lp.pulse,
+           lp.bp_systolic,
+           lp.bp_diastolic,
+           lp.temperature,
+           lp.urine_volume_ml,
+           lp.urine_protein,
+           lp.urine_glucose,
+           lp.urine_acetone,
+           lp.note,
+           lp.entry_staff,
+           lp.entry_datetime
+      FROM ipt_labour_partograph lp
+      LEFT JOIN labour_amniotic_type lat
+             ON lat.labour_amniotic_type_id = lp.labour_amniotic_type_id
+      JOIN ipt i ON i.an = lp.an
+     WHERE i.dchdate IS NULL
+     ORDER BY lp.an, lp.observe_datetime`,
+};
+
 // Patient address (province/district/sub-district) for GIS mapping
 // Reads from patient table's chwpart/amppart/tmbpart (2-digit Thai admin codes)
 export const PATIENT_ADDRESS: SqlQueryTemplate = {
