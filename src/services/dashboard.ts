@@ -1,6 +1,6 @@
 // T048: Dashboard service — province dashboard data from local cache
 import type { DatabaseAdapter } from '@/db/adapter';
-import type { DashboardHospital, DashboardSummary, HighRiskPatient, DashboardStageKPIs, DashboardAlerts } from '@/types/api';
+import type { DashboardHospital, DashboardSummary, HighRiskPatient, DashboardStageKPIs, DashboardAlerts, CdssSeverity } from '@/types/api';
 import type { ConnectionStatus, HospitalLevel } from '@/types/domain';
 
 interface DashboardRow {
@@ -109,6 +109,8 @@ interface HighRiskRow {
   hcode: string;
   admit_date: string | null;
   last_vital_at: string | null;
+  partograph_severity: string | null;
+  partograph_alert_count: number | null;
 }
 
 export async function getHighRiskPatients(
@@ -127,6 +129,8 @@ export async function getHighRiskPatients(
       h.name AS hospital_name,
       h.hcode,
       cp.admit_date,
+      cp.partograph_severity,
+      cp.partograph_alert_count,
       (SELECT MAX(cv.measured_at) FROM cached_vital_signs cv WHERE cv.patient_id = cp.id) AS last_vital_at
     FROM cached_patients cp
     INNER JOIN cpd_scores cs ON cs.patient_id = cp.id
@@ -154,6 +158,8 @@ export async function getHighRiskPatients(
     hcode: row.hcode,
     admitDate: row.admit_date,
     lastVitalAt: row.last_vital_at,
+    partographSeverity: (row.partograph_severity as CdssSeverity | null) ?? null,
+    partographAlertCount: row.partograph_alert_count ?? null,
   }));
 }
 
@@ -208,9 +214,17 @@ export async function getHospitalPatientList(
   );
   const total = countResult[0].count;
 
-  // Get patients with latest CPD score
-  const patients = await db.query(
+  // Get patients with latest CPD score. partograph_severity and
+  // partograph_alert_count are written by upsertPartographObservations()
+  // and surfaced here so the patient list can render a severity dot
+  // without an extra fetch.
+  const rows = await db.query<Record<string, unknown> & {
+    partograph_severity: string | null;
+    partograph_alert_count: number | null;
+  }>(
     `SELECT cp.*,
+      cp.partograph_severity,
+      cp.partograph_alert_count,
       (SELECT cs.score FROM cpd_scores cs WHERE cs.patient_id = cp.id ORDER BY cs.calculated_at DESC LIMIT 1) as cpd_score,
       (SELECT cs.risk_level FROM cpd_scores cs WHERE cs.patient_id = cp.id ORDER BY cs.calculated_at DESC LIMIT 1) as cpd_risk_level,
       (SELECT cs.recommendation FROM cpd_scores cs WHERE cs.patient_id = cp.id ORDER BY cs.calculated_at DESC LIMIT 1) as cpd_recommendation
@@ -220,6 +234,12 @@ export async function getHospitalPatientList(
     LIMIT ? OFFSET ?`,
     [...params, perPage, offset],
   );
+
+  const patients = rows.map((r) => ({
+    ...r,
+    partographSeverity: (r.partograph_severity as CdssSeverity | null) ?? null,
+    partographAlertCount: r.partograph_alert_count ?? null,
+  }));
 
   return {
     patients,

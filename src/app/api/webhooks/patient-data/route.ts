@@ -5,10 +5,12 @@ import { ensureInit } from '@/lib/ensure-init';
 import {
   validateApiKey,
   validatePayload,
+  validatePartographPayload,
   processWebhookPayload,
   processAncWebhook,
   processReferralCreate,
   processReferralUpdate,
+  processPartographWebhook,
 } from '@/services/webhook';
 import type {
   WebhookAncPayload,
@@ -108,6 +110,25 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(apiError('REFERRAL_FIELD_REQUIRED', { missing }), { status: 400 });
       }
       const result = await processReferralUpdate(db, keyInfo.hospitalId, referralPayload, sseManager);
+      return NextResponse.json({
+        success: true,
+        ...result,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Partograph observations from non-HOSxP senders (T21)
+    if (payloadType === 'partograph') {
+      const validation = validatePartographPayload(body);
+      if (!validation.valid || !validation.payload) {
+        return NextResponse.json(
+          apiError('VALIDATION_FAILED', validation.error ?? 'unknown validation error'),
+          { status: 400 },
+        );
+      }
+      const result = await processPartographWebhook(
+        db, keyInfo.hospitalId, validation.payload, sseManager,
+      );
       return NextResponse.json({
         success: true,
         ...result,

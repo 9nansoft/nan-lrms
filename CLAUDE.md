@@ -1,6 +1,6 @@
 # kk-lrms Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-03-08
+Auto-generated from all feature plans. Last updated: 2026-04-19
 
 ## Active Technologies
 - TypeScript 5.x / Node.js 20+ LTS + Next.js 15 (App Router), React 19, NextAuth.js v5, SWR, Recharts, shadcn/ui, Tailwind CSS 4, better-sqlite3, pg (001-kk-lrms-app)
@@ -33,6 +33,7 @@ npm test && npm run lint
 TypeScript 5.x / Node.js 20+ LTS: Follow standard conventions
 
 ## Recent Changes
+- 001-kk-lrms-app: Partograph time-series ingestion (HOSxP ipt_labour_partograph + webhook), Pascal CDSS port, 4-panel chart, dashboard severity dot
 - 001-kk-lrms-app: BMS Session API architecture with per-hospital tunnel URLs, SQL query data access, polling-based sync
 - 001-kk-lrms-app: Webhook API for non-HOSxP hospitals (incremental/full_snapshot modes, API key auth, auto-discharge)
 - 001-kk-lrms-app: Kiosk monitor mode (fullscreen dark theme, large fonts, risk glow shadows)

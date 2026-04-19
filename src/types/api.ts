@@ -58,6 +58,8 @@ export interface PatientListItem {
     dilationCm: number;
     measuredAt: string;
   } | null;
+  partographSeverity: CdssSeverity | null;
+  partographAlertCount: number | null;
   syncedAt: string;
 }
 
@@ -151,9 +153,67 @@ export interface PartogramEntry {
 
 export interface PartogramResponse {
   partogram: {
-    startTime: string;
-    entries: PartogramEntry[];
+    startTime: string;                            // unchanged — admit_date
+    entries: PartogramEntry[];                    // EXISTING — back-compat for LaborProgressCard
+    observations: PartographObservationDto[];     // NEW
+    alerts: CdssAlertDto[];                       // NEW
+    severity: {
+      highest: CdssSeverity | null;
+      counts: { critical: number; alert: number; warn: number; info: number };
+    };
+    source: 'hosxp' | 'webhook' | 'mixed' | 'none';
+    lastObservedAt: string | null;
   };
+}
+
+// Partograph CDSS (Clinical Decision Support) — ported from HOSxP Pascal
+// PartographCDSSUnit.pas. See docs/plans/2026-04-19-partograph-support.md.
+export type CdssSeverity = 'INFO' | 'WARN' | 'ALERT' | 'CRITICAL';
+export type CdssSection =
+  | 'FHR' | 'LIQUOR' | 'MOULDING' | 'CERVIX' | 'DESCENT'
+  | 'CONTRACTIONS' | 'OXY' | 'PULSE' | 'BP' | 'TEMP' | 'URINE' | 'TIME';
+
+export interface CdssAlertDto {
+  severity: CdssSeverity;
+  section: CdssSection;
+  message: string;
+  obsIndex: number;
+}
+
+export interface PartographObservationDto {
+  id: string;
+  observeDatetime: string;
+  hourNo: number | null;
+  fetalHeartRate: number | null;
+  amnioticFluid: string | null;
+  amnioticTypeName: string | null;
+  moulding: string | null;
+  cervicalDilationCm: number | null;
+  descentOfHead: string | null;
+  contractionPer10Min: number | null;
+  contractionDurationSec: number | null;
+  contractionStrength: string | null;
+  oxytocinUml: number | null;
+  oxytocinDropsMin: number | null;
+  drugsIvFluids: string | null;
+  pulse: number | null;
+  bpSystolic: number | null;
+  bpDiastolic: number | null;
+  temperature: number | null;
+  urineVolumeMl: number | null;
+  urineProtein: string | null;
+  urineGlucose: string | null;
+  urineAcetone: string | null;
+  note: string | null;
+  entryStaff: string | null;
+}
+
+export interface SsePartographSeverityChangedEvent {
+  type: 'partograph_severity_changed';
+  hcode: string;
+  an: string;
+  severity: CdssSeverity | null;
+  alertCount: number;
 }
 
 // Contractions
@@ -181,6 +241,8 @@ export interface HighRiskPatient {
   hcode: string;
   admitDate: string | null;
   lastVitalAt: string | null;
+  partographSeverity: CdssSeverity | null;
+  partographAlertCount: number | null;
 }
 
 export interface HighRiskPatientsResponse {

@@ -15,6 +15,11 @@ import {
 import { CpdBadge } from '@/components/shared/CpdBadge';
 import { cn, formatRelativeTime, buildPatientId } from '@/lib/utils';
 import { RiskLevel } from '@/types/domain';
+import type { CdssSeverity } from '@/types/api';
+import {
+  SEVERITY_DOT,
+  SEVERITY_LABEL_TH,
+} from '@/components/patient/cdss-presentation';
 
 export interface HighRiskPatient {
   an: string;
@@ -28,6 +33,23 @@ export interface HighRiskPatient {
   hcode: string;
   admitDate: string | null;
   lastVitalAt: string | null;
+  partographSeverity?: CdssSeverity | null;
+  partographAlertCount?: number | null;
+}
+
+function PartographSeverityDot({ patient }: { patient: HighRiskPatient }) {
+  if (!patient.partographSeverity) return null;
+  const count = patient.partographAlertCount ?? 0;
+  return (
+    <span
+      data-testid={`partograph-severity-dot-${patient.an}`}
+      className={cn(
+        'inline-block h-2.5 w-2.5 rounded-full',
+        SEVERITY_DOT[patient.partographSeverity],
+      )}
+      title={`Partograph: ${SEVERITY_LABEL_TH[patient.partographSeverity]} (${count} ข้อ)`}
+    />
+  );
 }
 
 export interface HighRiskPatientListProps {
@@ -193,19 +215,27 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sorted.map((patient) => (
+                {sorted.map((patient) => {
+                  // Critical glow fires for HIGH CPD risk OR CRITICAL partograph severity —
+                  // either signal warrants the red row accent on kiosk monitor.
+                  const isCriticalGlow =
+                    patient.riskLevel === 'HIGH' || patient.partographSeverity === 'CRITICAL';
+                  return (
                   <TableRow
                     key={patient.an}
                     data-testid="patient-row"
                     className={cn(
                       'cursor-pointer hover:bg-slate-50 transition-colors',
-                      patient.riskLevel === 'HIGH' && 'border-l-2 border-l-red-400',
-                      patient.riskLevel === 'MEDIUM' && 'border-l-2 border-l-amber-400',
+                      isCriticalGlow && 'border-l-2 border-l-red-400',
+                      !isCriticalGlow && patient.riskLevel === 'MEDIUM' && 'border-l-2 border-l-amber-400',
                     )}
                     onClick={() => handleRowClick(patient.hcode, patient.an)}
                   >
                     <TableCell>
-                      <RiskDot riskLevel={patient.riskLevel} />
+                      <span className="inline-flex items-center gap-1.5">
+                        <RiskDot riskLevel={patient.riskLevel} />
+                        <PartographSeverityDot patient={patient} />
+                      </span>
                     </TableCell>
                     <TableCell className="font-mono font-medium">AN {patient.an}</TableCell>
                     <TableCell className="font-mono">
@@ -229,7 +259,8 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
                       {formatRelativeTime(patient.lastVitalAt)}
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -239,14 +270,17 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
       {/* Mobile Card List */}
       {!isLoading && sorted.length > 0 && (
         <div className="md:hidden px-4 pb-4 space-y-3">
-          {sorted.map((patient) => (
+          {sorted.map((patient) => {
+            const isCriticalGlow =
+              patient.riskLevel === 'HIGH' || patient.partographSeverity === 'CRITICAL';
+            return (
             <div
               key={patient.an}
               data-testid="patient-row"
               className={cn(
                 'cursor-pointer rounded-xl border p-4 transition-colors hover:bg-slate-50',
-                patient.riskLevel === 'HIGH' && 'border-l-4 border-l-red-400',
-                patient.riskLevel === 'MEDIUM' && 'border-l-4 border-l-amber-400',
+                isCriticalGlow && 'border-l-4 border-l-red-400',
+                !isCriticalGlow && patient.riskLevel === 'MEDIUM' && 'border-l-4 border-l-amber-400',
               )}
               onClick={() => handleRowClick(patient.hcode, patient.an)}
               role="button"
@@ -261,6 +295,7 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
               {/* Top row: risk dot + name + CPD badge */}
               <div className="flex items-center gap-2">
                 <RiskDot riskLevel={patient.riskLevel} />
+                <PartographSeverityDot patient={patient} />
                 <span className="flex-1 truncate font-mono font-medium text-base">AN {patient.an}</span>
                 <CpdBadge
                   score={patient.cpdScore}
@@ -285,7 +320,8 @@ export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPat
                 Vital: {formatRelativeTime(patient.lastVitalAt)}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -31,6 +31,8 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'labor_status', type: 'string', maxLength: 20, defaultValue: 'ACTIVE' },
     { name: 'delivered_at', type: 'datetime', nullable: true },
     { name: 'journey_id', type: 'uuid', nullable: true, references: { table: 'maternal_journeys', column: 'id' } },
+    { name: 'partograph_severity',     type: 'string',  maxLength: 10, nullable: true },
+    { name: 'partograph_alert_count',  type: 'integer', nullable: true },
     { name: 'synced_at', type: 'datetime' },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },
