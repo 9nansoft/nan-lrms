@@ -10,6 +10,8 @@ import {
   upsertPregnancy,
   upsertLabour,
   upsertLabor,
+  upsertLabourMedication,
+  deleteLabourMedication,
 } from '@/services/maternity-ward';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 
@@ -569,5 +571,123 @@ describe('upsertLabor', () => {
     await expect(
       upsertLabor(cfg, userInfo, 'AN1', { mother_gvalue: 3 }, '10670'),
     ).resolves.not.toThrow();
+  });
+});
+
+// ─── Task 45: labour_medication CRUD ───────────────────────────────────────
+describe('upsertLabourMedication', () => {
+  beforeEach(() => mockFetch.mockReset());
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('insert: mints serial then restInsert + audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', Value: 33 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', insert_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+
+    const r = await upsertLabourMedication(
+      cfg,
+      userInfo,
+      'AN1',
+      { icode: 'D0001', qty: 2, drugusage: '1x3' },
+      '10670',
+    );
+    expect(r.labour_medication_id).toBe(33);
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/function?name=get_serialnumber');
+    expect(mockFetch.mock.calls[1][0]).toBe('https://t.example/api/api/rest/labour_medication');
+    const body = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(body).toMatchObject({
+      labour_medication_id: 33,
+      an: 'AN1',
+      icode: 'D0001',
+      qty: 2,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const auditBody = JSON.parse(mockFetch.mock.calls[2][1].body);
+    expect(auditBody).toMatchObject({
+      entity: 'labour_medication',
+      op: 'insert',
+      resourceId: '33',
+      hcode: '10670',
+    });
+  });
+
+  it('update: skips serial mint, calls restUpdate + audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    await upsertLabourMedication(
+      cfg,
+      userInfo,
+      'AN1',
+      { labour_medication_id: 9, qty: 5 },
+      '10670',
+    );
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      'https://t.example/api/api/rest/labour_medication/9',
+    );
+    expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body).toEqual({ qty: 5 });
+  });
+
+  it('does not throw if audit fails', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok', update_count: 1 }),
+    });
+    mockFetch.mockRejectedValueOnce(new Error('audit endpoint down'));
+    await expect(
+      upsertLabourMedication(
+        cfg,
+        userInfo,
+        'AN1',
+        { labour_medication_id: 1, qty: 2 },
+        '10670',
+      ),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('deleteLabourMedication', () => {
+  beforeEach(() => mockFetch.mockReset());
+  const userInfo: UserInfo = { loginname: 'nurse1', fullname: 'Nurse', hospcode: '10670' };
+
+  it('calls restDelete and fires audit', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ MessageCode: 200, Message: 'ok' }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    await deleteLabourMedication(cfg, userInfo, 33, '10670');
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/rest/labour_medication/33');
+    expect(mockFetch.mock.calls[0][1].method).toBe('DELETE');
+    await new Promise((r) => setTimeout(r, 0));
+    const body = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(body).toMatchObject({ entity: 'labour_medication', op: 'delete', resourceId: '33' });
   });
 });

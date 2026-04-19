@@ -397,3 +397,54 @@ export async function upsertLabor(
     fieldsTouched: Object.keys(fields),
   });
 }
+
+// ─── Task 45: labour_medication CRUD ───────────────────────────────────────
+export async function upsertLabourMedication(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  an: string,
+  row: Partial<LabourMedRow>,
+  hcode: string,
+): Promise<LabourMedRow> {
+  const isNew = row.labour_medication_id === undefined;
+  if (isNew) {
+    const id = await mintSerial('labour_medication_id', config);
+    const payload = { ...row, labour_medication_id: id, an };
+    await restInsert('labour_medication', payload, config);
+    fireAudit({
+      entity: 'labour_medication',
+      op: 'insert',
+      resourceId: String(id),
+      hcode,
+      staff: userInfo.loginname,
+    });
+    return payload as LabourMedRow;
+  }
+  const { labour_medication_id, ...fields } = row;
+  await restUpdate('labour_medication', String(labour_medication_id), fields, config);
+  fireAudit({
+    entity: 'labour_medication',
+    op: 'update',
+    resourceId: String(labour_medication_id),
+    hcode,
+    staff: userInfo.loginname,
+    fieldsTouched: Object.keys(fields),
+  });
+  return row as LabourMedRow;
+}
+
+export async function deleteLabourMedication(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  id: number,
+  hcode: string,
+): Promise<void> {
+  await restDelete('labour_medication', id, config);
+  fireAudit({
+    entity: 'labour_medication',
+    op: 'delete',
+    resourceId: String(id),
+    hcode,
+    staff: userInfo.loginname,
+  });
+}
