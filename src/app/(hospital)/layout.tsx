@@ -12,7 +12,7 @@ export default function HospitalLayout({ children }: { children: React.ReactNode
     <SessionProvider>
       <BmsSessionProvider>
         <div className="flex min-h-screen flex-col bg-slate-50/50">
-          <TopNavBar />
+          <TopNavBar variant="hospital" />
           <main className="flex-1">{children}</main>
         </div>
       </BmsSessionProvider>

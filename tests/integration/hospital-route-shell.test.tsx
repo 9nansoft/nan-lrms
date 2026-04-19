@@ -52,14 +52,16 @@ describe('Hospital route shell', () => {
     expect(await screen.findByText(/เปิดหน้านี้จาก HOSxP/)).toBeInTheDocument();
   });
 
-  it('renders the top navbar inside the hospital layout', async () => {
+  it('renders the hospital-variant top navbar: ห้องคลอด label, no provincial nav links (design §4.2)', async () => {
     render(
       <HospitalLayout>
         <HospitalMaternityWardPage />
       </HospitalLayout>,
     );
-    expect(screen.getByText('แดชบอร์ด')).toBeInTheDocument();
     expect(screen.getByText('ห้องคลอด')).toBeInTheDocument();
+    for (const label of ['แดชบอร์ด', 'ฝากครรภ์', 'โรงพยาบาล', 'ส่งต่อ', 'ผลลัพธ์ทารก']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
   });
 
   it('shows error UI on retrieve failure', async () => {

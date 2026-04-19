@@ -29,7 +29,7 @@ const baseSession = {
   },
 };
 
-describe('TopNavBar', () => {
+describe('TopNavBar — provincial variant (default)', () => {
   it('renders all 6 non-admin nav items for a NURSE', () => {
     mockUseSession.mockReturnValue(baseSession);
     render(<TopNavBar />);
@@ -66,5 +66,33 @@ describe('TopNavBar', () => {
     const logoutBtn = screen.getByLabelText(/ออกจากระบบ/);
     fireEvent.click(logoutBtn);
     expect(mockSignOut).toHaveBeenCalledWith({ callbackUrl: '/login' });
+  });
+});
+
+describe('TopNavBar — hospital variant', () => {
+  it('renders only the ห้องคลอด label, no provincial nav links (design §4.2)', () => {
+    mockUseSession.mockReturnValue(baseSession);
+    render(<TopNavBar variant="hospital" />);
+    expect(screen.getByText('ห้องคลอด')).toBeInTheDocument();
+    for (const label of ['แดชบอร์ด', 'ฝากครรภ์', 'โรงพยาบาล', 'ส่งต่อ', 'ผลลัพธ์ทารก', 'ตั้งค่า']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it('hides the provincial nav even for an ADMIN', () => {
+    mockUseSession.mockReturnValue({
+      data: { ...baseSession.data, user: { ...baseSession.data.user, role: 'ADMIN' } },
+    });
+    render(<TopNavBar variant="hospital" />);
+    expect(screen.queryByText('ตั้งค่า')).not.toBeInTheDocument();
+  });
+
+  it('still renders hospital badge, user name, and logout button', () => {
+    mockUseSession.mockReturnValue(baseSession);
+    render(<TopNavBar variant="hospital" />);
+    expect(screen.getByText(/รพ\.ขอนแก่น/)).toBeInTheDocument();
+    expect(screen.getByText(/10670/)).toBeInTheDocument();
+    expect(screen.getByText('นางทดสอบ')).toBeInTheDocument();
+    expect(screen.getByLabelText(/ออกจากระบบ/)).toBeInTheDocument();
   });
 });

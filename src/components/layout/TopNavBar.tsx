@@ -35,6 +35,7 @@ interface NavItem {
   adminOnly?: boolean;
 }
 
+// Provincial menu — full 6-item nav (+ ตั้งค่า for ADMIN). Per design §4.2.
 const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'แดชบอร์ด', icon: LayoutDashboard },
   { href: '/pregnancies', label: 'ฝากครรภ์', icon: Baby },
@@ -44,6 +45,12 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/hospital-maternity-ward', label: 'ห้องคลอด', icon: Stethoscope },
   { href: '/admin', label: 'ตั้งค่า', icon: Settings, adminOnly: true },
 ];
+
+export type TopNavBarVariant = 'hospital' | 'provincial';
+
+interface TopNavBarProps {
+  variant?: TopNavBarVariant;
+}
 
 function formatBangkokTime(): string {
   return new Date().toLocaleTimeString('th-TH', {
@@ -67,14 +74,18 @@ function useBangkokClock(): string {
   return time;
 }
 
-export function TopNavBar() {
+export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
   const pathname = usePathname();
   const { data: session } = useSession();
   const clock = useBangkokClock();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const isHospital = variant === 'hospital';
   const userRole = session?.user?.role;
-  const items = NAV_ITEMS.filter((i) => !i.adminOnly || userRole === 'ADMIN');
+  const items = isHospital
+    ? []
+    : NAV_ITEMS.filter((i) => !i.adminOnly || userRole === 'ADMIN');
+  const logoHref = isHospital ? '/hospital-maternity-ward' : '/';
   const userName = session?.user?.name ?? '';
   const hospitalName = session?.user?.hospitalName ?? '';
   const hospitalCode = session?.user?.hospitalCode ?? '';
@@ -96,7 +107,7 @@ export function TopNavBar() {
     <header className="sticky top-0 z-30 border-b border-slate-200/60 bg-white/85 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4 lg:px-6">
         {/* Logo */}
-        <Link href="/" className="flex shrink-0 items-center gap-2">
+        <Link href={logoHref} className="flex shrink-0 items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900">
             <Building2 className="h-5 w-5 text-white" />
           </div>
@@ -105,30 +116,45 @@ export function TopNavBar() {
           </span>
         </Link>
 
-        {/* Desktop nav */}
-        <nav className="hidden flex-1 items-center gap-1 lg:flex">
-          {items.map(({ href, label, icon: Icon }) => {
-            const active = isActive(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                  active
-                    ? 'bg-emerald-50 text-emerald-700'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-              </Link>
-            );
-          })}
-        </nav>
+        {/* Hospital mode: single static page label (no nav links). Design §4.2. */}
+        {isHospital && (
+          <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+            <Stethoscope className="h-4 w-4 text-emerald-600" />
+            ห้องคลอด
+          </span>
+        )}
 
-        {/* Right cluster (desktop) */}
-        <div className="ml-auto hidden items-center gap-3 lg:flex">
+        {/* Desktop nav (provincial only) */}
+        {!isHospital && (
+          <nav className="hidden flex-1 items-center gap-1 lg:flex">
+            {items.map(({ href, label, icon: Icon }) => {
+              const active = isActive(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                    active
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
+
+        {/* Right cluster (desktop, or always-visible in hospital mode) */}
+        <div
+          className={cn(
+            'ml-auto items-center gap-3',
+            isHospital ? 'flex' : 'hidden lg:flex',
+          )}
+        >
           {/* Clock */}
           <div className="hidden items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-1.5 sm:flex">
             <Clock className="h-3.5 w-3.5 text-slate-400" />
@@ -170,18 +196,20 @@ export function TopNavBar() {
           </button>
         </div>
 
-        {/* Mobile hamburger */}
-        <button
-          onClick={() => setMobileOpen((v) => !v)}
-          className="ml-auto rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
-          aria-label="เมนู"
-        >
-          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        {/* Mobile hamburger (provincial only — hospital has no nav links) */}
+        {!isHospital && (
+          <button
+            onClick={() => setMobileOpen((v) => !v)}
+            className="ml-auto rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
+            aria-label="เมนู"
+          >
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        )}
       </div>
 
-      {/* Mobile menu drawer */}
-      {mobileOpen && (
+      {/* Mobile menu drawer (provincial only) */}
+      {!isHospital && mobileOpen && (
         <nav className="border-t border-slate-200 bg-white px-4 py-2 lg:hidden">
           {items.map(({ href, label, icon: Icon }) => (
             <Link

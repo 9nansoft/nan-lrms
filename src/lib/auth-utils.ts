@@ -24,25 +24,7 @@ export interface BmsUserIdentity {
   expiresAt: string;
 }
 
-export async function validateBmsSession(
-  sessionId: string,
-  _tunnelUrl: string,
-): Promise<BmsUserIdentity | null> {
-  // Dev auth bypass — accept any session ID as admin
-  if (process.env.DEV_AUTH_BYPASS === 'true') {
-    logger.info('auth_dev_bypass', { sessionId, role: 'ADMIN' });
-    return {
-      name: 'Dev Admin (ผู้ดูแลระบบ)',
-      role: UserRole.ADMIN,
-      hospitalCode: '10670',
-      hospitalName: 'รพ.ชุมแพ',
-      tunnelUrl: process.env.DEV_HOSPITAL_TUNNEL_URL ?? '',
-      databaseType: 'postgresql',
-      jwt: 'dev-jwt-token',
-      expiresAt: new Date(Date.now() + 8 * 3600_000).toISOString(),
-    };
-  }
-
+async function fetchRealBmsIdentity(sessionId: string): Promise<BmsUserIdentity | null> {
   try {
     const validateUrl = process.env.BMS_VALIDATE_URL ?? 'https://hosxp.net/phapi/PasteJSON';
 
@@ -74,4 +56,46 @@ export async function validateBmsSession(
   } catch {
     return null;
   }
+}
+
+export async function validateBmsSession(
+  sessionId: string,
+  _tunnelUrl: string,
+): Promise<BmsUserIdentity | null> {
+  const devBypass = process.env.DEV_AUTH_BYPASS === 'true';
+
+  // Always try the real BMS session first so the navbar reflects the session's
+  // actual hospital (hcode, name, tunnel). Under DEV_AUTH_BYPASS we still call
+  // BMS, but force role → ADMIN so any session gets admin access in dev.
+  const real = await fetchRealBmsIdentity(sessionId);
+
+  if (real) {
+    if (devBypass) {
+      logger.info('auth_dev_bypass_with_real_identity', {
+        sessionId,
+        hcode: real.hospitalCode,
+        role: 'ADMIN',
+      });
+      return { ...real, role: UserRole.ADMIN };
+    }
+    return real;
+  }
+
+  // BMS unreachable. Under DEV_AUTH_BYPASS fall back to hardcoded identity so
+  // offline dev still works; in production, fail closed.
+  if (devBypass) {
+    logger.info('auth_dev_bypass_bms_unreachable', { sessionId, role: 'ADMIN' });
+    return {
+      name: 'Dev Admin (ผู้ดูแลระบบ)',
+      role: UserRole.ADMIN,
+      hospitalCode: '10670',
+      hospitalName: 'รพ.ขอนแก่น',
+      tunnelUrl: process.env.DEV_HOSPITAL_TUNNEL_URL ?? '',
+      databaseType: 'postgresql',
+      jwt: 'dev-jwt-token',
+      expiresAt: new Date(Date.now() + 8 * 3600_000).toISOString(),
+    };
+  }
+
+  return null;
 }
