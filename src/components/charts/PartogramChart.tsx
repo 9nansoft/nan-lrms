@@ -47,14 +47,10 @@ const X_AXIS_DOMAIN: [number, number] = [0, 24];
 const X_AXIS_TICKS = [0, 4, 8, 12, 16, 20, 24];
 
 export function PartogramChart({ observations, alerts, startTime }: PartogramChartProps) {
-  if (observations.length === 0) {
-    return (
-      <div className="flex h-64 items-center justify-center rounded-md border border-dashed text-muted-foreground">
-        ยังไม่มีข้อมูล Partogram
-      </div>
-    );
-  }
-
+  // Render the WHO base-form (axes + reference bands + alert/action lines)
+  // even when there are no observations yet — nurses use the empty chart as a
+  // visual template before entering data. With data=[] Recharts still draws
+  // the grid because XAxis/YAxis domains are explicit.
   const highest = highestSeverity(alerts);
   const totalCount = alerts.length;
 

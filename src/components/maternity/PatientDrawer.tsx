@@ -179,7 +179,7 @@ export function PatientDrawer({ open, occupant, onClose }: PatientDrawerProps) {
                 {PATIENT_DRAWER_TABS.map((t) => (
                   <TabsContent key={t.value} value={t.value}>
                     {t.value === 'partograph' ? (
-                      <PartographTab an={occupant.an} />
+                      <PartographTab an={occupant.an} occupant={occupant} />
                     ) : t.value === 'vitals' ? (
                       <VitalsTab an={occupant.an} />
                     ) : t.value === 'prelabour' ? (

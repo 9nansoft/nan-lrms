@@ -75,11 +75,16 @@ function makeObservation(
 const startTime = '2026-04-19T08:00:00Z';
 
 describe('PartogramChart', () => {
-  it('renders the empty-state placeholder when observations is empty', () => {
+  it('renders the four partograph base-form panels even when observations is empty', () => {
+    // Nurses want to see the WHO grid + reference bands (alert line, action
+    // line, normal FHR 110–160 band) as a visual template before entering any
+    // observations. The chart body shows no data line — just the form.
     render(<PartogramChart observations={[]} alerts={[]} startTime={startTime} />);
-    expect(screen.getByText(/ยังไม่มีข้อมูล Partogram/)).toBeTruthy();
-    // No panel testids should appear
-    expect(screen.queryByTestId('partogram-panel-fhr')).toBeNull();
+    expect(screen.getByTestId('partogram-panel-fhr')).toBeTruthy();
+    expect(screen.getByTestId('partogram-panel-cervix')).toBeTruthy();
+    expect(screen.getByTestId('partogram-panel-contractions')).toBeTruthy();
+    expect(screen.getByTestId('partogram-panel-vitals')).toBeTruthy();
+    expect(screen.queryByText(/ยังไม่มีข้อมูล Partogram/)).toBeNull();
   });
 
   it('renders all four panels when given observations', () => {
