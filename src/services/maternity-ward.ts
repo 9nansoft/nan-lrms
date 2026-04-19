@@ -2,13 +2,19 @@
 import { executeSql } from '@/lib/bms-browser-client';
 import {
   MATERNITY_WARDS,
+  PATIENT_PARTOGRAPH_BY_AN,
   WARD_BEDS_INVENTORY,
   WARD_BEDS_OCCUPANCY,
   getQuery,
   type DatabaseDialect,
 } from '@/config/hosxp-queries';
 import type { ConnectionConfig } from '@/types/bms-browser';
-import type { BedOccupancy, BedSlot, MaternityWard } from '@/types/maternity-ward';
+import type {
+  BedOccupancy,
+  BedSlot,
+  MaternityWard,
+  PartographRow,
+} from '@/types/maternity-ward';
 
 // HOSxP tunnels behind BMS Session API are typically MySQL.
 // Until we expose the dialect via the session, default to mysql for the
@@ -37,5 +43,16 @@ export async function listWardBedsOccupancy(
 ): Promise<BedOccupancy[]> {
   const sql = getQuery(WARD_BEDS_OCCUPANCY, DEFAULT_DIALECT);
   const r = await executeSql<BedOccupancy>(sql, config, { ward });
+  return r.data;
+}
+
+// Task 30: read all partograph observations for a single admission, ordered
+// by observe_datetime (ordering happens server-side in PATIENT_PARTOGRAPH_BY_AN).
+export async function getPatientPartograph(
+  config: ConnectionConfig,
+  an: string,
+): Promise<PartographRow[]> {
+  const sql = getQuery(PATIENT_PARTOGRAPH_BY_AN, DEFAULT_DIALECT);
+  const r = await executeSql<PartographRow>(sql, config, { an });
   return r.data;
 }

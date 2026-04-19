@@ -7,6 +7,7 @@ import { X } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn, calculateAge } from '@/lib/utils';
 import type { BedOccupancy } from '@/types/maternity-ward';
+import { PartographTab } from '@/components/maternity/tabs/PartographTab';
 
 export interface PatientDrawerProps {
   open: boolean;
@@ -150,7 +151,11 @@ export function PatientDrawer({ open, occupant, onClose }: PatientDrawerProps) {
               <div className="flex-1 overflow-auto">
                 {PATIENT_DRAWER_TABS.map((t) => (
                   <TabsContent key={t.value} value={t.value}>
-                    <TabPlaceholder name={t.value} />
+                    {t.value === 'partograph' ? (
+                      <PartographTab an={occupant.an} />
+                    ) : (
+                      <TabPlaceholder name={t.value} />
+                    )}
                   </TabsContent>
                 ))}
               </div>
