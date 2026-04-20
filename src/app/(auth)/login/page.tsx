@@ -7,6 +7,10 @@ import { signIn } from 'next-auth/react';
 import { Building2, Activity, BarChart3, Shield, Clock } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import {
+  setSessionCookie,
+  setMarketplaceToken,
+} from '@/utils/bms-session-storage';
 
 function LoginForm() {
   const router = useRouter();
@@ -18,6 +22,8 @@ function LoginForm() {
 
   const callbackUrl = searchParams.get('callbackUrl') || '/';
   const bmsSessionId = searchParams.get('bms-session-id');
+  const marketplaceToken =
+    searchParams.get('marketplace_token') ?? searchParams.get('marketplace-token');
 
   // Auto-login when bms-session-id is in the URL
   useEffect(() => {
@@ -34,14 +40,21 @@ function LoginForm() {
     setError(null);
 
     try {
+      const trimmed = id.trim();
       const result = await signIn('credentials', {
-        sessionId: id.trim(),
+        sessionId: trimmed,
         redirect: false,
       });
 
       if (result?.error) {
         setError('Session ID ไม่ถูกต้องหรือหมดอายุ');
       } else {
+        // Persist the BMS session + marketplace token so BmsSessionProvider
+        // (in the hospital layout) can hydrate on the next page. The middleware
+        // strips bms-session-id from the callbackUrl, so the cookie is the
+        // only surviving channel.
+        setSessionCookie(trimmed);
+        if (marketplaceToken) setMarketplaceToken(marketplaceToken);
         router.push(callbackUrl);
       }
     } catch {

@@ -13,8 +13,10 @@ import {
   extractConnectionConfig,
   extractUserInfo,
   retrieveBmsSession,
+  setActiveMarketplaceToken,
 } from '@/lib/bms-browser-client';
 import {
+  getMarketplaceToken,
   getSessionFromUrl,
   handleUrlMarketplaceToken,
   handleUrlSession,
@@ -26,6 +28,8 @@ import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 export interface BmsSessionContextValue {
   config: ConnectionConfig | null;
   userInfo: UserInfo | null;
+  /** Marketplace token paired with the active session, if any */
+  marketplaceToken: string | null;
   /** True when both config and userInfo are loaded */
   isReady: boolean;
   error: string | null;
@@ -47,8 +51,18 @@ export function useBmsSession(): BmsSessionContextValue {
 export function BmsSessionProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<ConnectionConfig | null>(null);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [marketplaceToken, setMarketplaceTokenState] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lastSessionRef = useRef<string | null>(null);
+
+  // Keep the bms-browser-client module-level singleton in sync so every
+  // /api/sql and /api/rest call auto-picks up the token without the caller
+  // having to thread it through (matches hosxp-telemed's activeSession
+  // pattern).
+  const publishMarketplaceToken = useCallback((token: string | null) => {
+    setMarketplaceTokenState(token);
+    setActiveMarketplaceToken(token);
+  }, []);
 
   const refresh = useCallback(async (sessionId: string) => {
     setError(null);
@@ -73,8 +87,9 @@ export function BmsSessionProvider({ children }: { children: ReactNode }) {
     setError(null);
     removeSessionCookie();
     removeMarketplaceToken();
+    publishMarketplaceToken(null);
     lastSessionRef.current = null;
-  }, []);
+  }, [publishMarketplaceToken]);
 
   // Bootstrap on mount: read URL session ID, persist to cookie, hydrate context.
   useEffect(() => {
@@ -88,13 +103,18 @@ export function BmsSessionProvider({ children }: { children: ReactNode }) {
       (window.location.search.includes('marketplace_token=') ||
         window.location.search.includes('marketplace-token='));
 
+    let resolvedToken: string | null = null;
     if (urlSessionId && urlSessionId !== lastSessionRef.current) {
       if (urlHasMarketplaceToken) {
-        handleUrlMarketplaceToken(); // persists + strips
+        resolvedToken = handleUrlMarketplaceToken(); // persists + strips
       } else {
         removeMarketplaceToken(); // drop stale, new session stands alone
+        resolvedToken = null;
       }
+    } else {
+      resolvedToken = getMarketplaceToken();
     }
+    publishMarketplaceToken(resolvedToken);
 
     const sid = handleUrlSession(); // reads URL, persists cookie, strips URL
     if (sid) {
@@ -106,13 +126,13 @@ export function BmsSessionProvider({ children }: { children: ReactNode }) {
         void refresh(sid);
       });
     }
-  }, [refresh]);
+  }, [refresh, publishMarketplaceToken]);
 
   const isReady = config !== null && userInfo !== null;
 
   return (
     <BmsSessionContext.Provider
-      value={{ config, userInfo, isReady, error, refresh, clear }}
+      value={{ config, userInfo, marketplaceToken, isReady, error, refresh, clear }}
     >
       {children}
     </BmsSessionContext.Provider>

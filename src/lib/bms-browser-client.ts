@@ -13,6 +13,35 @@ export const APP_IDENTIFIER = 'KK-LRMS.Web';
 export const SESSION_TIMEOUT_MS = 30_000;
 export const QUERY_TIMEOUT_MS = 60_000;
 
+// ---------------------------------------------------------------------------
+// Active marketplace-token singleton
+// ---------------------------------------------------------------------------
+//
+// BMS tunnel endpoints (/api/sql, /api/rest) accept an optional
+// `marketplace-token` to unlock READ/READWRITE scopes the session alone may
+// lack. Callers don't always have easy access to the token (it's launched via
+// URL, stored in localStorage, read inside React context), so we mirror
+// hosxp-telemed's `resolveMarketplaceToken` pattern: keep the current token in
+// a module-level variable that the BmsSessionProvider publishes on mount,
+// and fall back to it when an explicit argument isn't passed.
+//
+// This avoids threading `marketplaceToken` through every maternity-ward
+// service call site while keeping the explicit-override path for tests.
+let activeMarketplaceToken: string | null = null;
+
+export function setActiveMarketplaceToken(token: string | null | undefined): void {
+  activeMarketplaceToken = token && token.length > 0 ? token : null;
+}
+
+export function getActiveMarketplaceToken(): string | null {
+  return activeMarketplaceToken;
+}
+
+function resolveMarketplaceToken(explicit?: string | null): string | null {
+  if (explicit && explicit.length > 0) return explicit;
+  return activeMarketplaceToken;
+}
+
 /**
  * Private tagged error used to mark thrown errors that originated inside the
  * BMS client and must be re-thrown verbatim by the outer try/catch (rather
@@ -173,6 +202,7 @@ export async function executeSql<T = Record<string, unknown>>(
   sql: string,
   config: ConnectionConfig,
   params?: SqlParams,
+  marketplaceToken?: string | null,
 ): Promise<SqlApiResponse<T>> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
@@ -181,12 +211,17 @@ export async function executeSql<T = Record<string, unknown>>(
       sql: string;
       app: string;
       params?: Record<string, { value: unknown; value_type: string }>;
+      'marketplace-token'?: string;
     } = {
       sql,
       app: config.appIdentifier,
     };
     if (params && Object.keys(params).length > 0) {
       body.params = wrapBmsParams(params);
+    }
+    const mkt = resolveMarketplaceToken(marketplaceToken);
+    if (mkt) {
+      body['marketplace-token'] = mkt;
     }
 
     const response = await fetch(`${config.apiUrl}/api/sql`, {
@@ -397,13 +432,14 @@ export async function restInsert(
   table: string,
   data: Record<string, unknown>,
   config: ConnectionConfig,
-  marketplaceToken?: string,
+  marketplaceToken?: string | null,
 ): Promise<RestApiResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
   try {
     const url = `${config.apiUrl}/api/rest/${encodeURIComponent(table)}`;
-    const body = marketplaceToken ? { 'marketplace-token': marketplaceToken, ...data } : data;
+    const mkt = resolveMarketplaceToken(marketplaceToken);
+    const body = mkt ? { 'marketplace-token': mkt, ...data } : data;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -436,13 +472,14 @@ export async function restUpdate(
   resourceId: string | number,
   data: Record<string, unknown>,
   config: ConnectionConfig,
-  marketplaceToken?: string,
+  marketplaceToken?: string | null,
 ): Promise<RestApiResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
   try {
     const url = `${config.apiUrl}/api/rest/${encodeURIComponent(table)}/${encodeURIComponent(String(resourceId))}`;
-    const body = marketplaceToken ? { 'marketplace-token': marketplaceToken, ...data } : data;
+    const mkt = resolveMarketplaceToken(marketplaceToken);
+    const body = mkt ? { 'marketplace-token': mkt, ...data } : data;
     const response = await fetch(url, {
       method: 'PUT',
       headers: {
@@ -474,14 +511,15 @@ export async function restDelete(
   table: string,
   resourceId: string | number,
   config: ConnectionConfig,
-  marketplaceToken?: string,
+  marketplaceToken?: string | null,
 ): Promise<RestApiResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
   try {
     let url = `${config.apiUrl}/api/rest/${encodeURIComponent(table)}/${encodeURIComponent(String(resourceId))}`;
-    if (marketplaceToken) {
-      url += `?marketplace-token=${encodeURIComponent(marketplaceToken)}`;
+    const mkt = resolveMarketplaceToken(marketplaceToken);
+    if (mkt) {
+      url += `?marketplace-token=${encodeURIComponent(mkt)}`;
     }
     const response = await fetch(url, {
       method: 'DELETE',

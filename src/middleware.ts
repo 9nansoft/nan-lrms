@@ -52,6 +52,14 @@ export default auth((req) => {
     if (bmsSessionId) {
       loginUrl.searchParams.set('bms-session-id', bmsSessionId);
     }
+    // Preserve marketplace_token (snake_case OR kebab-case — launchers vary)
+    // so BmsSessionProvider can pair it with the new session on the next page.
+    const marketplaceToken =
+      req.nextUrl.searchParams.get('marketplace_token') ??
+      req.nextUrl.searchParams.get('marketplace-token');
+    if (marketplaceToken) {
+      loginUrl.searchParams.set('marketplace_token', marketplaceToken);
+    }
     return addSecurityHeaders(NextResponse.redirect(loginUrl));
   }
 
