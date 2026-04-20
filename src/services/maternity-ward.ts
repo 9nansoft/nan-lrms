@@ -16,6 +16,7 @@ import {
   PATIENT_LABOUR_MED_BY_AN,
   PATIENT_PARTOGRAPH_BY_AN,
   PATIENT_PREGNANCY_BY_AN,
+  PATIENT_NURSE_NOTES_BY_AN,
   PATIENT_STAGE_MED_BY_AN,
   PATIENT_VITAL_SIGNS_BY_AN,
   WARD_BEDS_INVENTORY,
@@ -35,6 +36,7 @@ import type {
   LabourMedRow,
   LabourRecord,
   MaternityWard,
+  NurseNoteRow,
   PartographRow,
   PregnancyRecord,
   StageMedRow,
@@ -203,13 +205,27 @@ function fireAudit(payload: AuditPayload): void {
 }
 
 /**
- * Mint a fresh primary-key value via BMS get_serialnumber. The id_field
- * parameter is the column name (e.g. 'ipt_labour_partograph_id'); BMS resolves
- * the underlying sequence/table itself.
+ * Mint a fresh primary-key value via BMS `get_serialnumber`.
+ *
+ * The function requires THREE fields in the payload (verified against live
+ * BMS — the previous single-field `id_field` shape returned MessageCode 500
+ * "No serial_name"):
+ *   - `serial_name`: name of the serial sequence (almost always == column name)
+ *   - `table_name`: the destination table
+ *   - `field_name`: the PK column name
+ *
+ * In standard HOSxP convention `serial_name === field_name === '<table>_id'`,
+ * so `idField` is reused for both.
  */
-async function mintSerial(idField: string, config: ConnectionConfig): Promise<number> {
+async function mintSerial(
+  config: ConnectionConfig,
+  table: string,
+  idField: string,
+): Promise<number> {
   const r = await callFunction<{ Value: number }>('get_serialnumber', config, {
-    id_field: idField,
+    serial_name: idField,
+    table_name: table,
+    field_name: idField,
   });
   return Number(r.Value);
 }
@@ -226,7 +242,7 @@ export async function upsertPartograph(
 ): Promise<PartographRow> {
   const isNew = row.ipt_labour_partograph_id === undefined;
   if (isNew) {
-    const id = await mintSerial('ipt_labour_partograph_id', config);
+    const id = await mintSerial(config, 'ipt_labour_partograph', 'ipt_labour_partograph_id');
     const payload = { ...row, ipt_labour_partograph_id: id, an };
     await restInsert('ipt_labour_partograph', payload, config);
     fireAudit({
@@ -290,7 +306,7 @@ export async function upsertVitalSign(
 ): Promise<VitalSignRow> {
   const isNew = row.ipt_pregnancy_vital_sign_id === undefined;
   if (isNew) {
-    const id = await mintSerial('ipt_pregnancy_vital_sign_id', config);
+    const id = await mintSerial(config, 'ipt_pregnancy_vital_sign', 'ipt_pregnancy_vital_sign_id');
     const payload = { ...row, ipt_pregnancy_vital_sign_id: id, an };
     await restInsert('ipt_pregnancy_vital_sign', payload, config);
     fireAudit({
@@ -329,6 +345,69 @@ export async function deleteVitalSign(
   await restDelete('ipt_pregnancy_vital_sign', id, config);
   fireAudit({
     entity: 'ipt_pregnancy_vital_sign',
+    op: 'delete',
+    resourceId: String(id),
+    hcode,
+    staff: userInfo.loginname,
+  });
+}
+
+// ─── IPD nurse-note CRUD ───────────────────────────────────────────────────
+// Comprehensive nurse-note chart (ipd_nurse_note, 70+ columns). Port of
+// HOSxPIPDPatientAdmitNurseNoteEntryForm. PK is ipd_nurse_note_id and
+// is auto-minted via get_serialnumber on insert.
+export async function getPatientNurseNotes(
+  config: ConnectionConfig,
+  an: string,
+): Promise<NurseNoteRow[]> {
+  const sql = getQuery(PATIENT_NURSE_NOTES_BY_AN, DEFAULT_DIALECT);
+  const r = await executeSql<NurseNoteRow>(sql, config, { an });
+  return r.data;
+}
+
+export async function upsertNurseNote(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  an: string,
+  row: Partial<NurseNoteRow>,
+  hcode: string,
+): Promise<NurseNoteRow> {
+  const isNew = row.nurse_note_id === undefined;
+  if (isNew) {
+    const id = await mintSerial(config, 'ipd_nurse_note', 'nurse_note_id');
+    const payload = { ...row, nurse_note_id: id, an };
+    await restInsert('ipd_nurse_note', payload, config);
+    fireAudit({
+      entity: 'ipd_nurse_note',
+      op: 'insert',
+      resourceId: String(id),
+      hcode,
+      staff: userInfo.loginname,
+    });
+    return payload as NurseNoteRow;
+  }
+  const { nurse_note_id, ...fields } = row;
+  await restUpdate('ipd_nurse_note', String(nurse_note_id), fields, config);
+  fireAudit({
+    entity: 'ipd_nurse_note',
+    op: 'update',
+    resourceId: String(nurse_note_id),
+    hcode,
+    staff: userInfo.loginname,
+    fieldsTouched: Object.keys(fields),
+  });
+  return row as NurseNoteRow;
+}
+
+export async function deleteNurseNote(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  id: number,
+  hcode: string,
+): Promise<void> {
+  await restDelete('ipd_nurse_note', id, config);
+  fireAudit({
+    entity: 'ipd_nurse_note',
     op: 'delete',
     resourceId: String(id),
     hcode,
@@ -411,7 +490,7 @@ export async function upsertLabourMedication(
 ): Promise<LabourMedRow> {
   const isNew = row.labour_medication_id === undefined;
   if (isNew) {
-    const id = await mintSerial('labour_medication_id', config);
+    const id = await mintSerial(config, 'labour_medication', 'labour_medication_id');
     const payload = { ...row, labour_medication_id: id, an };
     await restInsert('labour_medication', payload, config);
     fireAudit({
@@ -465,7 +544,7 @@ export async function upsertStageMedication(
 ): Promise<StageMedRow> {
   const isNew = row.labour_stage_medication_id === undefined;
   if (isNew) {
-    const id = await mintSerial('labour_stage_medication_id', config);
+    const id = await mintSerial(config, 'labour_stage_medication', 'labour_stage_medication_id');
     const payload = { ...row, labour_stage_medication_id: id, an };
     await restInsert('labour_stage_medication', payload, config);
     fireAudit({
@@ -524,7 +603,7 @@ export async function upsertComplication(
 ): Promise<ComplicationRow> {
   const isNew = row.ipt_labour_complication_id === undefined;
   if (isNew) {
-    const id = await mintSerial('ipt_labour_complication_id', config);
+    const id = await mintSerial(config, 'ipt_labour_complication', 'ipt_labour_complication_id');
     const payload = { ...row, ipt_labour_complication_id: id, ipt_labour_id: iptLabourId };
     await restInsert('ipt_labour_complication', payload, config);
     fireAudit({
@@ -585,7 +664,7 @@ export async function upsertNewborn(
 ): Promise<InfantRow> {
   const isNew = row.ipt_newborn_id === undefined;
   if (isNew) {
-    const id = await mintSerial('ipt_newborn_id', config);
+    const id = await mintSerial(config, 'ipt_newborn', 'ipt_newborn_id');
     const payload = { ...row, ipt_newborn_id: id, an };
     await restInsert('ipt_newborn', payload, config);
     fireAudit({
@@ -620,7 +699,7 @@ export async function upsertLabourInfant(
 ): Promise<InfantRow> {
   const isNew = row.ipt_labour_infant_id === undefined;
   if (isNew) {
-    const id = await mintSerial('ipt_labour_infant_id', config);
+    const id = await mintSerial(config, 'ipt_labour_infant', 'ipt_labour_infant_id');
     const payload = { ...row, ipt_labour_infant_id: id, an };
     await restInsert('ipt_labour_infant', payload, config);
     fireAudit({
@@ -697,7 +776,7 @@ export async function movePatientBed(
     config,
   );
   // 2. Mint a fresh iptbedmove_id
-  const id = await mintSerial('iptbedmove_id', config);
+  const id = await mintSerial(config, 'iptbedmove', 'iptbedmove_id');
   // 3. Insert iptbedmove audit row with split date/time + entry_datetime
   const now = new Date();
   const movedate = now.toISOString().slice(0, 10); // YYYY-MM-DD

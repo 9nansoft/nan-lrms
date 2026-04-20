@@ -1,4 +1,4 @@
-// T032: HospitalSeeder — seeds 25 Khon Kaen community hospitals
+// T032: HospitalSeeder — seeds 26 Khon Kaen province hospitals (per MOPH)
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '../adapter';
 import { DataSeeder } from './seeder';

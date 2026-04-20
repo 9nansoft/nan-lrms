@@ -61,36 +61,44 @@ export interface KkHospitalSeed {
   level: HospitalLevel;
 }
 
+// Source of truth: MOPH `hospcode` table — verified via
+//   SELECT hospcode, name, hospital_type_id
+//   FROM hospcode
+//   WHERE chwpart = '40' AND hospital_type_id IN (5,6,7) AND CHAR_LENGTH(hospcode) = 5
+// against a live HOSxP MySQL on 2026-04-19. 26 facilities total in
+// Khon Kaen province (chwpart = '40'):
+//   - hospital_type_id 5 → A_S (general/regional, just the KK Regional)
+//   - hospital_type_id 6 → M1 (large referral — Chumphae, Sirindhorn)
+//   - hospital_type_id 7 → F2 (community)
+// Names use the รพ. abbreviation per existing convention; full MOPH
+// names would be "โรงพยาบาล…".
 export const KK_HOSPITALS: KkHospitalSeed[] = [
-  { hcode: '10670', name: 'รพ.ชุมแพ', level: HospitalLevel.M1 },
-  { hcode: '10671', name: 'รพ.น้ำพอง', level: HospitalLevel.M1 },
-  { hcode: '10672', name: 'รพ.บ้านไผ่', level: HospitalLevel.A_S },
-  { hcode: '10673', name: 'รพ.พล', level: HospitalLevel.M2 },
-  { hcode: '10674', name: 'รพ.ภูเวียง', level: HospitalLevel.M1 },
-  { hcode: '10675', name: 'รพ.มัญจาคีรี', level: HospitalLevel.M2 },
-  { hcode: '10676', name: 'รพ.หนองเรือ', level: HospitalLevel.M2 },
-  { hcode: '10677', name: 'รพ.ชนบท', level: HospitalLevel.F1 },
-  { hcode: '10678', name: 'รพ.สีชมพู', level: HospitalLevel.F1 },
-  { hcode: '10679', name: 'รพ.อุบลรัตน์', level: HospitalLevel.F1 },
-  { hcode: '10680', name: 'รพ.กระนวน', level: HospitalLevel.M2 },
-  { hcode: '10681', name: 'รพ.บ้านฝาง', level: HospitalLevel.F2 },
-  { hcode: '10682', name: 'รพ.พระยืน', level: HospitalLevel.F2 },
-  { hcode: '10683', name: 'รพ.หนองสองห้อง', level: HospitalLevel.F1 },
-  { hcode: '10684', name: 'รพ.ภูผาม่าน', level: HospitalLevel.F2 },
-  { hcode: '10685', name: 'รพ.ซำสูง', level: HospitalLevel.F2 },
-  { hcode: '10686', name: 'รพ.โคกโพธิ์ไชย', level: HospitalLevel.F2 },
-  { hcode: '10687', name: 'รพ.หนองนาคำ', level: HospitalLevel.F2 },
-  { hcode: '10688', name: 'รพ.บ้านแฮด', level: HospitalLevel.F2 },
-  { hcode: '10689', name: 'รพ.โนนศิลา', level: HospitalLevel.F2 },
-  { hcode: '10690', name: 'รพ.เขาสวนกวาง', level: HospitalLevel.F1 },
-  { hcode: '11445', name: 'รพ.เปือยน้อย', level: HospitalLevel.F2 },
-  // รพ.วังสะพุง (hcode 11446) was removed — it is in Loei province, not
-  // Khon Kaen. KK has 26 districts; Mueang Khon Kaen is served by
-  // รพศ.ขอนแก่น (the Regional Hospital, separately managed) so this
-  // community-hospital list contains 25 entries.
-  { hcode: '10998', name: 'รพ.แวงใหญ่', level: HospitalLevel.F2 },
-  { hcode: '10999', name: 'รพ.แวงน้อย', level: HospitalLevel.F2 },
-  { hcode: '11000', name: 'รพ.เวียงเก่า', level: HospitalLevel.F3 },
+  { hcode: '10670', name: 'รพ.ขอนแก่น', level: HospitalLevel.A_S },
+  { hcode: '10995', name: 'รพ.บ้านฝาง', level: HospitalLevel.F2 },
+  { hcode: '10996', name: 'รพ.พระยืน', level: HospitalLevel.F2 },
+  { hcode: '10997', name: 'รพ.หนองเรือ', level: HospitalLevel.F2 },
+  { hcode: '10998', name: 'รพ.ชุมแพ', level: HospitalLevel.M1 },
+  { hcode: '10999', name: 'รพ.สีชมพู', level: HospitalLevel.F2 },
+  { hcode: '11000', name: 'รพ.น้ำพอง', level: HospitalLevel.F2 },
+  { hcode: '11001', name: 'รพ.อุบลรัตน์', level: HospitalLevel.F2 },
+  { hcode: '11002', name: 'รพ.บ้านไผ่', level: HospitalLevel.F2 },
+  { hcode: '11003', name: 'รพ.เปือยน้อย', level: HospitalLevel.F2 },
+  { hcode: '11004', name: 'รพ.พล', level: HospitalLevel.F2 },
+  { hcode: '11005', name: 'รพ.แวงใหญ่', level: HospitalLevel.F2 },
+  { hcode: '11006', name: 'รพ.แวงน้อย', level: HospitalLevel.F2 },
+  { hcode: '11007', name: 'รพ.หนองสองห้อง', level: HospitalLevel.F2 },
+  { hcode: '11008', name: 'รพ.ภูเวียง', level: HospitalLevel.F2 },
+  { hcode: '11009', name: 'รพ.มัญจาคีรี', level: HospitalLevel.F2 },
+  { hcode: '11010', name: 'รพ.ชนบท', level: HospitalLevel.F2 },
+  { hcode: '11011', name: 'รพ.เขาสวนกวาง', level: HospitalLevel.F2 },
+  { hcode: '11012', name: 'รพ.ภูผาม่าน', level: HospitalLevel.F2 },
+  { hcode: '11445', name: 'รพ.สมเด็จพระยุพราชกระนวน', level: HospitalLevel.F2 },
+  { hcode: '12275', name: 'รพ.สิรินธร จังหวัดขอนแก่น', level: HospitalLevel.M1 },
+  { hcode: '14132', name: 'รพ.ซำสูง', level: HospitalLevel.F2 },
+  { hcode: '77649', name: 'รพ.หนองนาคำ', level: HospitalLevel.F2 },
+  { hcode: '77650', name: 'รพ.เวียงเก่า', level: HospitalLevel.F2 },
+  { hcode: '77651', name: 'รพ.โคกโพธิ์ไชย', level: HospitalLevel.F2 },
+  { hcode: '77652', name: 'รพ.โนนศิลา', level: HospitalLevel.F2 },
 ];
 
 export function getHospitalLevelConfig(level: HospitalLevel): HospitalLevelConfig {

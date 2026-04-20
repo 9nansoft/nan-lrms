@@ -18,25 +18,33 @@ global.fetch = mockFetch;
 describe('bms-browser-client.retrieveBmsSession', () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it('POSTs sessionId to PasteJSON and returns parsed body', async () => {
+  it('GETs PasteJSON with ?Action=GET&code=<sid> query string', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({
-        jwt: 'eyJ...', bms_url: 'https://t.example/api',
-        user_info: { loginname: 'nurse1', fullname: 'Nurse One', hospcode: '10670' },
-        expired_second: 3600,
+        result: {
+          user_info: {
+            bms_url: 'https://t.example/api',
+            bms_session_code: 'eyJ...',
+            loginname: 'nurse1', fullname: 'Nurse One', hospcode: '10670',
+          },
+          expired_second: 3600,
+        },
       }),
     });
 
     const r = await retrieveBmsSession('SID-1');
-    expect(r.jwt).toBe('eyJ...');
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://hosxp.net/phapi/PasteJSON',
-      expect.objectContaining({ method: 'POST' }),
-    );
-    const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(callBody.session_id).toBe('SID-1');
+    expect(r.result?.user_info).toMatchObject({ loginname: 'nurse1' });
+    const calledUrl = mockFetch.mock.calls[0][0] as string;
+    expect(calledUrl).toMatch(/^https:\/\/hosxp\.net\/phapi\/PasteJSON\?/);
+    expect(calledUrl).toContain('Action=GET');
+    expect(calledUrl).toContain('code=SID-1');
+    // Cache-bust param present
+    expect(calledUrl).toMatch(/_=\d+/);
+    // Should NOT have a body (GET request)
+    expect(mockFetch.mock.calls[0][1]?.body).toBeUndefined();
+    expect(mockFetch.mock.calls[0][1]?.method).toBeUndefined(); // defaults to GET
   });
 
   it('throws on HTTP 401', async () => {
@@ -49,8 +57,15 @@ describe('bms-browser-client.retrieveBmsSession', () => {
 });
 
 describe('extractConnectionConfig', () => {
-  it('extracts apiUrl + bearerToken + appIdentifier', () => {
-    const r = { jwt: 'eyJ...', bms_url: 'https://t.example/api' };
+  it('extracts apiUrl + bearerToken from result.user_info (PasteJSON shape)', () => {
+    const r = {
+      result: {
+        user_info: {
+          bms_url: 'https://t.example/api',
+          bms_session_code: 'eyJ...',
+        },
+      },
+    };
     const c = extractConnectionConfig(r);
     expect(c).toEqual({
       apiUrl: 'https://t.example/api',
@@ -59,17 +74,55 @@ describe('extractConnectionConfig', () => {
     });
   });
 
-  it('throws when bms_url missing', () => {
-    expect(() => extractConnectionConfig({ jwt: 'x' } as never)).toThrow(/bms_url/);
+  it('falls back to result.key_value when bms_session_code missing', () => {
+    const r = {
+      result: {
+        user_info: { bms_url: 'https://t.example/api' },
+        key_value: 'fallback-token',
+      },
+    };
+    const c = extractConnectionConfig(r);
+    expect(c.bearerToken).toBe('fallback-token');
   });
 
-  it('throws when jwt missing', () => {
-    expect(() => extractConnectionConfig({ bms_url: 'x' } as never)).toThrow(/jwt/);
+  it('strips trailing slash from bms_url', () => {
+    const r = {
+      result: { user_info: { bms_url: 'https://t.example/api/', bms_session_code: 't' } },
+    };
+    expect(extractConnectionConfig(r).apiUrl).toBe('https://t.example/api');
+  });
+
+  it('throws when bms_url missing', () => {
+    expect(() =>
+      extractConnectionConfig({ result: { user_info: { bms_session_code: 'x' } } } as never),
+    ).toThrow(/bms_url/);
+  });
+
+  it('throws when bearer token missing (neither bms_session_code nor key_value)', () => {
+    expect(() =>
+      extractConnectionConfig({ result: { user_info: { bms_url: 'x' } } } as never),
+    ).toThrow(/bearer token/i);
+  });
+
+  it('accepts legacy top-level fixture shape (test-only fallback)', () => {
+    // Existing tests + integration helpers use the simpler { jwt, bms_url } shape
+    const r = { jwt: 'eyJ...', bms_url: 'https://t.example/api' };
+    const c = extractConnectionConfig(r);
+    expect(c).toEqual({
+      apiUrl: 'https://t.example/api',
+      bearerToken: 'eyJ...',
+      appIdentifier: APP_IDENTIFIER,
+    });
   });
 });
 
 describe('extractUserInfo', () => {
-  it('returns user_info subfield', () => {
+  it('returns user_info from result.user_info (PasteJSON shape)', () => {
+    const r = { result: { user_info: { loginname: 'n1', fullname: 'Nurse', hospcode: '10670' } } };
+    expect(extractUserInfo(r as never)).toMatchObject({ loginname: 'n1', hospcode: '10670' });
+  });
+
+  it('falls back to top-level user_info (test fixture shape)', () => {
     const r = { user_info: { loginname: 'n1', fullname: 'Nurse', hospcode: '10670' } };
     expect(extractUserInfo(r as never)).toMatchObject({ loginname: 'n1', hospcode: '10670' });
   });
@@ -115,7 +168,8 @@ describe('executeSql', () => {
     });
     await executeSql('SELECT * FROM x WHERE id = :id', cfg, { id: 42 });
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.params).toEqual({ id: 42 });
+    // BMS requires typed params; executeSql auto-wraps integer 42 → {value, value_type}
+    expect(body.params).toEqual({ id: { value: 42, value_type: 'integer' } });
   });
 
   it('throws Thai retry message on HTTP 429', async () => {

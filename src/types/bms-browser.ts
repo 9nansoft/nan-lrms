@@ -13,6 +13,16 @@ export interface UserInfo {
 }
 
 export interface BmsSessionResponse {
+  // PasteJSON nests the actionable fields (bms_url, bms_session_code, etc.)
+  // under `result.user_info`. Earlier ports read top-level `jwt`/`bms_url`
+  // and crashed at runtime because those fields don't exist.
+  result?: {
+    user_info?: Record<string, unknown>;
+    key_value?: string;
+    expired_second?: number;
+    [key: string]: unknown;
+  };
+  // Top-level fallbacks (used by test fixtures that mimic the legacy shape):
   jwt?: string;
   bms_url?: string;
   user_info?: Record<string, unknown>;

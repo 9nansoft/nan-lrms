@@ -47,17 +47,26 @@ function makePageStub(): PageStubResult {
 }
 
 describe('mockBmsSessionRetrieve', () => {
-  it('routes the PasteJSON URL and fulfills with default user info', async () => {
+  it('routes the PasteJSON URL and fulfills with default user info nested under result.user_info', async () => {
     const stub = makePageStub();
     await mockBmsSessionRetrieve(stub.page, { apiUrl: 'http://127.0.0.1:9999' });
-    expect(stub.getCapturedUrl()).toBe('https://hosxp.net/phapi/PasteJSON');
+    // URL pattern is now a regex (matches PasteJSON with optional ?Action=GET&code=…)
+    const captured = stub.getCapturedUrl();
+    if (captured instanceof RegExp) {
+      expect('https://hosxp.net/phapi/PasteJSON?Action=GET&code=X').toMatch(captured);
+    } else {
+      expect(captured).toBe('https://hosxp.net/phapi/PasteJSON');
+    }
     const result = await stub.fireRoute();
     expect(result?.status).toBe(200);
     expect(result?.contentType).toBe('application/json');
     const body = JSON.parse(result!.body);
-    expect(body.bms_url).toBe('http://127.0.0.1:9999');
-    expect(body.user_info.loginname).toBe('nurse1');
-    expect(body.user_info.hospcode).toBe('10670');
+    // Real PasteJSON shape: result.user_info.bms_url + result.user_info.bms_session_code
+    expect(body.result.user_info.bms_url).toBe('http://127.0.0.1:9999');
+    expect(body.result.user_info.bms_session_code).toBe('mock-bearer');
+    expect(body.result.user_info.loginname).toBe('nurse1');
+    expect(body.result.user_info.hospcode).toBe('10670');
+    expect(body.result.key_value).toBe('mock-bearer');
     expect(body.MessageCode).toBe(200);
   });
 
@@ -72,8 +81,8 @@ describe('mockBmsSessionRetrieve', () => {
     });
     const result = await stub.fireRoute();
     const body = JSON.parse(result!.body);
-    expect(body.jwt).toBe('CUSTOM');
-    expect(body.user_info).toEqual({
+    expect(body.result.user_info.bms_session_code).toBe('CUSTOM');
+    expect(body.result.user_info).toMatchObject({
       loginname: 'doc1',
       fullname: 'Dr. One',
       hospcode: '99999',

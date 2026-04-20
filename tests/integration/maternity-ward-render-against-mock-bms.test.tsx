@@ -59,19 +59,25 @@ beforeEach(async () => {
         : input instanceof URL
           ? input.toString()
           : input.url;
-    if (url === PASTE_JSON_URL) {
+    if (url.startsWith(PASTE_JSON_URL)) {
+      // Real PasteJSON shape (verified live): connection details nest under
+      // result.user_info; bms_session_code is the bearer token (key_value as
+      // a fallback). Top-level jwt/bms_url do NOT exist in the real response.
       return new Response(
         JSON.stringify({
-          jwt: 'mock-bearer',
-          bms_url: server.url,
-          user_info: {
-            loginname: 'nurse1',
-            fullname: 'Nurse One',
-            hospcode: '10670',
+          result: {
+            user_info: {
+              bms_url: server.url,
+              bms_session_code: 'mock-bearer',
+              loginname: 'nurse1',
+              fullname: 'Nurse One',
+              hospcode: '10670',
+            },
+            key_value: 'mock-bearer',
+            expired_second: 3600,
           },
-          expired_second: 3600,
           MessageCode: 200,
-          Message: 'ok',
+          Message: 'OK',
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );

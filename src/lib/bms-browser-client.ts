@@ -47,10 +47,13 @@ export async function retrieveBmsSession(sessionId: string): Promise<BmsSessionR
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SESSION_TIMEOUT_MS);
   try {
-    const response = await fetch(PASTE_JSON_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId }),
+    // PasteJSON expects GET with ?Action=GET&code=<sid>; cache-bust with _ to
+    // defeat any intermediate HTTP caching. POST + JSON body returns a 200
+    // with a non-actionable payload that lacks the result.user_info envelope.
+    const url = `${PASTE_JSON_URL}?Action=GET&code=${encodeURIComponent(sessionId)}&_=${Date.now()}`;
+    const response = await fetch(url, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -71,24 +74,99 @@ export async function retrieveBmsSession(sessionId: string): Promise<BmsSessionR
   }
 }
 
+// PasteJSON wraps the connection details in `result.user_info`. The bearer
+// token is `bms_session_code` (preferred) or `key_value` (fallback). Top-level
+// `jwt`/`bms_url` are NOT present — earlier port read from those and crashed
+// at runtime with "missing jwt".
+type RawUserInfo = {
+  bms_url?: string;
+  bms_session_code?: string;
+  loginname?: string;
+  username?: string;
+  fullname?: string;
+  name?: string;
+  hospcode?: string;
+  hospital_code?: string;
+  [key: string]: unknown;
+};
+type RawResult = {
+  user_info?: RawUserInfo;
+  key_value?: string;
+  [key: string]: unknown;
+};
+
+function readResult(r: BmsSessionResponse): RawResult {
+  // Accept either `r.result.user_info...` (PasteJSON) or top-level fields
+  // (test fixtures). Top-level wins only when result is absent.
+  return (r.result as RawResult | undefined) ?? (r as unknown as RawResult);
+}
+
 export function extractConnectionConfig(r: BmsSessionResponse): ConnectionConfig {
-  if (!r.jwt) throw new Error('BMS session response missing jwt');
-  if (!r.bms_url) throw new Error('BMS session response missing bms_url');
+  const result = readResult(r);
+  const userInfo = result.user_info;
+  const apiUrl = userInfo?.bms_url ?? (r as { bms_url?: string }).bms_url;
+  if (!apiUrl) {
+    throw new Error('BMS session response missing bms_url');
+  }
+  const bearerToken =
+    userInfo?.bms_session_code ?? result.key_value ?? (r as { jwt?: string }).jwt;
+  if (!bearerToken) {
+    throw new Error('BMS session response missing bearer token (bms_session_code/key_value)');
+  }
   return {
-    apiUrl: r.bms_url.replace(/\/$/, ''),
-    bearerToken: r.jwt,
+    apiUrl: apiUrl.replace(/\/$/, ''),
+    bearerToken,
     appIdentifier: APP_IDENTIFIER,
   };
 }
 
 export function extractUserInfo(r: BmsSessionResponse): UserInfo {
-  const ui = (r.user_info ?? {}) as Record<string, unknown>;
+  const result = readResult(r);
+  const ui = (result.user_info ?? (r.user_info as RawUserInfo | undefined) ?? {}) as RawUserInfo;
   return {
     loginname: String(ui.loginname ?? ui.username ?? ''),
     fullname: String(ui.fullname ?? ui.name ?? ''),
     hospcode: String(ui.hospcode ?? ui.hospital_code ?? ''),
     ...ui,
   };
+}
+
+/**
+ * Wrap raw param values into the typed shape BMS requires:
+ *   `{ name: <val> }` → `{ name: { value: <val>, value_type: 'string'|'integer'|... } }`
+ *
+ * BMS rejects untyped/primitive params with `409 "Invalid variant operation"`
+ * (verified live). Already-wrapped `{value, value_type}` entries pass through.
+ *
+ * Type detection follows Pascal/Delphi conventions:
+ *   - boolean → 'string' ('Y'/'N' is the HOSxP convention; raw bool is rare)
+ *   - integer (Number.isInteger) → 'integer'
+ *   - other number → 'float'
+ *   - Date → 'datetime' (ISO string)
+ *   - everything else (string, null) → 'string'
+ */
+function wrapBmsParams(raw: SqlParams): Record<string, { value: unknown; value_type: string }> {
+  const out: Record<string, { value: unknown; value_type: string }> = {};
+  for (const [key, v] of Object.entries(raw)) {
+    if (
+      v !== null &&
+      typeof v === 'object' &&
+      'value' in (v as object) &&
+      'value_type' in (v as object)
+    ) {
+      out[key] = v as { value: unknown; value_type: string };
+      continue;
+    }
+    if (typeof v === 'number') {
+      out[key] = { value: v, value_type: Number.isInteger(v) ? 'integer' : 'float' };
+    } else if (v instanceof Date) {
+      out[key] = { value: v.toISOString(), value_type: 'datetime' };
+    } else {
+      // string | null | boolean | undefined → coerce to string
+      out[key] = { value: v == null ? null : String(v), value_type: 'string' };
+    }
+  }
+  return out;
 }
 
 export async function executeSql<T = Record<string, unknown>>(
@@ -99,11 +177,17 @@ export async function executeSql<T = Record<string, unknown>>(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
   try {
-    const body: { sql: string; app: string; params?: SqlParams } = {
+    const body: {
+      sql: string;
+      app: string;
+      params?: Record<string, { value: unknown; value_type: string }>;
+    } = {
       sql,
       app: config.appIdentifier,
     };
-    if (params && Object.keys(params).length > 0) body.params = params;
+    if (params && Object.keys(params).length > 0) {
+      body.params = wrapBmsParams(params);
+    }
 
     const response = await fetch(`${config.apiUrl}/api/sql`, {
       method: 'POST',

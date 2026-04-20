@@ -139,8 +139,10 @@ describe('listWardBedsInventory', () => {
     expect(beds).toHaveLength(2);
     expect(beds[0].bedno).toBe('01');
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.params).toEqual({ ward: '03' });
+    // BMS requires typed params; executeSql wraps string '03' → {value, value_type}
+    expect(body.params).toEqual({ ward: { value: '03', value_type: 'string' } });
     expect(body.sql).toContain('FROM bedno');
+    expect(body.sql).toContain(':ward');
   });
 });
 
@@ -185,8 +187,9 @@ describe('listWardBedsOccupancy', () => {
     expect(occ).toHaveLength(1);
     expect(occ[0].an).toBe('AN1');
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.params).toEqual({ ward: '03' });
+    expect(body.params).toEqual({ ward: { value: '03', value_type: 'string' } });
     expect(body.sql).toContain("i.confirm_discharge = 'N'");
+    expect(body.sql).toContain(':ward');
   });
 });
 
@@ -1286,7 +1289,12 @@ describe('movePatientBed', () => {
 
     expect(mockFetch.mock.calls[1][0]).toContain('/api/function?name=get_serialnumber');
     const fnBody = JSON.parse(mockFetch.mock.calls[1][1].body);
-    expect(fnBody).toEqual({ id_field: 'iptbedmove_id' });
+    // get_serialnumber requires serial_name + table_name + field_name (verified live)
+    expect(fnBody).toEqual({
+      serial_name: 'iptbedmove_id',
+      table_name: 'iptbedmove',
+      field_name: 'iptbedmove_id',
+    });
   });
 
   it('calls restInsert(iptbedmove, {...}) third with all expected fields', async () => {

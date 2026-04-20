@@ -208,7 +208,12 @@ describe('Maternity ward bed-move full flow (against mock BMS)', () => {
 
     expect(reqs[1].method).toBe('POST');
     expect(reqs[1].path).toBe('/api/function');
-    expect(reqs[1].body).toEqual({ id_field: 'iptbedmove_id' });
+    // BMS get_serialnumber requires serial_name + table_name + field_name (verified live)
+    expect(reqs[1].body).toEqual({
+      serial_name: 'iptbedmove_id',
+      table_name: 'iptbedmove',
+      field_name: 'iptbedmove_id',
+    });
 
     expect(reqs[2].method).toBe('POST');
     expect(reqs[2].path).toBe('/api/rest/iptbedmove');

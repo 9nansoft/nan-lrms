@@ -33,20 +33,28 @@ export async function mockBmsSessionRetrieve(
   page: Page,
   opts: MockBmsSessionRetrieveOptions,
 ): Promise<void> {
+  const bearer = opts.bearerToken ?? 'mock-bearer';
+  // Real PasteJSON shape (verified live): connection details nest under
+  // result.user_info; bms_session_code is the bearer (key_value as fallback).
   const body = {
-    jwt: opts.bearerToken ?? 'mock-bearer',
-    bms_url: opts.apiUrl,
-    user_info: {
-      loginname: opts.loginname ?? 'nurse1',
-      fullname: opts.fullname ?? 'Nurse One',
-      hospcode: opts.hospcode ?? '10670',
+    result: {
+      user_info: {
+        bms_url: opts.apiUrl,
+        bms_session_code: bearer,
+        loginname: opts.loginname ?? 'nurse1',
+        fullname: opts.fullname ?? 'Nurse One',
+        hospcode: opts.hospcode ?? '10670',
+      },
+      key_value: bearer,
+      expired_second: 3600,
     },
-    expired_second: 3600,
     MessageCode: 200,
-    Message: 'ok',
+    Message: 'OK',
   };
 
-  await page.route(PASTE_JSON_URL, async (route) => {
+  // retrieveBmsSession appends ?Action=GET&code=<sid>&_=<ts>; match the URL
+  // by prefix (Playwright's route matcher accepts a regexp).
+  await page.route(new RegExp(`^${PASTE_JSON_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

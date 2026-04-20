@@ -86,6 +86,102 @@ export interface VitalSignRow {
   [key: string]: unknown;
 }
 
+// `ipd_nurse_note` — the general IPD nurse-note record ported from
+// HOSxPIPDPatientAdmitNurseNoteEntryForm (70+ columns). This is the real
+// source of the "vital sign chart" that the pulse/temp, RR, BP, fluid I/O
+// views in HOSxP read from. PK column is `nurse_note_id` (confirmed against
+// the Delphi DoSaveData SQL). `VitalSignRow` above stays in the codebase
+// for the pregnancy-specific labor form; everything the maternity drawer's
+// Vital Signs tab shows flows through this type instead.
+export interface NurseNoteRow {
+  nurse_note_id?: number;
+  an: string;
+  note_date: string | null;
+  note_time: string | null;
+  // Header / classification
+  ipd_nurse_note_time_id: number | null;
+  ipd_nurse_note_type_id: number | null;
+  ipd_nurse_shift_id: number | null;
+  ipd_nurse_eval_range_code: string | null;
+  doctor_code: string | null;
+  ipd_nurse_patient_type_id: number | null;
+  operation_started: string | null;
+  // Core vitals
+  temperature: number | null;
+  pulse: number | null;
+  heart_rate: number | null;
+  bp_systolic: number | null;
+  bp_diastolic: number | null;
+  ibps: number | null;   // invasive BP sys
+  ibpd: number | null;   // invasive BP dia
+  imap: number | null;   // invasive MAP
+  respiratory_rate: number | null;
+  // Extended vitals
+  spo2_ra: number | null;
+  spo2_o2: number | null;
+  etco2: number | null;
+  cvp: number | null;
+  icp: number | null;
+  pvc: number | null;
+  pain_score: number | null;
+  sedation_score: number | null;
+  news2_score: number | null;
+  news2_score_type_id: number | null;
+  sos_score: number | null;
+  consciousness_level_type_id: number | null;
+  has_hypercapnic_rf: string | null;      // 'Y'/'N'
+  has_oxygen_ventilator: string | null;   // 'Y'/'N'
+  // Biometric
+  weight: number | null;
+  height: number | null;
+  bmi: number | null;
+  bsa: number | null;
+  waist: number | null;
+  weight_loss: number | null;
+  // Physical exam
+  lung_text: string | null;
+  heart_text: string | null;
+  abdomen_text: string | null;
+  fetal_heart_text: string | null;
+  // Obstetric
+  cervical_open_size: number | null;
+  eff: number | null;
+  station: string | null;
+  labour_sac_type_id: number | null;
+  labour_amniotic_type_id: number | null;
+  // Fluid intake
+  fluid_intake_oral: number | null;
+  fluid_intake_parenteral: number | null;
+  fluid_intake_1: string | null;   fluid_intake_1_int: number | null;
+  fluid_intake_2: string | null;   fluid_intake_2_int: number | null;
+  fluid_intake_3: string | null;   fluid_intake_3_int: number | null;
+  fluid_intake_4: string | null;   fluid_intake_4_int: number | null;
+  fluid_intake_medication1: string | null;  fluid_intake_medication1_int: number | null;
+  fluid_intake_medication2: string | null;  fluid_intake_medication2_int: number | null;
+  fluid_intake_medication3: string | null;  fluid_intake_medication3_int: number | null;
+  // Fluid output
+  fluid_output_urine: number | null;
+  fluid_output_emesis: number | null;
+  fluid_output_drainage: number | null;
+  fluid_output_drainage_2: number | null;
+  fluid_output_drainage_3: number | null;
+  fluid_output_drainage_4: number | null;
+  fluid_output_aspiration: number | null;
+  fluid_blood_loss: number | null;
+  // Stool / Urine counts
+  urine_qty: number | null;
+  urine_qty_unit: string | null;
+  stools_qty: number | null;
+  stools_qty_unit: string | null;
+  // Text blocks
+  ipd_nurse_note_diet_text: string | null;
+  medication_text: string | null;
+  bottom_note_text: string | null;
+  note: string | null;
+  // Index signature for any additional nurse-note columns the app may need.
+  [key: string]: unknown;
+}
+
 export interface LabourRecord {
   ipt_labour_id: number;
   an: string;

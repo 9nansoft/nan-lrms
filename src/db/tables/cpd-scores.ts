@@ -14,8 +14,13 @@ export const cpdScoresTable: TableDefinition = {
     { name: 'risk_level', type: 'string', maxLength: 10 },
     { name: 'recommendation', type: 'string', maxLength: 500, nullable: true },
     { name: 'factor_gravida', type: 'integer', nullable: true },
-    { name: 'factor_anc_count', type: 'integer', nullable: true },
-    { name: 'factor_ga_weeks', type: 'integer', nullable: true },
+    // factor_anc_count and factor_ga_weeks are DECIMAL because their
+    // evaluators in src/config/risk-levels.ts return 1.5 — Postgres rejects
+    // a numeric literal into INTEGER (SQLite is loose, so the bug only
+    // surfaced under pglite/postgres). See test
+    // tests/integration/cpd-persist-decimal-factors.test.ts.
+    { name: 'factor_anc_count', type: 'decimal', nullable: true },
+    { name: 'factor_ga_weeks', type: 'decimal', nullable: true },
     { name: 'factor_height_cm', type: 'decimal', nullable: true },
     { name: 'factor_weight_diff', type: 'decimal', nullable: true },
     { name: 'factor_fundal_ht', type: 'decimal', nullable: true },

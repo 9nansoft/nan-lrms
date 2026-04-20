@@ -65,6 +65,9 @@ screenshots/
 .playwright-mcp/
 .superpowers/
 
+# Presentation assets (not part of deployable app)
+present/
+
 # Misc
 *.tmp
 *.bak
