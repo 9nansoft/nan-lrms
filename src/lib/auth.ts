@@ -62,4 +62,23 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     strategy: 'jwt',
     maxAge: 8 * 60 * 60, // 8 hours
   },
+  // SameSite=None + Secure required so the session cookie travels when KK-LRMS
+  // is embedded as an iframe inside HOSxP / marketplace / partner portals
+  // (cross-origin). In dev over http://localhost we fall back to Lax because
+  // browsers reject Secure cookies on plain HTTP.
+  useSecureCookies: process.env.NODE_ENV === 'production',
+  cookies: {
+    sessionToken: {
+      name:
+        process.env.NODE_ENV === 'production'
+          ? '__Secure-authjs.session-token'
+          : 'authjs.session-token',
+      options: {
+        httpOnly: true,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      },
+    },
+  },
 });

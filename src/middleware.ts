@@ -11,12 +11,18 @@ const PUBLIC_PATHS = ['/login', '/about', '/api/auth', '/api/health', '/api/webh
 const STATIC_PATHS = ['/_next', '/favicon.ico'];
 
 // T108: Add security headers to all responses
+//
+// NOTE: X-Frame-Options is intentionally NOT set, and CSP frame-ancestors is
+// wide open (*) so KK-LRMS can be embedded inside HOSxP / marketplace / other
+// partner hospital portals. Product requirement, not a misconfiguration.
+// Clickjacking mitigations (session binding to bms-session-id, no destructive
+// one-click actions without confirm) live at the app layer instead.
 function addSecurityHeaders(response: NextResponse): NextResponse {
   response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('X-XSS-Protection', '1; mode=block');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  response.headers.set('Content-Security-Policy', "frame-ancestors *");
   // HSTS - only in production
   if (process.env.NODE_ENV === 'production') {
     response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
