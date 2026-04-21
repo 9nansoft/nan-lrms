@@ -27,6 +27,21 @@ export const maternalJourneysTable: TableDefinition = {
     { name: 'changwat_code', type: 'string', maxLength: 2, nullable: true },
     { name: 'amphur_code', type: 'string', maxLength: 2, nullable: true },
     { name: 'tambon_code', type: 'string', maxLength: 2, nullable: true },
+    // WHO 2016 ANC journey-level data (L2). All optional — populated opportunistically
+    // by HOSxP sync / webhook. Results are short codes (POS/NEG/PENDING/UNKNOWN).
+    { name: 'blood_group', type: 'string', maxLength: 2, nullable: true },        // A / B / AB / O
+    { name: 'rh_factor', type: 'string', maxLength: 3, nullable: true },          // POS / NEG
+    { name: 'hbsag_result', type: 'string', maxLength: 10, nullable: true },      // POS / NEG / PENDING
+    { name: 'vdrl_result', type: 'string', maxLength: 10, nullable: true },
+    { name: 'hiv_result', type: 'string', maxLength: 10, nullable: true },
+    { name: 'ogtt_result', type: 'string', maxLength: 10, nullable: true },       // NORMAL / ABNORMAL / PENDING
+    // GPAL / GTPAL obstetric history.
+    { name: 'term_births', type: 'integer', nullable: true },
+    { name: 'preterm_births', type: 'integer', nullable: true },
+    { name: 'abortions', type: 'integer', nullable: true },
+    { name: 'living_children', type: 'integer', nullable: true },
+    // Past medical history free-text summary (HT / DM / thyroid / cardiac / thalassemia / epilepsy).
+    { name: 'past_medical_history', type: 'text', nullable: true },
     { name: 'registered_at', type: 'datetime' },
     { name: 'stage_changed_at', type: 'datetime' },
     { name: 'synced_at', type: 'datetime' },

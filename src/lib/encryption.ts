@@ -49,3 +49,23 @@ export function getEncryptionKey(): string {
   }
   return key;
 }
+
+/**
+ * Best-effort decrypt for fields that *might* be encrypted — patient names
+ * that came in through the webhook/sync pipeline are ciphertext, but test
+ * fixtures and older rows may still be plaintext. Returns the input
+ * unchanged if decryption throws (wrong format, bad key, missing key).
+ *
+ * Use this at API response boundaries that serve user-facing text. DO NOT
+ * use this for security-critical paths where you need to fail hard on
+ * tampering.
+ */
+export function decryptSafe(value: string | null | undefined): string {
+  if (!value) return '';
+  try {
+    const key = getEncryptionKey();
+    return decrypt(value, key);
+  } catch {
+    return value;
+  }
+}

@@ -2,7 +2,22 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
+import { decryptSafe } from '@/lib/encryption';
 import type { JourneyDetailResponse, AncVisitEntry, AncRiskEntry, ReferralListItem, NewbornEntry } from '@/types/api';
+
+// Tolerant parser — HOSxP / webhook may store this as a JSON string (Postgres)
+// or already-deserialized array (SQLite json column). Returns null on garbage.
+function parseDangerSigns(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw.filter((s): s is string => typeof s === 'string');
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : null;
+    } catch { return null; }
+  }
+  return null;
+}
 
 export async function GET(
   _request: NextRequest,
@@ -13,10 +28,14 @@ export async function GET(
     const { journeyId } = await params;
     const db = await getDatabase();
 
-    // Get journey with hospital info
+    // Get journey with hospital info + latest known maternal height (labor-side,
+    // if this journey has crossed over to a cached_patients record).
     const journeyRows = await db.query<Record<string, unknown>>(
       `SELECT mj.*, h.name as hospital_name, h.hcode,
-              ch.name as current_hospital_name, ch.hcode as current_hcode
+              ch.name as current_hospital_name, ch.hcode as current_hcode,
+              (SELECT cp.height_cm FROM cached_patients cp
+                 WHERE cp.journey_id = mj.id AND cp.height_cm IS NOT NULL
+                 ORDER BY cp.updated_at DESC LIMIT 1) as height_cm
        FROM maternal_journeys mj
        JOIN hospitals h ON h.id = mj.hospital_id
        JOIN hospitals ch ON ch.id = mj.current_hospital_id
@@ -47,6 +66,18 @@ export async function GET(
       bpSystolic: v.bp_systolic as number | null,
       bpDiastolic: v.bp_diastolic as number | null,
       fetalHr: v.fetal_hr as number | null,
+      presentation: (v.presentation as string | null) ?? null,
+      engagement: (v.engagement as string | null) ?? null,
+      passQuality: v.pass_quality == null ? null : !!v.pass_quality,
+      urineProtein: (v.urine_protein as string | null) ?? null,
+      urineGlucose: (v.urine_glucose as string | null) ?? null,
+      hbGDl: v.hb_g_dl == null ? null : Number(v.hb_g_dl),
+      hctPct: v.hct_pct == null ? null : Number(v.hct_pct),
+      ttDoseNo: v.tt_dose_no as number | null,
+      ironFolicGiven: v.iron_folic_given == null ? null : !!v.iron_folic_given,
+      calciumGiven: v.calcium_given == null ? null : !!v.calcium_given,
+      dangerSigns: parseDangerSigns(v.danger_signs_json),
+      fetalMovementOk: v.fetal_movement_ok == null ? null : !!v.fetal_movement_ok,
     }));
 
     // Get latest risk
@@ -100,7 +131,7 @@ export async function GET(
       journey: {
         id: r.id as string,
         hn: r.hn as string,
-        name: r.name as string,
+        name: decryptSafe(r.name as string),
         age: r.age as number,
         gravida: r.gravida as number,
         para: r.para as number,
@@ -116,6 +147,18 @@ export async function GET(
         registeredAt: r.registered_at as string,
         currentHospitalName: r.current_hospital_name as string,
         currentHcode: r.current_hcode as string,
+        heightCm: r.height_cm as number | null,
+        bloodGroup: (r.blood_group as string | null) ?? null,
+        rhFactor: (r.rh_factor as string | null) ?? null,
+        hbsagResult: (r.hbsag_result as string | null) ?? null,
+        vdrlResult: (r.vdrl_result as string | null) ?? null,
+        hivResult: (r.hiv_result as string | null) ?? null,
+        ogttResult: (r.ogtt_result as string | null) ?? null,
+        termBirths: r.term_births as number | null,
+        pretermBirths: r.preterm_births as number | null,
+        abortions: r.abortions as number | null,
+        livingChildren: r.living_children as number | null,
+        pastMedicalHistory: (r.past_medical_history as string | null) ?? null,
       },
       ancVisits,
       latestRisk,

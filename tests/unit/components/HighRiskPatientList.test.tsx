@@ -1,4 +1,6 @@
-// HighRiskPatientList component tests — TDD: write tests FIRST
+// HighRiskPatientList component tests — updated 2026-04-21 to match the
+// redesigned single-view (non-mobile-duplicating) layout from the Claude Design
+// handoff. Old mobile-card layout was removed in the redesign.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { HighRiskPatientList } from '@/components/dashboard/HighRiskPatientList';
@@ -61,73 +63,76 @@ const samplePatients: HighRiskPatient[] = [
   },
 ];
 
-// Note: Both desktop (table) and mobile (card list) render in the DOM simultaneously
-// (CSS media queries don't apply in jsdom). Each patient appears twice —
-// once in the table and once in the mobile card list.
-
 describe('HighRiskPatientList', () => {
   beforeEach(() => {
     mockPush.mockClear();
   });
 
-  it('renders the title and patient count badge', () => {
+  it('renders the section label', () => {
     render(<HighRiskPatientList patients={samplePatients} />);
-    expect(screen.getByText('ผู้ป่วยเสี่ยงสูง')).toBeTruthy();
-    // Count badge shows total number
-    expect(screen.getByText(String(samplePatients.length))).toBeTruthy();
+    // "High-risk" appears in both section title and tab label — at least 1 match
+    expect(screen.getAllByText(/High-risk/i).length).toBeGreaterThan(0);
   });
 
-  it('renders all patient AN numbers (both desktop and mobile)', () => {
+  it('renders tab counts (HIGH-RISK ONLY and ALL ACTIVE)', () => {
     render(<HighRiskPatientList patients={samplePatients} />);
-    // Each AN appears twice (desktop table + mobile cards)
-    expect(screen.getAllByText(/AN001/).length).toBe(2);
-    expect(screen.getAllByText(/AN002/).length).toBe(2);
-    expect(screen.getAllByText(/AN003/).length).toBe(2);
+    expect(screen.getByText(/HIGH-RISK ONLY/)).toBeTruthy();
+    expect(screen.getByText(/ALL ACTIVE/)).toBeTruthy();
+  });
+
+  it('renders AN numbers for HIGH-risk tab (default)', () => {
+    render(<HighRiskPatientList patients={samplePatients} />);
+    // Default tab = HIGH only, so AN001 + AN003 render (cpd 12 + 15)
+    expect(screen.getByText('AN001')).toBeTruthy();
+    expect(screen.getByText('AN003')).toBeTruthy();
+  });
+
+  it('switches to ALL ACTIVE tab and shows every patient', () => {
+    render(<HighRiskPatientList patients={samplePatients} />);
+    fireEvent.click(screen.getByText(/ALL ACTIVE/));
+    expect(screen.getByText('AN001')).toBeTruthy();
+    expect(screen.getByText('AN002')).toBeTruthy();
+    expect(screen.getByText('AN003')).toBeTruthy();
   });
 
   it('sorts patients by CPD score descending (highest first)', () => {
     const { container } = render(<HighRiskPatientList patients={samplePatients} />);
-    // Both desktop and mobile render patient-row elements; 6 total (3 desktop + 3 mobile)
+    fireEvent.click(screen.getByText(/ALL ACTIVE/));
     const rows = container.querySelectorAll('[data-testid="patient-row"]');
-    expect(rows.length).toBe(6);
-    // Desktop rows are first 3; check order: score 15, 12, 8
-    expect(rows[0].textContent).toContain('15');
-    expect(rows[1].textContent).toContain('12');
-    expect(rows[2].textContent).toContain('8');
+    expect(rows.length).toBe(3);
+    expect(rows[0].textContent).toContain('AN003'); // cpd 15
+    expect(rows[1].textContent).toContain('AN001'); // cpd 12
+    expect(rows[2].textContent).toContain('AN002'); // cpd 8
   });
 
   it('navigates to patient detail on row click', () => {
     const { container } = render(<HighRiskPatientList patients={samplePatients} />);
     const rows = container.querySelectorAll('[data-testid="patient-row"]');
-    // First row is AN003 (score 15, sorted first)
     fireEvent.click(rows[0]);
+    // First HIGH-risk row = AN003 (cpd 15) → hcode H001
     expect(mockPush).toHaveBeenCalledWith('/patients/H001-AN003');
   });
 
-  it('displays CPD score with font-mono styling', () => {
+  it('shows font-mono numerics', () => {
     const { container } = render(<HighRiskPatientList patients={samplePatients} />);
     const monoElements = container.querySelectorAll('.font-mono');
     expect(monoElements.length).toBeGreaterThan(0);
   });
 
-  it('shows hospital name for each patient', () => {
+  it('shows hospital name for each HIGH-risk patient', () => {
     render(<HighRiskPatientList patients={samplePatients} />);
-    // รพ.ขอนแก่น appears for AN001 and AN003, each twice (desktop + mobile) = 4
-    expect(screen.getAllByText('รพ.ขอนแก่น').length).toBe(4);
-    // รพ.ชุมแพ appears for AN002 twice (desktop + mobile) = 2
-    expect(screen.getAllByText('รพ.ชุมแพ').length).toBe(2);
+    // Default tab shows 2 HIGH patients (AN001, AN003), both at รพ.ขอนแก่น
+    expect(screen.getAllByText('รพ.ขอนแก่น').length).toBe(2);
   });
 
-  it('shows dash for null admitDate and lastVitalAt', () => {
-    // AN003 has null dates
+  it('shows no-data text for null lastVitalAt', () => {
     render(<HighRiskPatientList patients={[samplePatients[2]]} />);
-    const dashes = screen.getAllByText('-');
-    expect(dashes.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/no data/)).toBeTruthy();
   });
 
   it('shows empty state when no patients', () => {
     render(<HighRiskPatientList patients={[]} />);
-    expect(screen.getByText('ไม่มีผู้ป่วยเสี่ยงสูง')).toBeTruthy();
+    expect(screen.getByText(/ไม่มีผู้ป่วยที่ต้องเฝ้าระวัง/)).toBeTruthy();
   });
 
   it('shows loading skeletons when isLoading is true', () => {
@@ -138,23 +143,27 @@ describe('HighRiskPatientList', () => {
 
   it('does not show empty state when loading', () => {
     render(<HighRiskPatientList patients={[]} isLoading={true} />);
-    expect(screen.queryByText('ไม่มีผู้ป่วยเสี่ยงสูง')).toBeNull();
+    expect(screen.queryByText(/ไม่มีผู้ป่วยที่ต้องเฝ้าระวัง/)).toBeNull();
   });
 
-  it('renders age and GA weeks', () => {
+  it('renders GA weeks in HIGH tab', () => {
     render(<HighRiskPatientList patients={samplePatients} />);
-    // Age 28 appears in both desktop table and mobile card = 2
-    expect(screen.getAllByText('28').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('38').length).toBeGreaterThanOrEqual(1);
+    // HIGH tab shows AN001 (GA 38) + AN003 (GA 36)
+    expect(screen.getByText('38')).toBeTruthy();
+    expect(screen.getByText('36')).toBeTruthy();
   });
 
-  it('shows risk indicator dots with correct colors', () => {
+  it('tags HIGH risk with data-risk attribute', () => {
     const { container } = render(<HighRiskPatientList patients={samplePatients} />);
-    // HIGH risk rows: 2 patients x 2 layouts (desktop + mobile) = 4 dots
-    const redDots = container.querySelectorAll('[data-risk="HIGH"]');
-    expect(redDots.length).toBe(4);
-    // MEDIUM risk rows: 1 patient x 2 layouts = 2 dots
-    const amberDots = container.querySelectorAll('[data-risk="MEDIUM"]');
-    expect(amberDots.length).toBe(2);
+    // Default HIGH tab: 2 HIGH-risk chips
+    const highChips = container.querySelectorAll('[data-risk="HIGH"]');
+    expect(highChips.length).toBe(2);
+  });
+
+  it('switches to ALL ACTIVE tab and shows MEDIUM risk chip', () => {
+    const { container } = render(<HighRiskPatientList patients={samplePatients} />);
+    fireEvent.click(screen.getByText(/ALL ACTIVE/));
+    const medChips = container.querySelectorAll('[data-risk="MEDIUM"]');
+    expect(medChips.length).toBe(1);
   });
 });

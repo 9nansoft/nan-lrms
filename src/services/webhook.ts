@@ -60,6 +60,18 @@ export interface WebhookAncVisit {
   bpSystolic?: number;
   bpDiastolic?: number;
   fetalHr?: number;
+  presentation?: string | null;
+  engagement?: string | null;
+  // WHO 2016 data elements (L2) — all optional.
+  urineProtein?: string | null;                  // '-', 'trace', '+', '++', '+++'
+  urineGlucose?: string | null;
+  hbGDl?: number | null;
+  hctPct?: number | null;
+  ttDoseNo?: number | null;
+  ironFolicGiven?: boolean | null;
+  calciumGiven?: boolean | null;
+  dangerSigns?: string[] | null;
+  fetalMovementOk?: boolean | null;
 }
 
 export interface WebhookAncPatient {
@@ -75,6 +87,18 @@ export interface WebhookAncPatient {
   amphurCode?: string;          // อำเภอ 2-digit
   tambonCode?: string;          // ตำบล 2-digit
   visits?: WebhookAncVisit[];
+  // WHO 2016 journey-level data (L2).
+  bloodGroup?: string | null;    // A / B / AB / O
+  rhFactor?: string | null;      // POS / NEG
+  hbsagResult?: string | null;   // POS / NEG / PENDING
+  vdrlResult?: string | null;
+  hivResult?: string | null;
+  ogttResult?: string | null;    // NORMAL / ABNORMAL / PENDING
+  termBirths?: number | null;
+  pretermBirths?: number | null;
+  abortions?: number | null;
+  livingChildren?: number | null;
+  pastMedicalHistory?: string | null;
   action?: 'upsert' | 'delete'; // default: 'upsert'
 }
 
@@ -666,17 +690,74 @@ export async function processAncWebhook(
           `INSERT INTO cached_anc_visits
            (id, journey_id, visit_date, visit_number, ga_weeks,
             fundal_height_cm, weight_kg, bp_systolic, bp_diastolic,
-            fetal_hr, synced_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            fetal_hr, presentation, engagement,
+            urine_protein, urine_glucose, hb_g_dl, hct_pct,
+            tt_dose_no, iron_folic_given, calcium_given,
+            danger_signs_json, fetal_movement_ok,
+            synced_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             uuidv4(), journeyId, visit.date, visit.visitNumber,
             visit.gaWeeks ?? null,
             visit.fundalHeightCm ?? null, visit.weightKg ?? null,
             visit.bpSystolic ?? null, visit.bpDiastolic ?? null,
-            visit.fetalHr ?? null, visitNow, visitNow,
+            visit.fetalHr ?? null,
+            visit.presentation ?? null, visit.engagement ?? null,
+            visit.urineProtein ?? null, visit.urineGlucose ?? null,
+            visit.hbGDl ?? null, visit.hctPct ?? null,
+            visit.ttDoseNo ?? null,
+            visit.ironFolicGiven == null ? null : (visit.ironFolicGiven ? 1 : 0),
+            visit.calciumGiven == null ? null : (visit.calciumGiven ? 1 : 0),
+            visit.dangerSigns ? JSON.stringify(visit.dangerSigns) : null,
+            visit.fetalMovementOk == null ? null : (visit.fetalMovementOk ? 1 : 0),
+            visitNow, visitNow,
           ],
         );
       }
+    }
+
+    // Persist journey-level WHO ANC data (labs, obstetric history, PMH).
+    // Only touches provided fields — COALESCE preserves any prior value so an
+    // incremental update doesn't wipe labs recorded earlier.
+    const hasJourneyExt =
+      patient.bloodGroup !== undefined || patient.rhFactor !== undefined ||
+      patient.hbsagResult !== undefined || patient.vdrlResult !== undefined ||
+      patient.hivResult !== undefined || patient.ogttResult !== undefined ||
+      patient.termBirths !== undefined || patient.pretermBirths !== undefined ||
+      patient.abortions !== undefined || patient.livingChildren !== undefined ||
+      patient.pastMedicalHistory !== undefined;
+    if (hasJourneyExt) {
+      const nowExt = new Date().toISOString();
+      await db.execute(
+        `UPDATE maternal_journeys SET
+           blood_group = COALESCE(?, blood_group),
+           rh_factor = COALESCE(?, rh_factor),
+           hbsag_result = COALESCE(?, hbsag_result),
+           vdrl_result = COALESCE(?, vdrl_result),
+           hiv_result = COALESCE(?, hiv_result),
+           ogtt_result = COALESCE(?, ogtt_result),
+           term_births = COALESCE(?, term_births),
+           preterm_births = COALESCE(?, preterm_births),
+           abortions = COALESCE(?, abortions),
+           living_children = COALESCE(?, living_children),
+           past_medical_history = COALESCE(?, past_medical_history),
+           updated_at = ?
+         WHERE id = ?`,
+        [
+          patient.bloodGroup ?? null,
+          patient.rhFactor ?? null,
+          patient.hbsagResult ?? null,
+          patient.vdrlResult ?? null,
+          patient.hivResult ?? null,
+          patient.ogttResult ?? null,
+          patient.termBirths ?? null,
+          patient.pretermBirths ?? null,
+          patient.abortions ?? null,
+          patient.livingChildren ?? null,
+          patient.pastMedicalHistory ?? null,
+          nowExt, journeyId,
+        ],
+      );
     }
   }
 

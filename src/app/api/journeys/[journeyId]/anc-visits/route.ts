@@ -4,6 +4,18 @@ import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import type { AncVisitEntry } from '@/types/api';
 
+function parseDangerSigns(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw.filter((s): s is string => typeof s === 'string');
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : null;
+    } catch { return null; }
+  }
+  return null;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ journeyId: string }> },
@@ -27,6 +39,18 @@ export async function GET(
       bpSystolic: v.bp_systolic as number | null,
       bpDiastolic: v.bp_diastolic as number | null,
       fetalHr: v.fetal_hr as number | null,
+      presentation: (v.presentation as string | null) ?? null,
+      engagement: (v.engagement as string | null) ?? null,
+      passQuality: v.pass_quality == null ? null : !!v.pass_quality,
+      urineProtein: (v.urine_protein as string | null) ?? null,
+      urineGlucose: (v.urine_glucose as string | null) ?? null,
+      hbGDl: v.hb_g_dl == null ? null : Number(v.hb_g_dl),
+      hctPct: v.hct_pct == null ? null : Number(v.hct_pct),
+      ttDoseNo: v.tt_dose_no as number | null,
+      ironFolicGiven: v.iron_folic_given == null ? null : !!v.iron_folic_given,
+      calciumGiven: v.calcium_given == null ? null : !!v.calcium_given,
+      dangerSigns: parseDangerSigns(v.danger_signs_json),
+      fetalMovementOk: v.fetal_movement_ok == null ? null : !!v.fetal_movement_ok,
     }));
 
     return NextResponse.json({ visits });

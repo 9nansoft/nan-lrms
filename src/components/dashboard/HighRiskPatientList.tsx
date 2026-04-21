@@ -1,25 +1,14 @@
-// HighRiskPatientList — table/list of high-risk patients across all hospitals
+// HighRiskPatientList — primary zone on the redesigned 2026-04-21 dashboard.
+// Dense tabular view with partograph severity, vitals freshness, and clinical note.
+// Kiosk mode: HN/AN only (no names) per privacy decision in the design chat.
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle, AlertTriangle } from 'lucide-react';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { CpdBadge } from '@/components/shared/CpdBadge';
 import { cn, formatRelativeTime, buildPatientId } from '@/lib/utils';
 import { RiskLevel } from '@/types/domain';
 import type { CdssSeverity } from '@/types/api';
-import {
-  SEVERITY_DOT,
-  SEVERITY_LABEL_TH,
-} from '@/components/patient/cdss-presentation';
+import { PartographCell, SectionLabel } from './shared';
 
 export interface HighRiskPatient {
   an: string;
@@ -35,295 +24,359 @@ export interface HighRiskPatient {
   lastVitalAt: string | null;
   partographSeverity?: CdssSeverity | null;
   partographAlertCount?: number | null;
-}
-
-function PartographSeverityDot({ patient }: { patient: HighRiskPatient }) {
-  if (!patient.partographSeverity) return null;
-  const count = patient.partographAlertCount ?? 0;
-  return (
-    <span
-      data-testid={`partograph-severity-dot-${patient.an}`}
-      className={cn(
-        'inline-block h-2.5 w-2.5 rounded-full',
-        SEVERITY_DOT[patient.partographSeverity],
-      )}
-      title={`Partograph: ${SEVERITY_LABEL_TH[patient.partographSeverity]} (${count} ข้อ)`}
-    />
-  );
+  note?: string | null;
 }
 
 export interface HighRiskPatientListProps {
   patients: HighRiskPatient[];
   isLoading?: boolean;
+  variant?: 'light' | 'kiosk';
+  maxRows?: number;
 }
 
-function RiskDot({ riskLevel }: { riskLevel: string }) {
-  const colorClass =
+function RiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' | 'kiosk' }) {
+  const isKiosk = variant === 'kiosk';
+  const color =
     riskLevel === 'HIGH'
-      ? 'bg-red-500'
+      ? isKiosk
+        ? 'var(--kiosk-high)'
+        : 'var(--risk-high)'
       : riskLevel === 'MEDIUM'
-        ? 'bg-amber-500'
-        : 'bg-green-500';
+        ? isKiosk
+          ? 'var(--kiosk-med)'
+          : 'var(--risk-medium)'
+        : isKiosk
+          ? 'var(--kiosk-low)'
+          : 'var(--risk-low)';
 
   return (
     <span
       data-risk={riskLevel}
-      className={cn('inline-block h-2.5 w-2.5 rounded-full', colorClass)}
-      aria-label={riskLevel === 'HIGH' ? 'เสี่ยงสูง' : riskLevel === 'MEDIUM' ? 'เสี่ยงปานกลาง' : 'เสี่ยงต่ำ'}
-    />
+      className={cn(
+        'inline-block border px-1.5 py-0.5 text-center font-mono text-[11px] font-semibold tracking-[0.04em]',
+        isKiosk && riskLevel === 'HIGH' && 'shadow-[0_0_8px_var(--kiosk-high)]',
+      )}
+      style={{
+        color,
+        borderColor: color,
+        background: 'transparent',
+      }}
+    >
+      {riskLevel}
+    </span>
   );
 }
 
-function SkeletonRows() {
+function admitTime(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function vitalFreshness(iso: string | null): { text: string; stale: boolean } {
+  if (!iso) return { text: 'no data', stale: true };
+  return { text: formatRelativeTime(iso) ?? '—', stale: false };
+}
+
+function SkeletonRow({ variant }: { variant: 'light' | 'kiosk' }) {
+  const barBg = variant === 'kiosk' ? 'bg-white/10' : 'bg-slate-200';
   return (
-    <>
-      {Array.from({ length: 5 }).map((_, i) => (
-        <TableRow key={i}>
-          <TableCell>
-            <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-slate-200" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 w-32 animate-pulse rounded bg-slate-200" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 w-8 animate-pulse rounded bg-slate-200" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 w-8 animate-pulse rounded bg-slate-200" />
-          </TableCell>
-          <TableCell>
-            <div className="h-5 w-10 animate-pulse rounded-full bg-slate-200" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 w-24 animate-pulse rounded bg-slate-200" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 w-20 animate-pulse rounded bg-slate-200" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 w-20 animate-pulse rounded bg-slate-200" />
-          </TableCell>
-        </TableRow>
+    <div
+      className="grid items-center gap-2 border-b px-2 py-2"
+      style={{
+        gridTemplateColumns: '62px 130px 1fr 44px 44px 150px 58px 80px 110px 220px',
+        borderColor: variant === 'kiosk' ? 'var(--kiosk-rule)' : 'var(--rule-hair)',
+      }}
+    >
+      {Array.from({ length: 10 }).map((_, i) => (
+        <div key={i} className={cn('h-3 animate-pulse rounded', barBg)} />
       ))}
-    </>
+    </div>
   );
 }
 
-function MobileSkeletonCards() {
-  return (
-    <>
-      {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="rounded-xl border p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-3 w-3 animate-pulse rounded-full bg-slate-200" />
-            <div className="h-4 w-32 animate-pulse rounded bg-slate-200" />
-          </div>
-          <div className="mt-3 flex gap-4">
-            <div className="h-4 w-16 animate-pulse rounded bg-slate-200" />
-            <div className="h-4 w-16 animate-pulse rounded bg-slate-200" />
-            <div className="h-5 w-10 animate-pulse rounded-full bg-slate-200" />
-          </div>
-          <div className="mt-2 h-3 w-24 animate-pulse rounded bg-slate-200" />
-        </div>
-      ))}
-    </>
-  );
-}
-
-export function HighRiskPatientList({ patients, isLoading = false }: HighRiskPatientListProps) {
+export function HighRiskPatientList({
+  patients,
+  isLoading = false,
+  variant = 'light',
+  maxRows,
+}: HighRiskPatientListProps) {
   const router = useRouter();
+  const [tab, setTab] = useState<'high' | 'all'>('high');
 
   const sorted = useMemo(
     () => [...patients].sort((a, b) => b.cpdScore - a.cpdScore),
     [patients],
   );
 
-  const handleRowClick = (hcode: string, an: string) => {
-    router.push(`/patients/${buildPatientId(hcode, an)}`);
-  };
+  const shown = useMemo(() => {
+    const base = tab === 'high' ? sorted.filter((p) => p.riskLevel === 'HIGH') : sorted;
+    return maxRows ? base.slice(0, maxRows) : base;
+  }, [sorted, tab, maxRows]);
+
+  const counts = useMemo(
+    () => ({
+      high: sorted.filter((p) => p.riskLevel === 'HIGH').length,
+      total: sorted.length,
+    }),
+    [sorted],
+  );
+
+  const isKiosk = variant === 'kiosk';
+  const ruleStrong = isKiosk ? 'var(--kiosk-rule)' : 'var(--rule-strong)';
+  const ruleHair = isKiosk ? 'var(--kiosk-rule)' : 'var(--rule-hair)';
+  const ink = isKiosk ? 'var(--kiosk-ink)' : 'var(--ink-navy)';
+  const inkDim = isKiosk ? 'var(--kiosk-dim)' : 'var(--ink-navy-dim)';
+  const inkMuted = isKiosk ? 'var(--kiosk-dim)' : 'var(--ink-navy-muted)';
+  const accent = isKiosk ? 'var(--kiosk-accent)' : 'var(--accent-navy)';
+
+  // Column widths — kiosk drops name + note (privacy + space)
+  const columns = isKiosk
+    ? [
+        { key: 'risk', label: 'RISK', w: 72 },
+        { key: 'anhn', label: 'AN / HN', w: 140 },
+        { key: 'ga', label: 'GA', w: 50 },
+        { key: 'cpd', label: 'CPD', w: 50 },
+        { key: 'hospital', label: 'HOSPITAL', w: 0 }, // flex 1
+        { key: 'admit', label: 'ADMIT', w: 70 },
+        { key: 'partograph', label: 'PARTOGRAPH', w: 120 },
+      ]
+    : [
+        { key: 'risk', label: 'RISK', w: 62 },
+        { key: 'anhn', label: 'AN / HN', w: 130 },
+        { key: 'patient', label: 'PATIENT', w: 0 }, // flex 1
+        { key: 'ga', label: 'GA', w: 44 },
+        { key: 'cpd', label: 'CPD', w: 44 },
+        { key: 'hospital', label: 'HOSPITAL', w: 150 },
+        { key: 'admit', label: 'ADMIT', w: 58 },
+        { key: 'vital', label: 'LAST VITAL', w: 80 },
+        { key: 'partograph', label: 'PARTOGRAPH', w: 110 },
+        { key: 'note', label: 'NOTE', w: 220 },
+      ];
+
+  const gridCols = columns.map((c) => (c.w === 0 ? '1fr' : `${c.w}px`)).join(' ');
 
   return (
-    <div className="rounded-2xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)]">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-6 pt-6 pb-4">
-        <AlertTriangle className="h-5 w-5 text-red-500" />
-        <h2 className="text-sm font-medium uppercase tracking-wider text-slate-500">
-          ผู้ป่วยเสี่ยงสูง
-        </h2>
-        {!isLoading && (
-          <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-100 px-2 text-xs font-bold text-red-700">
-            {patients.length}
+    <div>
+      <SectionLabel
+        idx={1}
+        right={
+          <span>
+            AUTO-SORT · HIGH → MED · {counts.total} ACTIVE
           </span>
-        )}
-      </div>
+        }
+      >
+        High-risk &amp; Active labor
+      </SectionLabel>
 
-      {/* Loading State */}
-      {isLoading && (
-        <>
-          {/* Desktop skeleton */}
-          <div className="hidden md:block px-6 pb-6">
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10" />
-                    <TableHead>ชื่อผู้ป่วย</TableHead>
-                    <TableHead>อายุ</TableHead>
-                    <TableHead>GA</TableHead>
-                    <TableHead>CPD</TableHead>
-                    <TableHead>โรงพยาบาล</TableHead>
-                    <TableHead>Admit</TableHead>
-                    <TableHead>Vital ล่าสุด</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <SkeletonRows />
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-          {/* Mobile skeleton */}
-          <div className="md:hidden px-4 pb-4 space-y-3">
-            <MobileSkeletonCards />
-          </div>
-        </>
-      )}
-
-      {/* Empty State */}
-      {!isLoading && patients.length === 0 && (
-        <div className="flex flex-col items-center justify-center gap-3 px-6 pb-8 pt-4">
-          <CheckCircle className="h-12 w-12 text-green-400" />
-          <p className="text-sm text-slate-500">ไม่มีผู้ป่วยเสี่ยงสูง</p>
-        </div>
-      )}
-
-      {/* Desktop Table */}
-      {!isLoading && sorted.length > 0 && (
-        <div className="hidden md:block px-6 pb-6">
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10" />
-                  <TableHead>ชื่อผู้ป่วย</TableHead>
-                  <TableHead>อายุ</TableHead>
-                  <TableHead>GA</TableHead>
-                  <TableHead>CPD</TableHead>
-                  <TableHead>โรงพยาบาล</TableHead>
-                  <TableHead>Admit</TableHead>
-                  <TableHead>Vital ล่าสุด</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sorted.map((patient) => {
-                  // Critical glow fires for HIGH CPD risk OR CRITICAL partograph severity —
-                  // either signal warrants the red row accent on kiosk monitor.
-                  const isCriticalGlow =
-                    patient.riskLevel === 'HIGH' || patient.partographSeverity === 'CRITICAL';
-                  return (
-                  <TableRow
-                    key={patient.an}
-                    data-testid="patient-row"
-                    className={cn(
-                      'cursor-pointer hover:bg-slate-50 transition-colors',
-                      isCriticalGlow && 'border-l-2 border-l-red-400',
-                      !isCriticalGlow && patient.riskLevel === 'MEDIUM' && 'border-l-2 border-l-amber-400',
-                    )}
-                    onClick={() => handleRowClick(patient.hcode, patient.an)}
-                  >
-                    <TableCell>
-                      <span className="inline-flex items-center gap-1.5">
-                        <RiskDot riskLevel={patient.riskLevel} />
-                        <PartographSeverityDot patient={patient} />
-                      </span>
-                    </TableCell>
-                    <TableCell className="font-mono font-medium">AN {patient.an}</TableCell>
-                    <TableCell className="font-mono">
-                      {patient.age != null ? patient.age : '-'}
-                    </TableCell>
-                    <TableCell className="font-mono">
-                      {patient.gaWeeks != null ? patient.gaWeeks : '-'}
-                    </TableCell>
-                    <TableCell>
-                      <CpdBadge
-                        score={patient.cpdScore}
-                        riskLevel={patient.riskLevel as RiskLevel}
-                        size="sm"
-                      />
-                    </TableCell>
-                    <TableCell className="text-slate-600">{patient.hospital}</TableCell>
-                    <TableCell className="text-sm text-slate-500">
-                      {formatRelativeTime(patient.admitDate)}
-                    </TableCell>
-                    <TableCell className="text-sm text-slate-500">
-                      {formatRelativeTime(patient.lastVitalAt)}
-                    </TableCell>
-                  </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
-
-      {/* Mobile Card List */}
-      {!isLoading && sorted.length > 0 && (
-        <div className="md:hidden px-4 pb-4 space-y-3">
-          {sorted.map((patient) => {
-            const isCriticalGlow =
-              patient.riskLevel === 'HIGH' || patient.partographSeverity === 'CRITICAL';
-            return (
-            <div
-              key={patient.an}
-              data-testid="patient-row"
+      {/* Tabs */}
+      {!isKiosk && (
+        <div
+          className="mt-2.5 mb-2.5 flex gap-0 border-b"
+          style={{ borderColor: ruleHair }}
+        >
+          {[
+            { k: 'high', l: 'HIGH-RISK ONLY', n: counts.high },
+            { k: 'all', l: 'ALL ACTIVE', n: counts.total },
+          ].map((x) => (
+            <button
+              key={x.k}
+              onClick={() => setTab(x.k as 'high' | 'all')}
               className={cn(
-                'cursor-pointer rounded-xl border p-4 transition-colors hover:bg-slate-50',
-                isCriticalGlow && 'border-l-4 border-l-red-400',
-                !isCriticalGlow && patient.riskLevel === 'MEDIUM' && 'border-l-4 border-l-amber-400',
+                'border-b-2 bg-transparent px-3.5 py-2 font-mono text-[11px] tracking-[0.08em]',
+                tab === x.k ? 'font-semibold' : 'font-normal',
               )}
-              onClick={() => handleRowClick(patient.hcode, patient.an)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleRowClick(patient.hcode, patient.an);
-                }
+              style={{
+                borderColor: tab === x.k ? accent : 'transparent',
+                color: tab === x.k ? accent : inkMuted,
               }}
             >
-              {/* Top row: risk dot + name + CPD badge */}
-              <div className="flex items-center gap-2">
-                <RiskDot riskLevel={patient.riskLevel} />
-                <PartographSeverityDot patient={patient} />
-                <span className="flex-1 truncate font-mono font-medium text-base">AN {patient.an}</span>
-                <CpdBadge
-                  score={patient.cpdScore}
-                  riskLevel={patient.riskLevel as RiskLevel}
-                  size="sm"
-                />
-              </div>
-
-              {/* Details row */}
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
-                {patient.age != null && (
-                  <span>อายุ <span className="font-mono font-medium text-slate-700">{patient.age}</span></span>
-                )}
-                {patient.gaWeeks != null && (
-                  <span>GA <span className="font-mono font-medium text-slate-700">{patient.gaWeeks}</span> wks</span>
-                )}
-                <span>{patient.hospital}</span>
-              </div>
-
-              {/* Time row */}
-              <div className="mt-1 text-sm text-slate-400">
-                Vital: {formatRelativeTime(patient.lastVitalAt)}
-              </div>
-            </div>
-            );
-          })}
+              {x.l} <span style={{ color: inkMuted, fontWeight: 400 }}>· {x.n}</span>
+            </button>
+          ))}
         </div>
       )}
+
+      {/* Table */}
+      <div className="overflow-x-auto">
+        {/* Header */}
+        <div
+          className="grid gap-2 border-t border-b px-2 py-2 font-mono text-[10px] tracking-[0.1em]"
+          style={{
+            gridTemplateColumns: gridCols,
+            color: inkMuted,
+            borderColor: ruleStrong,
+          }}
+        >
+          {columns.map((c) => (
+            <div key={c.key}>{c.label}</div>
+          ))}
+        </div>
+
+        {/* Body */}
+        {isLoading ? (
+          <>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonRow key={i} variant={variant} />
+            ))}
+          </>
+        ) : shown.length === 0 ? (
+          <div
+            className="border-b px-2 py-8 text-center font-mono text-[11px]"
+            style={{ color: inkMuted, borderColor: ruleHair }}
+          >
+            ไม่มีผู้ป่วยที่ต้องเฝ้าระวัง
+          </div>
+        ) : (
+          shown.map((p, i) => {
+            const isHigh = p.riskLevel === 'HIGH';
+            const isCritical =
+              isHigh || p.partographSeverity === 'CRITICAL';
+            const freshness = vitalFreshness(p.lastVitalAt);
+            return (
+              <div
+                key={p.an}
+                data-testid="patient-row"
+                onClick={() => router.push(`/patients/${buildPatientId(p.hcode, p.an)}`)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    router.push(`/patients/${buildPatientId(p.hcode, p.an)}`);
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                className={cn(
+                  'grid cursor-pointer items-center gap-2 border-b px-2 text-sm transition-colors',
+                  !isKiosk && 'hover:bg-slate-50',
+                  isKiosk && 'hover:bg-white/5',
+                )}
+                style={{
+                  gridTemplateColumns: gridCols,
+                  height: isKiosk ? 56 : 44,
+                  borderColor: ruleHair,
+                  background:
+                    i === 0 && isCritical
+                      ? isKiosk
+                        ? 'linear-gradient(to right, rgba(224,92,92,0.18), transparent 60%)'
+                        : 'linear-gradient(to right, rgba(239,68,68,0.08), transparent 40%)'
+                      : 'transparent',
+                }}
+              >
+                <div>
+                  <RiskChip riskLevel={p.riskLevel} variant={variant} />
+                </div>
+                <div
+                  className="font-mono"
+                  style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}
+                >
+                  <div className="font-semibold">{p.an}</div>
+                  <div
+                    className="font-normal"
+                    style={{ color: inkMuted, fontSize: isKiosk ? 11 : 10 }}
+                  >
+                    HN {p.hn}
+                  </div>
+                </div>
+                {!isKiosk && (
+                  <div style={{ color: ink, fontSize: 13 }}>
+                    <div className="truncate">
+                      {p.name || <span style={{ color: inkMuted }}>ไม่ระบุ</span>}
+                    </div>
+                    <div
+                      className="font-mono"
+                      style={{ color: inkMuted, fontSize: 11 }}
+                    >
+                      {p.age != null ? `อายุ ${p.age}` : '—'}
+                    </div>
+                  </div>
+                )}
+                <div
+                  className="font-mono tabular-nums"
+                  style={{ color: ink, fontSize: isKiosk ? 18 : 13 }}
+                >
+                  {p.gaWeeks != null ? (
+                    <>
+                      {p.gaWeeks}
+                      <span style={{ color: inkMuted, fontSize: isKiosk ? 11 : 10 }}>w</span>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </div>
+                <div
+                  className="font-mono font-semibold tabular-nums"
+                  style={{
+                    color:
+                      p.cpdScore >= 6
+                        ? isKiosk
+                          ? 'var(--kiosk-high)'
+                          : 'var(--risk-high)'
+                        : p.cpdScore >= 4
+                          ? isKiosk
+                            ? 'var(--kiosk-med)'
+                            : 'var(--risk-medium)'
+                          : isKiosk
+                            ? 'var(--kiosk-low)'
+                            : 'var(--risk-low)',
+                    fontSize: isKiosk ? 20 : 13,
+                    textShadow:
+                      isKiosk && p.cpdScore >= 4
+                        ? `0 0 8px ${p.cpdScore >= 6 ? 'var(--kiosk-high)' : 'var(--kiosk-med)'}`
+                        : 'none',
+                  }}
+                >
+                  {p.cpdScore}
+                </div>
+                <div
+                  className="truncate"
+                  style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}
+                >
+                  {p.hospital}
+                </div>
+                <div
+                  className="font-mono"
+                  style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}
+                >
+                  {admitTime(p.admitDate)}
+                </div>
+                {!isKiosk && (
+                  <div
+                    className="font-mono"
+                    style={{
+                      color: freshness.stale ? inkMuted : inkDim,
+                      fontSize: 11,
+                    }}
+                  >
+                    {freshness.text}
+                  </div>
+                )}
+                <div>
+                  <PartographCell
+                    severity={p.partographSeverity ?? null}
+                    count={p.partographAlertCount ?? 0}
+                    variant={variant}
+                  />
+                </div>
+                {!isKiosk && (
+                  <div
+                    className="truncate font-mono"
+                    style={{ color: inkDim, fontSize: 11 }}
+                    title={p.note ?? undefined}
+                  >
+                    {p.note ?? ''}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

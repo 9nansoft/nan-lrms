@@ -332,6 +332,20 @@ export interface JourneyDetailResponse {
   journey: JourneyListItem & {
     currentHospitalName: string;
     currentHcode: string;
+    /** Latest known maternal height in cm (from linked labor record, if any). */
+    heightCm: number | null;
+    // WHO 2016 journey-level data (L2). All optional.
+    bloodGroup: string | null;                 // A / B / AB / O
+    rhFactor: string | null;                   // POS / NEG
+    hbsagResult: string | null;                // POS / NEG / PENDING
+    vdrlResult: string | null;
+    hivResult: string | null;
+    ogttResult: string | null;                 // NORMAL / ABNORMAL / PENDING
+    termBirths: number | null;
+    pretermBirths: number | null;
+    abortions: number | null;
+    livingChildren: number | null;
+    pastMedicalHistory: string | null;
   };
   ancVisits: AncVisitEntry[];
   latestRisk: AncRiskEntry | null;
@@ -348,6 +362,22 @@ export interface AncVisitEntry {
   bpSystolic: number | null;
   bpDiastolic: number | null;
   fetalHr: number | null;
+  /** Cephalic / breech / transverse etc. (raw HOSxP baby_position code). */
+  presentation: string | null;
+  /** Engaged / floating — raw HOSxP baby_lead code. */
+  engagement: string | null;
+  /** MoPH MCH quality flag — whether this visit passed quality criteria. */
+  passQuality: boolean | null;
+  // WHO 2016 ANC data elements (L2) — all optional, per-visit.
+  urineProtein: string | null;                 // '-', 'trace', '+', '++', '+++'
+  urineGlucose: string | null;
+  hbGDl: number | null;
+  hctPct: number | null;
+  ttDoseNo: number | null;                     // tetanus toxoid dose number at this visit (0-5)
+  ironFolicGiven: boolean | null;
+  calciumGiven: boolean | null;
+  dangerSigns: string[] | null;                // e.g. ['bleeding','severe_headache','reduced_fm']
+  fetalMovementOk: boolean | null;             // T3 only
 }
 
 export interface AncRiskEntry {
@@ -395,6 +425,33 @@ export interface DashboardAlerts {
   referralAlerts: number;
   overdueAnc: number;
   inTransitReferrals: number;
+}
+
+export interface ShiftStats {
+  /** Human-readable Thai shift label (e.g. "เวรบ่าย 15:00-22:00"). */
+  label: string;
+  /** ISO timestamp for the start of this shift window. */
+  windowStart: string;
+  /** ISO timestamp for the end of this shift window (= now() if current shift). */
+  windowEnd: string;
+  admissions: number;
+  delivered: number;
+  referred: number;
+}
+
+export interface DashboardTrends {
+  /** Admission counts for each of the last 24 hourly buckets.
+   *  `admissions24h[0]` is the hour that started 24h ago, `admissions24h[23]`
+   *  is the hour currently in progress. */
+  admissions24h: number[];
+  /** Total admissions since start of today (Asia/Bangkok). */
+  admissionsToday: number;
+  /** Mean admissions per day over the 7 days before today. */
+  admissions7dAvg: number;
+  /** Count of patients admitted in the last 24h, grouped by their current risk tier. */
+  newByRisk24h: { high: number; medium: number; low: number; total: number };
+  currentShift: ShiftStats;
+  previousShift: ShiftStats;
 }
 
 export interface ReferralListResponse {

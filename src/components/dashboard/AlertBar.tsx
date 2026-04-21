@@ -1,49 +1,100 @@
+// AlertBar — persistent 4-tile ribbon with "ALL CLEAR" resting state.
+// Redesigned 2026-04-21 per dashboard brief §4.2: never disappears, never causes layout jumps.
 'use client';
 
-import { AlertTriangle, Clock, Truck } from 'lucide-react';
 import type { DashboardAlerts } from '@/types/api';
+import { cn } from '@/lib/utils';
 
 interface AlertBarProps {
   alerts: DashboardAlerts;
 }
 
+interface AlertTileProps {
+  label: string;
+  value: number;
+  zeroLabel: string;
+  detail: string;
+}
+
+function AlertTile({ label, value, zeroLabel, detail }: AlertTileProps) {
+  const hot = value > 0;
+  const color = hot ? 'var(--risk-high)' : 'var(--risk-low)';
+  return (
+    <div className="flex flex-1 items-center gap-3.5 border-r border-[var(--rule-strong)] px-4 py-2.5">
+      <div style={{ width: 3, height: 28, background: color }} aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          {label}
+        </div>
+        <div
+          className={cn(
+            'font-mono text-xs',
+            hot ? 'text-[var(--ink-navy)]' : 'text-[var(--ink-navy-dim)]',
+          )}
+        >
+          {hot ? detail : zeroLabel}
+        </div>
+      </div>
+      <div
+        className="font-mono text-[28px] font-semibold leading-none tabular-nums"
+        style={{ color, letterSpacing: '-0.02em' }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
 export function AlertBar({ alerts }: AlertBarProps) {
-  if (alerts.referralAlerts === 0 && alerts.overdueAnc === 0 && alerts.inTransitReferrals === 0) {
-    return null;
-  }
+  const total = alerts.referralAlerts + alerts.overdueAnc + alerts.inTransitReferrals;
+  const hot = total > 0;
+  const stateColor = hot ? 'var(--risk-high)' : 'var(--risk-low)';
 
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-      {alerts.referralAlerts > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
-          <AlertTriangle className="h-5 w-5 text-orange-500" />
-          <div>
-            <div className="text-sm font-medium text-orange-800">แจ้งเตือนส่งต่อ</div>
-            <div className="text-xs text-orange-600">{alerts.referralAlerts} รายเกินศักยภาพ</div>
-          </div>
-          <span className="ml-auto text-lg font-bold text-orange-600">{alerts.referralAlerts}</span>
-        </div>
+    <div
+      className={cn(
+        'flex items-stretch border-b border-[var(--rule-strong)]',
+        hot ? 'bg-gradient-to-r from-red-50 to-white' : 'bg-white',
       )}
-      {alerts.overdueAnc > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-          <Clock className="h-5 w-5 text-red-500" />
-          <div>
-            <div className="text-sm font-medium text-red-800">ANC เลยนัด</div>
-            <div className="text-xs text-red-600">{alerts.overdueAnc} รายไม่มาตามนัด</div>
-          </div>
-          <span className="ml-auto text-lg font-bold text-red-600">{alerts.overdueAnc}</span>
-        </div>
-      )}
-      {alerts.inTransitReferrals > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-          <Truck className="h-5 w-5 text-amber-500" />
-          <div>
-            <div className="text-sm font-medium text-amber-800">กำลังส่งต่อ</div>
-            <div className="text-xs text-amber-600">{alerts.inTransitReferrals} รายระหว่างเดินทาง</div>
-          </div>
-          <span className="ml-auto text-lg font-bold text-amber-600">{alerts.inTransitReferrals}</span>
-        </div>
-      )}
+    >
+      {/* Leading state label */}
+      <div className="flex min-w-[200px] items-center gap-2 border-r border-[var(--rule-strong)] px-5 py-2.5">
+        <span
+          style={{ background: stateColor }}
+          className={cn(
+            'h-1.5 w-1.5 rounded-full',
+            hot && 'animate-pulse-hi',
+          )}
+          aria-hidden="true"
+        />
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-dim)]">
+          {hot ? 'ACTIVE ALERTS' : 'ALL CLEAR'}
+        </span>
+        <span
+          className="ml-auto font-mono text-lg font-semibold tabular-nums"
+          style={{ color: stateColor }}
+        >
+          {total}
+        </span>
+      </div>
+      <AlertTile
+        label="REFERRAL RECEIVED"
+        value={alerts.referralAlerts}
+        zeroLabel="ไม่มีการส่งต่อค้าง"
+        detail="รอรับเคส · triage pending"
+      />
+      <AlertTile
+        label="OVERDUE ANC"
+        value={alerts.overdueAnc}
+        zeroLabel="ANC ครบทุกราย"
+        detail="เข้าห้องคลอดโดยไม่มี ANC ครบ"
+      />
+      <AlertTile
+        label="IN-TRANSIT REFERRAL"
+        value={alerts.inTransitReferrals}
+        zeroLabel="ไม่มีรถรับส่งอยู่"
+        detail="รถพยาบาลกำลังส่งเคส"
+      />
     </div>
   );
 }

@@ -1,7 +1,17 @@
 // T048: Dashboard service — province dashboard data from local cache
 import type { DatabaseAdapter } from '@/db/adapter';
-import type { DashboardHospital, DashboardSummary, HighRiskPatient, DashboardStageKPIs, DashboardAlerts, CdssSeverity } from '@/types/api';
+import type {
+  DashboardHospital,
+  DashboardSummary,
+  HighRiskPatient,
+  DashboardStageKPIs,
+  DashboardAlerts,
+  DashboardTrends,
+  ShiftStats,
+  CdssSeverity,
+} from '@/types/api';
 import type { ConnectionStatus, HospitalLevel } from '@/types/domain';
+import { decryptSafe } from '@/lib/encryption';
 
 interface DashboardRow {
   hcode: string;
@@ -149,7 +159,7 @@ export async function getHighRiskPatients(
   return rows.map((row) => ({
     an: row.an,
     hn: row.hn,
-    name: row.name,
+    name: decryptSafe(row.name),
     age: row.age,
     gaWeeks: row.ga_weeks,
     cpdScore: row.cpd_score,
@@ -237,6 +247,7 @@ export async function getHospitalPatientList(
 
   const patients = rows.map((r) => ({
     ...r,
+    name: decryptSafe(typeof r.name === 'string' ? r.name : ''),
     partographSeverity: (r.partograph_severity as CdssSeverity | null) ?? null,
     partographAlertCount: r.partograph_alert_count ?? null,
   }));
@@ -350,5 +361,237 @@ export async function getDashboardAlerts(db: DatabaseAdapter): Promise<Dashboard
     referralAlerts: Number(refAlerts[0]?.count) || 0,
     overdueAnc: Number(overdueAnc[0]?.count) || 0,
     inTransitReferrals: Number(inTransit[0]?.count) || 0,
+  };
+}
+
+// ─── Trends ─────────────────────────────────────────────────────────────
+// Temporal signals for the redesigned dashboard (2026-04-21 brief §5):
+// 24h admission pulse, admissions today vs. 7-day average, new admits by
+// risk tier, and current/previous shift counts.
+//
+// SQL stays cross-dialect (SQLite + PostgreSQL) by passing ISO strings and
+// doing hourly bucketing in JS rather than relying on strftime/EXTRACT.
+
+const BANGKOK_TZ = 'Asia/Bangkok';
+
+/**
+ * Returns the Bangkok hour boundary at or before the given instant.
+ * Example: 2026-04-21T15:42:07+07:00 → 2026-04-21T15:00:00+07:00.
+ */
+function bangkokHourFloor(date: Date): Date {
+  const d = new Date(date);
+  d.setUTCMilliseconds(0);
+  d.setUTCSeconds(0);
+  d.setUTCMinutes(0);
+  // Round DOWN in Bangkok tz; since offset is fixed +07:00, an hour in UTC
+  // aligns with an hour in Bangkok.
+  return d;
+}
+
+/** Returns the start of today in Asia/Bangkok, expressed as UTC. */
+function bangkokStartOfToday(now: Date = new Date()): Date {
+  // Bangkok is UTC+7, no DST. Compute by shifting now() forward 7h, taking
+  // the UTC date at that shifted point, and then shifting back.
+  const shifted = new Date(now.getTime() + 7 * 3600 * 1000);
+  const shiftedMidnightUtc = new Date(
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()),
+  );
+  return new Date(shiftedMidnightUtc.getTime() - 7 * 3600 * 1000);
+}
+
+/** Returns the Bangkok hour-of-day (0–23) for an ISO timestamp. */
+function bangkokHourOfDay(iso: string): number {
+  const d = new Date(iso);
+  // Bangkok UTC+7, no DST.
+  return (d.getUTCHours() + 7) % 24;
+}
+
+interface ShiftWindow {
+  label: string;
+  windowStart: Date;
+  windowEnd: Date;
+}
+
+/**
+ * Resolves the current + previous hospital shift windows based on Bangkok time.
+ * Thai hospital convention: เวรเช้า 07:00–15:00, เวรบ่าย 15:00–22:00,
+ * เวรดึก 22:00–07:00 (spans midnight).
+ */
+function resolveShifts(now: Date = new Date()): { current: ShiftWindow; previous: ShiftWindow } {
+  // Determine Bangkok-local time components from the UTC instant.
+  const bkk = new Date(now.getTime() + 7 * 3600 * 1000);
+  const bkkHour = bkk.getUTCHours();
+  const bkkDate = new Date(
+    Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate()),
+  );
+
+  // Build candidate windows around today (and yesterday, for previous).
+  const mkWindow = (dayOffset: number, startH: number, endH: number, label: string): ShiftWindow => {
+    const start = new Date(bkkDate.getTime() + dayOffset * 86400_000 + startH * 3600_000 - 7 * 3600_000);
+    const end = new Date(bkkDate.getTime() + dayOffset * 86400_000 + endH * 3600_000 - 7 * 3600_000);
+    return { label, windowStart: start, windowEnd: end };
+  };
+
+  // Shifts for "today" and flanking days.
+  const yest = {
+    morning: mkWindow(-1, 7, 15, 'เวรเช้า 07:00-15:00'),
+    afternoon: mkWindow(-1, 15, 22, 'เวรบ่าย 15:00-22:00'),
+    night: mkWindow(-1, 22, 24 + 7, 'เวรดึก 22:00-07:00'),
+  };
+  const today = {
+    morning: mkWindow(0, 7, 15, 'เวรเช้า 07:00-15:00'),
+    afternoon: mkWindow(0, 15, 22, 'เวรบ่าย 15:00-22:00'),
+    night: mkWindow(0, 22, 24 + 7, 'เวรดึก 22:00-07:00'),
+  };
+
+  // Current shift picker.
+  let current: ShiftWindow;
+  let previous: ShiftWindow;
+  if (bkkHour >= 7 && bkkHour < 15) {
+    current = today.morning;
+    previous = yest.night;
+  } else if (bkkHour >= 15 && bkkHour < 22) {
+    current = today.afternoon;
+    previous = today.morning;
+  } else if (bkkHour >= 22) {
+    current = today.night;
+    previous = today.afternoon;
+  } else {
+    // 00:00–07:00 is the tail of last night's เวรดึก (which started yesterday 22:00).
+    current = yest.night;
+    previous = yest.afternoon;
+  }
+  return { current, previous };
+}
+
+async function countAdmitsInWindow(
+  db: DatabaseAdapter,
+  startIso: string,
+  endIso: string,
+): Promise<number> {
+  const r = await db.query<{ count: number }>(
+    `SELECT COUNT(*) as count FROM cached_patients WHERE admit_date >= ? AND admit_date < ?`,
+    [startIso, endIso],
+  );
+  return Number(r[0]?.count) || 0;
+}
+
+async function countDeliveredInWindow(
+  db: DatabaseAdapter,
+  startIso: string,
+  endIso: string,
+): Promise<number> {
+  const r = await db.query<{ count: number }>(
+    `SELECT COUNT(*) as count FROM cached_patients
+     WHERE delivered_at IS NOT NULL AND delivered_at >= ? AND delivered_at < ?`,
+    [startIso, endIso],
+  );
+  return Number(r[0]?.count) || 0;
+}
+
+async function countReferralsInWindow(
+  db: DatabaseAdapter,
+  startIso: string,
+  endIso: string,
+): Promise<number> {
+  // cached_referrals stores the initial dispatch at `initiated_at` (the
+  // moment a hospital starts the referral). Count referrals initiated
+  // within the window as the "referred this shift" signal.
+  const r = await db.query<{ count: number }>(
+    `SELECT COUNT(*) as count FROM cached_referrals
+     WHERE initiated_at IS NOT NULL AND initiated_at >= ? AND initiated_at < ?`,
+    [startIso, endIso],
+  );
+  return Number(r[0]?.count) || 0;
+}
+
+export async function getTrends(
+  db: DatabaseAdapter,
+  now: Date = new Date(),
+): Promise<DashboardTrends> {
+  // ─── 24h admission pulse (hourly) ────────────────────────────────────
+  const nowHour = bangkokHourFloor(now);
+  const start24h = new Date(nowHour.getTime() - 23 * 3600_000);
+  const admitsLast24h = await db.query<{ admit_date: string }>(
+    `SELECT admit_date FROM cached_patients WHERE admit_date >= ?`,
+    [start24h.toISOString()],
+  );
+  const bucket = Array<number>(24).fill(0);
+  for (const row of admitsLast24h) {
+    if (!row.admit_date) continue;
+    const d = new Date(row.admit_date);
+    const hoursAgo = Math.floor((nowHour.getTime() - bangkokHourFloor(d).getTime()) / 3600_000);
+    const idx = 23 - hoursAgo;
+    if (idx >= 0 && idx < 24) bucket[idx] += 1;
+  }
+
+  // ─── Today vs 7-day avg ──────────────────────────────────────────────
+  const startToday = bangkokStartOfToday(now);
+  const start7d = new Date(startToday.getTime() - 7 * 86400_000);
+  const admissionsToday = await countAdmitsInWindow(
+    db,
+    startToday.toISOString(),
+    now.toISOString(),
+  );
+  const admissions7d = await countAdmitsInWindow(
+    db,
+    start7d.toISOString(),
+    startToday.toISOString(),
+  );
+  const admissions7dAvg = Math.round((admissions7d / 7) * 10) / 10;
+
+  // ─── New admits by current risk tier (last 24h) ─────────────────────
+  const newByRiskRows = await db.query<{ risk_level: string | null; count: number }>(
+    `SELECT
+       (SELECT cs.risk_level FROM cpd_scores cs
+        WHERE cs.patient_id = cp.id
+        ORDER BY cs.calculated_at DESC LIMIT 1) as risk_level,
+       COUNT(*) as count
+     FROM cached_patients cp
+     WHERE cp.admit_date >= ?
+     GROUP BY risk_level`,
+    [start24h.toISOString()],
+  );
+  const newByRisk24h = { high: 0, medium: 0, low: 0, total: 0 };
+  for (const row of newByRiskRows) {
+    const c = Number(row.count) || 0;
+    newByRisk24h.total += c;
+    if (row.risk_level === 'HIGH') newByRisk24h.high += c;
+    else if (row.risk_level === 'MEDIUM') newByRisk24h.medium += c;
+    else if (row.risk_level === 'LOW') newByRisk24h.low += c;
+  }
+
+  // ─── Current + previous shift counts ────────────────────────────────
+  const shifts = resolveShifts(now);
+  const toStats = async (w: ShiftWindow, clampEndAtNow: boolean): Promise<ShiftStats> => {
+    const endCap = clampEndAtNow && w.windowEnd > now ? now : w.windowEnd;
+    const startIso = w.windowStart.toISOString();
+    const endIso = endCap.toISOString();
+    const [admissions, delivered, referred] = await Promise.all([
+      countAdmitsInWindow(db, startIso, endIso),
+      countDeliveredInWindow(db, startIso, endIso),
+      countReferralsInWindow(db, startIso, endIso),
+    ]);
+    return {
+      label: w.label,
+      windowStart: startIso,
+      windowEnd: endCap.toISOString(),
+      admissions,
+      delivered,
+      referred,
+    };
+  };
+  const [currentShift, previousShift] = await Promise.all([
+    toStats(shifts.current, true),
+    toStats(shifts.previous, false),
+  ]);
+
+  return {
+    admissions24h: bucket,
+    admissionsToday,
+    admissions7dAvg,
+    newByRisk24h,
+    currentShift,
+    previousShift,
   };
 }

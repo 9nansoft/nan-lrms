@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
+import { decryptSafe } from '@/lib/encryption';
 import type { JourneyListItem, JourneyListResponse } from '@/types/api';
 
 export async function GET(request: NextRequest) {
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
     const journeys: JourneyListItem[] = rows.map((r) => ({
       id: r.id as string,
       hn: r.hn as string,
-      name: r.name as string,
+      name: decryptSafe(r.name as string),
       age: r.age as number,
       gravida: r.gravida as number,
       para: r.para as number,

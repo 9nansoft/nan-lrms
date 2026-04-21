@@ -2,11 +2,17 @@
 'use client';
 
 import useSWR from 'swr';
-import type { DashboardResponse, DashboardStageKPIs, DashboardAlerts } from '@/types/api';
+import type {
+  DashboardResponse,
+  DashboardStageKPIs,
+  DashboardAlerts,
+  DashboardTrends,
+} from '@/types/api';
 
 interface DashboardWithExtras extends DashboardResponse {
   stageKPIs?: DashboardStageKPIs;
   alerts?: DashboardAlerts;
+  trends?: DashboardTrends;
 }
 
 const DEFAULT_STAGE_KPIS: DashboardStageKPIs = {
@@ -19,6 +25,29 @@ const DEFAULT_ALERTS: DashboardAlerts = {
   referralAlerts: 0,
   overdueAnc: 0,
   inTransitReferrals: 0,
+};
+
+const DEFAULT_TRENDS: DashboardTrends = {
+  admissions24h: Array<number>(24).fill(0),
+  admissionsToday: 0,
+  admissions7dAvg: 0,
+  newByRisk24h: { high: 0, medium: 0, low: 0, total: 0 },
+  currentShift: {
+    label: '',
+    windowStart: new Date().toISOString(),
+    windowEnd: new Date().toISOString(),
+    admissions: 0,
+    delivered: 0,
+    referred: 0,
+  },
+  previousShift: {
+    label: '',
+    windowStart: new Date().toISOString(),
+    windowEnd: new Date().toISOString(),
+    admissions: 0,
+    delivered: 0,
+    referred: 0,
+  },
 };
 
 export function useDashboard() {
@@ -35,6 +64,7 @@ export function useDashboard() {
     summary: data?.summary ?? { totalLow: 0, totalMedium: 0, totalHigh: 0, totalActive: 0 },
     stageKPIs: data?.stageKPIs ?? DEFAULT_STAGE_KPIS,
     alerts: data?.alerts ?? DEFAULT_ALERTS,
+    trends: data?.trends ?? DEFAULT_TRENDS,
     updatedAt: data?.updatedAt ?? null,
     isLoading,
     isValidating,

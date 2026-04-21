@@ -1,50 +1,21 @@
-// TopNavBar — horizontal top navigation with logo, nav links, Bangkok clock,
-// hospital badge, user identity, and logout. Replaces the previous
-// Sidebar + breadcrumb-only TopBar pair.
+// TopNavBar — shared provincial/hospital chrome in the 2026-04-21
+// air-traffic-control aesthetic: 3-px navy accent rail + navy bar with an
+// LR monogram, gold "KK-LRMS" brand, right-aligned nav menu, user identity,
+// and logout. Renders on every page (dashboard and otherwise) so the whole
+// app has one visual identity.
+//
+// Dashboard-specific controls (sync, kiosk toggle, simulate button, live
+// status) live in their own strip underneath TopNavBar on `/` — see
+// `src/app/(provincial)/page.tsx`.
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
-import {
-  LayoutDashboard,
-  Baby,
-  Building2,
-  ArrowRightLeft,
-  BarChart3,
-  Stethoscope,
-  Settings,
-  LogOut,
-  Clock,
-  Menu,
-  X,
-} from 'lucide-react';
+import { LogOut, Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: 'ผู้ดูแลระบบ',
-  OBSTETRICIAN: 'สูติแพทย์',
-  NURSE: 'พยาบาล',
-};
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  adminOnly?: boolean;
-}
-
-// Provincial menu — full 6-item nav (+ ตั้งค่า for ADMIN). Per design §4.2.
-const NAV_ITEMS: NavItem[] = [
-  { href: '/', label: 'แดชบอร์ด', icon: LayoutDashboard },
-  { href: '/pregnancies', label: 'ฝากครรภ์', icon: Baby },
-  { href: '/hospitals', label: 'โรงพยาบาล', icon: Building2 },
-  { href: '/referrals', label: 'ส่งต่อ', icon: ArrowRightLeft },
-  { href: '/outcomes', label: 'ผลลัพธ์ทารก', icon: BarChart3 },
-  { href: '/hospital-maternity-ward', label: 'ห้องคลอด', icon: Stethoscope },
-  { href: '/admin', label: 'ตั้งค่า', icon: Settings, adminOnly: true },
-];
+import { NAV_ITEMS, ROLE_LABELS, filterNavByRole } from '@/config/nav';
 
 export type TopNavBarVariant = 'hospital' | 'provincial';
 
@@ -57,18 +28,15 @@ function formatBangkokTime(): string {
     timeZone: 'Asia/Bangkok',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
+    hour12: false,
   });
 }
 
 function useBangkokClock(): string {
-  const [time, setTime] = useState('--:--:--');
+  const [time, setTime] = useState('--:--');
   useEffect(() => {
-    // Defer the initial update to avoid a synchronous setState inside
-    // the effect body (react-hooks/set-state-in-effect). Subsequent
-    // updates run inside the interval callback and are unaffected.
     queueMicrotask(() => setTime(formatBangkokTime()));
-    const id = setInterval(() => setTime(formatBangkokTime()), 1_000);
+    const id = setInterval(() => setTime(formatBangkokTime()), 30_000);
     return () => clearInterval(id);
   }, []);
   return time;
@@ -82,14 +50,12 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
 
   const isHospital = variant === 'hospital';
   const userRole = session?.user?.role;
-  const items = isHospital
-    ? []
-    : NAV_ITEMS.filter((i) => !i.adminOnly || userRole === 'ADMIN');
+  const items = isHospital ? [] : filterNavByRole(NAV_ITEMS, userRole);
   const logoHref = isHospital ? '/hospital-maternity-ward' : '/';
   const userName = session?.user?.name ?? '';
   const hospitalName = session?.user?.hospitalName ?? '';
   const hospitalCode = session?.user?.hospitalCode ?? '';
-  const roleLabel = userRole ? ROLE_LABELS[userRole] ?? userRole : '';
+  const roleLabel = userRole ? (ROLE_LABELS[userRole] ?? userRole) : '';
 
   const isActive = useCallback(
     (href: string) => {
@@ -104,131 +70,153 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200/60 bg-white/85 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4 lg:px-6">
-        {/* Logo */}
-        <Link href={logoHref} className="flex shrink-0 items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900">
-            <Building2 className="h-5 w-5 text-white" />
-          </div>
-          <span className="hidden text-lg font-bold tracking-tight text-slate-900 sm:inline">
-            KK-LRMS
-          </span>
+    <header className="sticky top-0 z-30">
+      {/* 3-px navy accent rail */}
+      <div
+        className="h-[3px]"
+        style={{
+          background:
+            'linear-gradient(90deg, var(--accent-navy-strong) 0%, var(--accent-navy) 60%, var(--accent-navy) 100%)',
+        }}
+      />
+
+      {/* Row 1 — navy bar: brand + identity + logout */}
+      <div
+        className="flex items-center gap-4 px-5 py-2.5 text-white"
+        style={{
+          background: 'var(--accent-navy)',
+          borderBottom: '1px solid var(--accent-navy-strong)',
+        }}
+      >
+        <Link
+          href={logoHref}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-sm bg-white font-mono text-[13px] font-extrabold shadow-md"
+          style={{ color: 'var(--accent-navy-strong)', letterSpacing: '0.02em' }}
+          aria-label="KK-LRMS home"
+        >
+          LR
         </Link>
+        <div className="min-w-0">
+          <div
+            className="text-[20px] font-extrabold leading-tight"
+            style={{
+              color: '#ffe89a',
+              letterSpacing: '-0.015em',
+              textShadow: '0 1px 2px rgba(0,0,0,0.25)',
+            }}
+          >
+            KK-LRMS
+            <span className="ml-2.5 text-[13px] font-medium text-white/85" style={{ letterSpacing: 0 }}>
+              ·{' '}
+              <span>{isHospital ? 'ห้องคลอด' : 'OneLR ห้องคลอดหนึ่งเดียว'}</span>
+            </span>
+          </div>
+          <div className="mt-[2px] font-mono text-[10px] tracking-[0.08em] text-white/60">
+            PROVINCIAL LABOR-ROOM MONITORING · KHON KAEN
+          </div>
+        </div>
 
-        {/* Hospital mode: single static page label (no nav links). Design §4.2. */}
-        {isHospital && (
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-            <Stethoscope className="h-4 w-4 text-emerald-600" />
-            ห้องคลอด
-          </span>
-        )}
+        <div className="flex-1" />
 
-        {/* Desktop nav (provincial only) */}
-        {!isHospital && (
-          <nav className="hidden flex-1 items-center gap-1 lg:flex">
+        <div className="flex items-center gap-3 font-mono text-[11px] text-white/80">
+          <span className="hidden font-mono tabular-nums text-white sm:inline">{clock}</span>
+          {hospitalName && (
+            <span className="hidden items-center gap-1 rounded-sm border border-white/25 bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white md:inline-flex">
+              {hospitalName}
+              {hospitalCode && (
+                <span className="text-white/60">·{hospitalCode}</span>
+              )}
+            </span>
+          )}
+          {userName && (
+            <div className="hidden flex-col items-end font-sans leading-tight md:flex">
+              <span className="text-[12px] font-medium text-white">{userName}</span>
+              {roleLabel && <span className="text-[10px] text-white/60">{roleLabel}</span>}
+            </div>
+          )}
+          <button
+            onClick={handleLogout}
+            className="rounded-sm p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            aria-label="ออกจากระบบ"
+            title="ออกจากระบบ"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+          {/* Mobile hamburger (provincial only; hospital variant has no nav to toggle) */}
+          {!isHospital && (
+            <button
+              onClick={() => setMobileOpen((v) => !v)}
+              className="rounded-sm p-1.5 text-white/80 hover:bg-white/10 lg:hidden"
+              aria-label="เมนู"
+            >
+              {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Row 2 — nav menu (provincial only) */}
+      {!isHospital && (
+        <nav
+          className="hidden items-center gap-1 bg-white px-5 py-1.5 lg:flex"
+          style={{ borderBottom: '1px solid var(--rule-strong)' }}
+          aria-label="เมนูหลัก"
+        >
+          <div className="flex-1" />
+          <div className="flex items-center gap-1 overflow-x-auto">
             {items.map(({ href, label, icon: Icon }) => {
               const active = isActive(href);
               return (
                 <Link
                   key={href}
                   href={href}
+                  aria-current={active ? 'page' : undefined}
                   className={cn(
-                    'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                    'inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-[13px] transition-colors',
                     active
-                      ? 'bg-emerald-50 text-emerald-700'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                      ? 'font-semibold'
+                      : 'font-medium hover:bg-[var(--accent-navy-soft)]',
                   )}
+                  style={{
+                    color: active ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
+                    background: active ? 'var(--accent-navy-soft)' : 'transparent',
+                  }}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-[15px] w-[15px]" />
                   {label}
                 </Link>
               );
             })}
-          </nav>
-        )}
-
-        {/* Right cluster (desktop, or always-visible in hospital mode) */}
-        <div
-          className={cn(
-            'ml-auto items-center gap-3',
-            isHospital ? 'flex' : 'hidden lg:flex',
-          )}
-        >
-          {/* Clock */}
-          <div className="hidden items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-1.5 sm:flex">
-            <Clock className="h-3.5 w-3.5 text-slate-400" />
-            <span className="font-mono text-sm tabular-nums text-slate-600">
-              {clock}
-            </span>
           </div>
+        </nav>
+      )}
 
-          {/* Hospital badge */}
-          {hospitalName && (
-            <div className="hidden items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 md:flex">
-              <span className="text-sm font-medium text-slate-700">
-                {hospitalName}
-              </span>
-              <span className="text-xs text-slate-400">({hospitalCode})</span>
-            </div>
-          )}
-
-          {/* User */}
-          {userName && (
-            <div className="hidden flex-col items-end md:flex">
-              <span className="text-sm font-medium text-slate-700">
-                {userName}
-              </span>
-              {roleLabel && (
-                <span className="text-xs text-slate-400">{roleLabel}</span>
-              )}
-            </div>
-          )}
-
-          {/* Logout */}
-          <button
-            onClick={handleLogout}
-            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-            aria-label="ออกจากระบบ"
-            title="ออกจากระบบ"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Mobile hamburger (provincial only — hospital has no nav links) */}
-        {!isHospital && (
-          <button
-            onClick={() => setMobileOpen((v) => !v)}
-            className="ml-auto rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
-            aria-label="เมนู"
-          >
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
-        )}
-      </div>
-
-      {/* Mobile menu drawer (provincial only) */}
+      {/* Mobile drawer */}
       {!isHospital && mobileOpen && (
-        <nav className="border-t border-slate-200 bg-white px-4 py-2 lg:hidden">
-          {items.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              onClick={() => setMobileOpen(false)}
-              className={cn(
-                'flex items-center gap-2 rounded-md px-3 py-2 text-sm',
-                isActive(href)
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : 'text-slate-600 hover:bg-slate-100',
-              )}
-            >
-              <Icon className="h-4 w-4" /> {label}
-            </Link>
-          ))}
+        <nav
+          className="flex flex-col bg-white px-4 py-2 lg:hidden"
+          style={{ borderBottom: '1px solid var(--rule-strong)' }}
+        >
+          {items.map(({ href, label, icon: Icon }) => {
+            const active = isActive(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center gap-2 rounded-sm px-3 py-2 text-[14px]"
+                style={{
+                  color: active ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
+                  background: active ? 'var(--accent-navy-soft)' : 'transparent',
+                }}
+              >
+                <Icon className="h-4 w-4" /> {label}
+              </Link>
+            );
+          })}
           <button
             onClick={handleLogout}
-            className="mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-600 hover:bg-red-50 hover:text-red-500"
+            className="mt-2 flex w-full items-center gap-2 rounded-sm px-3 py-2 text-[14px] text-red-600 hover:bg-red-50"
             aria-label="ออกจากระบบ"
           >
             <LogOut className="h-4 w-4" /> ออกจากระบบ

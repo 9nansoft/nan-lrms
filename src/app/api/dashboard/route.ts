@@ -1,7 +1,7 @@
 // T049: GET /api/dashboard — province dashboard summary
 import { NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
-import { getProvinceDashboard, getStageKPIs, getDashboardAlerts } from '@/services/dashboard';
+import { getProvinceDashboard, getStageKPIs, getDashboardAlerts, getTrends } from '@/services/dashboard';
 import { auth } from '@/lib/auth';
 import { tryLogAccess } from '@/services/audit';
 import { ensureInit } from '@/lib/ensure-init';
@@ -22,12 +22,13 @@ export async function GET() {
       });
     }
 
-    const [result, stageKPIs, alerts] = await Promise.all([
+    const [result, stageKPIs, alerts, trends] = await Promise.all([
       getProvinceDashboard(db),
       getStageKPIs(db),
       getDashboardAlerts(db),
+      getTrends(db),
     ]);
-    return NextResponse.json({ ...result, stageKPIs, alerts });
+    return NextResponse.json({ ...result, stageKPIs, alerts, trends });
   } catch (error) {
     logger.error('dashboard_api_failed', { error });
     return NextResponse.json(

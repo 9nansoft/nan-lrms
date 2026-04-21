@@ -1,4 +1,5 @@
-// HospitalTable component tests
+// HospitalTable component tests — updated 2026-04-21 for the redesigned
+// dense-list layout (no <table> rows; div grid with sort chips).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { HospitalTable } from '@/components/dashboard/HospitalTable';
@@ -34,115 +35,81 @@ describe('HospitalTable', () => {
     mockPush.mockClear();
   });
 
-  it('renders table with hospital rows', () => {
+  it('renders hospital rows', () => {
     render(<HospitalTable hospitals={sampleHospitals} />);
     expect(screen.getByText('รพ.ขอนแก่น')).toBeTruthy();
     expect(screen.getByText('รพ.ชุมแพ')).toBeTruthy();
   });
 
-  it('shows risk count badges with correct colors', () => {
+  it('renders sort chip controls', () => {
+    render(<HospitalTable hospitals={sampleHospitals} />);
+    expect(screen.getByText(/SEVERITY/)).toBeTruthy();
+    expect(screen.getByText(/NAME/)).toBeTruthy();
+    expect(screen.getByText(/TOTAL/)).toBeTruthy();
+    expect(screen.getByText(/LEVEL/)).toBeTruthy();
+  });
+
+  it('sorts by severity descending by default (HIGH hospital first)', () => {
     const { container } = render(<HospitalTable hospitals={sampleHospitals} />);
-    // Green badge for low risk
-    const greenBadges = container.querySelectorAll('.bg-green-100');
-    expect(greenBadges.length).toBeGreaterThan(0);
-    // Yellow badge for medium risk
-    const yellowBadges = container.querySelectorAll('.bg-yellow-100');
-    expect(yellowBadges.length).toBeGreaterThan(0);
-    // Red badge for high risk
-    const redBadges = container.querySelectorAll('.bg-red-100');
-    expect(redBadges.length).toBeGreaterThan(0);
+    const rows = container.querySelectorAll('[data-testid="hospital-row"]');
+    expect(rows.length).toBe(2);
+    // Default sort: severity desc; H001 has HIGH=2 → must come before H002 (HIGH=0)
+    expect(rows[0].textContent).toContain('รพ.ขอนแก่น');
+    expect(rows[1].textContent).toContain('รพ.ชุมแพ');
   });
 
-  it('shows dash for zero risk counts', () => {
-    render(<HospitalTable hospitals={sampleHospitals} />);
-    // H002 has high=0, should show "-"
-    const dashes = screen.getAllByText('-');
-    expect(dashes.length).toBeGreaterThan(0);
+  it('clicking NAME sort chip toggles order', () => {
+    const { container } = render(<HospitalTable hospitals={sampleHospitals} />);
+    fireEvent.click(screen.getByText(/NAME/));
+    const rows = container.querySelectorAll('[data-testid="hospital-row"]');
+    expect(rows.length).toBe(2);
+    // NAME desc (first click defaults to desc in the new design)
+    expect(rows[0].textContent).toContain('รพ.ชุมแพ');
   });
 
-  it('shows ConnectionStatus for each hospital', () => {
-    render(<HospitalTable hospitals={sampleHospitals} />);
-    expect(screen.getByText('ออนไลน์')).toBeTruthy();
-    expect(screen.getByText('ออฟไลน์')).toBeTruthy();
-  });
-
-  it('calls router.push when row is clicked', () => {
-    render(<HospitalTable hospitals={sampleHospitals} />);
-    const row = screen.getByText('รพ.ขอนแก่น').closest('tr');
-    expect(row).toBeTruthy();
-    fireEvent.click(row!);
+  it('calls router.push when row is clicked (no selection handler)', () => {
+    const { container } = render(<HospitalTable hospitals={sampleHospitals} />);
+    const rows = container.querySelectorAll('[data-testid="hospital-row"]');
+    fireEvent.click(rows[0]);
+    // Row 0 = H001 by default severity sort
     expect(mockPush).toHaveBeenCalledWith('/hospitals/H001');
   });
 
-  it('navigates to correct hospital when second row is clicked', () => {
-    render(<HospitalTable hospitals={sampleHospitals} />);
-    const row = screen.getByText('รพ.ชุมแพ').closest('tr');
-    fireEvent.click(row!);
-    expect(mockPush).toHaveBeenCalledWith('/hospitals/H002');
+  it('invokes onSelect instead of routing when provided', () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <HospitalTable hospitals={sampleHospitals} onSelect={onSelect} />,
+    );
+    const rows = container.querySelectorAll('[data-testid="hospital-row"]');
+    fireEvent.click(rows[0]);
+    expect(onSelect).toHaveBeenCalledWith('H001');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('renders table headers including sort headers', () => {
-    render(<HospitalTable hospitals={sampleHospitals} />);
-    expect(screen.getByText(/โรงพยาบาล/)).toBeTruthy();
-    expect(screen.getByText(/ระดับ/)).toBeTruthy();
-    expect(screen.getByText(/เสี่ยงต่ำ/)).toBeTruthy();
-    expect(screen.getByText(/เสี่ยงปานกลาง/)).toBeTruthy();
-    expect(screen.getByText(/เสี่ยงสูง/)).toBeTruthy();
-    expect(screen.getByText(/รวม/)).toBeTruthy();
-    expect(screen.getByText('สถานะ')).toBeTruthy();
-  });
-
-  it('sorts by name column when header clicked', () => {
-    const hospitals: DashboardHospital[] = [
-      {
-        hcode: 'H002',
-        name: 'สอง',
-        level: HospitalLevel.M1,
-        connectionStatus: ConnectionStatus.ONLINE,
-        lastSyncAt: null,
-        counts: { low: 1, medium: 0, high: 0, total: 1 },
-      },
-      {
-        hcode: 'H001',
-        name: 'หนึ่ง',
-        level: HospitalLevel.A_S,
-        connectionStatus: ConnectionStatus.ONLINE,
-        lastSyncAt: null,
-        counts: { low: 2, medium: 0, high: 0, total: 2 },
-      },
-    ];
-
-    const { container } = render(<HospitalTable hospitals={hospitals} />);
-
-    // Default sort is ascending by name
-    const rows = container.querySelectorAll('tbody tr');
-    expect(rows.length).toBe(2);
-
-    // Click name header to toggle to descending
-    const nameHeader = screen.getByText(/โรงพยาบาล/);
-    fireEvent.click(nameHeader);
-
-    // After clicking, sort direction should change
-    const rowsAfterClick = container.querySelectorAll('tbody tr');
-    expect(rowsAfterClick.length).toBe(2);
-  });
-
-  it('shows hospital level as Badge', () => {
+  it('renders hospital level chip', () => {
     render(<HospitalTable hospitals={sampleHospitals} />);
     expect(screen.getByText('A_S')).toBeTruthy();
     expect(screen.getByText('M1')).toBeTruthy();
   });
 
+  it('renders OFFLINE flag for offline hospital', () => {
+    render(<HospitalTable hospitals={sampleHospitals} />);
+    expect(screen.getByText('OFFLINE')).toBeTruthy();
+  });
+
   it('shows total count for each hospital', () => {
-    const { container } = render(<HospitalTable hospitals={sampleHospitals} />);
-    expect(screen.getByText('10')).toBeTruthy();
-    // '3' appears in both medium count (H001) and total (H002), so use getAllByText
-    const threes = screen.getAllByText('3');
-    expect(threes.length).toBeGreaterThanOrEqual(2);
-    // Verify totals are in font-semibold cells
-    const totalCells = container.querySelectorAll('td.font-semibold');
-    const totalValues = Array.from(totalCells).map((cell) => cell.textContent);
-    expect(totalValues).toContain('10');
-    expect(totalValues).toContain('3');
+    render(<HospitalTable hospitals={sampleHospitals} />);
+    expect(screen.getByText(/^10/)).toBeTruthy(); // "10 act"
+    expect(screen.getByText(/^3/)).toBeTruthy();
+  });
+
+  it('renders node-count summary in the sort bar', () => {
+    render(<HospitalTable hospitals={sampleHospitals} />);
+    expect(screen.getByText(/2 NODES/)).toBeTruthy();
+  });
+
+  it('shows empty-state message when no hospitals', () => {
+    render(<HospitalTable hospitals={[]} />);
+    expect(screen.getByText(/ไม่มีโรงพยาบาลในรายการ/)).toBeTruthy();
   });
 });
