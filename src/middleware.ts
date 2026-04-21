@@ -9,6 +9,10 @@ import { NextResponse } from 'next/server';
 // Public paths that don't require authentication
 const PUBLIC_PATHS = ['/login', '/about', '/api/auth', '/api/health', '/api/webhooks', '/api/referrals/check'];
 const STATIC_PATHS = ['/_next', '/favicon.ico'];
+// Dev-only API routes that are already guarded server-side by simulationGuard()
+// (which throws 404 in production). Listing them here lets local CLI tooling
+// curl them without a NextAuth cookie. No-op in prod because the guard fires first.
+const DEV_ONLY_API_PATHS = ['/api/dev/simulate'];
 
 // T108: Add security headers to all responses
 //
@@ -39,6 +43,14 @@ export default auth((req) => {
   }
 
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+    return addSecurityHeaders(NextResponse.next());
+  }
+
+  // Dev-only API routes — server-side guard blocks them in production anyway.
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    DEV_ONLY_API_PATHS.some((p) => pathname.startsWith(p))
+  ) {
     return addSecurityHeaders(NextResponse.next());
   }
 

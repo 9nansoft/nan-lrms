@@ -1,15 +1,18 @@
 import { SessionProvider } from 'next-auth/react';
-import { TopNavBar } from '@/components/layout/TopNavBar';
+import { TopNavBarSlot } from '@/components/layout/TopNavBarSlot';
+import { ContentFrameSlot } from '@/components/layout/ContentFrameSlot';
 import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
+import { DbHealthBanner } from '@/components/layout/DbHealthBanner';
 
 export default function ProvincialLayout({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
       <BreadcrumbProvider>
         <div className="flex min-h-screen flex-col bg-slate-50/50">
-          <TopNavBar />
+          <DbHealthBanner />
+          <TopNavBarSlot />
           <main className="flex-1">
-            <div className="mx-auto max-w-[1400px] p-6 lg:p-8">{children}</div>
+            <ContentFrameSlot>{children}</ContentFrameSlot>
           </main>
         </div>
       </BreadcrumbProvider>
