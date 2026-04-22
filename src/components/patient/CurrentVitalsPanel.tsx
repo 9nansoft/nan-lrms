@@ -1,7 +1,12 @@
-// CurrentVitalsPanel — latest vital signs with status badges and mini sparklines
+// CurrentVitalsPanel — latest vital signs with status badges and mini
+// sparklines. Redesigned 2026-04-21 (v3): tinted severity backgrounds so
+// abnormal vitals jump off the page; sparkline renders with a normal-band
+// green overlay so you can see at a glance whether a trend is drifting out
+// of range. Empty tiles render as muted slate (not just grey "—"), so the
+// absence of data is itself a visual signal.
 'use client';
 
-import { HeartPulse } from 'lucide-react';
+import { HeartPulse, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
@@ -20,10 +25,6 @@ interface VitalRecord {
 export interface CurrentVitalsPanelProps {
   vitals: VitalRecord[];
 }
-
-// ---------------------------------------------------------------------------
-// Status evaluation
-// ---------------------------------------------------------------------------
 
 type VitalStatus = 'normal' | 'warning' | 'critical';
 
@@ -63,56 +64,115 @@ function evaluateBpStatus(sbp: number, dbp: number): VitalStatus {
 // Style helpers
 // ---------------------------------------------------------------------------
 
-const STATUS_COLORS: Record<VitalStatus, { text: string; stroke: string }> = {
-  normal:   { text: 'text-green-500',  stroke: '#22c55e' },
-  warning:  { text: 'text-amber-500',  stroke: '#f59e0b' },
-  critical: { text: 'text-red-500',    stroke: '#ef4444' },
-};
-
-const STATUS_LABEL_TH: Record<VitalStatus, string> = {
-  normal: 'ปกติ',
-  warning: 'เฝ้าระวัง',
-  critical: 'ผิดปกติ',
+const STATUS_META: Record<VitalStatus, {
+  color: string;
+  bg: string;
+  stroke: string;
+  label: string;
+  icon: typeof CheckCircle2;
+}> = {
+  normal: {
+    color: 'var(--risk-low)',
+    bg: 'color-mix(in srgb, #22c55e 8%, white)',
+    stroke: '#16a34a',
+    label: 'ปกติ',
+    icon: CheckCircle2,
+  },
+  warning: {
+    color: 'var(--risk-medium)',
+    bg: 'color-mix(in srgb, #eab308 14%, white)',
+    stroke: '#ca8a04',
+    label: 'เฝ้าระวัง',
+    icon: AlertTriangle,
+  },
+  critical: {
+    color: 'var(--risk-high)',
+    bg: 'color-mix(in srgb, #ef4444 16%, white)',
+    stroke: '#dc2626',
+    label: 'ผิดปกติ',
+    icon: AlertTriangle,
+  },
 };
 
 // ---------------------------------------------------------------------------
-// Mini sparkline (raw SVG)
+// Mini sparkline (with normal-band shading)
 // ---------------------------------------------------------------------------
 
 function MiniSparkline({
   values,
   color,
+  normalMin,
+  normalMax,
 }: {
   values: number[];
   color: string;
+  normalMin?: number;
+  normalMax?: number;
 }) {
   if (values.length < 2) return null;
 
-  const width = 80;
-  const height = 24;
-  const padding = 2;
+  const width = 100;
+  const height = 28;
+  const padding = 3;
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1; // avoid division by zero
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  // Extend Y range to include the normal band so the band is always visible
+  // even when the patient's readings are far outside of it.
+  const yMin = normalMin != null ? Math.min(dataMin, normalMin) - 2 : dataMin;
+  const yMax = normalMax != null ? Math.max(dataMax, normalMax) + 2 : dataMax;
+  const range = yMax - yMin || 1;
+
+  const toY = (v: number) => height - padding - ((v - yMin) / range) * (height - padding * 2);
 
   const points = values.map((v, i) => {
     const x = padding + (i / (values.length - 1)) * (width - padding * 2);
-    const y = height - padding - ((v - min) / range) * (height - padding * 2);
-    return `${x},${y}`;
+    return `${x},${toY(v)}`;
   });
-
   const d = points.map((p, i) => (i === 0 ? `M${p}` : `L${p}`)).join(' ');
+
+  // Last-point highlight — larger dot if last value is abnormal.
+  const last = values[values.length - 1];
+  const lastX = padding + (width - padding * 2);
+  const lastY = toY(last);
+  const lastAbnormal =
+    (normalMin != null && last < normalMin) || (normalMax != null && last > normalMax);
 
   return (
     <svg
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
-      className="mt-1"
       aria-hidden="true"
+      className="shrink-0"
     >
-      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      {/* Normal-band shading */}
+      {normalMin != null && normalMax != null && (
+        <rect
+          x={0}
+          y={toY(normalMax)}
+          width={width}
+          height={toY(normalMin) - toY(normalMax)}
+          fill="#22c55e"
+          fillOpacity={0.14}
+        />
+      )}
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.75}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx={lastX}
+        cy={lastY}
+        r={lastAbnormal ? 2.75 : 1.75}
+        fill={color}
+        stroke="white"
+        strokeWidth={lastAbnormal ? 1 : 0.5}
+      />
     </svg>
   );
 }
@@ -129,6 +189,8 @@ interface VitalItemProps {
   normalRangeText: string;
   sparklineValues: number[];
   lastMeasuredAt: string | null;
+  normalMin?: number;
+  normalMax?: number;
 }
 
 function VitalItem({
@@ -139,56 +201,92 @@ function VitalItem({
   normalRangeText,
   sparklineValues,
   lastMeasuredAt,
+  normalMin,
+  normalMax,
 }: VitalItemProps) {
-  const colors = STATUS_COLORS[status];
+  const meta = STATUS_META[status];
+  const Icon = meta.icon;
 
   return (
-    <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
-      {/* Label */}
-      <div className="text-xs uppercase tracking-wider text-slate-400 font-medium">
-        {label}
+    <div
+      className="relative flex flex-col gap-1 border px-3 py-2"
+      style={{
+        borderColor: 'var(--rule-strong)',
+        borderLeft: `3px solid ${meta.color}`,
+        background: meta.bg,
+      }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div
+          className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]"
+          style={{ color: 'var(--ink-navy-dim)' }}
+        >
+          {label}
+        </div>
+        <div
+          className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-[0.08em]"
+          style={{
+            background: status === 'normal' ? 'rgba(34,197,94,0.15)' : meta.color,
+            color: status === 'normal' ? meta.color : 'white',
+          }}
+        >
+          <Icon className="h-2.5 w-2.5" />
+          {meta.label}
+        </div>
       </div>
-
-      {/* Current value */}
-      <div className="mt-1 flex items-baseline gap-1.5">
-        <span className={`font-mono text-2xl font-bold ${colors.text}`}>
+      <div className="flex items-baseline gap-1.5">
+        <span
+          className="font-mono text-[28px] font-bold leading-none tabular-nums"
+          style={{ color: meta.color, letterSpacing: '-0.025em' }}
+        >
           {displayValue}
         </span>
-        <span className="text-xs text-slate-400">{unit}</span>
+        <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">{unit}</span>
+        <div className="ml-auto">
+          <MiniSparkline
+            values={sparklineValues}
+            color={meta.stroke}
+            normalMin={normalMin}
+            normalMax={normalMax}
+          />
+        </div>
       </div>
-
-      {/* Status text */}
-      <div className={`text-xs font-semibold mt-0.5 ${colors.text}`}>
-        {STATUS_LABEL_TH[status]}
-      </div>
-
-      {/* Normal range */}
-      <div className="text-xs text-slate-400 mt-1">{normalRangeText}</div>
-
-      {/* Mini sparkline */}
-      <MiniSparkline values={sparklineValues} color={colors.stroke} />
-
-      {/* Last measured */}
-      <div className="text-xs text-slate-400 mt-1">
-        {lastMeasuredAt ? formatRelativeTime(lastMeasuredAt) : '-'}
+      <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
+        <span style={{ color: 'var(--ink-navy-muted)' }}>{normalRangeText}</span>
+        <span style={{ color: 'var(--ink-navy-dim)' }}>
+          {lastMeasuredAt ? formatRelativeTime(lastMeasuredAt) : '—'}
+        </span>
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Null-state item (when there is no data at all)
-// ---------------------------------------------------------------------------
-
 function VitalItemEmpty({ label, unit }: { label: string; unit: string }) {
   return (
-    <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
-      <div className="text-xs uppercase tracking-wider text-slate-400 font-medium">{label}</div>
-      <div className="mt-1 flex items-baseline gap-1.5">
-        <span className="font-mono text-2xl font-bold text-slate-300">-</span>
-        <span className="text-xs text-slate-400">{unit}</span>
+    <div
+      className="flex flex-col gap-1 border px-3 py-2"
+      style={{
+        borderColor: 'var(--rule-strong)',
+        borderLeft: '3px dashed var(--ink-navy-muted)',
+        background: 'color-mix(in srgb, #6b7693 4%, white)',
+      }}
+    >
+      <div
+        className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]"
+        style={{ color: 'var(--ink-navy-muted)' }}
+      >
+        {label}
       </div>
-      <div className="text-xs text-slate-400 mt-1">ไม่มีข้อมูล</div>
+      <div className="flex items-baseline gap-1.5">
+        <span
+          className="font-mono text-[28px] font-bold leading-none text-[var(--ink-navy-muted)]"
+          style={{ letterSpacing: '-0.025em' }}
+        >
+          —
+        </span>
+        <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">{unit}</span>
+      </div>
+      <div className="font-mono text-[10px] italic text-[var(--ink-navy-muted)]">ไม่มีข้อมูล</div>
     </div>
   );
 }
@@ -197,11 +295,10 @@ function VitalItemEmpty({ label, unit }: { label: string; unit: string }) {
 // Data extraction helpers
 // ---------------------------------------------------------------------------
 
-/** Extract the last N non-null numeric values from the vitals array for a given field. */
 function extractHistory(
   vitals: VitalRecord[],
   extractor: (v: VitalRecord) => number | null,
-  count: number = 8,
+  count: number = 10,
 ): number[] {
   const result: number[] = [];
   for (const v of vitals) {
@@ -213,7 +310,6 @@ function extractHistory(
   return result.slice(-count);
 }
 
-/** Find the latest record where the given field is non-null. */
 function findLatest(
   vitals: VitalRecord[],
   extractor: (v: VitalRecord) => number | string | null,
@@ -257,19 +353,34 @@ export function CurrentVitalsPanel({ vitals }: CurrentVitalsPanelProps) {
   const pphValue = latestPph?.pphAmountMl ?? null;
   const pphHistory = extractHistory(vitals, (v) => v.pphAmountMl);
 
+  // How many tiles are abnormal — used to decorate the header.
+  const criticalCount = [
+    mhrValue != null && evaluateStatus(mhrValue, THRESHOLDS.maternalHr) === 'critical',
+    fhrValue != null && evaluateStatus(fhrValue, THRESHOLDS.fetalHr) === 'critical',
+    sbpValue != null && dbpValue != null && evaluateBpStatus(sbpValue, dbpValue) === 'critical',
+    pphValue != null && evaluateStatus(pphValue, THRESHOLDS.pph) === 'critical',
+  ].filter(Boolean).length;
+
   return (
-    <div className="rounded-2xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)]">
-      {/* Title */}
-      <div className="flex items-center gap-2 mb-4">
-        <HeartPulse className="h-4 w-4 text-rose-500" />
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <HeartPulse className="h-4 w-4" style={{ color: 'var(--risk-high)' }} />
+        <h3 className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-navy)]">
           สัญญาณชีพปัจจุบัน
         </h3>
+        {criticalCount > 0 && (
+          <span
+            className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.06em] text-white"
+            style={{ background: 'var(--risk-high)' }}
+          >
+            <AlertTriangle className="h-2.5 w-2.5" />
+            {criticalCount} CRITICAL
+          </span>
+        )}
       </div>
 
-      {/* 2x2 Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* 1. Maternal HR */}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {/* Maternal HR */}
         {mhrValue !== null ? (
           <VitalItem
             label="ชีพจรมารดา"
@@ -279,12 +390,14 @@ export function CurrentVitalsPanel({ vitals }: CurrentVitalsPanelProps) {
             normalRangeText="ปกติ: 60-100 bpm"
             sparklineValues={mhrHistory}
             lastMeasuredAt={latestMhr?.measuredAt ?? null}
+            normalMin={THRESHOLDS.maternalHr.normalMin}
+            normalMax={THRESHOLDS.maternalHr.normalMax}
           />
         ) : (
           <VitalItemEmpty label="ชีพจรมารดา" unit="bpm" />
         )}
 
-        {/* 2. Fetal HR */}
+        {/* Fetal HR */}
         {fhrValue !== null ? (
           <VitalItem
             label="ชีพจรทารก"
@@ -294,12 +407,14 @@ export function CurrentVitalsPanel({ vitals }: CurrentVitalsPanelProps) {
             normalRangeText="ปกติ: 110-160 bpm"
             sparklineValues={fhrHistory}
             lastMeasuredAt={latestFhr?.measuredAt ?? null}
+            normalMin={THRESHOLDS.fetalHr.normalMin}
+            normalMax={THRESHOLDS.fetalHr.normalMax}
           />
         ) : (
           <VitalItemEmpty label="ชีพจรทารก" unit="bpm" />
         )}
 
-        {/* 3. Blood Pressure */}
+        {/* Blood Pressure */}
         {sbpValue !== null && dbpValue !== null ? (
           <VitalItem
             label="ความดันโลหิต"
@@ -309,12 +424,14 @@ export function CurrentVitalsPanel({ vitals }: CurrentVitalsPanelProps) {
             normalRangeText="ปกติ: 90-140/60-90 mmHg"
             sparklineValues={sbpHistory}
             lastMeasuredAt={latestBp?.measuredAt ?? null}
+            normalMin={THRESHOLDS.sbp.normalMin}
+            normalMax={THRESHOLDS.sbp.normalMax}
           />
         ) : (
           <VitalItemEmpty label="ความดันโลหิต" unit="mmHg" />
         )}
 
-        {/* 4. PPH */}
+        {/* PPH */}
         {pphValue !== null ? (
           <VitalItem
             label="เลือดออกหลังคลอด"
@@ -324,6 +441,8 @@ export function CurrentVitalsPanel({ vitals }: CurrentVitalsPanelProps) {
             normalRangeText="ปกติ: < 500 ml"
             sparklineValues={pphHistory}
             lastMeasuredAt={latestPph?.measuredAt ?? null}
+            normalMin={0}
+            normalMax={THRESHOLDS.pph.normalMax}
           />
         ) : (
           <VitalItemEmpty label="เลือดออกหลังคลอด" unit="ml" />

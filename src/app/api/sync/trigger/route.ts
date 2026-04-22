@@ -41,7 +41,8 @@ export async function POST() {
       await db.execute(
         `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [hospitalId, hospitalCode, hospitalName, 'M2', 1, 'UNKNOWN', now, now],
+        // Postgres strict boolean — use true, not 1 (SQLite is loose).
+        [hospitalId, hospitalCode, hospitalName, 'M2', true, 'UNKNOWN', now, now],
       );
 
       // Also store BMS tunnel config if available

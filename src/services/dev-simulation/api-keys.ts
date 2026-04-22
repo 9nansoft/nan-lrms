@@ -47,6 +47,11 @@ function ensureDev(): void {
 /**
  * Returns a valid Bearer key for the given hospital, issuing one if this
  * process hasn't seen the hospital before.
+ *
+ * Before handing back a cached key, we verify the underlying DB row is still
+ * active. If it's not (e.g. someone DELETE'd the row but the in-process cache
+ * wasn't cleared — a known cause of every-thread-401s after clear+start), we
+ * drop the stale entry and create a fresh key instead.
  */
 export async function getOrCreateDevApiKey(
   db: DatabaseAdapter,
@@ -55,7 +60,17 @@ export async function getOrCreateDevApiKey(
 ): Promise<string> {
   ensureDev();
   const hit = cache.get(hcode);
-  if (hit) return hit.rawKey;
+  if (hit) {
+    const rows = await db.query<{ id: string }>(
+      `SELECT id FROM webhook_api_keys
+       WHERE id = ? AND is_active = true AND revoked_at IS NULL`,
+      [hit.keyId],
+    );
+    if (rows.length > 0) return hit.rawKey;
+    // Stale cache entry — DB row is gone or revoked. Drop and reissue below.
+    cache.delete(hcode);
+    logger.warn('sim_api_key_cache_stale', { hcode, keyId: hit.keyId });
+  }
   const { id, rawKey } = await createApiKey(db, hospitalId, `${SIM_LABEL_PREFIX}${hcode}`);
   cache.set(hcode, { keyId: id, rawKey });
   logger.info('sim_api_key_issued', { hcode, keyId: id });
@@ -68,6 +83,14 @@ export async function getOrCreateDevApiKey(
  */
 export function clearDevApiKeyCache(): void {
   cache.clear();
+}
+
+/**
+ * Current size of the in-process key cache. Used by the clear route to
+ * report how many stale entries were purged.
+ */
+export function getDevApiKeyCacheSize(): number {
+  return cache.size;
 }
 
 /**

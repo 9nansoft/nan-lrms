@@ -2,6 +2,8 @@
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import { validateBmsSession } from '@/lib/auth-utils';
+import { assertHospitalAccess } from '@/lib/hospital-access-guard';
+import { logger } from '@/lib/logger';
 
 export { mapPositionToRole, validateBmsSession } from '@/lib/auth-utils';
 export type { BmsUserIdentity } from '@/lib/auth-utils';
@@ -20,6 +22,23 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const tunnelUrl = process.env.DEV_HOSPITAL_TUNNEL_URL ?? '';
         const identity = await validateBmsSession(sessionId, tunnelUrl);
         if (!identity) return null;
+
+        // Reject the login when the BMS identity belongs to a hospital that
+        // isn't registered in /admin (exempt: ADMIN role, hcode 00000, 99999).
+        // Failure closed so an operator removing a hospital from the admin
+        // list immediately blocks new sessions.
+        const allowed = await assertHospitalAccess({
+          hospitalCode: identity.hospitalCode,
+          role: identity.role,
+        });
+        if (!allowed) {
+          logger.warn('bms_login_rejected_unregistered_hospital', {
+            hospitalCode: identity.hospitalCode,
+            hospitalName: identity.hospitalName,
+            role: identity.role,
+          });
+          return null;
+        }
 
         return {
           id: sessionId,

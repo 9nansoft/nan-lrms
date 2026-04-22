@@ -23,6 +23,11 @@ export function usePatient(patientId: string | null) {
   return {
     patient: detail?.patient ?? null,
     cpdScore: detail?.cpdScore ?? null,
+    // `journeyContext` is the /pregnancies journey linked to this labor
+    // admission (same CID, possibly across hospitals). Present only when
+    // the woman had prior ANC registration. Consumers render the ANC
+    // summary panel off this; absent → labor-only admission.
+    journeyContext: detail?.journeyContext ?? null,
     vitals: vitalsData?.vitals ?? [],
     contractions: contractionsData?.contractions ?? [],
     isLoading: loadingDetail || loadingVitals || loadingContractions,

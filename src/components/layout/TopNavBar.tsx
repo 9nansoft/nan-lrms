@@ -1,12 +1,8 @@
-// TopNavBar — shared provincial/hospital chrome in the 2026-04-21
-// air-traffic-control aesthetic: 3-px navy accent rail + navy bar with an
-// LR monogram, gold "KK-LRMS" brand, right-aligned nav menu, user identity,
-// and logout. Renders on every page (dashboard and otherwise) so the whole
-// app has one visual identity.
-//
-// Dashboard-specific controls (sync, kiosk toggle, simulate button, live
-// status) live in their own strip underneath TopNavBar on `/` — see
-// `src/app/(provincial)/page.tsx`.
+// TopNavBar — shared provincial/hospital chrome. Single compact navy bar
+// (2026-04-21 redesign): logo + brand on the left, nav menu inline in the
+// middle, identity + logout on the right. Previous two-row layout (navy
+// identity row + white nav row) has been collapsed into one to free ~35px
+// of vertical space for page content.
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -80,52 +76,87 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
         }}
       />
 
-      {/* Row 1 — navy bar: brand + identity + logout */}
+      {/* Single compact navy bar: brand + inline nav + identity */}
       <div
-        className="flex items-center gap-4 px-5 py-2.5 text-white"
+        className="flex items-center gap-3 px-4 py-2 text-white"
         style={{
           background: 'var(--accent-navy)',
           borderBottom: '1px solid var(--accent-navy-strong)',
         }}
       >
+        {/* Brand cluster */}
         <Link
           href={logoHref}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-sm bg-white font-mono text-[13px] font-extrabold shadow-md"
-          style={{ color: 'var(--accent-navy-strong)', letterSpacing: '0.02em' }}
+          className="flex shrink-0 items-center gap-2.5"
           aria-label="KK-LRMS home"
         >
-          LR
-        </Link>
-        <div className="min-w-0">
-          <div
-            className="text-[20px] font-extrabold leading-tight"
-            style={{
-              color: '#ffe89a',
-              letterSpacing: '-0.015em',
-              textShadow: '0 1px 2px rgba(0,0,0,0.25)',
-            }}
+          <span
+            className="grid h-8 w-8 place-items-center rounded-sm bg-white font-mono text-[12px] font-extrabold shadow-md"
+            style={{ color: 'var(--accent-navy-strong)', letterSpacing: '0.02em' }}
           >
-            KK-LRMS
-            <span className="ml-2.5 text-[13px] font-medium text-white/85" style={{ letterSpacing: 0 }}>
-              ·{' '}
-              <span>{isHospital ? 'ห้องคลอด' : 'OneLR ห้องคลอดหนึ่งเดียว'}</span>
+            LR
+          </span>
+          <span className="leading-tight">
+            <span
+              className="block text-[15px] font-extrabold"
+              style={{
+                color: '#ffe89a',
+                letterSpacing: '-0.01em',
+                textShadow: '0 1px 2px rgba(0,0,0,0.25)',
+              }}
+            >
+              KK-LRMS
             </span>
-          </div>
-          <div className="mt-[2px] font-mono text-[10px] tracking-[0.08em] text-white/60">
-            PROVINCIAL LABOR-ROOM MONITORING · KHON KAEN
-          </div>
-        </div>
+            <span className="block text-[10px] font-medium tracking-wide text-white/70">
+              {isHospital ? 'ห้องคลอด' : 'OneLR · ขอนแก่น'}
+            </span>
+          </span>
+        </Link>
 
-        <div className="flex-1" />
+        {/* Divider */}
+        {!isHospital && items.length > 0 && (
+          <div className="mx-1 hidden h-7 w-px shrink-0 bg-white/15 lg:block" />
+        )}
 
-        <div className="flex items-center gap-3 font-mono text-[11px] text-white/80">
+        {/* Inline nav (provincial, desktop) */}
+        {!isHospital && (
+          <nav
+            className="hidden flex-1 items-center gap-0.5 overflow-x-auto lg:flex"
+            aria-label="เมนูหลัก"
+          >
+            {items.map(({ href, label, icon: Icon }) => {
+              const active = isActive(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-[13px] transition-colors',
+                    active
+                      ? 'bg-white/15 font-semibold text-white'
+                      : 'font-medium text-white/75 hover:bg-white/10 hover:text-white',
+                  )}
+                >
+                  <Icon className="h-[15px] w-[15px]" />
+                  {label}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
+
+        {/* Spacer when nav is hidden (hospital variant or mobile) */}
+        {(isHospital || items.length === 0) && <div className="flex-1" />}
+        {!isHospital && items.length > 0 && <div className="flex-1 lg:hidden" />}
+
+        {/* Identity + actions */}
+        <div className="flex shrink-0 items-center gap-2 text-[11px] text-white/80">
           <span className="hidden font-mono tabular-nums text-white sm:inline">{clock}</span>
           {hospitalName && (
             <span className="hidden items-center gap-1 rounded-sm border border-white/25 bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white md:inline-flex">
               {hospitalName}
-              {hospitalCode && (
-                <span className="text-white/60">·{hospitalCode}</span>
-              )}
+              {hospitalCode && <span className="text-white/60">·{hospitalCode}</span>}
             </span>
           )}
           {userName && (
@@ -142,7 +173,7 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
           >
             <LogOut className="h-4 w-4" />
           </button>
-          {/* Mobile hamburger (provincial only; hospital variant has no nav to toggle) */}
+          {/* Mobile hamburger (provincial only) */}
           {!isHospital && (
             <button
               onClick={() => setMobileOpen((v) => !v)}
@@ -155,46 +186,10 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
         </div>
       </div>
 
-      {/* Row 2 — nav menu (provincial only) */}
-      {!isHospital && (
-        <nav
-          className="hidden items-center gap-1 bg-white px-5 py-1.5 lg:flex"
-          style={{ borderBottom: '1px solid var(--rule-strong)' }}
-          aria-label="เมนูหลัก"
-        >
-          <div className="flex-1" />
-          <div className="flex items-center gap-1 overflow-x-auto">
-            {items.map(({ href, label, icon: Icon }) => {
-              const active = isActive(href);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-[13px] transition-colors',
-                    active
-                      ? 'font-semibold'
-                      : 'font-medium hover:bg-[var(--accent-navy-soft)]',
-                  )}
-                  style={{
-                    color: active ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
-                    background: active ? 'var(--accent-navy-soft)' : 'transparent',
-                  }}
-                >
-                  <Icon className="h-[15px] w-[15px]" />
-                  {label}
-                </Link>
-              );
-            })}
-          </div>
-        </nav>
-      )}
-
       {/* Mobile drawer */}
       {!isHospital && mobileOpen && (
         <nav
-          className="flex flex-col bg-white px-4 py-2 lg:hidden"
+          className="flex flex-col bg-white px-4 py-2 shadow-lg lg:hidden"
           style={{ borderBottom: '1px solid var(--rule-strong)' }}
         >
           {items.map(({ href, label, icon: Icon }) => {

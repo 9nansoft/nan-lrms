@@ -262,13 +262,36 @@ function CdssBanner({ x, y, w, h, alerts }: {
   else if (nAlert > 0) { headline = 'CDSS - แจ้งเตือน'; bg = '#FCF1E6'; accent = severityColor('ALERT'); }
   else if (nWarn > 0) { headline = 'CDSS - เฝ้าระวัง'; bg = '#FCF6EE'; accent = severityColor('WARN'); }
 
-  // Sort alerts by severity desc; show up to 4 rows.
+  // Dedupe: same (section, severity, message) triggered across N observations
+  // is ONE clinical finding — we collapse duplicates and track occurrence count
+  // so the list shows "<message> (x3)" instead of repeating the line 3 times.
   const rank: Record<CdssSeverity, number> = { CRITICAL: 3, ALERT: 2, WARN: 1, INFO: 0 };
-  const sorted = [...alerts].sort((a, b) => rank[b.severity] - rank[a.severity]);
-  const shown = sorted.slice(0, 4);
-  const remaining = sorted.length - shown.length;
+  interface UniqueAlert { severity: CdssSeverity; section: CdssAlertDto['section']; message: string; count: number }
+  const bucket = new Map<string, UniqueAlert>();
+  for (const a of alerts) {
+    const key = `${a.section}|${a.severity}|${a.message}`;
+    const hit = bucket.get(key);
+    if (hit) hit.count += 1;
+    else bucket.set(key, { severity: a.severity, section: a.section, message: a.message, count: 1 });
+  }
+  const unique = [...bucket.values()].sort((a, b) => rank[b.severity] - rank[a.severity]);
 
-  // Right-aligned severity pills.
+  // Fit rows into the available vertical space. Reserve 44px for the header
+  // (title + divider) and 8px bottom padding. Each row is 16px — tighter than
+  // the old 22px — so >3 alerts no longer overflow into the FHR strip below.
+  const ROW_H = 16;
+  const LIST_TOP = y + 42;
+  const listBottom = y + h - 6;
+  const maxRows = Math.max(1, Math.floor((listBottom - LIST_TOP) / ROW_H));
+  const shown = unique.slice(0, maxRows);
+  const remaining = unique.length - shown.length;
+  // If we're hiding anything, the last visible slot is reused for the
+  // "+ N more" line so it still fits inside the banner.
+  const showMore = remaining > 0;
+  const renderList = showMore ? shown.slice(0, maxRows - 1) : shown;
+  const hiddenCount = unique.length - renderList.length;
+
+  // Right-aligned severity pills — unchanged layout, still at the top.
   const pills: React.ReactElement[] = [];
   let pillX = x + w - 10;
   function pill(label: string, color: string) {
@@ -285,6 +308,16 @@ function CdssBanner({ x, y, w, h, alerts }: {
   if (nAlert > 0) pill(`เตือน ${nAlert}`, severityColor('ALERT'));
   if (nCrit > 0) pill(`วิกฤต ${nCrit}`, severityColor('CRITICAL'));
 
+  // Rough chars-that-fit for the message column. Subtract pill column + some
+  // breathing room; at fontSize=11 a Thai char ≈ 8px, Latin ≈ 6.5px.
+  const messageColX = x + 92;
+  const messageColW = w - (messageColX - x) - 16;
+  const maxChars = Math.floor(messageColW / 7);
+
+  function truncate(s: string, n: number): string {
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  }
+
   return (
     <g data-testid="strip-cdss">
       <rect x={x} y={y} width={w} height={h} fill={bg} />
@@ -293,23 +326,35 @@ function CdssBanner({ x, y, w, h, alerts }: {
       <text x={x + 22} y={y + 24} fontSize={15} fontWeight={800} fill={accent}>{headline}</text>
       <line x1={x + 22} y1={y + 36} x2={x + w - 10} y2={y + 36} stroke={C.LINE} />
       {pills}
-      {shown.map((a, i) => {
-        const ry = y + 44 + i * 22;
+      {renderList.map((a, i) => {
+        const ry = LIST_TOP + i * ROW_H;
+        const tagLabel =
+          a.severity === 'CRITICAL' ? 'วิกฤต'
+          : a.severity === 'ALERT' ? 'เตือน'
+          : a.severity === 'WARN' ? 'ระวัง'
+          : 'ข้อมูล';
+        const msg = `${sectionLabel(a.section)}: ${a.message}${a.count > 1 ? ` (×${a.count})` : ''}`;
         return (
           <g key={i}>
-            <rect x={x + 22} y={ry} width={98} height={19} fill={severityColor(a.severity)} rx={2} />
-            <text x={x + 71} y={ry + 14} fontSize={10} fontWeight={700} fill="#fff" textAnchor="middle">
-              {a.severity === 'CRITICAL' ? 'วิกฤต' : a.severity === 'ALERT' ? 'เตือน' : a.severity === 'WARN' ? 'ระวัง' : 'ข้อมูล'}
+            <rect x={x + 22} y={ry} width={60} height={ROW_H - 2} fill={severityColor(a.severity)} rx={2} />
+            <text x={x + 52} y={ry + ROW_H - 5} fontSize={10} fontWeight={700} fill="#fff" textAnchor="middle">
+              {tagLabel}
             </text>
-            <text x={x + 130} y={ry + 14} fontSize={12} fill={C.LABEL}>
-              {sectionLabel(a.section)}: {a.message}
+            <text x={messageColX} y={ry + ROW_H - 4} fontSize={11} fill={C.LABEL}>
+              {truncate(msg, maxChars)}
             </text>
           </g>
         );
       })}
-      {remaining > 0 && (
-        <text x={x + 22} y={y + 44 + shown.length * 22 + 14} fontSize={11} fontWeight={700} fill={C.LINE}>
-          +อีก {remaining} รายการ - ดูรายการเต็มในแท็บข้อมูล
+      {showMore && (
+        <text
+          x={x + 22}
+          y={LIST_TOP + renderList.length * ROW_H + ROW_H - 4}
+          fontSize={11}
+          fontWeight={700}
+          fill={C.LINE}
+        >
+          +อีก {hiddenCount} รายการ - ดูรายการเต็มในแท็บข้อมูล
         </text>
       )}
     </g>

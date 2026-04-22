@@ -51,6 +51,20 @@ export interface WebhookResult {
 
 // ─── ANC webhook payload ───
 
+export interface WebhookVaccineGiven {
+  type: 'TT' | 'DT' | 'TDAP' | 'INFLUENZA' | 'COVID';
+  dose?: number | null;
+  givenAtGa?: number | null;
+}
+
+export interface WebhookPsychosocialScreen {
+  alcohol?: boolean;
+  smoking?: boolean;
+  illicitDrugs?: boolean;
+  depressionPhq?: number;
+  domesticViolence?: boolean;
+}
+
 export interface WebhookAncVisit {
   date: string;
   visitNumber: number;
@@ -72,6 +86,17 @@ export interface WebhookAncVisit {
   calciumGiven?: boolean | null;
   dangerSigns?: string[] | null;
   fetalMovementOk?: boolean | null;
+  // RTCOG OB 66-029 (2566) additions — per-visit.
+  vaccinesGiven?: WebhookVaccineGiven[] | null;
+  urineKetone?: string | null;
+  urineCultureResult?: string | null;
+  iodineGiven?: boolean | null;
+  multivitaminGiven?: boolean | null;
+  vitaminDIu?: number | null;
+  nstResult?: 'REACTIVE' | 'NON_REACTIVE' | 'PENDING' | null;
+  bppScore?: number | null;
+  umbilicalDopplerResult?: 'NORMAL' | 'ABNORMAL' | null;
+  psychosocialScreen?: WebhookPsychosocialScreen | null;
 }
 
 export interface WebhookAncPatient {
@@ -100,6 +125,44 @@ export interface WebhookAncPatient {
   livingChildren?: number | null;
   pastMedicalHistory?: string | null;
   action?: 'upsert' | 'delete'; // default: 'upsert'
+  // ─── RTCOG OB 66-029 (2566) journey-level additions ──────────────────
+  mcvFl?: number | null;
+  dcipResult?: 'POS' | 'NEG' | 'PENDING' | null;
+  hbEResult?: 'POS' | 'NEG' | 'PENDING' | null;
+  thalassemiaType?:
+    | 'HB_H'
+    | 'BETA_THAL_MAJOR'
+    | 'BETA_THAL_HB_E'
+    | 'TRAIT'
+    | 'NORMAL'
+    | null;
+  cervicalScreenType?: 'PAP' | 'HPV' | 'NONE' | null;
+  cervicalScreenResult?: 'NORMAL' | 'ABNORMAL' | 'PENDING' | null;
+  cervicalScreenDate?: string | null;
+  aneuploidyMethod?: 'SERUM_T1' | 'QUAD_T2' | 'CFDNA' | 'NONE' | null;
+  aneuploidyResult?: 'LOW_RISK' | 'HIGH_RISK' | 'PENDING' | null;
+  gbsResult?: 'POS' | 'NEG' | 'PENDING' | null;
+  gbsCollectedDate?: string | null;
+  anatomyScanDate?: string | null;
+  anatomyScanResult?: 'NORMAL' | 'ABNORMAL' | 'PENDING' | null;
+  efwG?: number | null;
+  datingMethod?: 'LMP' | 'US' | 'ART' | null;
+  proteinuria24hMg?: number | null;
+  creatinineMgDl?: number | null;
+  priorPeDvt?: boolean | null;
+  severeLungDisease?: boolean | null;
+  alloimmunizationCde?: boolean | null;
+  bariatricSurgeryHx?: boolean | null;
+  teratogenExposure?: boolean | null;
+  congenitalInfection?: boolean | null;
+  gdmRiskFactors?: Array<
+    | 'bmi_over_30'
+    | 'first_degree_dm'
+    | 'pcos'
+    | 'prior_macrosomia'
+    | 'steroid_use'
+    | 'prior_igm'
+  > | null;
 }
 
 export interface WebhookAncPayload {
@@ -460,6 +523,31 @@ export async function processWebhookPayload(
   // Upsert patients (reuse existing sync pipeline)
   await upsertCachedPatients(db, hospitalId, patients);
 
+  // Fix E — link each cached_patients row to its maternal_journey when a
+  // matching cid_hash exists. Without this the journey_id FK stays null even
+  // though the read-path can still resolve via cid_hash JOIN; persisting the
+  // FK means the /patients/[an] page's journeyContext works without relying
+  // on the lookup path, and the continuity audit is no longer fragile.
+  const cidHashes = patients.map((p) => p.cidHash).filter((h): h is string => !!h);
+  if (cidHashes.length > 0) {
+    const placeholders = cidHashes.map(() => '?').join(',');
+    const journeys = await db.query<{ id: string; cid_hash: string }>(
+      `SELECT id, cid_hash FROM maternal_journeys WHERE cid_hash IN (${placeholders})`,
+      cidHashes,
+    );
+    const journeyByCid = new Map(journeys.map((j) => [j.cid_hash, j.id]));
+    for (const p of patients) {
+      if (!p.cidHash) continue;
+      const journeyId = journeyByCid.get(p.cidHash);
+      if (!journeyId) continue;
+      await db.execute(
+        `UPDATE cached_patients SET journey_id = ?, updated_at = ?
+         WHERE hospital_id = ? AND an = ? AND (journey_id IS NULL OR journey_id <> ?)`,
+        [journeyId, new Date().toISOString(), hospitalId, p.an, journeyId],
+      );
+    }
+  }
+
   // Detect transfers
   const transfers = await detectTransfers(db, hospitalId, patients);
   for (const transfer of transfers) {
@@ -681,7 +769,11 @@ export async function processAncWebhook(
       );
     }
 
-    // Persist ANC visit records — replace strategy (delete old, insert new)
+    // Persist ANC visit records — replace strategy (delete old, insert new).
+    // Also mirrors the HOSxP-polling path (src/services/sync/anc.ts): after
+    // visits are written, update the journey's summary columns
+    // (anc_visit_count, last_anc_date, ga_weeks) so the list UI shows the
+    // right "ANC# / LAST ANC / GA" without a separate aggregate query.
     if (patient.visits?.length) {
       await db.execute(`DELETE FROM cached_anc_visits WHERE journey_id = ?`, [journeyId]);
       const visitNow = new Date().toISOString();
@@ -694,8 +786,13 @@ export async function processAncWebhook(
             urine_protein, urine_glucose, hb_g_dl, hct_pct,
             tt_dose_no, iron_folic_given, calcium_given,
             danger_signs_json, fetal_movement_ok,
+            vaccines_given_json, urine_ketone, urine_culture_result,
+            iodine_given, multivitamin_given, vitamin_d_iu,
+            nst_result, bpp_score, umbilical_doppler_result,
+            psychosocial_screen_json,
             synced_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             uuidv4(), journeyId, visit.date, visit.visitNumber,
             visit.gaWeeks ?? null,
@@ -706,14 +803,51 @@ export async function processAncWebhook(
             visit.urineProtein ?? null, visit.urineGlucose ?? null,
             visit.hbGDl ?? null, visit.hctPct ?? null,
             visit.ttDoseNo ?? null,
-            visit.ironFolicGiven == null ? null : (visit.ironFolicGiven ? 1 : 0),
-            visit.calciumGiven == null ? null : (visit.calciumGiven ? 1 : 0),
+            // Postgres is strict on boolean columns — must be true/false,
+            // not 1/0. SQLite is lenient; we normalize here for both paths.
+            visit.ironFolicGiven == null ? null : Boolean(visit.ironFolicGiven),
+            visit.calciumGiven == null ? null : Boolean(visit.calciumGiven),
             visit.dangerSigns ? JSON.stringify(visit.dangerSigns) : null,
-            visit.fetalMovementOk == null ? null : (visit.fetalMovementOk ? 1 : 0),
+            visit.fetalMovementOk == null ? null : Boolean(visit.fetalMovementOk),
+            // RTCOG OB 66-029 per-visit additions.
+            visit.vaccinesGiven ? JSON.stringify(visit.vaccinesGiven) : null,
+            visit.urineKetone ?? null,
+            visit.urineCultureResult ?? null,
+            visit.iodineGiven == null ? null : Boolean(visit.iodineGiven),
+            visit.multivitaminGiven == null ? null : Boolean(visit.multivitaminGiven),
+            visit.vitaminDIu ?? null,
+            visit.nstResult ?? null,
+            visit.bppScore ?? null,
+            visit.umbilicalDopplerResult ?? null,
+            visit.psychosocialScreen ? JSON.stringify(visit.psychosocialScreen) : null,
             visitNow, visitNow,
           ],
         );
       }
+
+      // Summary roll-up. Last visit is the one with the highest visit_number;
+      // fall back to latest visit_date if numbers clash or are missing.
+      const sorted = [...patient.visits].sort((a, b) => {
+        const bn = (b.visitNumber ?? 0) - (a.visitNumber ?? 0);
+        if (bn !== 0) return bn;
+        return (b.date ?? '').localeCompare(a.date ?? '');
+      });
+      const lastVisit = sorted[0];
+      await db.execute(
+        `UPDATE maternal_journeys
+            SET anc_visit_count = ?,
+                last_anc_date = ?,
+                ga_weeks = COALESCE(?, ga_weeks),
+                updated_at = ?
+          WHERE id = ?`,
+        [
+          patient.visits.length,
+          lastVisit?.date ?? null,
+          lastVisit?.gaWeeks ?? null,
+          visitNow,
+          journeyId,
+        ],
+      );
     }
 
     // Persist journey-level WHO ANC data (labs, obstetric history, PMH).
@@ -756,6 +890,84 @@ export async function processAncWebhook(
           patient.livingChildren ?? null,
           patient.pastMedicalHistory ?? null,
           nowExt, journeyId,
+        ],
+      );
+    }
+
+    // ── RTCOG OB 66-029 journey-level extensions ───────────────────────
+    // Kept in a second UPDATE so the existing block stays readable and any
+    // future RTCOG revisions only churn this one. Same COALESCE strategy:
+    // an undefined/null field preserves whatever's already there.
+    const hasRtcogExt =
+      patient.mcvFl !== undefined || patient.dcipResult !== undefined ||
+      patient.hbEResult !== undefined || patient.thalassemiaType !== undefined ||
+      patient.cervicalScreenType !== undefined || patient.cervicalScreenResult !== undefined ||
+      patient.cervicalScreenDate !== undefined ||
+      patient.aneuploidyMethod !== undefined || patient.aneuploidyResult !== undefined ||
+      patient.gbsResult !== undefined || patient.gbsCollectedDate !== undefined ||
+      patient.anatomyScanDate !== undefined || patient.anatomyScanResult !== undefined ||
+      patient.efwG !== undefined || patient.datingMethod !== undefined ||
+      patient.proteinuria24hMg !== undefined || patient.creatinineMgDl !== undefined ||
+      patient.priorPeDvt !== undefined || patient.severeLungDisease !== undefined ||
+      patient.alloimmunizationCde !== undefined || patient.bariatricSurgeryHx !== undefined ||
+      patient.teratogenExposure !== undefined || patient.congenitalInfection !== undefined ||
+      patient.gdmRiskFactors !== undefined;
+    if (hasRtcogExt) {
+      const nowRt = new Date().toISOString();
+      await db.execute(
+        `UPDATE maternal_journeys SET
+           mcv_fl = COALESCE(?, mcv_fl),
+           dcip_result = COALESCE(?, dcip_result),
+           hb_e_result = COALESCE(?, hb_e_result),
+           thalassemia_type = COALESCE(?, thalassemia_type),
+           cervical_screen_type = COALESCE(?, cervical_screen_type),
+           cervical_screen_result = COALESCE(?, cervical_screen_result),
+           cervical_screen_date = COALESCE(?, cervical_screen_date),
+           aneuploidy_method = COALESCE(?, aneuploidy_method),
+           aneuploidy_result = COALESCE(?, aneuploidy_result),
+           gbs_result = COALESCE(?, gbs_result),
+           gbs_collected_date = COALESCE(?, gbs_collected_date),
+           anatomy_scan_date = COALESCE(?, anatomy_scan_date),
+           anatomy_scan_result = COALESCE(?, anatomy_scan_result),
+           efw_g = COALESCE(?, efw_g),
+           dating_method = COALESCE(?, dating_method),
+           proteinuria_24h_mg = COALESCE(?, proteinuria_24h_mg),
+           creatinine_mg_dl = COALESCE(?, creatinine_mg_dl),
+           prior_pe_dvt = COALESCE(?, prior_pe_dvt),
+           severe_lung_disease = COALESCE(?, severe_lung_disease),
+           alloimmunization_cde = COALESCE(?, alloimmunization_cde),
+           bariatric_surgery_hx = COALESCE(?, bariatric_surgery_hx),
+           teratogen_exposure = COALESCE(?, teratogen_exposure),
+           congenital_infection = COALESCE(?, congenital_infection),
+           gdm_risk_factors_json = COALESCE(?, gdm_risk_factors_json),
+           updated_at = ?
+         WHERE id = ?`,
+        [
+          patient.mcvFl ?? null,
+          patient.dcipResult ?? null,
+          patient.hbEResult ?? null,
+          patient.thalassemiaType ?? null,
+          patient.cervicalScreenType ?? null,
+          patient.cervicalScreenResult ?? null,
+          patient.cervicalScreenDate ?? null,
+          patient.aneuploidyMethod ?? null,
+          patient.aneuploidyResult ?? null,
+          patient.gbsResult ?? null,
+          patient.gbsCollectedDate ?? null,
+          patient.anatomyScanDate ?? null,
+          patient.anatomyScanResult ?? null,
+          patient.efwG ?? null,
+          patient.datingMethod ?? null,
+          patient.proteinuria24hMg ?? null,
+          patient.creatinineMgDl ?? null,
+          patient.priorPeDvt == null ? null : Boolean(patient.priorPeDvt),
+          patient.severeLungDisease == null ? null : Boolean(patient.severeLungDisease),
+          patient.alloimmunizationCde == null ? null : Boolean(patient.alloimmunizationCde),
+          patient.bariatricSurgeryHx == null ? null : Boolean(patient.bariatricSurgeryHx),
+          patient.teratogenExposure == null ? null : Boolean(patient.teratogenExposure),
+          patient.congenitalInfection == null ? null : Boolean(patient.congenitalInfection),
+          patient.gdmRiskFactors ? JSON.stringify(patient.gdmRiskFactors) : null,
+          nowRt, journeyId,
         ],
       );
     }

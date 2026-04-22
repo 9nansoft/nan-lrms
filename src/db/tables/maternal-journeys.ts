@@ -42,6 +42,52 @@ export const maternalJourneysTable: TableDefinition = {
     { name: 'living_children', type: 'integer', nullable: true },
     // Past medical history free-text summary (HT / DM / thyroid / cardiac / thalassemia / epilepsy).
     { name: 'past_medical_history', type: 'text', nullable: true },
+
+    // ─── RTCOG OB 66-029 (2566) expansion — journey-level ─────────────
+    // Thalassemia carrier screening (1st-visit). MCV + DCIP + Hb E; type is
+    // one of TRAIT / DISEASE / NORMAL / PENDING. "Disease" tag (HbH,
+    // β-thal/HbE, β-thal major) drives an iron-contraindication alert.
+    { name: 'mcv_fl', type: 'decimal', nullable: true },
+    { name: 'dcip_result', type: 'string', maxLength: 10, nullable: true },      // POS / NEG / PENDING
+    { name: 'hb_e_result', type: 'string', maxLength: 10, nullable: true },      // POS / NEG / PENDING
+    { name: 'thalassemia_type', type: 'string', maxLength: 20, nullable: true }, // HB_H / BETA_THAL_MAJOR / BETA_THAL_HB_E / TRAIT / NORMAL
+
+    // Cervical cancer screening — Pap or HPV DNA, every 3-5y.
+    { name: 'cervical_screen_type', type: 'string', maxLength: 10, nullable: true },   // PAP / HPV / NONE
+    { name: 'cervical_screen_result', type: 'string', maxLength: 20, nullable: true }, // NORMAL / ABNORMAL / PENDING
+    { name: 'cervical_screen_date', type: 'datetime', nullable: true },
+
+    // Aneuploidy screening (serum markers or cfDNA).
+    { name: 'aneuploidy_method', type: 'string', maxLength: 20, nullable: true },      // SERUM_T1 / QUAD_T2 / CFDNA / NONE
+    { name: 'aneuploidy_result', type: 'string', maxLength: 20, nullable: true },      // LOW_RISK / HIGH_RISK / PENDING
+
+    // GBS rectovaginal culture at 35-37w.
+    { name: 'gbs_result', type: 'string', maxLength: 10, nullable: true },              // POS / NEG / PENDING
+    { name: 'gbs_collected_date', type: 'datetime', nullable: true },
+
+    // 2nd-trimester anatomy scan (18-22w) + estimated fetal weight.
+    { name: 'anatomy_scan_date', type: 'datetime', nullable: true },
+    { name: 'anatomy_scan_result', type: 'string', maxLength: 20, nullable: true },    // NORMAL / ABNORMAL / PENDING
+    { name: 'efw_g', type: 'integer', nullable: true },
+
+    // EDC dating provenance — LMP (default), US (Ultrasound), ART (IVF/ICSI).
+    { name: 'dating_method', type: 'string', maxLength: 10, nullable: true },
+
+    // RTCOG Section 6 additional HR criteria — persisted so the risk
+    // classifier can read them without another round-trip to HOSxP.
+    { name: 'proteinuria_24h_mg', type: 'integer', nullable: true },
+    { name: 'creatinine_mg_dl', type: 'decimal', nullable: true },
+    { name: 'prior_pe_dvt', type: 'boolean', nullable: true },
+    { name: 'severe_lung_disease', type: 'boolean', nullable: true },
+    { name: 'alloimmunization_cde', type: 'boolean', nullable: true },
+    { name: 'bariatric_surgery_hx', type: 'boolean', nullable: true },
+    { name: 'teratogen_exposure', type: 'boolean', nullable: true },
+    { name: 'congenital_infection', type: 'boolean', nullable: true },
+
+    // GDM early-screen risk factors — JSON array for forward-compat.
+    // Example: ["bmi_over_30", "first_degree_dm", "pcos", "prior_macrosomia",
+    //          "steroid_use", "prior_igm"].
+    { name: 'gdm_risk_factors_json', type: 'json', nullable: true },
     { name: 'registered_at', type: 'datetime' },
     { name: 'stage_changed_at', type: 'datetime' },
     { name: 'synced_at', type: 'datetime' },

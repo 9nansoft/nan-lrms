@@ -18,17 +18,6 @@ interface AlertSummaryPanelProps {
 export function AlertSummaryPanel({ alerts, observations }: AlertSummaryPanelProps) {
   if (alerts.length === 0) return null;
 
-  // Group alerts by severity (preserve display order, then sort items within
-  // each group by descending obsIndex so the most-recent observations appear first).
-  const grouped = SEVERITY_DISPLAY_ORDER
-    .map((severity) => ({
-      severity,
-      items: alerts
-        .filter((a) => a.severity === severity)
-        .sort((a, b) => b.obsIndex - a.obsIndex),
-    }))
-    .filter((group) => group.items.length > 0);
-
   function timeLabel(obsIndex: number): string {
     if (obsIndex < 0) return 'ภาพรวม';
     const obs = observations[obsIndex];
@@ -38,6 +27,32 @@ export function AlertSummaryPanel({ alerts, observations }: AlertSummaryPanelPro
       minute: '2-digit',
     });
   }
+
+  // Group alerts by severity (preserve display order). Within each group,
+  // collapse duplicates keyed by (section, message, timeLabel) so the same
+  // finding reported against the same observation — or against two obs at
+  // the same HH:mm — doesn't render as two identical list items. The group
+  // header still shows the raw occurrence count so the user sees fidelity
+  // ("วิกฤต 5 ครั้ง") separately from the uniquified list below.
+  interface UniqueItem { alert: CdssAlertDto; count: number; time: string }
+  const grouped = SEVERITY_DISPLAY_ORDER
+    .map((severity) => {
+      const group = alerts.filter((a) => a.severity === severity);
+      const bucket = new Map<string, UniqueItem>();
+      for (const a of group) {
+        const time = timeLabel(a.obsIndex);
+        const key = `${a.section}|${a.message}|${time}`;
+        const hit = bucket.get(key);
+        if (hit) hit.count += 1;
+        else bucket.set(key, { alert: a, count: 1, time });
+      }
+      // Most-recent observations first.
+      const unique = [...bucket.values()].sort(
+        (a, b) => b.alert.obsIndex - a.alert.obsIndex,
+      );
+      return { severity, rawCount: group.length, items: unique };
+    })
+    .filter((group) => group.items.length > 0);
 
   return (
     <div
@@ -59,19 +74,24 @@ export function AlertSummaryPanel({ alerts, observations }: AlertSummaryPanelPro
                 aria-hidden="true"
               />
               <span>
-                {SEVERITY_LABEL_TH[group.severity]} {group.items.length} ครั้ง
+                {SEVERITY_LABEL_TH[group.severity]} {group.rawCount} ครั้ง
               </span>
             </div>
             <ul className="ml-4 space-y-0.5">
-              {group.items.map((alert, i) => (
+              {group.items.map((item, i) => (
                 <li
-                  key={`${alert.section}-${alert.obsIndex}-${i}`}
+                  key={`${item.alert.section}-${item.alert.obsIndex}-${i}`}
                   className="text-sm text-slate-700"
                 >
-                  <span>• {alert.message}</span>{' '}
+                  <span>• {item.alert.message}</span>{' '}
                   <span className="text-xs text-slate-500">
-                    ({SECTION_LABEL_TH[alert.section]}, {timeLabel(alert.obsIndex)})
+                    ({SECTION_LABEL_TH[item.alert.section]}, {item.time})
                   </span>
+                  {item.count > 1 && (
+                    <span className="ml-1 rounded bg-slate-200 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-700">
+                      ×{item.count}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

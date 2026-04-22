@@ -10,14 +10,21 @@
 
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import useSWR from 'swr';
 import { MapContainer, TileLayer, GeoJSON, Marker, Tooltip, ZoomControl } from 'react-leaflet';
 import L, { type LatLngExpression, type LatLngBoundsExpression, type DivIcon } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import type { FeatureCollection } from 'geojson';
 import type { DashboardHospital } from '@/types/api';
 import { ConnectionStatus as ConnectionStatusEnum, HospitalLevel } from '@/types/domain';
-import { KK_HOSPITALS } from '@/config/hospitals';
 import { HOSPITAL_COORDS } from '@/data/kk-hospital-coords';
 import { KK_GEOJSON } from '@/data/kk-province-geojson';
+import {
+  loadProvinceShapes,
+  computeBounds,
+  districtCentroids,
+  type ProvinceShapes,
+} from '@/lib/thai-geo-shapes';
 
 interface ProvinceMapLeafletProps {
   hospitals: DashboardHospital[];
@@ -158,6 +165,29 @@ function buildPalette(mode: 'light' | 'kiosk') {
   };
 }
 
+interface PinEntry {
+  hcode: string;
+  name: string;
+  coord: { lat: number; lon: number };
+  level: HospitalLevel;
+  live: DashboardHospital | undefined;
+  sizePx: number;
+  color: string;
+  isSel: boolean;
+  isOnline: boolean;
+  isHigh: boolean;
+  icon: DivIcon;
+}
+
+interface ActiveMap {
+  bounds: LatLngBoundsExpression;
+  center: LatLngExpression;
+  districtsFC: FeatureCollection;
+  provinceFC: FeatureCollection;
+}
+
+const KK_PROVINCE_CODE = '40';
+
 export default function ProvinceMapLeaflet({
   hospitals,
   selected,
@@ -169,8 +199,23 @@ export default function ProvinceMapLeaflet({
   const palette = buildPalette(mode);
   const w = WEIGHTS[size];
 
-  // Live-data index by hcode so pins can reflect activity without depending on
-  // the array order of HOSPITAL_COORDS.
+  // Active province drives which shapes + pin list are rendered. A missing
+  // config means default to Khon Kaen so first-run deployments don't blank.
+  const { data: configData } = useSWR<{ config: { active_province_code?: string } }>(
+    '/api/admin/config',
+  );
+  const activeProvince = configData?.config.active_province_code ?? KK_PROVINCE_CODE;
+
+  // For non-KK provinces we fetch the full Thailand GeoJSON + filter to the
+  // active province at runtime. KK keeps using the pre-simplified inline
+  // KK_GEOJSON to avoid the 6 MB network round-trip (regression-safe path).
+  // Null SWR key when KK means no fetch runs — SWR also cache-dedupes the
+  // result, so flipping between provinces is instant after first load.
+  const { data: loadedShapes } = useSWR<ProvinceShapes>(
+    activeProvince === KK_PROVINCE_CODE ? null : ['thai-geo-shapes', activeProvince],
+    () => loadProvinceShapes(activeProvince),
+  );
+
   const liveByHcode = useMemo(
     () => new Map(hospitals.map((h) => [h.hcode, h])),
     [hospitals],
@@ -190,47 +235,118 @@ export default function ProvinceMapLeaflet({
     else router.push(`/hospitals/${hcode}`);
   };
 
-  const hospitalPins = KK_HOSPITALS.map((h) => {
-    const coord = HOSPITAL_COORDS[h.hcode];
-    if (!coord) return null;
-    const live = liveByHcode.get(h.hcode);
-    // Pin pixel size scales with hospital level + active patient count, then
-    // is clamped to [pinMinPx, pinMaxPx] for the chosen size preset.
-    const baseRadius =
-      (LEVEL_BASE_RADIUS[h.level] ?? DEFAULT_RADIUS) +
-      activeCountRadiusBoost(live?.counts.total ?? 0);
-    const rawSize = baseRadius * w.pinMult;
-    const sizePx = Math.round(
-      Math.min(w.pinMaxPx, Math.max(w.pinMinPx, rawSize)),
-    );
-    const color = riskColor(live, palette);
-    const isSel = selected === h.hcode;
-    const isOnline =
-      live?.connectionStatus === undefined
-        ? true
-        : live.connectionStatus === ConnectionStatusEnum.ONLINE;
-    const isHigh = !!live && live.counts.high > 0;
-    const icon = buildHospitalIcon({
-      color,
-      sizePx,
-      isHigh,
-      isSelected: isSel,
-      isOnline,
-    });
+  // Build the active shapes + a coord resolver. For KK this is effectively a
+  // no-op wrapper around the inline assets; for other provinces we compute
+  // bounds + district centroids from the fetched GeoJSON.
+  const activeMap: ActiveMap | null = useMemo(() => {
+    if (activeProvince === KK_PROVINCE_CODE) {
+      return {
+        bounds: KK_BOUNDS,
+        center: KK_CENTER,
+        districtsFC: KK_GEOJSON,
+        provinceFC: KK_GEOJSON,
+      };
+    }
+    if (!loadedShapes) return null;
+    const bbox = computeBounds(loadedShapes.province);
+    if (!bbox) return null;
+    const center: LatLngExpression = [
+      (bbox[0][0] + bbox[1][0]) / 2,
+      (bbox[0][1] + bbox[1][1]) / 2,
+    ];
     return {
-      hcode: h.hcode,
-      name: h.name,
-      coord,
-      level: h.level,
-      live,
-      sizePx,
-      color,
-      isSel,
-      isOnline,
-      isHigh,
-      icon,
+      bounds: bbox,
+      center,
+      districtsFC: loadedShapes.districts,
+      provinceFC: loadedShapes.province,
     };
-  }).filter((x): x is NonNullable<typeof x> => x !== null);
+  }, [activeProvince, loadedShapes]);
+
+  const centroidByDistrict = useMemo(() => {
+    if (activeProvince === KK_PROVINCE_CODE || !loadedShapes) return {};
+    return districtCentroids(loadedShapes.districts);
+  }, [activeProvince, loadedShapes]);
+
+  const hospitalPins: PinEntry[] = useMemo(() => {
+    const buildPin = (
+      hcode: string,
+      name: string,
+      level: HospitalLevel,
+      coord: { lat: number; lon: number },
+    ): PinEntry => {
+      const live = liveByHcode.get(hcode);
+      const baseRadius =
+        (LEVEL_BASE_RADIUS[level] ?? DEFAULT_RADIUS) +
+        activeCountRadiusBoost(live?.counts.total ?? 0);
+      const sizePx = Math.round(
+        Math.min(w.pinMaxPx, Math.max(w.pinMinPx, baseRadius * w.pinMult)),
+      );
+      const color = riskColor(live, palette);
+      const isSel = selected === hcode;
+      const isOnline =
+        live?.connectionStatus === undefined
+          ? true
+          : live.connectionStatus === ConnectionStatusEnum.ONLINE;
+      const isHigh = !!live && live.counts.high > 0;
+      const icon = buildHospitalIcon({ color, sizePx, isHigh, isSelected: isSel, isOnline });
+      return { hcode, name, coord, level, live, sizePx, color, isSel, isOnline, isHigh, icon };
+    };
+
+    // Single source of truth: the `hospitals` prop (what the caller fetched
+    // from /api/dashboard or /api/admin/hospitals). Previously the KK path
+    // iterated the hardcoded KK_HOSPITALS config, so pins showed for all 26
+    // MOPH facilities even when the admin list was empty. That was wrong for
+    // the admin page — fixed by iterating the prop everywhere.
+    if (!activeMap) return [];
+    const [sw, ne] = activeMap.bounds as [[number, number], [number, number]];
+    const fallback = { lat: (sw[0] + ne[0]) / 2, lon: (sw[1] + ne[1]) / 2 };
+
+    // Resolve coord per-hospital:
+    //   1. operator-entered lat/lon on the hospital row
+    //   2. the pre-mapped HOSPITAL_COORDS table (KK only — 26 known hcodes)
+    //   3. amphoe centroid via districtCode (works for any province whose
+    //      shapes are loaded)
+    //   4. province center (so an unmapped hospital is still reachable)
+    const pins: PinEntry[] = [];
+    for (const h of hospitals) {
+      let coord: { lat: number; lon: number } | null = null;
+      if (typeof h.lat === 'number' && typeof h.lon === 'number') {
+        coord = { lat: h.lat, lon: h.lon };
+      } else if (HOSPITAL_COORDS[h.hcode]) {
+        coord = HOSPITAL_COORDS[h.hcode];
+      } else if (h.districtCode && centroidByDistrict[h.districtCode]) {
+        coord = centroidByDistrict[h.districtCode];
+      } else {
+        coord = fallback;
+      }
+      pins.push(buildPin(h.hcode, h.name, h.level, coord));
+    }
+    return pins;
+  }, [
+    activeMap,
+    hospitals,
+    liveByHcode,
+    centroidByDistrict,
+    selected,
+    palette,
+    w,
+  ]);
+
+  if (!activeMap) {
+    return (
+      <div
+        className="grid h-full w-full place-items-center"
+        style={{
+          background: mode === 'kiosk' ? '#06121f' : 'var(--surface-cool)',
+          isolation: 'isolate',
+        }}
+      >
+        <span className="font-mono text-[10px] tracking-[0.18em] text-[var(--ink-navy-muted)]">
+          LOADING {activeProvince === KK_PROVINCE_CODE ? 'MAP' : `PROVINCE ${activeProvince}`}…
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -243,8 +359,9 @@ export default function ProvinceMapLeaflet({
       }}
     >
       <MapContainer
-        bounds={KK_BOUNDS}
-        center={KK_CENTER}
+        key={activeProvince}
+        bounds={activeMap.bounds}
+        center={activeMap.center}
         style={{ height: '100%', width: '100%', background: 'transparent' }}
         scrollWheelZoom
         zoomControl={false}
@@ -260,7 +377,7 @@ export default function ProvinceMapLeaflet({
 
         {/* Amphoe outlines (subtle, interior hairlines) */}
         <GeoJSON
-          data={KK_GEOJSON}
+          data={activeMap.districtsFC}
           style={{
             color: palette.amphoeStroke,
             weight: w.amphoeWeight,
@@ -271,7 +388,7 @@ export default function ProvinceMapLeaflet({
 
         {/* Province-wide outline — drawn thicker, no fill, on top of tiles */}
         <GeoJSON
-          data={KK_GEOJSON}
+          data={activeMap.provinceFC}
           style={{
             color: palette.boundaryStroke,
             weight: w.boundaryWeight,

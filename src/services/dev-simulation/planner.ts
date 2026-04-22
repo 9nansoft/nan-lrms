@@ -19,7 +19,10 @@ import type { SimEventType } from './types';
 
 const PLAN_SIZE = 20;             // events per plan generation
 const PLAN_REFILL_THRESHOLD = 4;  // refill in background when this many left
-const PLAN_LLM_TIMEOUT_MS = 25_000;
+// vLLM serves one prompt at a time per model, so 26 simultaneous plan
+// generations will starve each other. We give each call a generous 3min
+// ceiling and rely on the orchestrator to stagger kickoffs (see below).
+const PLAN_LLM_TIMEOUT_MS = 180_000;
 
 export interface PlannedEvent {
   order: number;
@@ -141,23 +144,36 @@ async function generatePlan(
   // Merge caller signal into our timeout so both cancel the fetch.
   signal.addEventListener('abort', () => timeoutCtl.abort());
   try {
-    const raw = await llmJson<{
-      narrative: string;
-      events: Array<{ order: number; eventType: SimEventType; profileId: string; name: string; note: string }>;
-    }>({
+    const raw = await llmJson<Record<string, unknown>>({
       model,
       messages: [
-        { role: 'system', content: 'You are an obstetric-ward planner for a Thai community hospital. Output strict JSON only.' },
+        { role: 'system', content: 'You are an obstetric-ward planner for a Thai community hospital. Output strict JSON only. The array of events MUST be named exactly "events".' },
         { role: 'user', content: prompt },
       ],
       jsonSchema: PLAN_SCHEMA,
       signal: timeoutCtl.signal,
+      // Defer the base client's timer to our 3-minute planner timer.
+      timeoutMs: PLAN_LLM_TIMEOUT_MS,
       temperature: 0.9,
-      maxTokens: 3500,
+      maxTokens: 8000,
     });
+    // vLLM's guided_json doesn't strictly enforce top-level property names —
+    // Gemma-4 sometimes returns `shift_plan`, `plan`, or plain `items` instead
+    // of `events`. Accept any top-level array field as the event list.
+    const narrative = typeof raw.narrative === 'string' ? raw.narrative : '';
+    const eventsField =
+      (Array.isArray(raw.events) ? raw.events : null) ??
+      (Array.isArray(raw.shift_plan) ? raw.shift_plan : null) ??
+      (Array.isArray(raw.plan) ? raw.plan : null) ??
+      (Array.isArray(raw.items) ? raw.items : null) ??
+      // Fallback: pick the first array-valued field in the object.
+      Object.values(raw).find((v): v is unknown[] => Array.isArray(v)) ??
+      [];
     // Validate + normalize.
     const events: PlannedEvent[] = [];
-    for (const [i, e] of (raw.events ?? []).entries()) {
+    type RawEvent = { order?: number; eventType?: string; profileId?: string; name?: string; note?: string };
+    for (const [i, raw_e] of (eventsField as RawEvent[]).entries()) {
+      const e = raw_e as { order: number; eventType: SimEventType; profileId: string; name: string; note: string };
       if (!eventTypes.includes(e.eventType)) continue;
       if (!PROFILE_IDS.includes(e.profileId)) continue;
       events.push({
@@ -175,7 +191,7 @@ async function generatePlan(
     return {
       hcode,
       hospitalName,
-      narrative: (raw.narrative ?? '').slice(0, 400),
+      narrative: narrative.slice(0, 400),
       events,
       cursor: 0,
       refilling: false,

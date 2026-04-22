@@ -10,7 +10,10 @@ import { NextResponse } from 'next/server';
 import { simulationGuard } from '../_guard';
 import { simulationOrchestrator } from '@/services/dev-simulation/orchestrator';
 import { resetPool } from '@/services/dev-simulation/pool';
-import { clearDevApiKeyCache } from '@/services/dev-simulation/api-keys';
+import {
+  clearDevApiKeyCache,
+  getDevApiKeyCacheSize,
+} from '@/services/dev-simulation/api-keys';
 import { SseManager } from '@/lib/sse';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
@@ -20,18 +23,31 @@ export async function POST() {
   const guard = simulationGuard();
   if (guard) return guard;
 
-  // Stop any in-flight simulation first; otherwise its next tick will race
-  // with our DELETE and re-insert rows we just wiped.
+  // 1. ALWAYS clear the in-memory API-key cache first.
+  //
+  // If we don't do this up-front, a new sim started after clear can reuse raw
+  // keys cached from a previous run that point to DB rows we're about to
+  // DELETE. Every webhook POST then 401s with INVALID_API_KEY because the
+  // key-hash lookup returns no rows. Clearing before stop() / DELETE makes the
+  // cleanup idempotent regardless of orchestrator state, HMR reloads, or
+  // whether stop() completed its own revocation cleanly.
+  const cachedBefore = getDevApiKeyCacheSize();
+  clearDevApiKeyCache();
+
+  // 2. Stop any in-flight simulation so its next tick doesn't race with our
+  //    DELETE and re-insert rows we just wiped.
+  let orchestratorWasRunning = false;
   if (simulationOrchestrator.isRunning()) {
+    orchestratorWasRunning = true;
     await simulationOrchestrator.stop();
   }
 
   await ensureInit();
   const db = await getDatabase();
 
-  // Delete children before parents. FKs: cached_anc_* → maternal_journeys,
-  // cached_vital_signs + cpd_scores + cached_partograph_observations →
-  // cached_patients, cached_patients.journey_id → maternal_journeys (nullable).
+  // 3. Delete children before parents. FKs: cached_anc_* → maternal_journeys,
+  //    cached_vital_signs + cpd_scores + cached_partograph_observations →
+  //    cached_patients, cached_patients.journey_id → maternal_journeys (nullable).
   const tables = [
     'cpd_scores',
     'cached_vital_signs',
@@ -51,23 +67,39 @@ export async function POST() {
     await db.execute(`DELETE FROM ${t}`);
   }
 
-  // Revoke simulator-issued webhook API keys so the next run gets fresh ones.
-  // (The in-memory cache in api-keys.ts is also cleared here.)
-  const keyRows = await db.query<{ id: string }>(
+  // 4. Delete simulator-issued webhook API keys. DELETE (not UPDATE) so fresh
+  //    runs create brand-new rows; no chance of matching by hash against a
+  //    lingering-but-revoked row.
+  const simKeyRows = await db.query<{ id: string }>(
     `SELECT id FROM webhook_api_keys WHERE label LIKE 'sim:dev:%'`,
   );
-  for (const row of keyRows) {
-    await db.execute(`DELETE FROM webhook_api_keys WHERE id = ?`, [row.id]);
+  if (simKeyRows.length > 0) {
+    const placeholders = simKeyRows.map(() => '?').join(',');
+    await db.execute(
+      `DELETE FROM webhook_api_keys WHERE id IN (${placeholders})`,
+      simKeyRows.map((r) => r.id),
+    );
   }
-  counts['webhook_api_keys (sim)'] = keyRows.length;
+  counts['webhook_api_keys (sim)'] = simKeyRows.length;
 
-  // Reset the in-memory simulator pool + API key cache (no-op if never ran).
+  // 5. Reset in-process state. resetPool clears patient/admission/referral
+  //    pools; clearDevApiKeyCache again belt-and-suspenders (stop() may have
+  //    re-populated the cache with freshly-revoked entries while shutting
+  //    down — those entries would point to rows we just DELETE'd).
   resetPool();
   clearDevApiKeyCache();
 
-  // Tell connected clients to re-fetch. Dashboards listen to `sync-complete`
-  // and call refreshAll(), which invalidates all SWR caches that back the
-  // KPIs, hospital table, high-risk list, trends panel, etc.
+  // 6. Verify post-clear DB state. A non-zero count here means something is
+  //    still writing to these tables after we started clearing — worth
+  //    flagging loudly so the next-start failure is easy to diagnose.
+  const leftoverSimKeys = await db.query<{ n: number }>(
+    `SELECT COUNT(*) as n FROM webhook_api_keys WHERE label LIKE 'sim:dev:%'`,
+  );
+  const leftoverCount = Number(leftoverSimKeys[0]?.n ?? 0);
+
+  // 7. Tell connected clients to re-fetch. Dashboards listen to `sync-complete`
+  //    and call refreshAll(), which invalidates all SWR caches that back the
+  //    KPIs, hospital table, high-risk list, trends panel, etc.
   const sse = SseManager.getInstance();
   sse.broadcast('sync-complete', {
     hcode: '',
@@ -76,10 +108,20 @@ export async function POST() {
     timestamp: new Date().toISOString(),
   });
 
-  logger.warn('sim_data_cleared', { counts });
+  logger.warn('sim_data_cleared', {
+    counts,
+    cacheEntriesPurged: cachedBefore,
+    orchestratorWasRunning,
+    leftoverSimKeysAfter: leftoverCount,
+  });
 
   return NextResponse.json({
     ok: true,
     cleared: counts,
+    diagnostics: {
+      cacheEntriesPurged: cachedBefore,
+      orchestratorWasRunning,
+      leftoverSimKeysAfter: leftoverCount,
+    },
   });
 }

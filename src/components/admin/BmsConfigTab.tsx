@@ -1,9 +1,11 @@
+// BmsConfigTab — per-hospital BMS tunnel URL configuration. Redesigned
+// 2026-04-21 to match the dashboard aesthetic: flush KPI strip, sharp-
+// cornered bordered hospital tiles, navy accents.
 'use client';
 
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Wifi, WifiOff, Pencil, FlaskConical, Save, Database } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -115,78 +117,118 @@ export function BmsConfigTab() {
     }
   };
 
+  const kpis: Array<{ k: string; v: number; color: string; label: string }> = [
+    { k: 'TOTAL', v: hospitals.length, color: 'var(--accent-navy)', label: 'โรงพยาบาล' },
+    { k: 'ONLINE', v: connectedCount, color: 'var(--risk-low)', label: 'เชื่อมต่อแล้ว' },
+    { k: 'CONFIGURED', v: configuredCount, color: 'var(--risk-medium)', label: 'มี Tunnel URL' },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-xl border-t-4 border-t-teal-500 bg-white p-4 shadow-sm">
-          <div className="text-sm text-slate-500">ทั้งหมด</div>
-          <div className="mt-1 font-mono text-2xl font-bold text-slate-800">{hospitals.length}</div>
-          <div className="text-xs text-slate-400">โรงพยาบาล</div>
-        </div>
-        <div className="rounded-xl border-t-4 border-t-green-500 bg-white p-4 shadow-sm">
-          <div className="text-sm text-slate-500">ออนไลน์</div>
-          <div className="mt-1 font-mono text-2xl font-bold text-green-600">{connectedCount}</div>
-          <div className="text-xs text-slate-400">เชื่อมต่อแล้ว</div>
-        </div>
-        <div className="rounded-xl border-t-4 border-t-amber-500 bg-white p-4 shadow-sm">
-          <div className="text-sm text-slate-500">ตั้งค่าแล้ว</div>
-          <div className="mt-1 font-mono text-2xl font-bold text-amber-600">{configuredCount}</div>
-          <div className="text-xs text-slate-400">มี Tunnel URL</div>
-        </div>
+    <div className="space-y-5">
+      {/* KPI strip */}
+      <div
+        className="grid border bg-white"
+        style={{
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          borderColor: 'var(--rule-strong)',
+        }}
+      >
+        {kpis.map((k, i) => (
+          <div
+            key={k.k}
+            className="flex flex-col gap-1 px-4 py-3"
+            style={{
+              borderLeft: `2px solid ${k.color}`,
+              borderRight: i < kpis.length - 1 ? '1px solid var(--rule-strong)' : undefined,
+            }}
+          >
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+              {k.k}
+            </div>
+            <div
+              className="font-mono text-[28px] font-semibold leading-none tabular-nums"
+              style={{ color: k.color, letterSpacing: '-0.02em' }}
+            >
+              {k.v}
+            </div>
+            <div className="font-mono text-[10px] text-[var(--ink-navy-dim)]">{k.label}</div>
+          </div>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {/* Hospital tiles */}
+      <div className="grid grid-cols-1 gap-0 border md:grid-cols-2 xl:grid-cols-3"
+        style={{ borderColor: 'var(--rule-strong)' }}
+      >
         {hospitals.map((h) => {
           const hasConfig = !!h.bmsConfig?.tunnelUrl;
-
           return (
-            <div key={h.hcode} className="rounded-xl bg-white p-4 shadow-sm">
-              <div className="flex items-start justify-between">
+            <div
+              key={h.hcode}
+              className="flex flex-col gap-2 border-b border-r bg-white px-4 py-3 last:border-b-0"
+              style={{ borderColor: 'var(--rule-hair)' }}
+            >
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-800">{h.name}</span>
-                    <Badge variant="outline" className="text-xs">{h.level}</Badge>
+                    <span className="truncate text-[13px] font-medium text-[var(--ink-navy)]">
+                      {h.name}
+                    </span>
+                    <span
+                      className="shrink-0 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[var(--ink-navy-dim)]"
+                      style={{ borderColor: 'var(--rule-strong)' }}
+                    >
+                      {h.level}
+                    </span>
                   </div>
-                  <div className="mt-1 font-mono text-xs text-slate-400">{h.hcode}</div>
+                  <div className="mt-0.5 font-mono text-[10px] tabular-nums text-[var(--ink-navy-muted)]">
+                    {h.hcode}
+                  </div>
                 </div>
                 <button
                   onClick={() => handleEdit(h)}
-                  className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-teal-50 hover:text-teal-600"
+                  className="rounded-sm p-1.5 text-[var(--ink-navy-muted)] transition-colors hover:bg-[var(--accent-navy-soft)] hover:text-[var(--accent-navy)]"
                   title="แก้ไข"
                 >
-                  <Pencil className="h-4 w-4" />
+                  <Pencil className="h-3.5 w-3.5" />
                 </button>
               </div>
 
-              <div className="mt-3 space-y-2">
-                <div className="flex items-center gap-2 text-xs">
-                  {hasConfig ? (
-                    <Wifi className="h-3.5 w-3.5 text-green-500" />
-                  ) : (
-                    <WifiOff className="h-3.5 w-3.5 text-slate-300" />
-                  )}
-                  <span className={hasConfig ? 'truncate text-slate-600' : 'text-slate-400'}>
-                    {h.bmsConfig?.tunnelUrl ?? 'ยังไม่ตั้งค่า Tunnel URL'}
-                  </span>
-                </div>
+              <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                {hasConfig ? (
+                  <Wifi className="h-3 w-3" style={{ color: 'var(--risk-low)' }} />
+                ) : (
+                  <WifiOff className="h-3 w-3" style={{ color: 'var(--ink-navy-muted)' }} />
+                )}
+                <span
+                  className={hasConfig ? 'truncate text-[var(--ink-navy-dim)]' : 'text-[var(--ink-navy-muted)]'}
+                >
+                  {h.bmsConfig?.tunnelUrl ?? 'ยังไม่ตั้งค่า Tunnel URL'}
+                </span>
+              </div>
 
-                <div className="flex items-center gap-3 text-xs">
-                  <ConnectionStatus
-                    status={h.connectionStatus as ConnectionStatusEnum}
-                    lastSyncAt={h.lastSyncAt}
-                  />
-                  {h.bmsConfig?.hasSession && (
-                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-700">
-                      Session Active
-                    </span>
-                  )}
-                  {h.bmsConfig?.databaseType && (
-                    <span className="flex items-center gap-1 text-slate-400">
-                      <Database className="h-3 w-3" />
-                      {h.bmsConfig.databaseType}
-                    </span>
-                  )}
-                </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                <ConnectionStatus
+                  status={h.connectionStatus as ConnectionStatusEnum}
+                  lastSyncAt={h.lastSyncAt}
+                />
+                {h.bmsConfig?.hasSession && (
+                  <span
+                    className="rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
+                    style={{
+                      color: 'var(--risk-low)',
+                      borderColor: 'var(--risk-low)',
+                    }}
+                  >
+                    SESSION ACTIVE
+                  </span>
+                )}
+                {h.bmsConfig?.databaseType && (
+                  <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                    <Database className="h-3 w-3" />
+                    {h.bmsConfig.databaseType}
+                  </span>
+                )}
               </div>
             </div>
           );
@@ -203,7 +245,7 @@ export function BmsConfigTab() {
 
           <div className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="tunnelUrl" className="text-sm font-medium text-slate-700">
+              <label htmlFor="tunnelUrl" className="text-sm font-medium text-[var(--ink-navy)]">
                 Tunnel URL
               </label>
               <Input
@@ -211,21 +253,36 @@ export function BmsConfigTab() {
                 value={tunnelUrl}
                 onChange={(e) => setTunnelUrl(e.target.value)}
                 placeholder="https://xxxxx-ondemand-win-xxxxxxxxx.tunnel.hosxp.net"
-                className="focus-visible:ring-teal-500"
               />
             </div>
 
             {saveMessage && (
-              <div className={`rounded-lg p-3 text-sm ${saveMessage.includes('สำเร็จ') ? 'border border-green-200 bg-green-50 text-green-700' : 'border border-red-200 bg-red-50 text-red-600'}`}>
+              <div
+                className="border px-3 py-2 font-mono text-[11px]"
+                style={{
+                  borderColor: saveMessage.includes('สำเร็จ')
+                    ? 'var(--risk-low)'
+                    : 'var(--risk-high)',
+                  color: saveMessage.includes('สำเร็จ')
+                    ? 'var(--risk-low)'
+                    : 'var(--risk-high)',
+                }}
+              >
                 {saveMessage}
               </div>
             )}
 
             {testResult && (
-              <div className={`rounded-lg p-3 text-sm ${testResult.connected ? 'border border-green-200 bg-green-50 text-green-700' : 'border border-red-200 bg-red-50 text-red-600'}`}>
+              <div
+                className="border px-3 py-2 font-mono text-[11px]"
+                style={{
+                  borderColor: testResult.connected ? 'var(--risk-low)' : 'var(--risk-high)',
+                  color: testResult.connected ? 'var(--risk-low)' : 'var(--risk-high)',
+                }}
+              >
                 {testResult.connected ? (
-                  <div className="space-y-1">
-                    <div className="font-medium">เชื่อมต่อสำเร็จ</div>
+                  <div className="space-y-0.5">
+                    <div className="font-semibold">เชื่อมต่อสำเร็จ</div>
                     <div>Database: {testResult.databaseType} — {testResult.databaseVersion}</div>
                     <div>Tables: {testResult.tablesFound?.join(', ') ?? 'none'}</div>
                   </div>
@@ -249,7 +306,8 @@ export function BmsConfigTab() {
             <Button
               onClick={handleSave}
               disabled={saving || !tunnelUrl.trim()}
-              className="gap-2 bg-teal-600 hover:bg-teal-700"
+              className="gap-2"
+              style={{ background: 'var(--accent-navy)' }}
             >
               <Save className="h-4 w-4" />
               {saving ? 'กำลังบันทึก...' : 'บันทึก'}

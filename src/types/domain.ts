@@ -9,6 +9,20 @@ export enum HospitalLevel {
   F3 = 'F3',
 }
 
+// Service-role classification for the kk-lrms maternity network.
+// Orthogonal to MOPH `HospitalLevel`: a single F2 district hospital may or
+// may not run a maternity ward; the service_type column captures that.
+// Drives:
+//   - dashboard filter: "who can receive a referred labor case" =
+//     PROVINCIAL_HUB ∪ DISTRICT_WITH_MATERNITY
+//   - map tile: NO_MATERNITY pins render in a muted palette
+//   - admin UI: sync and partograph are only meaningful for maternity sites
+export enum HospitalServiceType {
+  PROVINCIAL_HUB = 'PROVINCIAL_HUB',
+  DISTRICT_WITH_MATERNITY = 'DISTRICT_WITH_MATERNITY',
+  DISTRICT_NO_MATERNITY = 'DISTRICT_NO_MATERNITY',
+}
+
 export enum ConnectionStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',

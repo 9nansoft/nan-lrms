@@ -3,9 +3,10 @@
 // labels, mono tabular numerics, dense rows, Sarabun for Thai names.
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
+import { useSSE } from '@/hooks/useSSE';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { SectionLabel, RiskBar } from '@/components/dashboard/shared';
@@ -73,10 +74,15 @@ export default function PregnanciesPage() {
     return p.toString();
   }, [page, riskFilter]);
 
-  const { data, isLoading, error } = useSWR<JourneyListResponse>(
+  const { data, isLoading, error, mutate } = useSWR<JourneyListResponse>(
     `/api/journeys?${queryParams}`,
     { refreshInterval: 30000 },
   );
+
+  // Real-time refresh on webhook/sync activity. Without this the table waits
+  // up to 30s for the poll interval, which feels broken during simulation.
+  const refresh = useCallback(() => { void mutate(); }, [mutate]);
+  useSSE({ onPatientUpdate: refresh, onSyncComplete: refresh });
 
   const journeys = useMemo(() => data?.journeys ?? [], [data?.journeys]);
 
@@ -125,43 +131,43 @@ export default function PregnanciesPage() {
 
   return (
     <div
-      className="flex flex-col gap-4 px-6 py-6 lg:px-8"
       style={{
         color: 'var(--ink-navy)',
         background: 'var(--surface-cool)',
         // Match the dashboard's font-size bump so /pregnancies reads at the
         // same visual weight. Dialogs portal out of this scope.
         zoom: 1.15,
-        minHeight: '100%',
       }}
     >
-      {/* Eyebrow + title */}
-      <div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
-          PROVINCIAL REGISTRY · ANC
-        </div>
-        <div className="mt-1 flex items-baseline justify-between gap-4">
-          <div>
-            <h1 className="text-[24px] font-bold tracking-tight" style={{ color: 'var(--ink-navy)' }}>
-              ฝากครรภ์ (ANC)
-            </h1>
-            <p className="mt-0.5 font-mono text-[11px] text-[var(--ink-navy-muted)]">
-              ทะเบียนหญิงตั้งครรภ์ทั้งจังหวัด ·{' '}
-              <span className="font-semibold text-[var(--ink-navy)] tabular-nums">
-                {pagination.total}
-              </span>{' '}
-              ราย
-            </p>
+      {/* Page header strip — matches the dashboard's under-navbar control row:
+          flush-to-edges white surface, navy rule underneath. */}
+      <div
+        className="flex flex-wrap items-baseline gap-x-4 gap-y-1 bg-white px-5 py-2.5"
+        style={{ borderBottom: '1px solid var(--rule-strong)' }}
+      >
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
+            PROVINCIAL REGISTRY · ANC
           </div>
+          <h1 className="mt-0.5 text-[22px] font-bold leading-tight tracking-tight" style={{ color: 'var(--ink-navy)' }}>
+            ฝากครรภ์ (ANC)
+          </h1>
         </div>
+        <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+          ทะเบียนหญิงตั้งครรภ์ทั้งจังหวัด ·{' '}
+          <span className="font-semibold text-[var(--ink-navy)] tabular-nums">
+            {pagination.total}
+          </span>{' '}
+          ราย
+        </p>
       </div>
 
       {/* 01 — Page-level risk strip (bound to current page of results) */}
       <div
-        className="grid border bg-white"
+        className="grid bg-white"
         style={{
           gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
-          borderColor: 'var(--rule-strong)',
+          borderBottom: '1px solid var(--rule-strong)',
         }}
       >
         <div className="border-r border-[var(--rule-strong)] px-5 py-4">
@@ -218,7 +224,7 @@ export default function PregnanciesPage() {
       </div>
 
       {/* 02 — Filters + table */}
-      <div>
+      <div className="bg-white px-5 pt-4 pb-5">
         <SectionLabel
           idx={2}
           right={
@@ -231,8 +237,8 @@ export default function PregnanciesPage() {
         </SectionLabel>
 
         <div
-          className="mt-2 flex flex-wrap items-center gap-2 border-b-0 border bg-white px-3 py-2"
-          style={{ borderColor: 'var(--rule-strong)' }}
+          className="mt-2 flex flex-wrap items-center gap-2 border bg-white px-3 py-2"
+          style={{ borderColor: 'var(--rule-strong)', borderBottom: 'none' }}
         >
           {/* Search */}
           <div className="relative flex-1 min-w-[220px]">

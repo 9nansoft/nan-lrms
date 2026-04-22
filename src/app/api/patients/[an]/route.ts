@@ -8,7 +8,7 @@ import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
 import { logger } from '@/lib/logger';
 import type { PatientDetailResponse } from '@/types/api';
-import { getJourneyByHn } from '@/services/journey';
+import { getJourneyByHn, getActiveJourneyByCid } from '@/services/journey';
 
 export async function GET(
   _request: NextRequest,
@@ -35,13 +35,17 @@ export async function GET(
       });
     }
 
-    // Query patient with hospital info
+    // Query patient with hospital info. cid_hash is pulled for cross-hospital
+    // journey lookup below (an ANC journey registered at hospital A carries
+    // the same cid_hash as the labor admission at hospital B).
     const patients = await db.query<{
       id: string;
       hn: string;
       an: string;
       name: string;
       cid: string | null;
+      cid_hash: string | null;
+      journey_id: string | null;
       age: number;
       gravida: number | null;
       ga_weeks: number | null;
@@ -59,7 +63,8 @@ export async function GET(
       hospital_name: string;
       level: string;
     }>(
-      `SELECT cp.id, cp.hn, cp.an, cp.name, cp.cid, cp.age, cp.gravida,
+      `SELECT cp.id, cp.hn, cp.an, cp.name, cp.cid, cp.cid_hash, cp.journey_id,
+              cp.age, cp.gravida,
               cp.ga_weeks, cp.anc_count, cp.admit_date, cp.height_cm,
               cp.weight_kg, cp.weight_diff_kg, cp.fundal_height_cm,
               cp.us_weight_g, cp.hematocrit_pct, cp.labor_status, cp.synced_at,
@@ -136,7 +141,12 @@ export async function GET(
     );
     const hospitalId = hospitals.length > 0 ? hospitals[0].id : null;
 
-    // Look up journey context
+    // Look up journey context in priority order:
+    //   1. Direct journey_id FK (webhook links this when labor CID matches
+    //      an existing ANC journey — see processWebhookPayload).
+    //   2. cid_hash cross-hospital match (woman registered ANC at hospital A
+    //      then labored at hospital B — HN differs, CID stays constant).
+    //   3. HN + hospital (legacy HOSxP data without CID).
     let journeyContext: {
       journeyId: string;
       careStage: string;
@@ -146,19 +156,19 @@ export async function GET(
       lmp: string | null;
       edc: string | null;
     } | null = null;
-    if (hospitalId) {
-      const journey = await getJourneyByHn(db, p.hn, hospitalId);
-      if (journey) {
-        journeyContext = {
-          journeyId: journey.id,
-          careStage: journey.careStage,
-          ancRiskLevel: journey.ancRiskLevel,
-          ancVisitCount: journey.ancVisitCount,
-          lastAncDate: journey.lastAncDate,
-          lmp: journey.lmp,
-          edc: journey.edc,
-        };
-      }
+    const journey =
+      (p.cid_hash ? await getActiveJourneyByCid(db, p.cid_hash) : null) ??
+      (hospitalId ? await getJourneyByHn(db, p.hn, hospitalId) : null);
+    if (journey) {
+      journeyContext = {
+        journeyId: journey.id,
+        careStage: journey.careStage,
+        ancRiskLevel: journey.ancRiskLevel,
+        ancVisitCount: journey.ancVisitCount,
+        lastAncDate: journey.lastAncDate,
+        lmp: journey.lmp,
+        edc: journey.edc,
+      };
     }
 
     const response: PatientDetailResponse = {

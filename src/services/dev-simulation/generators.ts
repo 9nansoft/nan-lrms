@@ -28,9 +28,12 @@ import {
   addAdmission,
   addReferral,
   findExistingAncPatient,
+  findAncPatient,
   graduateToLabor,
   pickRecentAdmission,
   pickRecentReferralForUpdate,
+  pickPatientToRefer,
+  consumeArrivedReferralForAdmission,
   incPartographHour,
   advanceReferralStatus,
   type PooledPatient,
@@ -47,6 +50,8 @@ import {
   applyProfileToAnc,
   applyProfileToAncVisit,
   applyProfileToPartograph,
+  type DeterministicLaborInput,
+  type DeterministicAncInput,
 } from './apply-profile';
 import {
   evaluateAncEvent,
@@ -184,6 +189,18 @@ const SYSTEM_PROMPT = [
   'stay within the numeric ranges supplied by the JSON schema.',
 ].join(' ');
 
+// Simple schema used for LLM-assisted narrative generation (name + note).
+// vLLM's guided_json reliably enforces this 2-field shape; it falls apart on
+// richer clinical schemas because Gemma-4 invents its own wrapper keys.
+const NARRATIVE_SCHEMA = {
+  type: 'object',
+  required: ['name', 'note'],
+  properties: {
+    name: { type: 'string', maxLength: 60 },
+    note: { type: 'string', maxLength: 140 },
+  },
+};
+
 // ─── Labor admission ───────────────────────────────────────────────────
 
 function laborJsonSchema(p: ClinicalProfile) {
@@ -217,6 +234,45 @@ interface LaborLlmOutput {
   hematocritPct: number;
 }
 
+/** Gemma-4 under vLLM guided_json doesn't strictly enforce that required
+ *  properties appear at the top level — it sometimes nests them inside an
+ *  invented wrapper object. Deep-search the parsed response so we recover
+ *  the schema-intended fields no matter where the model placed them. */
+function deepFind(obj: unknown, key: string): unknown {
+  if (obj == null || typeof obj !== 'object') return undefined;
+  if (Array.isArray(obj)) {
+    for (const el of obj) {
+      const hit = deepFind(el, key);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  }
+  const rec = obj as Record<string, unknown>;
+  if (key in rec && rec[key] != null) return rec[key];
+  // Try snake_case variant.
+  const snake = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+  if (snake !== key && snake in rec && rec[snake] != null) return rec[snake];
+  for (const v of Object.values(rec)) {
+    const hit = deepFind(v, key);
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
+/** Throws if any of the listed fields is missing from the parsed LLM response.
+ *  Generators catch this and fall back to applyProfile() so we never persist
+ *  a half-filled clinical record. */
+function requireFields(
+  parsed: Record<string, unknown>,
+  fields: string[],
+  label: string,
+): void {
+  const missing = fields.filter((f) => deepFind(parsed, f) === undefined);
+  if (missing.length > 0) {
+    throw new Error(`LLM ${label} output missing required fields: ${missing.join(', ')}`);
+  }
+}
+
 export async function generateLaborEvent(
   hosp: HospitalContext,
   scenario: string | undefined,
@@ -226,82 +282,104 @@ export async function generateLaborEvent(
   const resolved = resolveProfile(hosp.hcode, 'labor');
   const profile = resolved.profile;
 
-  // Reuse an existing ANC patient when available so CIDs walk ANC → Labor.
-  const existing = Math.random() < 0.4 ? findExistingAncPatient(hosp.hcode) : null;
+  // Three-step patient selection, highest-fidelity-first:
+  //   1. ARRIVED referral targeting this hospital — the referred patient
+  //      arrives and gets admitted (same CID, closes cross-hospital loop).
+  //   2. ANC-registered mother (with 20% cross-hospital chance to model real
+  //      migration — e.g., ANC at tambon clinic, labor at community hospital).
+  //   3. Brand-new synthetic CID if nothing available.
+  const arrived = consumeArrivedReferralForAdmission(hosp.hcode);
+  const ancPatient = arrived ? null : (Math.random() < 0.4 ? findAncPatient(hosp.hcode, 0.25) : null);
+  const existing: PooledPatient | null = ancPatient;
   const seed = Date.now() + Math.floor(Math.random() * 1e6);
-  const cid = existing?.cid ?? synthCid(seed);
-  const hn = existing?.hn ?? synthHn();
+  const cid = arrived?.cid ?? existing?.cid ?? synthCid(seed);
+  const hn = arrived?.hn ?? existing?.hn ?? synthHn();
+  const reuseName = arrived?.name ?? existing?.name ?? null;
   const an = synthAn();
   const gaWeeks = existing?.ga ?? rnd(36, profile.id === 'post_term' ? 42 : 41);
   const ancCount = existing ? Math.max(existing.ancVisits, 0) : pick([0, 2, 3, 4, 4, 5, 6, 8]);
-  const gravida = existing ? 1 : Math.min(5, Math.max(1, Math.floor(Math.random() * 3) + 1));
+  const gravida = existing?.pregNo ?? Math.min(5, Math.max(1, Math.floor(Math.random() * 3) + 1));
   const admitIso = new Date().toISOString();
 
-  let event: WebhookPatientPayload;
+  // Hybrid: LLM provides the Thai name + short clinical note (narrative
+  // only — vLLM reliably honors this 2-field schema). All clinical numbers
+  // come from applyProfileToLabor() which samples from profile-bounded
+  // ranges. This is the strict version of the Tier-2 pipeline after we
+  // measured that Gemma-4 routinely invents its own clinical-record shape
+  // when the schema has many properties.
+  let llmName: string | null = null;
+  let llmNote: string | null = null;
   try {
-    const raw = await llmJson<LaborLlmOutput>({
+    const nar = await llmJson<{ name: string; note: string }>({
       model,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         {
           role: 'user',
           content: [
-            `Create one labor-room admission for ${hosp.name} (hcode ${hosp.hcode}).`,
+            `Create a Thai patient name + 1-sentence clinical note for a labor`,
+            `admission at ${hosp.name}.`,
             profilePromptHint(profile),
             resolved.plannedNote ? `Planner note: ${resolved.plannedNote}` : '',
             scenario ? `Scenario: ${scenario}` : '',
-            'Respond with JSON conforming to the schema. All numeric values must be consistent',
-            'with the clinical profile.',
+            'Output JSON: { "name": "นาง... ...", "note": "Thai, < 120 chars" }',
             resolved.plannedName ? `Use the name "${resolved.plannedName}" exactly.` : '',
           ].filter(Boolean).join('\n'),
         },
       ],
-      jsonSchema: laborJsonSchema(profile),
+      jsonSchema: NARRATIVE_SCHEMA,
       signal,
       temperature: 0.85,
-      maxTokens: 300,
+      maxTokens: 400,
     });
-    const name = existing?.name ?? (resolved.plannedName || raw.name || 'นาง ทดลอง ระบบ');
-    event = {
-      hn,
-      an,
-      name,
-      cid,
-      age: rnd(profile.ageYears.min, profile.ageYears.max),
-      gravida,
-      ga_weeks: gaWeeks,
-      anc_count: ancCount,
-      admit_date: admitIso,
-      height_cm: raw.heightCm,
-      weight_kg: raw.weightKgNow,
-      weight_diff_kg: raw.weightGainKg,
-      fundal_height_cm: raw.fundalHeightCm,
-      us_weight_g: raw.ultrasoundWeightG,
-      hematocrit_pct: raw.hematocritPct,
-      labor_status: 'ACTIVE',
-    };
-    const evalRes = evaluateLaborEvent(profile, event);
-    recordEvaluation(evalRes);
-    if (!evalRes.valid) throw new Error(`evaluator rejected: ${evalRes.errors[0]}`);
+    llmName = (deepFind(nar, 'name') as string | undefined) ?? null;
+    llmNote = (deepFind(nar, 'note') as string | undefined) ?? null;
   } catch (err) {
-    // Fallback — deterministic profile-driven output. We know this passes
-    // the evaluator because its bands come from the same profile.
-    logger.warn('sim_labor_llm_fallback', {
+    logger.warn('sim_labor_narrative_llm_fallback', {
       profile: profile.id,
       reason: err instanceof Error ? err.message : String(err),
     });
-    event = applyProfileToLabor({
-      profile,
-      name: existing?.name ?? resolved.plannedName ?? 'นาง ทดลอง ระบบ',
-      hn, an, cid,
-      gaWeeks,
-      gravida,
-      ancCount,
-      admitIso,
-    });
   }
 
-  if (existing) graduateToLabor(hosp.hcode, cid);
+  const laborInput: DeterministicLaborInput = {
+    profile,
+    name: reuseName ?? resolved.plannedName ?? llmName ?? 'นาง ทดลอง ระบบ',
+    hn, an, cid,
+    gaWeeks,
+    gravida,
+    ancCount,
+    admitIso,
+  };
+  const event = applyProfileToLabor(laborInput);
+  // Evaluator runs on the deterministic output — should always pass because
+  // profile bands generate the numbers. Tracked for telemetry symmetry.
+  const evalRes = evaluateLaborEvent(profile, event);
+  recordEvaluation(evalRes);
+  void llmNote;
+
+  // Mark the patient as LABOR-stage at THIS hospital (cross-hospital move
+  // reflected by the currentHcode update). For CIDs with no prior pool entry
+  // (arrived-referral with no ANC history, or brand-new synthetic) we seed a
+  // minimal pool record so subsequent partograph + updates can locate them.
+  if (existing || arrived) {
+    graduateToLabor(hosp.hcode, cid);
+  } else {
+    addPatient(hosp.hcode, {
+      cid,
+      hn,
+      name: event.name,
+      birthday: `${new Date().getFullYear() - (event.age ?? 28)}-01-01`,
+      pregNo: gravida,
+      lmp: '',
+      edc: '',
+      ga: gaWeeks,
+      ancVisits: ancCount,
+      stage: 'LABOR',
+      homeHcode: hosp.hcode,
+      currentHcode: hosp.hcode,
+      createdAt: Date.now(),
+    });
+  }
   addAdmission(hosp.hcode, {
     an,
     hn,
@@ -363,121 +441,148 @@ export async function generateAncEvent(
   const resolved = resolveProfile(hosp.hcode, 'anc');
   const profile = resolved.profile;
 
-  // 40% of ANC events target an existing pool entry — accumulates realistic history.
-  const existing = Math.random() < 0.4 ? findExistingAncPatient(hosp.hcode) : null;
+  // 40% of ANC events target an existing pool entry (20% cross-hospital) so
+  // the journey accumulates realistic visit history — even across hospital
+  // boundaries, reflecting real patients who follow their care between
+  // tambon clinic and district hospital.
+  const existing = Math.random() < 0.4 ? findAncPatient(hosp.hcode, 0.2) : null;
   const seed = Date.now() + Math.floor(Math.random() * 1e6);
   const today = new Date();
-  const weeksAgo = existing
-    ? Math.min(40, existing.ga + rnd(1, 3))
-    : rnd(8, 40);
-  const lmp = new Date(today.getTime() - weeksAgo * 7 * 86400_000);
-  const edc = new Date(lmp.getTime() + 280 * 86400_000);
-  const birthdayYear = today.getFullYear() - rnd(profile.ageYears.min, profile.ageYears.max);
-  const birthday = `${birthdayYear}-${String(rnd(1, 12)).padStart(2, '0')}-${String(rnd(1, 28)).padStart(2, '0')}`;
+  // Fix D — when an existing patient is being re-seen, REUSE their stable
+  // pregNo / lmp / edc / birthday so the webhook's "isNewPregnancy" check
+  // doesn't misfire and create a second journey for the same person.
+  const initialGa = existing ? existing.ga : rnd(8, 40);
+  const lmpIsoStable = existing?.lmp && existing.lmp.length > 0
+    ? existing.lmp
+    : new Date(today.getTime() - initialGa * 7 * 86400_000).toISOString();
+  // Current GA derived from the stable LMP so visits always land on a real
+  // date ≤ today. Earlier code let weeksAgo drift (existing.ga + rnd) while
+  // LMP stayed fixed, which made visit_date = LMP + visitGa*7 resolve into
+  // the future — visually confusing and clinically nonsensical.
+  const lmpMs = new Date(lmpIsoStable).getTime();
+  const weeksAgo = Math.max(
+    8,
+    Math.min(42, Math.floor((today.getTime() - lmpMs) / (7 * 86400_000))),
+  );
+  const edcIsoStable = existing?.edc && existing.edc.length > 0
+    ? existing.edc
+    : new Date(new Date(lmpIsoStable).getTime() + 280 * 86400_000).toISOString();
+  const birthdayStable = existing?.birthday && existing.birthday.length > 0
+    ? existing.birthday
+    : (() => {
+        const birthdayYear = today.getFullYear() - rnd(profile.ageYears.min, profile.ageYears.max);
+        return `${birthdayYear}-${String(rnd(1, 12)).padStart(2, '0')}-${String(rnd(1, 28)).padStart(2, '0')}`;
+      })();
 
-  // Build per-visit records from the profile deterministically — every visit
-  // gets its own clinical row with profile-coherent values. LLM doesn't need
-  // to generate each visit; it just owns the journey-level labs + narrative.
-  const existingVisits = existing?.ancVisits ?? 0;
-  const newVisitCount = existing ? 1 : Math.random() < 0.6 ? rnd(1, Math.min(Math.floor(weeksAgo / 4), 8)) : 0;
-  const visits = Array.from({ length: newVisitCount }, (_, i) => {
-    const visitGa = weeksAgo - newVisitCount + i;
-    const visitAt = new Date(lmp.getTime() + visitGa * 7 * 86400_000);
-    return applyProfileToAncVisit(profile, visitGa, existingVisits + i + 1, visitAt.toISOString());
+  // Build per-visit records on the Thai MOH / WHO 2016 ANC contact schedule.
+  // Previously visits were packed into consecutive weeks (e.g. GA 16, 17, 18,
+  // 19, 20) which doesn't reflect how a real pregnancy is followed: clinical
+  // spacing is ~4 weeks in 1st/2nd trimester, tightening toward weekly near
+  // term. We pick the milestone GAs that have already been reached and emit
+  // one visit per milestone, with ±3d jitter so dates look human.
+  //
+  // The webhook uses a REPLACE strategy (DELETE + INSERT) for cached_anc_visits
+  // per journey, so always sending the full history-to-date keeps the DB in
+  // sync with reality instead of accumulating random fragments across runs.
+  //
+  // Schedule: Thai MOH Safe Motherhood (8 core contacts) aligned with WHO 2016.
+  const ANC_CONTACT_WEEKS = [12, 20, 26, 30, 34, 36, 38, 40] as const;
+  const currentGa = weeksAgo;
+  const milestones = ANC_CONTACT_WEEKS.filter((w) => w <= currentGa);
+  const lmpDate = new Date(lmpIsoStable);
+  const nowMs = today.getTime();
+  const visits = milestones.map((visitGa, i) => {
+    const jitterDays = rnd(-3, 3);
+    const raw = lmpDate.getTime() + visitGa * 7 * 86400_000 + jitterDays * 86400_000;
+    // Cap at today so the latest milestone's positive jitter can't land a
+    // visit in the future (clinically impossible — ANC visits are past events).
+    const visitAt = new Date(Math.min(raw, nowMs));
+    return applyProfileToAncVisit(profile, visitGa, i + 1, visitAt.toISOString());
   });
 
-  const gravida = existing?.ancVisits ? (existing.ga > 0 ? 1 : 1) : pick([1, 1, 1, 2, 2, 3]);
+  const gravida = existing?.pregNo ?? pick([1, 1, 1, 2, 2, 3]);
   const cid = existing?.cid ?? synthCid(seed);
   const hn = existing?.hn ?? synthHn();
 
-  let event: WebhookAncPatient;
+  // Same hybrid as labor — LLM owns the Thai name + note, applyProfile owns
+  // all structured clinical + serology + GTPAL fields.
+  let llmName: string | null = null;
+  let llmNote: string | null = null;
   try {
-    const raw = await llmJson<AncLlmOutput>({
+    const nar = await llmJson<{ name: string; note: string }>({
       model,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         {
           role: 'user',
           content: [
-            `Create one ANC (antenatal) registration for ${hosp.name}.`,
+            `Create a Thai patient name + 1-sentence clinical note for an ANC`,
+            `registration at ${hosp.name}.`,
             profilePromptHint(profile),
             resolved.plannedNote ? `Planner note: ${resolved.plannedNote}` : '',
             scenario ? `Scenario: ${scenario}` : '',
-            'Thai mothers in this region are ~60% O, ~25% B, ~10% A, ~5% AB blood group.',
-            `Rh− is rare (<1%) unless the profile explicitly calls for it.`,
-            'Respond with JSON conforming to the schema.',
+            'Output JSON: { "name": "นาง... ...", "note": "Thai, < 120 chars" }',
             resolved.plannedName ? `Use the name "${resolved.plannedName}".` : '',
           ].filter(Boolean).join('\n'),
         },
       ],
-      jsonSchema: ancJsonSchema(profile),
+      jsonSchema: NARRATIVE_SCHEMA,
       signal,
       temperature: 0.85,
-      maxTokens: 500,
+      maxTokens: 400,
     });
-    const name = existing?.name ?? (resolved.plannedName || raw.name || 'นาง ทดลอง ระบบ');
-    event = {
-      hn,
-      name,
-      cid,
-      birthday,
-      pregNo: gravida,
-      lmp: lmp.toISOString(),
-      edc: edc.toISOString(),
-      riskLevel: String(profile.riskLevel),
-      changwatCode: '40',
-      amphurCode: pick(AMPHUR_CODES),
-      visits,
-      bloodGroup: raw.bloodGroup,
-      rhFactor: raw.rhFactor,
-      hbsagResult: raw.hbsagResult,
-      vdrlResult: raw.vdrlResult,
-      hivResult: raw.hivResult,
-      ogttResult: weeksAgo >= 24 ? raw.ogttResult : 'PENDING',
-      termBirths: raw.termBirths,
-      pretermBirths: raw.pretermBirths,
-      abortions: raw.abortions,
-      livingChildren: raw.livingChildren,
-      pastMedicalHistory: raw.pastMedicalHistory ?? null,
-    };
-    const evalRes = evaluateAncEvent(profile, event);
-    recordEvaluation(evalRes);
-    // Cross-check LLM note vs danger signs on any visit — advisory only.
-    for (const v of event.visits ?? []) {
-      const issues = findNarrativeInconsistencies(raw.note, v.dangerSigns);
-      if (issues.length > 0) evalStats.warnings += 1;
-    }
-    if (!evalRes.valid) throw new Error(`evaluator rejected: ${evalRes.errors[0]}`);
+    llmName = (deepFind(nar, 'name') as string | undefined) ?? null;
+    llmNote = (deepFind(nar, 'note') as string | undefined) ?? null;
   } catch (err) {
-    logger.warn('sim_anc_llm_fallback', {
+    logger.warn('sim_anc_narrative_llm_fallback', {
       profile: profile.id,
       reason: err instanceof Error ? err.message : String(err),
     });
-    event = applyProfileToAnc({
-      profile,
-      name: existing?.name ?? resolved.plannedName ?? 'นาง ทดลอง ระบบ',
-      hn, cid,
-      birthday,
-      gravida,
-      lmpIso: lmp.toISOString(),
-      edcIso: edc.toISOString(),
-      changwatCode: '40',
-      amphurCode: pick(AMPHUR_CODES),
-      visits,
-    });
   }
 
-  // Track in pool so subsequent labor events can graduate the same CID.
+  const ancInput: DeterministicAncInput = {
+    profile,
+    name: existing?.name ?? resolved.plannedName ?? llmName ?? 'นาง ทดลอง ระบบ',
+    hn, cid,
+    birthday: birthdayStable,
+    gravida,
+    lmpIso: lmpIsoStable,
+    edcIso: edcIsoStable,
+    changwatCode: '40',
+    amphurCode: pick(AMPHUR_CODES),
+    visits,
+    currentGa: weeksAgo,
+  };
+  const event = applyProfileToAnc(ancInput);
+  const evalRes = evaluateAncEvent(profile, event);
+  recordEvaluation(evalRes);
+  for (const v of event.visits ?? []) {
+    const issues = findNarrativeInconsistencies(llmNote, v.dangerSigns);
+    if (issues.length > 0) evalStats.warnings += 1;
+  }
+
+  // Track or update in pool so subsequent events reuse CID + stable fields.
+  // addPatient() is idempotent on CID — it upserts, preserving homeHcode but
+  // updating currentHcode to reflect who last saw the patient.
   const pooled: PooledPatient = {
     cid,
     hn,
     name: event.name,
+    birthday: birthdayStable,
+    pregNo: gravida,
+    lmp: lmpIsoStable,
+    edc: edcIsoStable,
     ga: weeksAgo,
-    ancVisits: existingVisits + visits.length,
+    // Full-history payload: the webhook replaces the visit set on each event,
+    // so the pool's ancVisits should mirror what's now in the DB, not
+    // accumulate across sim events.
+    ancVisits: visits.length,
     stage: 'ANC',
-    createdAt: Date.now(),
+    homeHcode: existing?.homeHcode ?? hosp.hcode,
+    currentHcode: hosp.hcode,
+    createdAt: existing ? existing.createdAt : Date.now(),
   };
-  if (!existing) addPatient(hosp.hcode, pooled);
+  addPatient(hosp.hcode, pooled);
   return event;
 }
 
@@ -528,7 +633,7 @@ export async function generateReferralEvent(
     },
     signal,
     temperature: 0.85,
-    maxTokens: 200,
+    maxTokens: 8000,
   }).catch((err) => {
     logger.warn('sim_referral_llm_fallback', {
       profile: profile.id,
@@ -550,10 +655,23 @@ export async function generateReferralEvent(
 
   const seed = Date.now() + Math.floor(Math.random() * 1e6);
   const referralId = `REF-${hosp.hcode}-${String(seed).slice(-8)}`;
+
+  // Fix B — a referral transfers a real patient, not a fresh fictional one.
+  // Prefer picking from the sending hospital's current admissions (someone
+  // in labor is being transferred) or ANC-registered mothers there. Only
+  // fall back to a synthetic CID when the pool is genuinely empty.
+  const existing = pickPatientToRefer(hosp.hcode);
+  const referredCid = existing?.cid ?? synthCid(seed);
+  const referredHn = existing?.hn ?? synthHn();
+  const referredName = existing?.name ?? raw.name ?? 'นาง ทดลอง ระบบ';
+
   addReferral(hosp.hcode, {
     referralId,
     fromHcode: hosp.hcode,
     toHcode: dest.hcode,
+    cid: referredCid,
+    hn: referredHn,
+    name: referredName,
     createdAt: Date.now(),
     status: 'INITIATED',
   });
@@ -562,9 +680,9 @@ export async function generateReferralEvent(
     type: 'referral',
     hospitalCode: hosp.hcode,
     referralId,
-    hn: synthHn(),
-    cid: synthCid(seed),
-    name: raw.name || 'นาง ทดลอง ระบบ',
+    hn: referredHn,
+    cid: referredCid,
+    name: referredName,
     toHospitalCode: dest.hcode,
     reason: raw.reason,
     diagnosisCode: raw.diagnosisCode || 'O14.0',
@@ -599,7 +717,21 @@ export function generateReferralUpdateEvent(
 
 // ─── Partograph observation (continuation on admitted patient) ─────────
 
-/** Returns null if this hospital has no recent labor admission. */
+/**
+ * Returns null if this hospital has no recent labor admission.
+ *
+ * Real-world WHO partographs are recorded every 30 minutes during active
+ * labor, so a realistic admission should accumulate 8-24 observations over
+ * its 4-12 hour stay. The previous implementation emitted one observation
+ * per event; combined with the planner's ~10% partograph proportion this
+ * gave each admission only 1-3 observations over a 15-min sim — visibly
+ * thin on the patient-detail page. We now emit a batch of 4-6 observations
+ * per event, spaced 30 minutes apart ending at "now", so each tick
+ * represents ~2-3 hours of labor progression. Dilation, contraction, and
+ * descent naturally advance because `applyProfileToPartograph` scales by
+ * `hourNo`, and the per-admission counter is incremented once per
+ * observation.
+ */
 export async function generatePartographEvent(
   hosp: HospitalContext,
   signal: AbortSignal,
@@ -607,22 +739,38 @@ export async function generatePartographEvent(
 ): Promise<WebhookPartographPayload | null> {
   const admit = pickRecentAdmission(hosp.hcode);
   if (!admit) return null;
-  const hourNo = incPartographHour(hosp.hcode, admit.an);
 
   const resolved = resolveProfile(hosp.hcode, 'partograph');
   const profile = resolved.profile;
 
-  const baseObs = applyProfileToPartograph({
-    profile,
-    an: admit.an,
-    externalObservationId: `OBS-${admit.an}-${hourNo}-${String(Date.now()).slice(-5)}`,
-    hourNo,
-    observeIso: new Date().toISOString(),
-  });
+  // Batch size 4-6 per event. Observations spaced 30 min apart, newest last
+  // at "now". `applyProfileToPartograph` keys dilation off `hourNo` so the
+  // batch reads as a realistic progression (e.g. 3cm → 4cm → 5cm → 6cm).
+  const batchSize = rnd(4, 6);
+  const nowMs = Date.now();
+  const observations: WebhookPartographObservation[] = [];
+  let lastHourNo = 0;
+  for (let i = 0; i < batchSize; i++) {
+    const hourNo = incPartographHour(hosp.hcode, admit.an);
+    lastHourNo = hourNo;
+    const offsetMin = (batchSize - 1 - i) * 30;
+    const observeIso = new Date(nowMs - offsetMin * 60_000).toISOString();
+    const obs = applyProfileToPartograph({
+      profile,
+      an: admit.an,
+      // Suffix `i` so externalObservationIds in the batch stay unique even
+      // though Date.now().slice(-5) is the same for all obs in this call.
+      externalObservationId: `OBS-${admit.an}-${hourNo}-${String(nowMs).slice(-5)}-${i}`,
+      hourNo,
+      observeIso,
+    });
+    observations.push(obs);
+  }
 
   // Tier 2: ask LLM for a short nurse-note + confirm the vitals are coherent.
   // Partograph fields are progressive time-series so we already have good
-  // deterministic output; LLM only augments the note.
+  // deterministic output; LLM only augments the note on the LAST (newest)
+  // observation so the batch still reads chronologically.
   try {
     const raw = await llmChat({
       model,
@@ -631,7 +779,7 @@ export async function generatePartographEvent(
         {
           role: 'user',
           content: [
-            `Partograph observation hour ${hourNo} at ${hosp.name}.`,
+            `Partograph observation hour ${lastHourNo} at ${hosp.name}.`,
             profilePromptHint(profile),
             'Return ONLY a 1-sentence Thai nurse note describing the progression',
             '(e.g. คลอดปกติดี, รก drain ดี). <100 Thai chars, no JSON.',
@@ -640,23 +788,27 @@ export async function generatePartographEvent(
       ],
       signal,
       temperature: 0.8,
-      maxTokens: 80,
+      maxTokens: 8000,
     });
     const cleaned = (raw ?? '').trim().slice(0, 100);
-    if (cleaned) (baseObs as WebhookPartographObservation & { note?: string }).note = cleaned;
+    if (cleaned && observations.length > 0) {
+      const last = observations[observations.length - 1] as
+        WebhookPartographObservation & { note?: string };
+      last.note = cleaned;
+    }
   } catch {
     // Nurse-note is optional — silently skip on failure.
   }
 
-  const evalRes = evaluatePartographEvent(profile, baseObs);
+  // Evaluate against the profile using the LATEST observation (the most
+  // recent state is what the evaluator cares about).
+  const evalRes = evaluatePartographEvent(profile, observations[observations.length - 1]);
   recordEvaluation(evalRes);
-  // We always use baseObs — profile-driven. The LLM here only embellishes the
-  // note, so evaluator rejection is unusual but still logged.
 
   return {
     type: 'partograph',
     hospitalCode: hosp.hcode,
-    observations: [baseObs],
+    observations,
   };
 }
 

@@ -7,10 +7,14 @@ import { SseManager } from '@/lib/sse';
 import { startPolling, stopPolling } from '@/services/sync';
 import { logger } from '@/lib/logger';
 
-let initialized = false;
+// HMR- and bundle-safe init flag (pair with ensure-init.ts singleton).
+interface InitFlag { done: boolean }
+const _global = global as unknown as { __initFlag?: InitFlag };
+const _flag: InitFlag = _global.__initFlag ?? { done: false };
+if (!_global.__initFlag) _global.__initFlag = _flag;
 
 export async function initializeApp(): Promise<void> {
-  if (initialized) return;
+  if (_flag.done) return;
 
   try {
     const startTime = Date.now();
@@ -43,7 +47,7 @@ export async function initializeApp(): Promise<void> {
       logger.info('hosxp_polling_started', {});
     }
 
-    initialized = true;
+    _flag.done = true;
     const elapsed = Date.now() - startTime;
     logger.info('initialization_completed', { elapsedMs: elapsed });
   } catch (error) {
@@ -57,6 +61,6 @@ export async function shutdownApp(): Promise<void> {
   stopPolling();
   await closeDatabase();
   SseManager.getInstance().destroy();
-  initialized = false;
+  _flag.done = false;
   logger.info('shutdown_completed', {});
 }

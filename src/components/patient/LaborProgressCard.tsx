@@ -293,16 +293,35 @@ export function LaborProgressCard({
   const exceedsActionLine = latest !== null && latest.actionLineCm !== null && latest.dilationCm > latest.actionLineCm;
 
   return (
-    <div className="rounded-2xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)]">
-      {/* Card title */}
-      <div className="flex items-center gap-2 mb-4">
-        <Activity className="h-4 w-4 text-slate-400" />
-        <h3 className="text-sm font-semibold text-slate-700">ความคืบหน้าการคลอด</h3>
+    <div
+      className="rounded-sm border"
+      style={{ borderColor: 'var(--rule-strong)' }}
+    >
+      {/* Card header — match the other card headers on this page */}
+      <div
+        className="flex items-center gap-2 border-b px-3 py-2"
+        style={{
+          borderColor: 'var(--rule-strong)',
+          background: 'linear-gradient(135deg, var(--accent-navy-soft) 0%, white 60%)',
+        }}
+      >
+        <Activity className="h-4 w-4" style={{ color: 'var(--accent-navy)' }} />
+        <h3 className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[var(--ink-navy)]">
+          ความคืบหน้าการคลอด
+        </h3>
       </div>
 
+      <div className="p-3">
       {/* Empty state */}
       {!hasEntries && (
-        <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-300 text-sm text-slate-400">
+        <div
+          className="flex h-28 items-center justify-center border border-dashed font-mono text-[12px]"
+          style={{
+            borderColor: 'var(--rule-strong)',
+            color: 'var(--ink-navy-muted)',
+            background: 'color-mix(in srgb, #6b7693 3%, white)',
+          }}
+        >
           ยังไม่มีข้อมูลการขยายปากมดลูก
         </div>
       )}
@@ -360,6 +379,7 @@ export function LaborProgressCard({
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

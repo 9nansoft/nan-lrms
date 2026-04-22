@@ -1,5 +1,7 @@
 // Journey detail page — full pregnancy journey for one woman.
-// Redesigned 2026-04-21 in the dashboard's air-traffic-control aesthetic.
+// Redesigned 2026-04-21 (v2): air-traffic-control aesthetic; 2-column layout
+// with sticky clinical-summary rail on the right, vital-trend sparklines,
+// and a WHO 8-contact tracker with next-due recommendation.
 'use client';
 
 import { use } from 'react';
@@ -23,6 +25,11 @@ import {
   Heart,
   Activity,
   Ruler,
+  MapPin,
+  User,
+  TrendingUp,
+  Syringe,
+  ShieldAlert,
 } from 'lucide-react';
 
 // ─── Types (shape must match /api/journeys/[journeyId]) ───────────────────
@@ -48,6 +55,10 @@ interface AncVisit {
   calciumGiven: boolean | null;
   dangerSigns: string[] | null;
   fetalMovementOk: boolean | null;
+  vaccinesGiven?: VaccineRecord[] | null;
+  nstResult?: string | null;
+  bppScore?: number | null;
+  umbilicalDopplerResult?: string | null;
 }
 
 interface LatestRisk {
@@ -108,6 +119,37 @@ interface Journey {
   abortions: number | null;
   livingChildren: number | null;
   pastMedicalHistory: string | null;
+  // RTCOG OB 66-029 (2566) additions.
+  mcvFl?: number | null;
+  dcipResult?: string | null;
+  hbEResult?: string | null;
+  thalassemiaType?: string | null;
+  cervicalScreenType?: string | null;
+  cervicalScreenResult?: string | null;
+  cervicalScreenDate?: string | null;
+  aneuploidyMethod?: string | null;
+  aneuploidyResult?: string | null;
+  gbsResult?: string | null;
+  gbsCollectedDate?: string | null;
+  anatomyScanDate?: string | null;
+  anatomyScanResult?: string | null;
+  efwG?: number | null;
+  datingMethod?: string | null;
+  proteinuria24hMg?: number | null;
+  creatinineMgDl?: number | null;
+  priorPeDvt?: boolean | null;
+  severeLungDisease?: boolean | null;
+  alloimmunizationCde?: boolean | null;
+  bariatricSurgeryHx?: boolean | null;
+  teratogenExposure?: boolean | null;
+  congenitalInfection?: boolean | null;
+  gdmRiskFactors?: string[] | null;
+}
+
+interface VaccineRecord {
+  type: 'TT' | 'DT' | 'TDAP' | 'INFLUENZA' | 'COVID';
+  dose?: number | null;
+  givenAtGa?: number | null;
 }
 
 interface JourneyDetailResponse {
@@ -156,10 +198,50 @@ const REFERRAL_STATUS_LABEL: Record<string, string> = {
 const SEX_LABEL_TH: Record<string, string> = { M: 'ชาย', F: 'หญิง' };
 
 // Clinical normal bands (rough — used only for visual hint, not actual CDSS).
+// Three tiers per metric so the UI can render normal/borderline/abnormal
+// instead of a single binary abnormal flag.
 const BP_SYS_HIGH = 140;
+const BP_SYS_AMBER = 130;   // 130-139 = borderline/elevated
 const BP_DIA_HIGH = 90;
+const BP_DIA_AMBER = 85;    // 85-89 = borderline
 const FHR_LOW = 110;
 const FHR_HIGH = 160;
+const HB_LOW = 11;          // anemia
+const HB_SEVERE = 9;        // severe anemia
+
+type Severity = 'normal' | 'borderline' | 'abnormal';
+
+function sevBp(sys: number | null, dia: number | null): Severity {
+  if (sys == null || dia == null) return 'normal';
+  if (sys >= BP_SYS_HIGH || dia >= BP_DIA_HIGH) return 'abnormal';
+  if (sys >= BP_SYS_AMBER || dia >= BP_DIA_AMBER) return 'borderline';
+  return 'normal';
+}
+function sevFhr(v: number | null): Severity {
+  if (v == null) return 'normal';
+  if (v < FHR_LOW || v > FHR_HIGH) return 'abnormal';
+  return 'normal';
+}
+function sevHb(v: number | null): Severity {
+  if (v == null) return 'normal';
+  if (v < HB_SEVERE) return 'abnormal';
+  if (v < HB_LOW) return 'borderline';
+  return 'normal';
+}
+function sevColor(s: Severity): string {
+  return s === 'abnormal'
+    ? 'var(--risk-high)'
+    : s === 'borderline'
+      ? 'var(--risk-medium)'
+      : 'var(--ink-navy)';
+}
+function sevBg(s: Severity): string {
+  return s === 'abnormal'
+    ? 'rgba(239, 68, 68, 0.10)'
+    : s === 'borderline'
+      ? 'rgba(234, 179, 8, 0.10)'
+      : 'transparent';
+}
 
 // WHO 2016 recommended 8-contact ANC schedule — target gestational weeks.
 // First contact < 12w; then 20/26/30/34/36/38/40. See NBK409109.
@@ -206,6 +288,14 @@ function formatThai(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString('th-TH', {
     timeZone: 'Asia/Bangkok',
     year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+function formatThaiShort(dateStr: string | null): string {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString('th-TH', {
+    timeZone: 'Asia/Bangkok',
     month: 'short',
     day: 'numeric',
   });
@@ -284,20 +374,18 @@ function VisitChip({
   );
 }
 
+// Compact lab result — "BLOOD B", "Rh POS", etc. Abnormal values render in red.
 function LabResult({
   label,
   value,
   abnormalIf,
-  positiveIsBad = false,
 }: {
   label: string;
   value: string | null;
   abnormalIf?: (v: string) => boolean;
-  positiveIsBad?: boolean;
 }) {
   const v = value ?? null;
   const abn = v ? (abnormalIf ? abnormalIf(v) : false) : false;
-  void positiveIsBad;
   return (
     <span className="inline-flex items-center gap-1 font-mono text-[11px]">
       <span className="text-[var(--ink-navy-muted)]">{label}</span>
@@ -317,6 +405,80 @@ function LabResult({
   );
 }
 
+// Serology tile for the labs panel — wider click-target with a clear
+// normal/abnormal color-coded status line. Abnormal tiles use a saturated
+// red background + white-on-red value with a warning icon so they pop out
+// of a row of otherwise-normal serology.
+function LabTile({
+  label,
+  value,
+  status,
+}: {
+  label: string;
+  value: string | null;
+  status: 'normal' | 'abnormal' | 'missing';
+}) {
+  if (status === 'abnormal') {
+    return (
+      <div
+        className="flex flex-col gap-0.5 border px-2.5 py-1.5"
+        style={{
+          borderColor: 'var(--risk-high)',
+          background: 'rgba(239, 68, 68, 0.14)',
+          boxShadow: 'inset 3px 0 0 var(--risk-high)',
+        }}
+      >
+        <div
+          className="inline-flex items-center gap-1 font-mono text-[9px] font-bold uppercase tracking-[0.12em]"
+          style={{ color: 'var(--risk-high)' }}
+        >
+          <AlertTriangle className="h-2.5 w-2.5" />
+          {label}
+        </div>
+        <div
+          className="inline-flex w-fit items-center rounded-sm px-1.5 py-0.5 font-mono text-[12px] font-bold tabular-nums text-white"
+          style={{ background: 'var(--risk-high)' }}
+        >
+          {value ?? '—'}
+        </div>
+      </div>
+    );
+  }
+  const palette =
+    status === 'normal'
+      ? {
+          fg: 'var(--ink-navy)',
+          accent: 'var(--risk-low)',
+          bg: 'rgba(34, 197, 94, 0.06)',
+        }
+      : {
+          fg: 'var(--ink-navy-muted)',
+          accent: 'var(--ink-navy-muted)',
+          bg: 'white',
+        };
+  return (
+    <div
+      className="flex flex-col gap-0.5 border px-2.5 py-1.5"
+      style={{
+        borderColor: 'var(--rule-strong)',
+        borderLeftColor: palette.accent,
+        borderLeftWidth: 3,
+        background: palette.bg,
+      }}
+    >
+      <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+        {label}
+      </div>
+      <div
+        className="font-mono text-[13px] font-bold tabular-nums"
+        style={{ color: palette.fg }}
+      >
+        {value ?? '—'}
+      </div>
+    </div>
+  );
+}
+
 const DANGER_LABEL_TH: Record<string, string> = {
   severe_headache: 'ปวดศีรษะรุนแรง',
   blurred_vision: 'ตาพร่ามัว',
@@ -331,31 +493,138 @@ function dangerLabel(code: string): string {
   return DANGER_LABEL_TH[code] ?? code;
 }
 
+// Immunization tile — shows whether a vaccine has been given in this
+// pregnancy. Tdap gets the strongest treatment (RTCOG requires Tdap 27-36w
+// each pregnancy); other vaccines just show yes/no with GA timestamp.
+function VaccineTile({
+  label,
+  subLabel,
+  records,
+  requiredThisPregnancy,
+  currentGa,
+  windowStart,
+  windowEnd,
+}: {
+  label: string;
+  subLabel?: string;
+  records: VaccineRecord[];
+  requiredThisPregnancy?: boolean;
+  currentGa?: number | null;
+  windowStart?: number;
+  windowEnd?: number;
+}) {
+  const given = records.length > 0;
+  const latest = records[records.length - 1];
+  // Overdue logic — only for required-this-pregnancy vaccines (Tdap).
+  const overdue =
+    requiredThisPregnancy &&
+    !given &&
+    windowEnd != null &&
+    currentGa != null &&
+    currentGa > windowEnd;
+  const fg = given
+    ? 'var(--risk-low)'
+    : overdue
+      ? 'var(--risk-high)'
+      : 'var(--ink-navy-muted)';
+  const bg = given
+    ? 'rgba(34, 197, 94, 0.06)'
+    : overdue
+      ? 'rgba(239, 68, 68, 0.08)'
+      : 'white';
+  const accent = given
+    ? 'var(--risk-low)'
+    : overdue
+      ? 'var(--risk-high)'
+      : 'var(--ink-navy-muted)';
+  return (
+    <div
+      className="flex flex-col gap-1 px-3 py-2"
+      style={{
+        background: bg,
+        borderLeft: `3px solid ${accent}`,
+      }}
+    >
+      <div className="flex items-baseline gap-1.5">
+        <Syringe className="h-3 w-3" style={{ color: accent }} />
+        <span className="font-mono text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: fg }}>
+          {label}
+        </span>
+        {subLabel && (
+          <span className="font-mono text-[9px] text-[var(--ink-navy-muted)]">
+            {subLabel}
+          </span>
+        )}
+      </div>
+      {given ? (
+        <div className="flex items-center gap-1 font-mono text-[12px] font-bold tabular-nums" style={{ color: fg }}>
+          <CheckCircle2 className="h-3 w-3" />
+          GIVEN
+          {latest?.givenAtGa != null && (
+            <span className="font-normal text-[10px] text-[var(--ink-navy-muted)]">
+              @ {latest.givenAtGa}w
+            </span>
+          )}
+          {latest?.dose != null && (
+            <span className="font-normal text-[10px] text-[var(--ink-navy-muted)]">
+              dose {latest.dose}
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center gap-1 font-mono text-[12px] font-bold tabular-nums" style={{ color: fg }}>
+          {overdue ? <AlertTriangle className="h-3 w-3" /> : null}
+          {overdue ? 'OVERDUE' : 'NOT GIVEN'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Summary-strip tile — big number, tiny label. The top edge carries an
+// accent band in the tile's color, and the icon sits in a matching tinted
+// badge so each metric reads as its own visual "lane" rather than a row of
+// identical grey rectangles.
 function MetricTile({
   label,
   value,
   sub,
   color,
   icon,
+  tone = 'light',
 }: {
   label: string;
   value: string | number;
   sub?: string;
   color?: string;
   icon?: React.ReactNode;
+  /** 'light' (default): soft tint + dark text. 'bold': deeper tint for
+   *  emphasis (e.g. right-rail big number). */
+  tone?: 'light' | 'bold';
 }) {
+  const c = color ?? 'var(--accent-navy)';
+  const bgTint =
+    tone === 'bold' ? `color-mix(in srgb, ${c} 14%, white)` : `color-mix(in srgb, ${c} 6%, white)`;
+  const badgeTint = `color-mix(in srgb, ${c} 18%, white)`;
   return (
     <div
-      className="flex flex-col gap-0.5 px-4 py-3"
-      style={{ borderLeft: `2px solid ${color ?? 'var(--accent-navy)'}` }}
+      className="relative flex flex-col gap-1 px-4 py-3"
+      style={{ background: bgTint, borderTop: `3px solid ${c}` }}
     >
-      <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
-        {icon}
+      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+        {icon && (
+          <span
+            className="inline-flex h-5 w-5 items-center justify-center rounded-sm"
+            style={{ background: badgeTint, color: c }}
+          >
+            {icon}
+          </span>
+        )}
         {label}
       </div>
       <div className="flex items-baseline gap-2">
         <div
-          className="font-mono text-[20px] font-semibold leading-none tabular-nums"
+          className="font-mono text-[22px] font-semibold leading-none tabular-nums"
           style={{ color: 'var(--ink-navy)', letterSpacing: '-0.01em' }}
         >
           {value}
@@ -368,13 +637,229 @@ function MetricTile({
   );
 }
 
+// ─── Inline sparkline (no external chart lib for tiny trends) ─────────────
+//
+// Renders a polyline + dots for a small time-series of numbers. Values that
+// fall outside [lowBand, highBand] render the dot red so a clinician can
+// spot an abnormal point at a glance without reading exact numbers.
+function Sparkline({
+  values,
+  width = 140,
+  height = 34,
+  lowBand,
+  highBand,
+  color = 'var(--accent-navy)',
+}: {
+  values: Array<number | null>;
+  width?: number;
+  height?: number;
+  lowBand?: number;
+  highBand?: number;
+  color?: string;
+}) {
+  const pts = values.filter((v): v is number => v != null);
+  if (pts.length < 1) {
+    return (
+      <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">—</span>
+    );
+  }
+  const min = Math.min(...pts, lowBand ?? Infinity);
+  const max = Math.max(...pts, highBand ?? -Infinity);
+  const span = max - min || 1;
+  const pad = 4;
+  const w = width - pad * 2;
+  const h = height - pad * 2;
+  const x = (i: number) =>
+    pad + (values.length === 1 ? w / 2 : (i / (values.length - 1)) * w);
+  const y = (v: number) => pad + h - ((v - min) / span) * h;
+  const polyPts = values
+    .map((v, i) => (v == null ? null : `${x(i)},${y(v)}`))
+    .filter(Boolean)
+    .join(' ');
+  // Normal band shading when both lowBand and highBand are provided.
+  const bandY0 = highBand != null ? y(highBand) : null;
+  const bandY1 = lowBand != null ? y(lowBand) : null;
+  return (
+    <svg
+      width={width}
+      height={height}
+      className="block"
+      role="img"
+      aria-label="trend"
+    >
+      {bandY0 != null && bandY1 != null && (
+        <rect
+          x={0}
+          y={Math.min(bandY0, bandY1)}
+          width={width}
+          height={Math.abs(bandY1 - bandY0)}
+          fill="var(--risk-low)"
+          opacity={0.08}
+        />
+      )}
+      <polyline
+        points={polyPts}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.4}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      {values.map((v, i) => {
+        if (v == null) return null;
+        const abnormal =
+          (lowBand != null && v < lowBand) || (highBand != null && v > highBand);
+        return (
+          <circle
+            key={i}
+            cx={x(i)}
+            cy={y(v)}
+            r={abnormal ? 2.4 : 1.8}
+            fill={abnormal ? 'var(--risk-high)' : color}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+// Row in the Vital trends panel — label, current value with colored abnormal
+// flag, delta vs previous, and a sparkline. Each metric gets its own
+// tinted label badge so scanning down the table you can find (say) BP
+// without reading labels. `severity` is a function of the current value so
+// we can flash it amber (borderline) or red (abnormal) in place.
+function TrendRow({
+  label,
+  values,
+  unit,
+  lowBand,
+  highBand,
+  format = (v) => String(v),
+  color,
+  severity,
+}: {
+  label: string;
+  values: Array<number | null>;
+  unit?: string;
+  lowBand?: number;
+  highBand?: number;
+  format?: (v: number) => string;
+  color?: string;
+  /** Per-value severity. Defaults to a binary check against lowBand/highBand. */
+  severity?: (v: number) => Severity;
+}) {
+  const real = values.filter((v): v is number => v != null);
+  const current = real[real.length - 1] ?? null;
+  const prev = real[real.length - 2] ?? null;
+  const delta = current != null && prev != null ? current - prev : null;
+  const sev: Severity =
+    current == null
+      ? 'normal'
+      : severity
+        ? severity(current)
+        : (lowBand != null && current < lowBand) ||
+            (highBand != null && current > highBand)
+          ? 'abnormal'
+          : 'normal';
+  const c = color ?? 'var(--accent-navy)';
+  const labelBg = `color-mix(in srgb, ${c} 10%, white)`;
+  const deltaColor =
+    delta == null || delta === 0
+      ? 'var(--ink-navy-muted)'
+      : delta > 0
+        ? 'var(--risk-medium)'
+        : 'var(--primary-teal)';
+  const valueBg = sevBg(sev);
+  const valueColor =
+    current == null ? 'var(--ink-navy-muted)' : sevColor(sev);
+  const valueBorder =
+    sev === 'normal' ? 'transparent' : sevColor(sev);
+  return (
+    <div
+      className="grid items-center gap-2 border-b px-3 py-1.5"
+      style={{
+        gridTemplateColumns: '96px 92px 54px 1fr',
+        borderColor: 'var(--rule-hair)',
+        background: sev === 'abnormal' ? 'rgba(239, 68, 68, 0.03)' : undefined,
+      }}
+    >
+      <div
+        className="inline-flex items-center justify-start rounded-sm px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-[0.08em]"
+        style={{ background: labelBg, color: c }}
+      >
+        {label}
+      </div>
+      <div
+        className="inline-flex items-baseline gap-0.5 rounded-sm border px-1.5 py-0.5 font-mono text-[13px] font-bold tabular-nums"
+        style={{
+          background: valueBg,
+          color: valueColor,
+          borderColor: valueBorder,
+        }}
+      >
+        {current != null ? format(current) : '—'}
+        {current != null && unit && (
+          <span className="text-[10px] font-normal" style={{ color: 'var(--ink-navy-muted)' }}>
+            {unit}
+          </span>
+        )}
+        {sev === 'abnormal' && (
+          <AlertTriangle
+            className="ml-0.5 h-3 w-3"
+            style={{ color: 'var(--risk-high)' }}
+          />
+        )}
+      </div>
+      <div
+        className="font-mono text-[10px] font-semibold tabular-nums"
+        style={{ color: deltaColor }}
+      >
+        {delta != null && delta !== 0
+          ? `${delta > 0 ? '+' : ''}${format(Math.round(delta * 10) / 10)}`
+          : '—'}
+      </div>
+      <div>
+        <Sparkline
+          values={values}
+          lowBand={lowBand}
+          highBand={highBand}
+          color={c}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Compute the next WHO contact-week that hasn't been attended, together
+// with whether it's overdue / due-now / upcoming.
+function nextContactDue(
+  currentGa: number | null,
+  attendedWeeks: number[],
+): { ga: number; status: 'overdue' | 'due-now' | 'upcoming'; weeksAway: number } | null {
+  if (currentGa == null) return null;
+  for (const w of WHO_CONTACT_WEEKS) {
+    const attended = attendedWeeks.some(
+      (v) => Math.abs(v - w) <= WHO_CONTACT_WINDOW_W,
+    );
+    if (attended) continue;
+    const diff = w - currentGa;
+    if (diff < -WHO_CONTACT_WINDOW_W) {
+      return { ga: w, status: 'overdue', weeksAway: diff };
+    }
+    if (Math.abs(diff) <= WHO_CONTACT_WINDOW_W) {
+      return { ga: w, status: 'due-now', weeksAway: diff };
+    }
+    return { ga: w, status: 'upcoming', weeksAway: diff };
+  }
+  return null;
+}
+
 /** GA progress bar with WHO 8-contact schedule overlay. */
 function GaProgressBar({
   gaWeeks,
   attendedWeeks,
 }: {
   gaWeeks: number | null;
-  /** Integer GA weeks at which a visit was recorded — used to light the target dots. */
   attendedWeeks: number[];
 }) {
   const ga = gaWeeks ?? 0;
@@ -429,11 +914,9 @@ function GaProgressBar({
         style={{ background: 'var(--surface-sunken)' }}
       >
         <div style={{ width: `${pct}%`, height: '100%', background: color }} />
-        {/* WHO 8-contact target dots */}
         {WHO_CONTACT_WEEKS.map((week, i) => {
           const hit = attendedWeeks.some((v) => Math.abs(v - week) <= WHO_CONTACT_WINDOW_W);
           const passed = ga >= week;
-          // Missed = target week already passed without a matching visit.
           const missed = passed && !hit;
           const fill = hit
             ? 'var(--risk-low)'
@@ -512,28 +995,30 @@ export default function JourneyDetailPage({
     const daysSinceLastAnc = j.lastAncDate ? daysBetween(j.lastAncDate, nowIso) : null;
     const daysToEdc = j.edc ? daysBetween(nowIso, j.edc) : null;
 
-    // Attended GA weeks (unique, integer) — used by WHO 8-contact tracker.
+    // Visits sorted chronologically — the timeline + trend sparklines expect
+    // oldest-first so the x-axis reads left-to-right like a clinical chart.
+    const visitsChrono = [...(data.ancVisits ?? [])].sort(
+      (a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime(),
+    );
+
     const attendedWeeks = Array.from(
       new Set(
-        (data.ancVisits ?? [])
+        visitsChrono
           .map((v) => (v.gaWeeks != null ? Math.round(v.gaWeeks) : null))
           .filter((w): w is number => w != null),
       ),
     ).sort((a, b) => a - b);
 
-    // First-contact GA — WHO expects < 12w; flag late registrations.
-    const firstVisitGa = (data.ancVisits ?? [])
-      .filter((v) => v.gaWeeks != null)
-      .sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime())[0]?.gaWeeks ?? null;
-    const lateFirstContact = firstVisitGa != null && firstVisitGa > 12;
+    const firstVisitGa = visitsChrono.find((v) => v.gaWeeks != null)?.gaWeeks ?? null;
+    // RTCOG OB 66-029 (2566) recommends first ANC contact < 10w. Tightened
+    // from 12w (WHO threshold) because Thai guideline is stricter.
+    const lateFirstContact = firstVisitGa != null && firstVisitGa >= 10;
 
     // Pre-pregnancy BMI — only when we have both height (labor record) and the
     // earliest visit weight. Clinical BMI = kg / (m*m).
     let bmi: number | null = null;
     const heightCm = j.heightCm;
-    const firstWeight = (data.ancVisits ?? [])
-      .filter((v) => v.weightKg != null)
-      .sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime())[0]?.weightKg ?? null;
+    const firstWeight = visitsChrono.find((v) => v.weightKg != null)?.weightKg ?? null;
     if (heightCm && heightCm > 100 && firstWeight && firstWeight > 0) {
       const m = heightCm / 100;
       bmi = Math.round((firstWeight / (m * m)) * 10) / 10;
@@ -545,16 +1030,120 @@ export default function JourneyDetailPage({
       .map((id) => LAB_FLAGS_FROM_RULES[id])
       .filter((f): f is LabFlag => !!f);
 
+    // Trend series — null-gaps preserved so the sparkline can skip missing
+    // points instead of forging a value. Coerce through Number() because
+    // PGlite returns NUMERIC columns as strings.
+    const toNum = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const bpSys = visitsChrono.map((v) => toNum(v.bpSystolic));
+    const bpDia = visitsChrono.map((v) => toNum(v.bpDiastolic));
+    const weight = visitsChrono.map((v) => toNum(v.weightKg));
+    const hb = visitsChrono.map((v) => toNum(v.hbGDl));
+    const fh = visitsChrono.map((v) => toNum(v.fundalHeightCm));
+    const fhr = visitsChrono.map((v) => toNum(v.fetalHr));
+
+    const next = nextContactDue(j.gaWeeks, attendedWeeks);
+
+    // RTCOG OB 66-029 (2566) — investigation-overdue checks. Each fires when
+    // the clinical window has passed without the corresponding result.
+    const ga = j.gaWeeks ?? 0;
+    const overdue: Array<{ key: string; labelTh: string; dueBy: string; severity: 'warn' | 'high' }> = [];
+    if (ga > 22 && !j.anatomyScanDate) {
+      overdue.push({
+        key: 'anatomy_scan',
+        labelTh: 'Anatomy scan (18-22 สัปดาห์)',
+        dueBy: '22w',
+        severity: 'warn',
+      });
+    }
+    if (ga > 30 && (j.ogttResult == null || j.ogttResult === 'PENDING')) {
+      overdue.push({
+        key: 'ogtt',
+        labelTh: 'OGTT (24-28 สัปดาห์)',
+        dueBy: '28w',
+        severity: 'high',
+      });
+    }
+    if (ga >= 37 && (!j.gbsResult || j.gbsResult === 'PENDING')) {
+      overdue.push({
+        key: 'gbs',
+        labelTh: 'GBS culture (35-37 สัปดาห์)',
+        dueBy: '37w',
+        severity: 'high',
+      });
+    }
+    // Tdap this pregnancy — scan all visits' vaccinesGiven.
+    const tdapGiven = visitsChrono.some(
+      (v) => (v.vaccinesGiven ?? []).some((vx) => vx.type === 'TDAP'),
+    );
+    if (ga >= 36 && !tdapGiven) {
+      overdue.push({
+        key: 'tdap',
+        labelTh: 'Tdap (27-36 สัปดาห์)',
+        dueBy: '36w',
+        severity: 'high',
+      });
+    }
+    // Thalassemia screening — once per woman. If any of the three fields is
+    // still null by GA 16, flag it.
+    const thalassemiaDone =
+      j.mcvFl != null || j.dcipResult != null || j.hbEResult != null;
+    if (ga > 16 && !thalassemiaDone) {
+      overdue.push({
+        key: 'thalassemia',
+        labelTh: 'Thalassemia screen (1st visit)',
+        dueBy: '16w',
+        severity: 'warn',
+      });
+    }
+
+    // Iron contraindication — RTCOG: Hb H / β-thal major / β-thal-HbE should
+    // NOT receive iron supplementation (iron-overload risk).
+    const ironContra =
+      j.thalassemiaType === 'HB_H'
+        ? 'Hb H disease'
+        : j.thalassemiaType === 'BETA_THAL_MAJOR'
+          ? 'β-thalassemia major'
+          : j.thalassemiaType === 'BETA_THAL_HB_E'
+            ? 'β-thalassemia / Hb E'
+            : null;
+
+    // Immunization flags — most recent status per type, across all visits.
+    const immunization = {
+      tdap: visitsChrono.flatMap((v) =>
+        (v.vaccinesGiven ?? []).filter((x) => x.type === 'TDAP'),
+      ),
+      influenza: visitsChrono.flatMap((v) =>
+        (v.vaccinesGiven ?? []).filter((x) => x.type === 'INFLUENZA'),
+      ),
+      covid: visitsChrono.flatMap((v) =>
+        (v.vaccinesGiven ?? []).filter((x) => x.type === 'COVID'),
+      ),
+      ttDoseNo: visitsChrono
+        .map((v) => v.ttDoseNo)
+        .filter((n): n is number => n != null)
+        .pop() ?? null,
+    };
+
     return {
       daysSinceRegistered,
       daysSinceLastAnc,
       daysToEdc,
+      visitsChrono,
       attendedWeeks,
       firstVisitGa,
       lateFirstContact,
       bmi,
       heightCm,
       labFlags,
+      bpSys, bpDia, weight, hb, fh, fhr,
+      next,
+      overdue,
+      ironContra,
+      immunization,
     };
   })();
 
@@ -584,27 +1173,28 @@ export default function JourneyDetailPage({
   }
 
   const { journey, ancVisits, latestRisk, referrals, newborns } = data;
-  const riskColor =
-    ANC_RISK_COLOR[journey.ancRiskLevel ?? ''] ?? 'var(--ink-navy-muted)';
+  const riskColor = ANC_RISK_COLOR[journey.ancRiskLevel ?? ''] ?? 'var(--ink-navy-muted)';
   const riskLabel = journey.ancRiskLevel
-    ? (ANC_RISK_LABEL_TH[journey.ancRiskLevel] ?? journey.ancRiskLevel)
+    ? ANC_RISK_LABEL_TH[journey.ancRiskLevel] ?? journey.ancRiskLevel
     : null;
   const stageColor = STAGE_COLOR[journey.careStage] ?? 'var(--ink-navy-muted)';
   const stageLabel = STAGE_LABEL_TH[journey.careStage] ?? journey.careStage;
   const isReferred = !!journey.currentHcode && journey.currentHcode !== journey.hcode;
+  const highRisk = journey.ancRiskLevel === 'HR2' || journey.ancRiskLevel === 'HR3';
 
   return (
     <div
-      className="flex flex-col gap-4 px-6 py-6 lg:px-8"
       style={{
         color: 'var(--ink-navy)',
         background: 'var(--surface-cool)',
         zoom: 1.15,
-        minHeight: '100%',
       }}
     >
-      {/* Back + header */}
-      <div className="flex items-center justify-between gap-3">
+      {/* ─── Control strip ─── */}
+      <div
+        className="flex items-center justify-between gap-3 bg-white px-5 py-2"
+        style={{ borderBottom: '1px solid var(--rule-strong)' }}
+      >
         <button
           onClick={() => router.back()}
           className="inline-flex items-center gap-1 font-mono text-[11px] tracking-[0.1em] text-[var(--ink-navy-muted)] hover:text-[var(--accent-navy)]"
@@ -614,170 +1204,92 @@ export default function JourneyDetailPage({
         <div className="flex items-center gap-2">
           {journey.ancRiskLevel && (
             <Pill
-              label={journey.ancRiskLevel}
+              label={`${journey.ancRiskLevel}${riskLabel ? ` · ${riskLabel}` : ''}`}
               color={riskColor}
-              bg="transparent"
             />
           )}
           <Pill label={stageLabel.toUpperCase()} color={stageColor} />
         </div>
       </div>
 
-      {/* Eyebrow + title */}
-      <div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
+      {/* ─── Identity header ─── */}
+      <div
+        className="px-5 py-3"
+        style={{
+          borderBottom: '1px solid var(--rule-strong)',
+          background:
+            'linear-gradient(90deg, var(--accent-navy-soft) 0%, #f4f6fb 70%, white 100%)',
+        }}
+      >
+        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--accent-navy)]">
           PROVINCIAL REGISTRY · JOURNEY DETAIL
         </div>
-        <h1
-          className="mt-1 text-[28px] font-bold leading-tight"
-          style={{ color: 'var(--ink-navy)', letterSpacing: '-0.01em' }}
-        >
-          {journey.name}
-        </h1>
-        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[12px] text-[var(--ink-navy-dim)]">
-          <span>
-            HN <span className="font-semibold text-[var(--ink-navy)]">{journey.hn}</span>
-          </span>
-          <span>
-            อายุ{' '}
-            <span className="font-semibold text-[var(--ink-navy)] tabular-nums">
-              {journey.age}
-            </span>{' '}
-            ปี
-          </span>
-          {journey.gravida != null && (
-            <span className="font-mono tracking-[0.05em]">
-              G<span className="font-semibold text-[var(--ink-navy)]">{journey.gravida}</span>
-              {journey.termBirths != null && (
-                <>·T<span className="font-semibold text-[var(--ink-navy)]">{journey.termBirths}</span></>
-              )}
-              {journey.pretermBirths != null && (
-                <>·P<span className="font-semibold text-[var(--ink-navy)]">{journey.pretermBirths}</span></>
-              )}
-              {journey.abortions != null && (
-                <>·A<span className="font-semibold text-[var(--ink-navy)]">{journey.abortions}</span></>
-              )}
-              {journey.livingChildren != null && (
-                <>·L<span className="font-semibold text-[var(--ink-navy)]">{journey.livingChildren}</span></>
-              )}
-              {journey.termBirths == null && journey.pretermBirths == null && (
-                <>·P<span className="font-semibold text-[var(--ink-navy)]">{journey.para ?? '?'}</span></>
-              )}
+        <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <h1
+            className="text-[26px] font-bold leading-tight"
+            style={{ color: 'var(--ink-navy)', letterSpacing: '-0.01em' }}
+          >
+            {journey.name}
+          </h1>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[12px] text-[var(--ink-navy-dim)]">
+            <span className="inline-flex items-center gap-1">
+              <User className="h-3 w-3 text-[var(--ink-navy-muted)]" />
+              HN <span className="font-semibold text-[var(--ink-navy)]">{journey.hn}</span>
             </span>
-          )}
-          <span>
-            STAGE {stageLabel}
-          </span>
-        </div>
-      </div>
-
-      {/* 01 — Pregnancy summary */}
-      <section>
-        <SectionLabel
-          idx={1}
-          right={
             <span>
-              REGISTERED {formatThai(journey.registeredAt)}
-              {derived?.daysSinceRegistered != null && (
-                <> · {derived.daysSinceRegistered}d AGO</>
-              )}
+              อายุ{' '}
+              <span className="font-semibold text-[var(--ink-navy)] tabular-nums">
+                {journey.age}
+              </span>{' '}
+              ปี
             </span>
-          }
-        >
-          Pregnancy summary
-        </SectionLabel>
-        <div
-          className="mt-2 grid border bg-white"
-          style={{
-            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-            borderColor: 'var(--rule-strong)',
-          }}
-        >
-          <MetricTile
-            label="LMP"
-            value={formatThai(journey.lmp)}
-            sub="วันแรกประจำเดือน"
-            color="var(--accent-navy)"
-            icon={<Calendar className="h-3 w-3" />}
-          />
-          <MetricTile
-            label="EDC"
-            value={formatThai(journey.edc)}
-            sub={
-              derived?.daysToEdc != null
-                ? derived.daysToEdc > 0
-                  ? `อีก ${derived.daysToEdc} วัน`
-                  : `เลย ${Math.abs(derived.daysToEdc)} วัน`
-                : 'วันกำหนดคลอด'
-            }
-            color={
-              derived?.daysToEdc != null && derived.daysToEdc < 0
-                ? 'var(--risk-high)'
-                : 'var(--risk-low)'
-            }
-            icon={<Calendar className="h-3 w-3" />}
-          />
-          <MetricTile
-            label="GA"
-            value={journey.gaWeeks != null ? `${journey.gaWeeks}w` : '—'}
-            sub={
-              journey.gaWeeks != null
-                ? journey.gaWeeks >= 37
-                  ? 'Term'
-                  : journey.gaWeeks >= 28
-                    ? 'Third trimester'
-                    : journey.gaWeeks >= 14
-                      ? 'Second trimester'
-                      : 'First trimester'
-                : undefined
-            }
-            color={
-              journey.gaWeeks != null && journey.gaWeeks >= 41
-                ? 'var(--risk-high)'
-                : 'var(--accent-navy)'
-            }
-            icon={<Clock className="h-3 w-3" />}
-          />
-          <MetricTile
-            label="ANC VISITS"
-            value={journey.ancVisitCount}
-            sub={
-              derived?.daysSinceLastAnc != null
-                ? `ครั้งล่าสุด ${derived.daysSinceLastAnc}d ago`
-                : 'ยังไม่มีนัด'
-            }
-            color={
-              derived?.daysSinceLastAnc != null && derived.daysSinceLastAnc > 28
-                ? 'var(--risk-high)'
-                : 'var(--accent-navy)'
-            }
-            icon={<Activity className="h-3 w-3" />}
-          />
-        </div>
-
-        {/* GA progress + WHO 8-contact dots */}
-        <div
-          className="border border-t-0 bg-white px-4 py-3"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          <GaProgressBar
-            gaWeeks={journey.gaWeeks}
-            attendedWeeks={derived?.attendedWeeks ?? []}
-          />
-          {/* Derived clinical context row */}
-          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] text-[var(--ink-navy-dim)]">
+            {journey.gravida != null && (
+              <span className="font-mono tracking-[0.05em]">
+                G<span className="font-semibold text-[var(--ink-navy)]">{journey.gravida}</span>
+                {journey.termBirths != null && (
+                  <>·T<span className="font-semibold text-[var(--ink-navy)]">{journey.termBirths}</span></>
+                )}
+                {journey.pretermBirths != null && (
+                  <>·P<span className="font-semibold text-[var(--ink-navy)]">{journey.pretermBirths}</span></>
+                )}
+                {journey.abortions != null && (
+                  <>·A<span className="font-semibold text-[var(--ink-navy)]">{journey.abortions}</span></>
+                )}
+                {journey.livingChildren != null && (
+                  <>·L<span className="font-semibold text-[var(--ink-navy)]">{journey.livingChildren}</span></>
+                )}
+                {journey.termBirths == null && journey.pretermBirths == null && (
+                  <>·P<span className="font-semibold text-[var(--ink-navy)]">{journey.para ?? '?'}</span></>
+                )}
+              </span>
+            )}
+            {journey.bloodGroup && (
+              <span className="inline-flex items-center gap-1">
+                <Droplets className="h-3 w-3 text-[var(--ink-navy-muted)]" />
+                BLOOD{' '}
+                <span className="font-semibold text-[var(--ink-navy)]">
+                  {journey.bloodGroup}
+                  {journey.rhFactor === 'NEG' ? (
+                    <span className="ml-0.5 text-[var(--risk-medium)]">Rh−</span>
+                  ) : journey.rhFactor === 'POS' ? (
+                    <span className="ml-0.5 text-[var(--ink-navy-muted)]">Rh+</span>
+                  ) : null}
+                </span>
+              </span>
+            )}
             {derived?.heightCm != null && (
-              <span>
-                <span className="text-[var(--ink-navy-muted)]">HEIGHT </span>
-                <span className="font-semibold tabular-nums text-[var(--ink-navy)]">
+              <span className="inline-flex items-center gap-1">
+                <Ruler className="h-3 w-3 text-[var(--ink-navy-muted)]" />
+                HT{' '}
+                <span className="font-semibold text-[var(--ink-navy)] tabular-nums">
                   {derived.heightCm}
                 </span>
-                <span className="text-[10px] text-[var(--ink-navy-muted)]"> cm</span>
+                <span className="text-[10px] text-[var(--ink-navy-muted)]">cm</span>
               </span>
             )}
             {derived?.bmi != null && (
               <span>
-                <span className="text-[var(--ink-navy-muted)]">PRE-PREG BMI </span>
+                BMI{' '}
                 <span
                   className="font-semibold tabular-nums"
                   style={{
@@ -793,519 +1305,1406 @@ export default function JourneyDetailPage({
                 >
                   {derived.bmi}
                 </span>
-                <span className="ml-1 text-[10px] text-[var(--ink-navy-muted)]">
-                  {derived.bmi < 18.5
-                    ? 'UNDERWEIGHT'
-                    : derived.bmi >= 40
-                      ? 'MORBID OBESE'
-                      : derived.bmi >= 30
-                        ? 'OBESE'
-                        : derived.bmi >= 23
-                          ? 'OVERWEIGHT'
-                          : 'NORMAL'}
-                </span>
-              </span>
-            )}
-            {derived?.firstVisitGa != null && (
-              <span>
-                <span className="text-[var(--ink-navy-muted)]">FIRST CONTACT </span>
-                <span
-                  className="font-semibold tabular-nums"
-                  style={{
-                    color: derived.lateFirstContact
-                      ? 'var(--risk-high)'
-                      : 'var(--risk-low)',
-                  }}
-                >
-                  {derived.firstVisitGa}w
-                </span>
-                {derived.lateFirstContact && (
-                  <span className="ml-1 text-[10px] font-semibold text-[var(--risk-high)]">
-                    {'·LATE (WHO \u003C 12w)'}
-                  </span>
-                )}
-              </span>
-            )}
-            {(derived?.labFlags.length ?? 0) > 0 && (
-              <span className="flex flex-wrap items-center gap-1">
-                <span className="text-[var(--ink-navy-muted)]">LAB</span>
-                {derived!.labFlags.map((f) => (
-                  <span
-                    key={f.key}
-                    className="inline-flex items-center border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
-                    style={{ color: f.color, borderColor: f.color }}
-                  >
-                    {f.label}
-                  </span>
-                ))}
               </span>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Labs & obstetric history (WHO 2016 — journey level) */}
-        {(journey.bloodGroup || journey.rhFactor || journey.hbsagResult ||
-          journey.vdrlResult || journey.hivResult || journey.ogttResult ||
-          journey.pastMedicalHistory) && (
-          <div
-            className="grid gap-3 border border-t-0 bg-white px-4 py-3 text-[12px] sm:grid-cols-2"
-            style={{ borderColor: 'var(--rule-strong)' }}
-          >
-            <div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
-                LABS · ผลตรวจทางห้องปฏิบัติการ
+      {/* ─── Pregnancy summary strip (6 tiles) ─── */}
+      <div
+        className="grid bg-white"
+        style={{
+          gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+          borderBottom: '1px solid var(--rule-strong)',
+        }}
+      >
+        <MetricTile
+          label="GA"
+          value={journey.gaWeeks != null ? `${journey.gaWeeks}w` : '—'}
+          sub={
+            journey.gaWeeks != null
+              ? journey.gaWeeks >= 37
+                ? 'Term'
+                : journey.gaWeeks >= 28
+                  ? 'Third tri'
+                  : journey.gaWeeks >= 14
+                    ? 'Second tri'
+                    : 'First tri'
+              : undefined
+          }
+          color={
+            journey.gaWeeks != null && journey.gaWeeks >= 41
+              ? 'var(--risk-high)'
+              : 'var(--accent-navy)'
+          }
+          icon={<Clock className="h-3 w-3" />}
+          tone="bold"
+        />
+        <MetricTile
+          label="EDC"
+          value={formatThaiShort(journey.edc)}
+          sub={
+            derived?.daysToEdc != null
+              ? derived.daysToEdc > 0
+                ? `อีก ${derived.daysToEdc} วัน`
+                : `เลย ${Math.abs(derived.daysToEdc)} วัน`
+              : 'วันกำหนดคลอด'
+          }
+          color={
+            derived?.daysToEdc != null && derived.daysToEdc < 0
+              ? 'var(--risk-high)'
+              : 'var(--primary-teal)'
+          }
+          icon={<Calendar className="h-3 w-3" />}
+        />
+        <MetricTile
+          label="LMP"
+          value={formatThaiShort(journey.lmp)}
+          sub="ประจำเดือนครั้งสุดท้าย"
+          color="var(--ink-navy-muted)"
+          icon={<Calendar className="h-3 w-3" />}
+        />
+        <MetricTile
+          label="ANC VISITS"
+          value={journey.ancVisitCount}
+          sub={
+            derived?.daysSinceLastAnc != null
+              ? `ครั้งล่าสุด ${derived.daysSinceLastAnc}d ago`
+              : 'ยังไม่มีนัด'
+          }
+          color={
+            derived?.daysSinceLastAnc != null && derived.daysSinceLastAnc > 28
+              ? 'var(--risk-high)'
+              : 'var(--accent-navy)'
+          }
+          icon={<Activity className="h-3 w-3" />}
+        />
+        <MetricTile
+          label="1ST CONTACT"
+          value={derived?.firstVisitGa != null ? `${derived.firstVisitGa}w` : '—'}
+          sub={
+            derived?.lateFirstContact
+              ? 'LATE — RTCOG < 10w'
+              : derived?.firstVisitGa != null
+                ? 'RTCOG on-time'
+                : undefined
+          }
+          color={derived?.lateFirstContact ? 'var(--risk-high)' : 'var(--risk-low)'}
+          icon={<TrendingUp className="h-3 w-3" />}
+        />
+        <MetricTile
+          label="NEXT DUE"
+          value={
+            derived?.next
+              ? `${derived.next.ga}w`
+              : 'ครบกำหนด'
+          }
+          sub={
+            derived?.next
+              ? derived.next.status === 'overdue'
+                ? `เลย ${Math.abs(derived.next.weeksAway)}w`
+                : derived.next.status === 'due-now'
+                  ? 'นัดครั้งถัดไป'
+                  : `อีก ${derived.next.weeksAway}w`
+              : 'ครบ 8 contact'
+          }
+          color={
+            derived?.next?.status === 'overdue'
+              ? 'var(--risk-high)'
+              : derived?.next?.status === 'due-now'
+                ? 'var(--risk-medium)'
+                : 'var(--risk-low)'
+          }
+          icon={<AlertTriangle className="h-3 w-3" />}
+          tone="bold"
+        />
+      </div>
+
+      {/* ─── WHO 8-contact progress ─── */}
+      <div
+        className="bg-white px-5 py-3"
+        style={{ borderBottom: '1px solid var(--rule-strong)' }}
+      >
+        <GaProgressBar
+          gaWeeks={journey.gaWeeks}
+          attendedWeeks={derived?.attendedWeeks ?? []}
+        />
+      </div>
+
+      {/* ═══ 2-col main ═══ */}
+      <div
+        className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]"
+        style={{ alignItems: 'start' }}
+      >
+        {/* ─── LEFT: timeline + trends + labs ─── */}
+        <div className="min-w-0 border-r border-[var(--rule-strong)] bg-white p-5 space-y-6">
+
+          {/* 01 — Vital trends (new) */}
+          <section>
+            <SectionLabel
+              idx={1}
+              right={<span>{derived?.visitsChrono.length ?? 0} VISITS · L→R OLDEST→NEWEST</span>}
+            >
+              Vital trends
+            </SectionLabel>
+            <div
+              className="mt-2 border bg-white"
+              style={{ borderColor: 'var(--rule-strong)' }}
+            >
+              {(derived?.visitsChrono.length ?? 0) === 0 ? (
+                <div className="px-4 py-8 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                  ยังไม่มีข้อมูลเพียงพอสำหรับแสดงแนวโน้ม
+                </div>
+              ) : (
+                <>
+                  <div
+                    className="grid items-center gap-2 border-b px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-[0.12em]"
+                    style={{
+                      gridTemplateColumns: '96px 80px 54px 1fr',
+                      borderColor: 'var(--accent-navy)',
+                      background: 'var(--accent-navy)',
+                      color: 'white',
+                    }}
+                  >
+                    <div>METRIC</div>
+                    <div>LATEST</div>
+                    <div>Δ</div>
+                    <div>TREND</div>
+                  </div>
+                  <TrendRow
+                    label="BP SYS"
+                    values={derived!.bpSys}
+                    unit="mmHg"
+                    highBand={BP_SYS_HIGH}
+                    color="var(--risk-medium)"
+                    severity={(v) =>
+                      v >= BP_SYS_HIGH
+                        ? 'abnormal'
+                        : v >= BP_SYS_AMBER
+                          ? 'borderline'
+                          : 'normal'
+                    }
+                  />
+                  <TrendRow
+                    label="BP DIA"
+                    values={derived!.bpDia}
+                    unit="mmHg"
+                    highBand={BP_DIA_HIGH}
+                    color="var(--risk-medium)"
+                    severity={(v) =>
+                      v >= BP_DIA_HIGH
+                        ? 'abnormal'
+                        : v >= BP_DIA_AMBER
+                          ? 'borderline'
+                          : 'normal'
+                    }
+                  />
+                  <TrendRow
+                    label="WEIGHT"
+                    values={derived!.weight}
+                    unit="kg"
+                    format={(v) => v.toFixed(1)}
+                    color="var(--accent-navy)"
+                  />
+                  <TrendRow
+                    label="Hb"
+                    values={derived!.hb}
+                    unit="g/dL"
+                    lowBand={HB_LOW}
+                    format={(v) => v.toFixed(1)}
+                    color="var(--risk-medium)"
+                    severity={(v) => sevHb(v)}
+                  />
+                  <TrendRow
+                    label="FUNDAL HT"
+                    values={derived!.fh}
+                    unit="cm"
+                    format={(v) => v.toFixed(1)}
+                    color="var(--accent-navy)"
+                  />
+                  <TrendRow
+                    label="FHR"
+                    values={derived!.fhr}
+                    unit="bpm"
+                    lowBand={FHR_LOW}
+                    highBand={FHR_HIGH}
+                    color="var(--risk-medium)"
+                    severity={(v) => sevFhr(v)}
+                  />
+                </>
+              )}
+            </div>
+          </section>
+
+          {/* 02 — ANC timeline */}
+          <section>
+            <SectionLabel
+              idx={2}
+              right={<span>{ancVisits.length} VISIT{ancVisits.length === 1 ? '' : 'S'}</span>}
+            >
+              ANC visit timeline
+            </SectionLabel>
+            <div
+              className="mt-2 border bg-white overflow-x-auto"
+              style={{ borderColor: 'var(--rule-strong)' }}
+            >
+              {(derived?.visitsChrono.length ?? 0) === 0 ? (
+                <div className="px-4 py-8 text-center">
+                  <Calendar className="mx-auto mb-2 h-6 w-6 text-[var(--ink-navy-muted)] opacity-50" />
+                  <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                    ยังไม่มีประวัติการฝากครรภ์
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div
+                    className="grid gap-2 border-b px-3 py-2 font-mono text-[10px] font-bold tracking-[0.1em]"
+                    style={{
+                      gridTemplateColumns:
+                        '32px 100px 42px 50px 54px 56px 76px 54px 74px 62px 1fr',
+                      borderColor: 'var(--accent-navy)',
+                      background: 'var(--accent-navy)',
+                      color: 'white',
+                      minWidth: 820,
+                    }}
+                  >
+                    <div>#</div>
+                    <div>DATE</div>
+                    <div>GAP</div>
+                    <div>GA</div>
+                    <div>FH</div>
+                    <div>WT</div>
+                    <div>BP</div>
+                    <div>FHR</div>
+                    <div>PRES.</div>
+                    <div>LIE</div>
+                    <div>FLAGS</div>
+                  </div>
+                  {derived!.visitsChrono.map((v, idx, arr) => {
+                    const prev = idx > 0 ? arr[idx - 1] : null;
+                    const gap = prev
+                      ? daysBetween(prev.visitDate, v.visitDate)
+                      : null;
+                    const bpSev = sevBp(v.bpSystolic, v.bpDiastolic);
+                    const fhrSev = sevFhr(v.fetalHr);
+                    const hbSev = sevHb(v.hbGDl);
+                    const bpHigh = bpSev === 'abnormal';
+                    const proteinuria = v.urineProtein != null && /\+/.test(v.urineProtein);
+                    const glucosuria = v.urineGlucose != null && /\+/.test(v.urineGlucose);
+                    const anemia = hbSev !== 'normal';
+                    const severeAnemia = hbSev === 'abnormal';
+                    const preeclampsiaSuspect = bpHigh && proteinuria;
+                    const reducedFm = v.fetalMovementOk === false;
+                    const dangers = v.dangerSigns ?? [];
+                    const anyFlag = bpSev !== 'normal' || fhrSev !== 'normal' || proteinuria || glucosuria ||
+                      anemia || preeclampsiaSuspect || reducedFm || dangers.length > 0;
+                    return (
+                      <div
+                        key={v.visitNumber}
+                        className="grid items-center gap-2 border-b px-3 text-[12px] transition-colors hover:bg-[var(--accent-navy-soft)]"
+                        style={{
+                          gridTemplateColumns:
+                            '32px 100px 42px 50px 54px 56px 76px 54px 74px 62px 1fr',
+                          borderColor: 'var(--rule-hair)',
+                          height: 40,
+                          minWidth: 820,
+                          background: idx % 2 === 1 ? 'rgba(231,234,245,0.35)' : 'white',
+                        }}
+                      >
+                        <div
+                          className="inline-flex h-6 w-7 items-center justify-center rounded-sm font-mono text-[11px] font-bold tabular-nums"
+                          style={{
+                            background: 'var(--accent-navy)',
+                            color: 'white',
+                          }}
+                        >
+                          {v.visitNumber}
+                        </div>
+                        <div className="font-mono text-[11px] tabular-nums">
+                          {formatThai(v.visitDate)}
+                        </div>
+                        <div className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-muted)]">
+                          {gap != null ? `${gap}d` : '—'}
+                        </div>
+                        <div className="font-mono tabular-nums">
+                          {v.gaWeeks ?? '—'}
+                          {v.gaWeeks != null && (
+                            <span className="text-[10px] text-[var(--ink-navy-muted)]">w</span>
+                          )}
+                        </div>
+                        <div className="font-mono tabular-nums">
+                          {v.fundalHeightCm ?? '—'}
+                        </div>
+                        <div className="font-mono tabular-nums">
+                          {v.weightKg ?? '—'}
+                        </div>
+                        <div
+                          className={cn(
+                            'inline-flex items-center justify-start rounded-sm px-1.5 font-mono tabular-nums',
+                            bpSev !== 'normal' && 'font-bold',
+                          )}
+                          style={{
+                            color: sevColor(bpSev),
+                            background: sevBg(bpSev),
+                          }}
+                        >
+                          {v.bpSystolic != null && v.bpDiastolic != null
+                            ? `${v.bpSystolic}/${v.bpDiastolic}`
+                            : '—'}
+                        </div>
+                        <div
+                          className={cn(
+                            'inline-flex items-center justify-start rounded-sm px-1.5 font-mono tabular-nums',
+                            fhrSev !== 'normal' && 'font-bold',
+                          )}
+                          style={{
+                            color: sevColor(fhrSev),
+                            background: sevBg(fhrSev),
+                          }}
+                        >
+                          {v.fetalHr ?? '—'}
+                        </div>
+                        <div
+                          className="font-mono text-[11px] tracking-[0.04em]"
+                          style={{
+                            color:
+                              v.presentation && /BR|B|BREECH|ก้น|TR|T|OBL|ขวาง/i.test(v.presentation)
+                                ? 'var(--risk-medium)'
+                                : undefined,
+                          }}
+                        >
+                          {presentationLabel(v.presentation)}
+                        </div>
+                        <div className="font-mono text-[11px] tracking-[0.04em] text-[var(--ink-navy-dim)]">
+                          {engagementLabel(v.engagement)}
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {preeclampsiaSuspect && (
+                            <VisitChip label="PRE-ECL SUSPECT" color="var(--risk-high)" />
+                          )}
+                          {bpHigh && !preeclampsiaSuspect && (
+                            <VisitChip
+                              label="BP HIGH"
+                              color="var(--risk-high)"
+                              icon={<Droplets className="h-2.5 w-2.5" />}
+                            />
+                          )}
+                          {fhrSev === 'abnormal' && (
+                            <VisitChip
+                              label="FHR"
+                              color="var(--risk-high)"
+                              icon={<Heart className="h-2.5 w-2.5" />}
+                            />
+                          )}
+                          {bpSev === 'borderline' && (
+                            <VisitChip
+                              label="BP AMBER"
+                              color="var(--risk-medium)"
+                              icon={<Droplets className="h-2.5 w-2.5" />}
+                            />
+                          )}
+                          {severeAnemia && (
+                            <VisitChip label={`Hb ${v.hbGDl}`} color="var(--risk-high)" />
+                          )}
+                          {anemia && !severeAnemia && (
+                            <VisitChip label={`Hb ${v.hbGDl}`} color="var(--risk-medium)" />
+                          )}
+                          {proteinuria && (
+                            <VisitChip label={`PROT ${v.urineProtein}`} color="var(--risk-high)" />
+                          )}
+                          {glucosuria && (
+                            <VisitChip label={`GLUC ${v.urineGlucose}`} color="var(--risk-medium)" />
+                          )}
+                          {reducedFm && (
+                            <VisitChip label="FM↓" color="var(--risk-high)" />
+                          )}
+                          {dangers.map((d) => (
+                            <VisitChip key={d} label={dangerLabel(d)} color="var(--risk-high)" />
+                          ))}
+                          {v.ttDoseNo != null && v.ttDoseNo > 0 && (
+                            <VisitChip label={`TT${v.ttDoseNo}`} color="var(--accent-navy)" />
+                          )}
+                          {v.ironFolicGiven && (
+                            <VisitChip label="Fe+FA" color="var(--ink-navy-muted)" />
+                          )}
+                          {v.calciumGiven && (
+                            <VisitChip label="Ca" color="var(--ink-navy-muted)" />
+                          )}
+                          {!anyFlag && (
+                            <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--risk-low)]">
+                              <CheckCircle2 className="h-2.5 w-2.5" /> OK
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          </section>
+
+          {/* 03 — Labs + screening + PMH (RTCOG OB 66-029 booking panel) */}
+          <section>
+            <SectionLabel
+              idx={3}
+              right={
+                (derived?.labFlags.length ?? 0) > 0 ? (
+                  <span className="flex flex-wrap items-center gap-1">
+                    {derived!.labFlags.map((f) => (
+                      <span
+                        key={f.key}
+                        className="inline-flex items-center border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
+                        style={{ color: f.color, borderColor: f.color }}
+                      >
+                        {f.label}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span>ALL CLEAR</span>
+                )
+              }
+            >
+              Labs · screening · PMH
+            </SectionLabel>
+
+            {/* Iron contraindication banner — RTCOG: no iron in Hb H / β-thal */}
+            {derived?.ironContra && (
+              <div
+                className="mt-2 flex items-start gap-2 border-l-4 px-3 py-2"
+                style={{
+                  borderLeftColor: 'var(--risk-high)',
+                  background: 'rgba(239, 68, 68, 0.08)',
+                }}
+              >
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[var(--risk-high)]" />
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--risk-high)]">
+                    ห้ามให้ iron supplement
+                  </div>
+                  <div className="text-[12px] leading-snug text-[var(--ink-navy-dim)]">
+                    ผู้ป่วยมี <b>{derived.ironContra}</b> — ต้องงดธาตุเหล็ก (RTCOG OB 66-029 เนื่องจากภาวะ iron overload)
+                  </div>
+                </div>
               </div>
-              <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
-                <LabResult label="BLOOD" value={journey.bloodGroup} />
-                <LabResult label="Rh" value={journey.rhFactor} positiveIsBad={false} abnormalIf={(v) => v === 'NEG'} />
-                <LabResult label="HBsAg" value={journey.hbsagResult} positiveIsBad abnormalIf={(v) => v === 'POS'} />
-                <LabResult label="VDRL" value={journey.vdrlResult} positiveIsBad abnormalIf={(v) => v === 'POS'} />
-                <LabResult label="HIV" value={journey.hivResult} positiveIsBad abnormalIf={(v) => v === 'POS'} />
-                <LabResult label="OGTT" value={journey.ogttResult} abnormalIf={(v) => v === 'ABNORMAL'} />
+            )}
+
+            {/* Sub-group 3a — Serology (infectious + blood type) */}
+            <div className="mt-2">
+              <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                SEROLOGY · BLOOD TYPE
+              </div>
+              <div
+                className="mt-1 grid grid-cols-6 gap-0 border bg-white"
+                style={{ borderColor: 'var(--rule-strong)' }}
+              >
+                <LabTile
+                  label="BLOOD"
+                  value={journey.bloodGroup}
+                  status={journey.bloodGroup ? 'normal' : 'missing'}
+                />
+                <LabTile
+                  label="Rh"
+                  value={journey.rhFactor}
+                  status={
+                    !journey.rhFactor
+                      ? 'missing'
+                      : journey.rhFactor === 'NEG'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="HBsAg"
+                  value={journey.hbsagResult}
+                  status={
+                    !journey.hbsagResult
+                      ? 'missing'
+                      : journey.hbsagResult === 'POS'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="VDRL"
+                  value={journey.vdrlResult}
+                  status={
+                    !journey.vdrlResult
+                      ? 'missing'
+                      : journey.vdrlResult === 'POS'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="HIV"
+                  value={journey.hivResult}
+                  status={
+                    !journey.hivResult
+                      ? 'missing'
+                      : journey.hivResult === 'POS'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="OGTT"
+                  value={journey.ogttResult}
+                  status={
+                    !journey.ogttResult
+                      ? 'missing'
+                      : journey.ogttResult === 'ABNORMAL'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
               </div>
             </div>
+
+            {/* Sub-group 3b — Thalassemia screening (RTCOG 1st-visit) */}
+            <div className="mt-3">
+              <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                THALASSEMIA · MCV / DCIP / Hb E
+              </div>
+              <div
+                className="mt-1 grid grid-cols-4 gap-0 border bg-white"
+                style={{ borderColor: 'var(--rule-strong)' }}
+              >
+                <LabTile
+                  label="MCV (fL)"
+                  value={journey.mcvFl != null ? String(journey.mcvFl) : null}
+                  status={
+                    journey.mcvFl == null
+                      ? 'missing'
+                      : journey.mcvFl < 80
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="DCIP"
+                  value={journey.dcipResult ?? null}
+                  status={
+                    !journey.dcipResult
+                      ? 'missing'
+                      : journey.dcipResult === 'POS'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="Hb E"
+                  value={journey.hbEResult ?? null}
+                  status={
+                    !journey.hbEResult
+                      ? 'missing'
+                      : journey.hbEResult === 'POS'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="THAL TYPE"
+                  value={
+                    journey.thalassemiaType
+                      ? journey.thalassemiaType.replace(/_/g, ' ')
+                      : null
+                  }
+                  status={
+                    !journey.thalassemiaType
+                      ? 'missing'
+                      : journey.thalassemiaType === 'NORMAL' ||
+                          journey.thalassemiaType === 'TRAIT'
+                        ? 'normal'
+                        : 'abnormal'
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Sub-group 3c — Cervical / Aneuploidy / GBS screening */}
+            <div className="mt-3">
+              <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                SCREENING · CERVICAL · ANEUPLOIDY · GBS
+              </div>
+              <div
+                className="mt-1 grid grid-cols-3 gap-0 border bg-white"
+                style={{ borderColor: 'var(--rule-strong)' }}
+              >
+                <LabTile
+                  label="CERVICAL"
+                  value={
+                    journey.cervicalScreenResult
+                      ? `${journey.cervicalScreenType ?? ''} ${journey.cervicalScreenResult}`.trim()
+                      : null
+                  }
+                  status={
+                    !journey.cervicalScreenResult
+                      ? 'missing'
+                      : journey.cervicalScreenResult === 'ABNORMAL'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="ANEUPLOIDY"
+                  value={
+                    journey.aneuploidyResult
+                      ? `${journey.aneuploidyMethod ?? ''} ${journey.aneuploidyResult}`.trim()
+                      : null
+                  }
+                  status={
+                    !journey.aneuploidyResult
+                      ? 'missing'
+                      : journey.aneuploidyResult === 'HIGH_RISK'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+                <LabTile
+                  label="GBS (35-37w)"
+                  value={journey.gbsResult ?? null}
+                  status={
+                    !journey.gbsResult
+                      ? 'missing'
+                      : journey.gbsResult === 'POS'
+                        ? 'abnormal'
+                        : 'normal'
+                  }
+                />
+              </div>
+            </div>
+
             {journey.pastMedicalHistory && (
-              <div>
+              <div
+                className="mt-3 border bg-white px-4 py-3"
+                style={{ borderColor: 'var(--rule-strong)' }}
+              >
                 <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
-                  PMH · โรคประจำตัว
+                  PMH · โรคประจำตัว / ประวัติการรักษา
                 </div>
-                <div className="mt-1.5 text-[13px] text-[var(--ink-navy-dim)]">
+                <div className="mt-1 text-[13px] leading-relaxed text-[var(--ink-navy-dim)]">
                   {journey.pastMedicalHistory}
                 </div>
               </div>
             )}
-          </div>
-        )}
+          </section>
 
-        {/* Hospital row */}
-        <div
-          className="flex flex-wrap items-center gap-4 border border-t-0 bg-white px-4 py-3 text-[12px]"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          <div className="flex items-center gap-1.5">
-            <Hospital className="h-3.5 w-3.5 text-[var(--ink-navy-muted)]" />
-            <span className="text-[var(--ink-navy-muted)]">REGISTERED AT</span>
-            <Link
-              href={`/hospitals/${journey.hcode}`}
-              className="font-semibold text-[var(--ink-navy)] hover:text-[var(--accent-navy)] hover:underline"
+          {/* 04 — Immunization (RTCOG: Tdap every pregnancy 27-36w) */}
+          <section>
+            <SectionLabel
+              idx={4}
+              right={
+                <span>
+                  {derived?.immunization.tdap.length ?? 0} TDAP ·{' '}
+                  {derived?.immunization.influenza.length ?? 0} FLU
+                </span>
+              }
             >
-              {journey.hospitalName}
-            </Link>
-          </div>
-          {isReferred && journey.currentHospitalName && (
-            <div className="flex items-center gap-1.5">
-              <ArrowRightLeft className="h-3.5 w-3.5 text-[var(--risk-medium)]" />
-              <span className="text-[var(--ink-navy-muted)]">CURRENT</span>
-              <Link
-                href={`/hospitals/${journey.currentHcode}`}
-                className="font-semibold text-[var(--risk-medium)] hover:underline"
-              >
-                {journey.currentHospitalName}
-              </Link>
+              Immunization
+            </SectionLabel>
+            <div
+              className="mt-2 grid grid-cols-4 gap-0 border bg-white"
+              style={{ borderColor: 'var(--rule-strong)' }}
+            >
+              <VaccineTile
+                label="TDAP"
+                subLabel="27-36w"
+                records={derived?.immunization.tdap ?? []}
+                requiredThisPregnancy
+                currentGa={journey.gaWeeks}
+                windowStart={27}
+                windowEnd={36}
+              />
+              <VaccineTile
+                label="INFLUENZA"
+                subLabel="any tri"
+                records={derived?.immunization.influenza ?? []}
+              />
+              <VaccineTile
+                label="COVID-19"
+                subLabel="per OB 63-022"
+                records={derived?.immunization.covid ?? []}
+              />
+              <VaccineTile
+                label={`TT dose ${derived?.immunization.ttDoseNo ?? '?'}`}
+                subLabel="legacy"
+                records={
+                  derived?.immunization.ttDoseNo
+                    ? [{ type: 'TT', dose: derived.immunization.ttDoseNo }]
+                    : []
+                }
+              />
             </div>
-          )}
-        </div>
-      </section>
+          </section>
 
-      {/* 02 — ANC timeline */}
-      <section>
-        <SectionLabel
-          idx={2}
-          right={
-            <span>
-              {ancVisits.length} VISIT{ancVisits.length === 1 ? '' : 'S'}
-            </span>
-          }
-        >
-          ANC visit timeline
-        </SectionLabel>
-        <div
-          className="mt-2 border bg-white overflow-x-auto"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          {ancVisits.length === 0 ? (
-            <div className="px-4 py-8 text-center">
-              <Calendar className="mx-auto mb-2 h-6 w-6 text-[var(--ink-navy-muted)] opacity-50" />
-              <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
-                ยังไม่มีประวัติการฝากครรภ์
-              </p>
-            </div>
-          ) : (
-            <>
+          {/* 05 — Ultrasound timeline (T1 dating, T2 anatomy, T3 wellbeing) */}
+          <section>
+            <SectionLabel
+              idx={5}
+              right={<span>T1 DATING · T2 ANATOMY · T3 WELLBEING</span>}
+            >
+              Ultrasound &amp; fetal wellbeing
+            </SectionLabel>
+            <div
+              className="mt-2 grid grid-cols-1 gap-0 border bg-white md:grid-cols-3"
+              style={{ borderColor: 'var(--rule-strong)' }}
+            >
+              {/* T1 dating */}
               <div
-                className="grid gap-2 border-b px-3 py-2 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
-                style={{
-                  gridTemplateColumns: '38px 108px 48px 64px 60px 84px 62px 86px 74px 1fr',
-                  borderColor: 'var(--rule-strong)',
-                  minWidth: 760,
-                }}
+                className="flex flex-col gap-1 px-3 py-2"
+                style={{ borderRight: '1px solid var(--rule-hair)' }}
               >
-                <div>#</div>
-                <div>DATE</div>
-                <div>GA</div>
-                <div>FH (cm)</div>
-                <div>WT (kg)</div>
-                <div>BP</div>
-                <div>FHR</div>
-                <div>PRES.</div>
-                <div>LIE</div>
-                <div>FLAGS</div>
+                <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                  T1 · DATING
+                </div>
+                <div className="text-[12px] text-[var(--ink-navy)]">
+                  {journey.datingMethod ? (
+                    <span className="font-semibold">
+                      {journey.datingMethod}
+                    </span>
+                  ) : (
+                    <span className="text-[var(--ink-navy-muted)]">— ไม่ระบุวิธี —</span>
+                  )}
+                </div>
+                <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                  LMP {formatThaiShort(journey.lmp)} · EDC{' '}
+                  {formatThaiShort(journey.edc)}
+                </div>
               </div>
-              {ancVisits.map((v) => {
-                const bpHigh =
-                  (v.bpSystolic != null && v.bpSystolic >= BP_SYS_HIGH) ||
-                  (v.bpDiastolic != null && v.bpDiastolic >= BP_DIA_HIGH);
-                const fhrAbnormal =
-                  v.fetalHr != null && (v.fetalHr < FHR_LOW || v.fetalHr > FHR_HIGH);
-                const proteinuria = v.urineProtein != null && /\+/.test(v.urineProtein);
-                const glucosuria = v.urineGlucose != null && /\+/.test(v.urineGlucose);
-                const anemia = v.hbGDl != null && v.hbGDl < 11;
-                const severeAnemia = v.hbGDl != null && v.hbGDl < 9;
-                const preeclampsiaSuspect = bpHigh && proteinuria;
-                const reducedFm = v.fetalMovementOk === false;
-                const dangers = v.dangerSigns ?? [];
-                const anyFlag = bpHigh || fhrAbnormal || proteinuria || glucosuria ||
-                  anemia || preeclampsiaSuspect || reducedFm || dangers.length > 0;
-                return (
-                  <div
-                    key={v.visitNumber}
-                    className="grid items-center gap-2 border-b px-3 text-[12px]"
-                    style={{
-                      gridTemplateColumns: '38px 108px 48px 64px 60px 84px 62px 86px 74px 1fr',
-                      borderColor: 'var(--rule-hair)',
-                      height: 40,
-                      minWidth: 760,
-                    }}
-                  >
-                    <div className="font-mono font-semibold tabular-nums text-[var(--ink-navy)]">
-                      #{v.visitNumber}
-                    </div>
-                    <div>{formatThai(v.visitDate)}</div>
-                    <div className="font-mono tabular-nums">
-                      {v.gaWeeks ?? '—'}
-                      {v.gaWeeks != null && (
-                        <span className="text-[10px] text-[var(--ink-navy-muted)]">w</span>
-                      )}
-                    </div>
-                    <div className="font-mono tabular-nums">
-                      {v.fundalHeightCm ?? '—'}
-                    </div>
-                    <div className="font-mono tabular-nums">
-                      {v.weightKg ?? '—'}
-                    </div>
+
+              {/* T2 anatomy */}
+              <div
+                className="flex flex-col gap-1 px-3 py-2"
+                style={{ borderRight: '1px solid var(--rule-hair)' }}
+              >
+                <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                  T2 · ANATOMY (18-22w)
+                </div>
+                {journey.anatomyScanDate ? (
+                  <>
                     <div
-                      className={cn(
-                        'font-mono tabular-nums',
-                        bpHigh && 'font-semibold',
-                      )}
-                      style={{ color: bpHigh ? 'var(--risk-high)' : undefined }}
-                    >
-                      {v.bpSystolic != null && v.bpDiastolic != null
-                        ? `${v.bpSystolic}/${v.bpDiastolic}`
-                        : '—'}
-                    </div>
-                    <div
-                      className={cn(
-                        'font-mono tabular-nums',
-                        fhrAbnormal && 'font-semibold',
-                      )}
-                      style={{ color: fhrAbnormal ? 'var(--risk-high)' : undefined }}
-                    >
-                      {v.fetalHr ?? '—'}
-                    </div>
-                    <div
-                      className="font-mono text-[11px] tracking-[0.04em]"
+                      className="font-semibold text-[12px]"
                       style={{
                         color:
-                          v.presentation && /BR|B|BREECH|ก้น|TR|T|OBL|ขวาง/i.test(v.presentation)
-                            ? 'var(--risk-medium)'
-                            : undefined,
+                          journey.anatomyScanResult === 'ABNORMAL'
+                            ? 'var(--risk-high)'
+                            : 'var(--ink-navy)',
                       }}
                     >
-                      {presentationLabel(v.presentation)}
+                      {journey.anatomyScanResult ?? 'PENDING'}
                     </div>
-                    <div className="font-mono text-[11px] tracking-[0.04em] text-[var(--ink-navy-dim)]">
-                      {engagementLabel(v.engagement)}
+                    <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                      {formatThaiShort(journey.anatomyScanDate)}
+                      {journey.efwG != null && ` · EFW ${journey.efwG} g`}
                     </div>
-                    <div className="flex flex-wrap gap-1">
-                      {preeclampsiaSuspect && (
-                        <VisitChip label="PRE-ECL SUSPECT" color="var(--risk-high)" />
+                  </>
+                ) : (
+                  <div
+                    className="text-[12px]"
+                    style={{
+                      color:
+                        (journey.gaWeeks ?? 0) > 22
+                          ? 'var(--risk-high)'
+                          : 'var(--ink-navy-muted)',
+                    }}
+                  >
+                    {(journey.gaWeeks ?? 0) > 22
+                      ? 'OVERDUE — ยังไม่มีผล'
+                      : 'ยังไม่ถึงกำหนด'}
+                  </div>
+                )}
+              </div>
+
+              {/* T3 wellbeing */}
+              <div className="flex flex-col gap-1 px-3 py-2">
+                <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                  T3 · WELLBEING (≥28w)
+                </div>
+                {(() => {
+                  const latestT3 = [...(derived?.visitsChrono ?? [])]
+                    .reverse()
+                    .find(
+                      (v) =>
+                        v.nstResult != null ||
+                        v.bppScore != null ||
+                        v.umbilicalDopplerResult != null,
+                    );
+                  if (!latestT3) {
+                    return (
+                      <div className="text-[12px] text-[var(--ink-navy-muted)]">
+                        {(journey.gaWeeks ?? 0) < 28
+                          ? 'ยังไม่ถึง 28 สัปดาห์'
+                          : '— ยังไม่มีข้อมูล —'}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="flex flex-wrap gap-2 text-[12px]">
+                      {latestT3.nstResult && (
+                        <span
+                          className="font-mono"
+                          style={{
+                            color:
+                              latestT3.nstResult === 'NON_REACTIVE'
+                                ? 'var(--risk-high)'
+                                : 'var(--ink-navy)',
+                          }}
+                        >
+                          NST: <b>{latestT3.nstResult}</b>
+                        </span>
                       )}
-                      {bpHigh && !preeclampsiaSuspect && (
-                        <VisitChip label="BP HIGH" color="var(--risk-high)" icon={<Droplets className="h-2.5 w-2.5" />} />
+                      {latestT3.bppScore != null && (
+                        <span
+                          className="font-mono"
+                          style={{
+                            color:
+                              latestT3.bppScore < 8
+                                ? 'var(--risk-high)'
+                                : 'var(--ink-navy)',
+                          }}
+                        >
+                          BPP: <b>{latestT3.bppScore}/10</b>
+                        </span>
                       )}
-                      {fhrAbnormal && (
-                        <VisitChip label="FHR" color="var(--risk-high)" icon={<Heart className="h-2.5 w-2.5" />} />
-                      )}
-                      {severeAnemia && (
-                        <VisitChip label={`Hb ${v.hbGDl}`} color="var(--risk-high)" />
-                      )}
-                      {anemia && !severeAnemia && (
-                        <VisitChip label={`Hb ${v.hbGDl}`} color="var(--risk-medium)" />
-                      )}
-                      {proteinuria && (
-                        <VisitChip label={`PROT ${v.urineProtein}`} color="var(--risk-high)" />
-                      )}
-                      {glucosuria && (
-                        <VisitChip label={`GLUC ${v.urineGlucose}`} color="var(--risk-medium)" />
-                      )}
-                      {reducedFm && (
-                        <VisitChip label="FM↓" color="var(--risk-high)" />
-                      )}
-                      {dangers.map((d) => (
-                        <VisitChip key={d} label={dangerLabel(d)} color="var(--risk-high)" />
-                      ))}
-                      {v.ttDoseNo != null && v.ttDoseNo > 0 && (
-                        <VisitChip label={`TT${v.ttDoseNo}`} color="var(--accent-navy)" />
-                      )}
-                      {v.ironFolicGiven && (
-                        <VisitChip label="Fe+FA" color="var(--ink-navy-muted)" />
-                      )}
-                      {v.calciumGiven && (
-                        <VisitChip label="Ca" color="var(--ink-navy-muted)" />
-                      )}
-                      {!anyFlag && (
-                        <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--risk-low)]">
-                          <CheckCircle2 className="h-2.5 w-2.5" /> OK
+                      {latestT3.umbilicalDopplerResult && (
+                        <span
+                          className="font-mono"
+                          style={{
+                            color:
+                              latestT3.umbilicalDopplerResult === 'ABNORMAL'
+                                ? 'var(--risk-high)'
+                                : 'var(--ink-navy)',
+                          }}
+                        >
+                          DOPPLER: <b>{latestT3.umbilicalDopplerResult}</b>
                         </span>
                       )}
                     </div>
-                  </div>
-                );
-              })}
-            </>
+                  );
+                })()}
+              </div>
+            </div>
+          </section>
+
+          {/* 04 — Newborn outcomes (only if present) */}
+          {newborns.length > 0 && (
+            <section>
+              <SectionLabel
+                idx={4}
+                right={<span>{newborns.length} INFANT{newborns.length === 1 ? '' : 'S'}</span>}
+              >
+                Newborn outcomes
+              </SectionLabel>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                {newborns.map((nb) => {
+                  const lbw = nb.birthWeightG != null && nb.birthWeightG < 2500;
+                  const lowApgar1 = nb.apgar1min != null && nb.apgar1min < 7;
+                  const lowApgar5 = nb.apgar5min != null && nb.apgar5min < 7;
+                  return (
+                    <div
+                      key={nb.infantNumber}
+                      className="border bg-white p-4"
+                      style={{ borderColor: 'var(--rule-strong)' }}
+                    >
+                      <div className="flex items-baseline justify-between">
+                        <div
+                          className="font-semibold text-[15px]"
+                          style={{ color: 'var(--ink-navy)' }}
+                        >
+                          <Baby className="mr-1 inline h-4 w-4 text-[var(--accent-navy)]" />
+                          ทารกคนที่ {nb.infantNumber}
+                          {nb.sex && (
+                            <span className="ml-2 font-mono text-[11px] font-normal text-[var(--ink-navy-muted)]">
+                              {SEX_LABEL_TH[nb.sex] ?? nb.sex}
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
+                          {formatThaiDateTime(nb.bornAt)}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <MetricTile
+                          label="BW"
+                          value={nb.birthWeightG != null ? `${nb.birthWeightG}g` : '—'}
+                          sub={lbw ? 'LBW!' : 'แรกเกิด'}
+                          color={lbw ? 'var(--risk-high)' : 'var(--risk-low)'}
+                          icon={<Ruler className="h-3 w-3" />}
+                        />
+                        <MetricTile
+                          label="APGAR 1"
+                          value={nb.apgar1min ?? '—'}
+                          sub={lowApgar1 ? 'LOW!' : '1 นาที'}
+                          color={lowApgar1 ? 'var(--risk-high)' : 'var(--risk-low)'}
+                        />
+                        <MetricTile
+                          label="APGAR 5"
+                          value={nb.apgar5min ?? '—'}
+                          sub={lowApgar5 ? 'LOW!' : '5 นาที'}
+                          color={lowApgar5 ? 'var(--risk-high)' : 'var(--risk-low)'}
+                        />
+                      </div>
+                      {(lbw || lowApgar1 || lowApgar5) && (
+                        <div
+                          className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-2"
+                          style={{ borderColor: 'var(--rule-hair)' }}
+                        >
+                          <AlertTriangle className="h-3 w-3 text-[var(--risk-high)]" />
+                          <span className="font-mono text-[10px] tracking-[0.1em] text-[var(--risk-high)]">
+                            ADVERSE OUTCOME — flagged for follow-up
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           )}
         </div>
-      </section>
 
-      {/* 03 — Risk assessment */}
-      {latestRisk && (
-        <section>
-          <SectionLabel
-            idx={3}
-            right={<span>SCREENED {formatThai(latestRisk.screenedAt)}</span>}
-          >
-            Risk assessment
-          </SectionLabel>
+        {/* ─── RIGHT: sticky clinical summary rail ─── */}
+        <aside className="hidden lg:block bg-white" style={{ alignSelf: 'stretch' }}>
           <div
-            className="mt-2 border bg-white"
-            style={{ borderColor: 'var(--rule-strong)' }}
+            className="flex flex-col space-y-0"
+            style={{
+              position: 'sticky',
+              top: 0,
+              maxHeight: 'calc((100vh - 60px) / 1.15)',
+              overflowY: 'auto',
+            }}
           >
+            {/* Risk assessment — always shown; extra emphasis when HR2+ */}
             <div
-              className="flex flex-wrap items-center gap-3 border-b px-4 py-3"
-              style={{ borderColor: 'var(--rule-hair)' }}
+              className="px-4 py-3"
+              style={{
+                borderBottom: '1px solid var(--rule-strong)',
+                borderLeft: `3px solid ${highRisk ? 'var(--risk-high)' : 'var(--accent-navy)'}`,
+                background: highRisk ? 'rgba(239, 68, 68, 0.06)' : 'var(--accent-navy-soft)',
+              }}
             >
-              <Pill
-                label={latestRisk.riskLevel}
-                color={ANC_RISK_COLOR[latestRisk.riskLevel] ?? 'var(--ink-navy-muted)'}
-              />
-              <span className="text-[13px] text-[var(--ink-navy-dim)]">
-                {ANC_RISK_LABEL_TH[latestRisk.riskLevel] ?? latestRisk.riskLevel}
-              </span>
-              {latestRisk.recommendedFacility && (
-                <span className="ml-auto font-mono text-[11px] text-[var(--ink-navy-muted)]">
-                  แนะนำส่งต่อ ·{' '}
-                  <span className="font-semibold text-[var(--ink-navy)]">
-                    {latestRisk.recommendedFacility}
-                  </span>
+              <div className="flex items-baseline gap-2">
+                <span
+                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                  style={{ background: highRisk ? 'var(--risk-high)' : 'var(--accent-navy)' }}
+                >
+                  01
                 </span>
+                <span
+                  className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]"
+                  style={{ color: highRisk ? 'var(--risk-high)' : 'var(--accent-navy-strong)' }}
+                >
+                  Risk assessment
+                </span>
+              </div>
+              {latestRisk ? (
+                <>
+                  <div className="mt-2 flex items-center gap-2">
+                    <Pill
+                      label={latestRisk.riskLevel}
+                      color={
+                        ANC_RISK_COLOR[latestRisk.riskLevel] ?? 'var(--ink-navy-muted)'
+                      }
+                    />
+                    <span className="text-[12px] text-[var(--ink-navy-dim)]">
+                      {ANC_RISK_LABEL_TH[latestRisk.riskLevel] ??
+                        latestRisk.riskLevel}
+                    </span>
+                  </div>
+                  <div className="mt-1 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
+                    SCREENED {formatThai(latestRisk.screenedAt)}
+                  </div>
+                  {latestRisk.recommendedFacility && (
+                    <div className="mt-2 rounded-sm border p-2 text-[12px]"
+                         style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-sunken)' }}>
+                      <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
+                        แนะนำส่งต่อ ·{' '}
+                      </span>
+                      <span className="font-semibold text-[var(--ink-navy)]">
+                        {latestRisk.recommendedFacility}
+                      </span>
+                    </div>
+                  )}
+                  {latestRisk.triggeredRules.length > 0 ? (
+                    <div className="mt-3">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                        ปัจจัยเสี่ยง · {latestRisk.triggeredRules.length} ข้อ
+                      </div>
+                      <ul className="mt-1.5 space-y-1">
+                        {latestRisk.triggeredRules.map((rule) => (
+                          <li
+                            key={rule}
+                            className="flex items-start gap-1.5 text-[12px] leading-snug"
+                            style={{ color: 'var(--ink-navy-dim)' }}
+                          >
+                            <AlertTriangle
+                              className="mt-0.5 h-3 w-3 shrink-0"
+                              style={{ color: 'var(--risk-medium)' }}
+                            />
+                            <span className="font-mono text-[11px]">{rule}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <div className="mt-2 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                      ไม่มีปัจจัยเสี่ยง
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="mt-2 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                  ยังไม่มีการประเมินความเสี่ยง
+                </div>
               )}
             </div>
-            {latestRisk.triggeredRules.length > 0 ? (
-              <div className="px-4 py-3">
-                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
-                  ปัจจัยเสี่ยง · {latestRisk.triggeredRules.length} ข้อ
-                </div>
-                <ul className="mt-2 space-y-1.5">
-                  {latestRisk.triggeredRules.map((rule) => (
-                    <li
-                      key={rule}
-                      className="flex items-start gap-2 text-[13px]"
-                      style={{ color: 'var(--ink-navy-dim)' }}
+
+            {/* Next action */}
+            <div
+              className="px-4 py-3"
+              style={{
+                borderBottom: '1px solid var(--rule-strong)',
+                borderLeft: `3px solid ${
+                  derived?.next?.status === 'overdue'
+                    ? 'var(--risk-high)'
+                    : derived?.next?.status === 'due-now'
+                      ? 'var(--risk-medium)'
+                      : 'var(--primary-teal)'
+                }`,
+                background:
+                  derived?.next?.status === 'overdue'
+                    ? 'rgba(239, 68, 68, 0.05)'
+                    : derived?.next?.status === 'due-now'
+                      ? 'rgba(234, 179, 8, 0.05)'
+                      : 'rgba(13, 148, 136, 0.05)',
+              }}
+            >
+              <div className="flex items-baseline gap-2">
+                <span
+                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                  style={{
+                    background:
+                      derived?.next?.status === 'overdue'
+                        ? 'var(--risk-high)'
+                        : derived?.next?.status === 'due-now'
+                          ? 'var(--risk-medium)'
+                          : 'var(--primary-teal)',
+                  }}
+                >
+                  02
+                </span>
+                <span
+                  className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]"
+                  style={{ color: 'var(--ink-navy)' }}
+                >
+                  Next action
+                </span>
+              </div>
+              {derived?.next ? (
+                <div className="mt-2">
+                  <div className="flex items-baseline gap-2">
+                    <span
+                      className="font-mono text-[22px] font-semibold tabular-nums leading-none"
+                      style={{
+                        color:
+                          derived.next.status === 'overdue'
+                            ? 'var(--risk-high)'
+                            : derived.next.status === 'due-now'
+                              ? 'var(--risk-medium)'
+                              : 'var(--accent-navy)',
+                      }}
                     >
-                      <AlertTriangle
-                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                        style={{ color: 'var(--risk-medium)' }}
-                      />
-                      {rule}
+                      {derived.next.ga}w
+                    </span>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                      WHO CONTACT
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[12px]"
+                       style={{
+                         color: derived.next.status === 'overdue' ? 'var(--risk-high)' : 'var(--ink-navy-dim)',
+                       }}>
+                    {derived.next.status === 'overdue'
+                      ? `เลยกำหนด ${Math.abs(derived.next.weeksAway)} สัปดาห์ — ควรติดตามด่วน`
+                      : derived.next.status === 'due-now'
+                        ? 'ถึงกำหนดนัดครั้งถัดไป'
+                        : `อีก ${derived.next.weeksAway} สัปดาห์`}
+                  </div>
+                  {derived.daysSinceLastAnc != null && derived.daysSinceLastAnc > 28 && (
+                    <div className="mt-2 flex items-center gap-1 font-mono text-[11px] text-[var(--risk-high)]">
+                      <AlertTriangle className="h-3 w-3" />
+                      NO ANC FOR {derived.daysSinceLastAnc}d
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-2 text-[12px] text-[var(--risk-low)]">
+                  ครบทั้ง 8 contact แล้ว
+                </div>
+              )}
+              {/* RTCOG overdue-investigation list */}
+              {(derived?.overdue.length ?? 0) > 0 && (
+                <div className="mt-3 border-t pt-2" style={{ borderColor: 'var(--rule-hair)' }}>
+                  <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                    RTCOG · การตรวจที่เลยกำหนด
+                  </div>
+                  <ul className="mt-1.5 space-y-1">
+                    {derived!.overdue.map((o) => (
+                      <li
+                        key={o.key}
+                        className="flex items-start gap-1.5 text-[11px]"
+                        style={{
+                          color:
+                            o.severity === 'high'
+                              ? 'var(--risk-high)'
+                              : 'var(--risk-medium)',
+                        }}
+                      >
+                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                        <span>
+                          {o.labelTh}
+                          <span className="ml-1 font-mono text-[9px] opacity-70">
+                            DUE ≤ {o.dueBy}
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            {/* Hospital */}
+            <div
+              className="px-4 py-3"
+              style={{
+                borderBottom: '1px solid var(--rule-strong)',
+                borderLeft: `3px solid ${isReferred ? 'var(--risk-medium)' : 'var(--accent-navy)'}`,
+                background: isReferred
+                  ? 'rgba(234, 179, 8, 0.04)'
+                  : 'white',
+              }}
+            >
+              <div className="flex items-baseline gap-2">
+                <span
+                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                  style={{
+                    background: isReferred ? 'var(--risk-medium)' : 'var(--accent-navy)',
+                  }}
+                >
+                  03
+                </span>
+                <span
+                  className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]"
+                  style={{ color: 'var(--ink-navy)' }}
+                >
+                  Hospital
+                </span>
+              </div>
+              <div className="mt-2 space-y-1.5 text-[12px]">
+                <div className="flex items-center gap-1.5">
+                  <Hospital className="h-3.5 w-3.5 text-[var(--ink-navy-muted)]" />
+                  <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
+                    REGISTERED AT
+                  </span>
+                </div>
+                <Link
+                  href={`/hospitals/${journey.hcode}`}
+                  className="block font-semibold text-[var(--ink-navy)] hover:text-[var(--accent-navy)] hover:underline"
+                >
+                  {journey.hospitalName}
+                </Link>
+                <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                  HCODE {journey.hcode} · REG {formatThai(journey.registeredAt)}
+                  {derived?.daysSinceRegistered != null && ` · ${derived.daysSinceRegistered}d ago`}
+                </div>
+                {isReferred && journey.currentHospitalName && (
+                  <>
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <ArrowRightLeft className="h-3.5 w-3.5 text-[var(--risk-medium)]" />
+                      <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--risk-medium)]">
+                        CURRENT
+                      </span>
+                    </div>
+                    <Link
+                      href={`/hospitals/${journey.currentHcode}`}
+                      className="block font-semibold text-[var(--risk-medium)] hover:underline"
+                    >
+                      {journey.currentHospitalName}
+                    </Link>
+                    <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                      HCODE {journey.currentHcode}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Referrals */}
+            <div
+              className="px-4 py-3"
+              style={{
+                borderBottom: '1px solid var(--rule-strong)',
+                borderLeft: `3px solid ${referrals.length > 0 ? 'var(--accent-navy)' : 'var(--rule-strong)'}`,
+              }}
+            >
+              <div className="flex items-baseline justify-between">
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                    style={{
+                      background:
+                        referrals.length > 0 ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
+                    }}
+                  >
+                    04
+                  </span>
+                  <span
+                    className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]"
+                    style={{ color: 'var(--ink-navy)' }}
+                  >
+                    Referral history
+                  </span>
+                </div>
+                <span
+                  className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 font-mono text-[10px] font-bold tabular-nums"
+                  style={{
+                    background: referrals.length > 0 ? 'var(--accent-navy-soft)' : 'var(--surface-sunken)',
+                    color: 'var(--ink-navy)',
+                  }}
+                >
+                  {referrals.length}
+                </span>
+              </div>
+              {referrals.length === 0 ? (
+                <div className="mt-2 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                  ยังไม่มีประวัติการส่งต่อ
+                </div>
+              ) : (
+                <div className="mt-2 flex flex-col gap-2">
+                  {referrals.map((ref) => {
+                    const statusLabel = REFERRAL_STATUS_LABEL[ref.status] ?? ref.status;
+                    const isArrived = ref.status === 'ARRIVED' || !!ref.arrivedAt;
+                    const isUrgent =
+                      ref.urgencyLevel === 'URGENT' || ref.urgencyLevel === 'EMERGENCY';
+                    return (
+                      <div
+                        key={ref.id}
+                        className="border px-2.5 py-2"
+                        style={{ borderColor: 'var(--rule-hair)' }}
+                      >
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Pill
+                            label={statusLabel}
+                            color={
+                              isArrived
+                                ? 'var(--risk-low)'
+                                : isUrgent
+                                  ? 'var(--risk-high)'
+                                  : 'var(--accent-navy)'
+                            }
+                          />
+                          {ref.urgencyLevel && (
+                            <Pill
+                              label={ref.urgencyLevel}
+                              color={
+                                isUrgent ? 'var(--risk-high)' : 'var(--ink-navy-muted)'
+                              }
+                            />
+                          )}
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[12px]">
+                          <span className="text-[var(--ink-navy-dim)]">{ref.fromHospital}</span>
+                          <ArrowRightLeft className="h-3 w-3 text-[var(--ink-navy-muted)]" />
+                          <span className="font-semibold text-[var(--ink-navy)]">
+                            {ref.toHospital}
+                          </span>
+                        </div>
+                        {ref.reason && (
+                          <div className="mt-1 text-[11px] leading-snug text-[var(--ink-navy-dim)]">
+                            {ref.reason}
+                          </div>
+                        )}
+                        <div className="mt-1 font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
+                          {formatRelativeTime(ref.initiatedAt)}
+                          {ref.arrivedAt && (
+                            <>
+                              {' · '}
+                              <span className="text-[var(--risk-low)]">
+                                <CheckCircle2 className="inline h-2.5 w-2.5" /> ARRIVED
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Tiny id footer */}
+            <div className="px-4 py-2 font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
+              JOURNEY ID{' '}
+              <span className="font-semibold text-[var(--ink-navy)]">
+                {journey.id.slice(0, 8)}
+              </span>
+            </div>
+          </div>
+        </aside>
+
+        {/* Mobile fallback — same panels, no sticky */}
+        <div className="bg-white p-5 space-y-4 lg:hidden border-t border-[var(--rule-strong)]">
+          {latestRisk && (
+            <section>
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="font-mono text-[10px] font-bold tracking-[0.18em] text-[var(--accent-navy)]">
+                  01
+                </span>
+                <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]">
+                  Risk · {latestRisk.riskLevel}
+                </span>
+              </div>
+              {latestRisk.triggeredRules.length > 0 && (
+                <ul className="text-[12px] space-y-1">
+                  {latestRisk.triggeredRules.map((r) => (
+                    <li key={r} className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
+                      · {r}
                     </li>
                   ))}
                 </ul>
-              </div>
-            ) : (
-              <div className="px-4 py-3 font-mono text-[11px] text-[var(--ink-navy-muted)]">
-                ไม่มีปัจจัยเสี่ยง
+              )}
+            </section>
+          )}
+          <section>
+            <div className="flex items-baseline gap-2 mb-1">
+              <MapPin className="h-3 w-3 text-[var(--ink-navy-muted)]" />
+              <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]">
+                {journey.hospitalName}
+              </span>
+            </div>
+            {isReferred && journey.currentHospitalName && (
+              <div className="font-mono text-[11px] text-[var(--risk-medium)]">
+                → {journey.currentHospitalName}
               </div>
             )}
-          </div>
-        </section>
-      )}
+          </section>
+        </div>
+      </div>
 
-      {/* 04 — Referral history */}
-      {referrals.length > 0 && (
-        <section>
-          <SectionLabel
-            idx={4}
-            right={
-              <span>
-                {referrals.length} REFERRAL{referrals.length === 1 ? '' : 'S'}
-              </span>
-            }
-          >
-            Referral history
-          </SectionLabel>
-          <div
-            className="mt-2 flex flex-col divide-y border bg-white"
-            style={{ borderColor: 'var(--rule-strong)' }}
-          >
-            {referrals.map((ref) => {
-              const statusLabel = REFERRAL_STATUS_LABEL[ref.status] ?? ref.status;
-              const isArrived = ref.status === 'ARRIVED' || !!ref.arrivedAt;
-              const isUrgent = ref.urgencyLevel === 'URGENT' || ref.urgencyLevel === 'EMERGENCY';
-              return (
-                <div
-                  key={ref.id}
-                  className="px-4 py-3"
-                  style={{ borderColor: 'var(--rule-hair)' }}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Pill
-                      label={statusLabel}
-                      color={
-                        isArrived ? 'var(--risk-low)' : isUrgent ? 'var(--risk-high)' : 'var(--accent-navy)'
-                      }
-                    />
-                    {ref.urgencyLevel && (
-                      <Pill
-                        label={ref.urgencyLevel}
-                        color={isUrgent ? 'var(--risk-high)' : 'var(--ink-navy-muted)'}
-                      />
-                    )}
-                    <span className="ml-auto font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
-                      {formatThaiDateTime(ref.initiatedAt)}
-                      {' · '}
-                      {formatRelativeTime(ref.initiatedAt)}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
-                    <span className="text-[var(--ink-navy-dim)]">{ref.fromHospital}</span>
-                    <ArrowRightLeft className="h-3.5 w-3.5 text-[var(--ink-navy-muted)]" />
-                    <span className="font-semibold text-[var(--ink-navy)]">
-                      {ref.toHospital}
-                    </span>
-                  </div>
-                  {ref.reason && (
-                    <div className="mt-1 text-[12px] text-[var(--ink-navy-dim)]">
-                      <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
-                        เหตุผล ·{' '}
-                      </span>
-                      {ref.reason}
-                    </div>
-                  )}
-                  {ref.arrivedAt && (
-                    <div className="mt-1 flex items-center gap-1 font-mono text-[11px] text-[var(--risk-low)]">
-                      <CheckCircle2 className="h-3 w-3" />
-                      ถึงปลายทาง {formatThaiDateTime(ref.arrivedAt)}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* 05 — Newborn outcomes */}
-      {newborns.length > 0 && (
-        <section>
-          <SectionLabel
-            idx={5}
-            right={
-              <span>
-                {newborns.length} INFANT{newborns.length === 1 ? '' : 'S'}
-              </span>
-            }
-          >
-            Newborn outcomes
-          </SectionLabel>
-          <div className="mt-2 grid gap-3 sm:grid-cols-2">
-            {newborns.map((nb) => {
-              const lbw = nb.birthWeightG != null && nb.birthWeightG < 2500;
-              const lowApgar1 = nb.apgar1min != null && nb.apgar1min < 7;
-              const lowApgar5 = nb.apgar5min != null && nb.apgar5min < 7;
-              return (
-                <div
-                  key={nb.infantNumber}
-                  className="border bg-white p-4"
-                  style={{ borderColor: 'var(--rule-strong)' }}
-                >
-                  <div className="flex items-baseline justify-between">
-                    <div
-                      className="font-semibold text-[15px]"
-                      style={{ color: 'var(--ink-navy)' }}
-                    >
-                      <Baby className="mr-1 inline h-4 w-4 text-[var(--accent-navy)]" />
-                      ทารกคนที่ {nb.infantNumber}
-                      {nb.sex && (
-                        <span className="ml-2 font-mono text-[11px] font-normal text-[var(--ink-navy-muted)]">
-                          {SEX_LABEL_TH[nb.sex] ?? nb.sex}
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
-                      {formatThaiDateTime(nb.bornAt)}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2">
-                    <MetricTile
-                      label="BW"
-                      value={nb.birthWeightG != null ? `${nb.birthWeightG}g` : '—'}
-                      sub={lbw ? 'LBW!' : 'น้ำหนักแรกเกิด'}
-                      color={lbw ? 'var(--risk-high)' : 'var(--risk-low)'}
-                      icon={<Ruler className="h-3 w-3" />}
-                    />
-                    <MetricTile
-                      label="APGAR 1"
-                      value={nb.apgar1min ?? '—'}
-                      sub={lowApgar1 ? 'LOW!' : '1 นาที'}
-                      color={lowApgar1 ? 'var(--risk-high)' : 'var(--risk-low)'}
-                    />
-                    <MetricTile
-                      label="APGAR 5"
-                      value={nb.apgar5min ?? '—'}
-                      sub={lowApgar5 ? 'LOW!' : '5 นาที'}
-                      color={lowApgar5 ? 'var(--risk-high)' : 'var(--risk-low)'}
-                    />
-                  </div>
-                  {(lbw || lowApgar1 || lowApgar5) && (
-                    <div
-                      className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-2"
-                      style={{ borderColor: 'var(--rule-hair)' }}
-                    >
-                      <AlertTriangle className="h-3 w-3 text-[var(--risk-high)]" />
-                      <span className="font-mono text-[10px] tracking-[0.1em] text-[var(--risk-high)]">
-                        ADVERSE OUTCOME — flagged for follow-up
-                      </span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Footer */}
+      {/* ─── Footer ─── */}
       <div
-        className="mt-4 flex justify-between border-t pt-3 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
-        style={{ borderColor: 'var(--rule-strong)' }}
+        className="flex justify-between bg-white px-5 py-2 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
+        style={{ borderTop: '1px solid var(--rule-strong)' }}
       >
         <span>
-          JOURNEY ID <span className="font-semibold text-[var(--ink-navy)]">{journey.id.slice(0, 8)}</span>
+          JOURNEY ID{' '}
+          <span className="font-semibold text-[var(--ink-navy)]">{journey.id.slice(0, 8)}</span>
         </span>
-        <span>
-          REFRESHING EVERY 60s
-        </span>
+        <span>REFRESHING EVERY 60s</span>
       </div>
     </div>
   );

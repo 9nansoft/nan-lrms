@@ -7,9 +7,16 @@
 import { usePathname } from 'next/navigation';
 
 // Exact-match routes that render full-bleed (their own padding / background).
-const FULL_BLEED_ROUTES = new Set<string>(['/', '/pregnancies']);
+const FULL_BLEED_ROUTES = new Set<string>([
+  '/',
+  '/pregnancies',
+  '/hospitals',
+  '/referrals',
+  '/outcomes',
+  '/admin',
+]);
 // Prefix-match routes for dynamic children (e.g. /pregnancies/[journeyId]).
-const FULL_BLEED_PREFIXES = ['/pregnancies/'];
+const FULL_BLEED_PREFIXES = ['/pregnancies/', '/patients/'];
 
 function isFullBleed(pathname: string): boolean {
   if (FULL_BLEED_ROUTES.has(pathname)) return true;

@@ -20,6 +20,10 @@ interface DashboardRow {
   connection_status: string;
   last_sync_at: string | null;
   is_active: number;
+  province_code: string | null;
+  district_code: string | null;
+  lat: number | string | null;
+  lon: number | string | null;
 }
 
 interface PatientCountRow {
@@ -38,7 +42,9 @@ export interface DashboardResult {
 export async function getProvinceDashboard(db: DatabaseAdapter): Promise<DashboardResult> {
   // Get all active hospitals
   const hospitals = await db.query<DashboardRow>(
-    "SELECT hcode, name, level, connection_status, last_sync_at, is_active FROM hospitals WHERE is_active = true ORDER BY name",
+    `SELECT hcode, name, level, connection_status, last_sync_at, is_active,
+            province_code, district_code, lat, lon
+     FROM hospitals WHERE is_active = true ORDER BY name`,
   );
 
   // Get patient counts per hospital grouped by risk level
@@ -59,12 +65,20 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
   const hospitalMap = new Map<string, DashboardHospital>();
 
   for (const h of hospitals) {
+    // PGlite returns DECIMAL columns as strings. Coerce lat/lon once here so
+    // downstream consumers (map, mobile clients) get numbers.
+    const lat = h.lat === null ? null : Number(h.lat);
+    const lon = h.lon === null ? null : Number(h.lon);
     hospitalMap.set(h.hcode, {
       hcode: h.hcode,
       name: h.name,
       level: h.level as HospitalLevel,
       connectionStatus: h.connection_status as ConnectionStatus,
       lastSyncAt: h.last_sync_at,
+      provinceCode: h.province_code,
+      districtCode: h.district_code,
+      lat: lat !== null && Number.isFinite(lat) ? lat : null,
+      lon: lon !== null && Number.isFinite(lon) ? lon : null,
       counts: { low: 0, medium: 0, high: 0, total: 0 },
     });
   }

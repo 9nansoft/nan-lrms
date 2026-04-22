@@ -19,6 +19,28 @@ export interface AncRiskInput {
   hivPositive: boolean;
   thalassemiaDisease: boolean;
   niptHighRisk: boolean;
+  // RTCOG OB 66-029 (2566) Section 6 high-risk criteria — optional so the
+  // existing callers that don't yet populate them default to "not triggered"
+  // rather than breaking. Provide via the new webhook fields (Phase 2).
+  proteinuria24hMg?: number | null;        // HR3: >500 mg/24h
+  creatinineMgDl?: number | null;          // HR3: >1.5 mg/dL
+  priorPeOrDvt?: boolean;                  // HR3: prior pulmonary embolism or DVT
+  severeLungDisease?: boolean;             // HR3: severe restrictive/obstructive
+  alloimmunizationCde?: boolean;           // HR3: CDE (Rh) alloimmunization, excluding ABO/Lewis
+  bariatricSurgeryHx?: boolean;            // HR2: Bariatric surgery history
+  teratogenExposure?: boolean;             // HR3: known teratogen exposure (Accutane etc)
+  congenitalInfection?: boolean;           // HR3: confirmed congenital infection (TORCH)
+  // RTCOG GDM early-screen risk factors — these don't change risk level but
+  // fire the `earlyOgttNeeded` advisory below.
+  priorMacrosomia4000g?: boolean;
+  firstDegreeDm?: boolean;
+  pcos?: boolean;
+  steroidUse?: boolean;
+  priorIgm?: boolean;                      // prior impaired glucose metabolism
+  // Iron-contraindication lab results — supplement advisory (not a risk level).
+  hbHDisease?: boolean;
+  betaThalassemiaMajor?: boolean;
+  betaThalassemiaHbE?: boolean;
 }
 
 export interface AncRiskRule {
@@ -146,7 +168,45 @@ export const ANC_RISK_RULES: AncRiskRule[] = [
   { id: 'hr3_renal_autoimmune', level: 'HR3', labelTh: 'โรคไต/APS/SLE', labelEn: 'Renal disease/APS/SLE', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(18) },
   { id: 'hr3_uncontrolled_psych', level: 'HR3', labelTh: 'โรคจิตเวชที่ควบคุมไม่ได้', labelEn: 'Uncontrolled psychiatric disease', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(19) },
   { id: 'hr3_beyond_capability', level: 'HR3', labelTh: 'โรคทางอายุรกรรมที่เกินศักยภาพ รพ.แม่ข่าย', labelEn: 'Medical condition beyond facility capability', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(20) },
+
+  // --- RTCOG OB 66-029 (2566) Section 6 additions ---
+  { id: 'hr3_proteinuria_24h', level: 'HR3', labelTh: 'โปรตีนในปัสสาวะ > 500 มก./24 ชม.', labelEn: 'Proteinuria >500 mg/24h', source: 'lab', evaluate: (d) => (d.proteinuria24hMg ?? 0) > 500 },
+  { id: 'hr3_creatinine', level: 'HR3', labelTh: 'Creatinine > 1.5 มก./ดล.', labelEn: 'Creatinine >1.5 mg/dL', source: 'lab', evaluate: (d) => (d.creatinineMgDl ?? 0) > 1.5 },
+  { id: 'hr3_pe_dvt_hx', level: 'HR3', labelTh: 'ประวัติ pulmonary embolism / DVT', labelEn: 'Prior PE or DVT', source: 'hosxp_risk', evaluate: (d) => !!d.priorPeOrDvt },
+  { id: 'hr3_severe_lung', level: 'HR3', labelTh: 'โรคปอดรุนแรง (restrictive/obstructive)', labelEn: 'Severe restrictive/obstructive lung disease', source: 'hosxp_risk', evaluate: (d) => !!d.severeLungDisease },
+  { id: 'hr3_alloimmunization_cde', level: 'HR3', labelTh: 'Alloimmunization CDE (Rh)', labelEn: 'Alloimmunization CDE (Rh)', source: 'lab', evaluate: (d) => !!d.alloimmunizationCde },
+  { id: 'hr3_teratogen_exposure', level: 'HR3', labelTh: 'สัมผัสสารก่อวิรูป (Accutane / vitamin A derivative)', labelEn: 'Teratogen exposure', source: 'hosxp_risk', evaluate: (d) => !!d.teratogenExposure },
+  { id: 'hr3_congenital_infection', level: 'HR3', labelTh: 'Congenital infection (TORCH)', labelEn: 'Congenital infection', source: 'hosxp_risk', evaluate: (d) => !!d.congenitalInfection },
+  { id: 'hr2_bariatric', level: 'HR2', labelTh: 'ประวัติผ่าตัด bariatric', labelEn: 'Prior bariatric surgery', source: 'hosxp_risk', evaluate: (d) => !!d.bariatricSurgeryHx },
 ];
+
+// ─── Advisory (non-classifying) rules ─────────────────────────────────────
+// These don't change ancRiskLevel but surface actionable alerts to the UI.
+
+/** RTCOG early-OGTT indication. Triggers OGTT at booking in addition to the
+ *  universal 24–28w screen. Fires if ANY listed risk factor is present. */
+export function isEarlyOgttIndicated(d: AncRiskInput): boolean {
+  return (
+    d.prePregnancyBmi >= 30 ||
+    !!d.firstDegreeDm ||
+    !!d.pcos ||
+    !!d.priorMacrosomia4000g ||
+    !!d.steroidUse ||
+    !!d.priorIgm
+  );
+}
+
+/** RTCOG: iron supplementation CONTRAINDICATED in Hb H disease,
+ *  β-thalassemia/Hb E, β-thalassemia major (iron overload risk). Returns the
+ *  triggering condition for display, or null if iron is safe. */
+export function ironContraindication(
+  d: AncRiskInput,
+): 'hb_h_disease' | 'beta_thal_major' | 'beta_thal_hb_e' | null {
+  if (d.hbHDisease) return 'hb_h_disease';
+  if (d.betaThalassemiaMajor) return 'beta_thal_major';
+  if (d.betaThalassemiaHbE) return 'beta_thal_hb_e';
+  return null;
+}
 
 export function classifyAncRisk(input: AncRiskInput): { level: AncRiskLevel; triggeredRules: string[] } {
   const triggered: string[] = [];

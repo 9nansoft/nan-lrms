@@ -16,6 +16,15 @@ function parseDangerSigns(raw: unknown): string[] | null {
   return null;
 }
 
+function parseJson<T = unknown>(raw: unknown): T | null {
+  if (raw == null) return null;
+  if (typeof raw === 'object') return raw as T;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  }
+  return null;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ journeyId: string }> },
@@ -51,6 +60,19 @@ export async function GET(
       calciumGiven: v.calcium_given == null ? null : !!v.calcium_given,
       dangerSigns: parseDangerSigns(v.danger_signs_json),
       fetalMovementOk: v.fetal_movement_ok == null ? null : !!v.fetal_movement_ok,
+      vaccinesGiven: parseJson<AncVisitEntry['vaccinesGiven']>(v.vaccines_given_json) ?? null,
+      urineKetone: (v.urine_ketone as string | null) ?? null,
+      urineCultureResult: (v.urine_culture_result as string | null) ?? null,
+      iodineGiven: v.iodine_given == null ? null : !!v.iodine_given,
+      multivitaminGiven: v.multivitamin_given == null ? null : !!v.multivitamin_given,
+      vitaminDIu: (v.vitamin_d_iu as number | null) ?? null,
+      nstResult: (v.nst_result as AncVisitEntry['nstResult']) ?? null,
+      bppScore: (v.bpp_score as number | null) ?? null,
+      umbilicalDopplerResult:
+        (v.umbilical_doppler_result as AncVisitEntry['umbilicalDopplerResult']) ?? null,
+      psychosocialScreen: parseJson<AncVisitEntry['psychosocialScreen']>(
+        v.psychosocial_screen_json,
+      ) ?? null,
     }));
 
     return NextResponse.json({ visits });

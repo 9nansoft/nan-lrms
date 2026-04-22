@@ -13,6 +13,11 @@ import { cachedAncVisitsTable } from './cached-anc-visits';
 import { cachedAncRisksTable } from './cached-anc-risks';
 import { cachedReferralsTable } from './cached-referrals';
 import { cachedNewbornsTable } from './cached-newborns';
+import { provincesTable } from './provinces';
+import { districtsTable } from './districts';
+import { tambonsTable } from './tambons';
+import { mophHospitalsTable } from './moph-hospitals';
+import { systemConfigTable } from './system-config';
 
 export {
   hospitalsTable,
@@ -29,10 +34,20 @@ export {
   cachedAncRisksTable,
   cachedReferralsTable,
   cachedNewbornsTable,
+  provincesTable,
+  districtsTable,
+  tambonsTable,
+  mophHospitalsTable,
+  systemConfigTable,
 };
 
 // All tables in creation order (respects foreign key dependencies)
 export const ALL_TABLES: TableDefinition[] = [
+  provincesTable,
+  districtsTable,
+  tambonsTable,
+  mophHospitalsTable,
+  systemConfigTable,
   hospitalsTable,
   hospitalBmsConfigTable,
   usersTable,

@@ -45,7 +45,7 @@ export async function GET(
       [patients[0].id],
     );
 
-    const response: VitalSignsResponse = {
+    let response: VitalSignsResponse = {
       vitals: vitals.map((v) => ({
         measuredAt: v.measured_at,
         maternalHr: v.maternal_hr,
@@ -55,6 +55,39 @@ export async function GET(
         pphAmountMl: v.pph_amount_ml,
       })),
     };
+
+    // Fallback: when no explicit cached_vital_signs rows exist, derive vitals
+    // from partograph observations. Partograph captures pulse + BP + fetal HR
+    // at every timepoint, which is exactly what CurrentVitalsPanel displays.
+    // This matters for webhook-ingested patients (simulator + non-HOSxP
+    // hospitals) that only write to cached_partograph_observations, not to
+    // cached_vital_signs. No-op when vitals is non-empty so HOSxP hospitals
+    // (which write both tables) keep their explicit per-minute nurse notes.
+    if (response.vitals.length === 0) {
+      const obs = await db.query<{
+        observe_datetime: string;
+        pulse: number | null;
+        bp_systolic: number | null;
+        bp_diastolic: number | null;
+        fetal_heart_rate: number | null;
+      }>(
+        `SELECT observe_datetime, pulse, bp_systolic, bp_diastolic, fetal_heart_rate
+         FROM cached_partograph_observations
+         WHERE patient_id = ?
+         ORDER BY observe_datetime ASC`,
+        [patients[0].id],
+      );
+      response = {
+        vitals: obs.map((o) => ({
+          measuredAt: o.observe_datetime,
+          maternalHr: o.pulse,
+          fetalHr: o.fetal_heart_rate != null ? String(o.fetal_heart_rate) : null,
+          sbp: o.bp_systolic,
+          dbp: o.bp_diastolic,
+          pphAmountMl: null,
+        })),
+      };
+    }
 
     return NextResponse.json(response);
   } catch (error) {

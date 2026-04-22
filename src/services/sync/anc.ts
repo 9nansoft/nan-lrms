@@ -204,7 +204,7 @@ async function upsertAncVisit(
       [visit.anc_service_number, visit.pa_week, visit.pa_day,
        visit.fundal_height, visit.bw, visit.bps, visit.bpd,
        visit.fetal_heart_rate, visit.baby_position, visit.baby_lead,
-       visit.pass_quality === 'Y' ? 1 : 0, visit.doctor_code, now,
+       visit.pass_quality === 'Y', visit.doctor_code, now,
        existing[0].id],
     );
   } else {
@@ -217,7 +217,7 @@ async function upsertAncVisit(
        visit.pa_week, visit.pa_day, visit.fundal_height, visit.bw,
        visit.bps, visit.bpd, visit.fetal_heart_rate,
        visit.baby_position, visit.baby_lead,
-       visit.pass_quality === 'Y' ? 1 : 0, visit.doctor_code, now, now],
+       visit.pass_quality === 'Y', visit.doctor_code, now, now],
     );
   }
 }

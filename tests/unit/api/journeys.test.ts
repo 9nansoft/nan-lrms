@@ -286,6 +286,18 @@ describe('Journey API Logic', () => {
         calciumGiven: v.calcium_given == null ? null : !!v.calcium_given,
         dangerSigns: null,
         fetalMovementOk: v.fetal_movement_ok == null ? null : !!v.fetal_movement_ok,
+        // RTCOG OB 66-029 (2566) additions — not populated by this fixture,
+        // default to null so the shape matches AncVisitEntry.
+        vaccinesGiven: null,
+        urineKetone: null,
+        urineCultureResult: null,
+        iodineGiven: null,
+        multivitaminGiven: null,
+        vitaminDIu: null,
+        nstResult: null,
+        bppScore: null,
+        umbilicalDopplerResult: null,
+        psychosocialScreen: null,
       }));
 
       expect(visits[0].visitNumber).toBe(1);

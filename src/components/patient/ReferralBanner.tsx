@@ -1,10 +1,12 @@
-// ReferralBanner — persistent banner showing referral recommendation for MEDIUM/HIGH CPD risk
+// ReferralBanner — persistent banner showing referral recommendation for
+// MEDIUM / HIGH CPD risk. Redesigned 2026-04-21 (v3): full-width strip with
+// risk-colored left accent, pulsing dot + icon cluster, large actionable
+// headline, and a separate CTA chip pointing to the recommended facility.
 'use client';
 
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { RiskLevel } from '@/types/domain';
 import { RISK_LEVELS } from '@/config/risk-levels';
-import { cn } from '@/lib/utils';
 
 interface ReferralBannerProps {
   score: number;
@@ -12,23 +14,37 @@ interface ReferralBannerProps {
   recommendation: string;
 }
 
-const BANNER_STYLES: Record<'MEDIUM' | 'HIGH', {
-  container: string;
+interface BannerStyle {
+  bg: string;
+  accent: string;
+  headline: string;
+  sub: string;
   scoreBg: string;
-  scoreText: string;
-  pulsingDot: boolean;
-}> = {
+  scoreFg: string;
+  pulse: boolean;
+  ctaLabel: string;
+}
+
+const BANNER_STYLES: Record<'MEDIUM' | 'HIGH', BannerStyle> = {
   MEDIUM: {
-    container: 'bg-amber-50 border border-amber-200 text-amber-800',
-    scoreBg: 'bg-amber-200 text-amber-900',
-    scoreText: 'text-amber-700',
-    pulsingDot: false,
+    bg: 'linear-gradient(90deg, color-mix(in srgb, #eab308 14%, white), white)',
+    accent: '#eab308',
+    headline: '#854d0e',
+    sub: '#a16207',
+    scoreBg: '#fde68a',
+    scoreFg: '#78350f',
+    pulse: false,
+    ctaLabel: 'เฝ้าระวังใกล้ชิด · เตรียมพร้อมส่งต่อ',
   },
   HIGH: {
-    container: 'bg-red-50 border border-red-200 text-red-800',
-    scoreBg: 'bg-red-200 text-red-900',
-    scoreText: 'text-red-700',
-    pulsingDot: true,
+    bg: 'linear-gradient(90deg, color-mix(in srgb, #ef4444 16%, white), white)',
+    accent: '#dc2626',
+    headline: '#7f1d1d',
+    sub: '#b91c1c',
+    scoreBg: '#fecaca',
+    scoreFg: '#7f1d1d',
+    pulse: true,
+    ctaLabel: 'ควรประสานส่งต่อทันที',
   },
 };
 
@@ -38,47 +54,66 @@ export function ReferralBanner({ score, riskLevel, recommendation }: ReferralBan
   const config = RISK_LEVELS[riskLevel];
   const style = BANNER_STYLES[riskLevel as 'MEDIUM' | 'HIGH'];
 
-  const bannerText = riskLevel === RiskLevel.HIGH
-    ? 'คำแนะนำ ควรประสานส่งต่อทันที!'
-    : 'เฝ้าระวังใกล้ชิด เตรียมพร้อมส่งต่อ';
-
   return (
     <div
-      className={cn('rounded-xl p-4 flex items-center gap-3 print:hidden', style.container)}
+      className="flex items-center gap-4 px-6 py-3 print:hidden"
       role="alert"
-      aria-label={`${config.labelTh} — ${bannerText}`}
+      aria-label={`${config.labelTh} — ${style.ctaLabel}`}
+      style={{
+        background: style.bg,
+        borderLeft: `4px solid ${style.accent}`,
+      }}
     >
-      {/* Pulsing dot for HIGH risk */}
-      {style.pulsingDot && (
-        <span className="relative flex h-3 w-3 shrink-0">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-          <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
-        </span>
-      )}
-
-      {/* Icon */}
-      <AlertTriangle size={20} className="shrink-0" />
-
-      {/* Score circle badge */}
-      <span
-        className={cn(
-          'inline-flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold shrink-0',
-          style.scoreBg,
+      {/* Pulsing dot + warning icon cluster */}
+      <div className="flex shrink-0 items-center gap-2.5">
+        {style.pulse && (
+          <span className="relative flex h-3 w-3">
+            <span
+              className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+              style={{ background: style.accent }}
+            />
+            <span
+              className="relative inline-flex h-3 w-3 rounded-full"
+              style={{ background: style.accent }}
+            />
+          </span>
         )}
+        <AlertTriangle className="h-6 w-6" style={{ color: style.accent }} />
+      </div>
+
+      {/* Score circle */}
+      <span
+        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full font-mono text-[18px] font-bold shadow-[inset_0_0_0_2px_rgba(255,255,255,0.6)]"
+        style={{
+          background: style.scoreBg,
+          color: style.scoreFg,
+        }}
         aria-label={`CPD Score ${score}`}
       >
         {score}
       </span>
 
-      {/* Text content */}
-      <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-bold leading-tight">
-          {bannerText}
+      {/* Headline + sub */}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          className="text-[15px] font-bold leading-tight"
+          style={{ color: style.headline, letterSpacing: '-0.005em' }}
+        >
+          {style.ctaLabel}
         </span>
-        <span className={cn('text-xs leading-tight', style.scoreText)}>
-          {config.labelTh} — {recommendation}
+        <span className="text-[12px] leading-tight" style={{ color: style.sub }}>
+          {config.labelTh} · {recommendation}
         </span>
       </div>
+
+      {/* Risk level badge */}
+      <span
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2.5 py-1 font-mono text-[11px] font-bold tracking-[0.1em] text-white"
+        style={{ background: style.accent }}
+      >
+        <ArrowRightLeft className="h-3 w-3" />
+        {config.labelTh.toUpperCase()}
+      </span>
     </div>
   );
 }

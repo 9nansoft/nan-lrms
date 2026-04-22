@@ -19,6 +19,17 @@ function parseDangerSigns(raw: unknown): string[] | null {
   return null;
 }
 
+// Generic JSON-or-object passthrough — used for RTCOG additions that store
+// structured data (vaccines_given_json, psychosocial_screen_json, etc).
+function parseJson<T = unknown>(raw: unknown): T | null {
+  if (raw == null) return null;
+  if (typeof raw === 'object') return raw as T;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  }
+  return null;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ journeyId: string }> },
@@ -78,6 +89,19 @@ export async function GET(
       calciumGiven: v.calcium_given == null ? null : !!v.calcium_given,
       dangerSigns: parseDangerSigns(v.danger_signs_json),
       fetalMovementOk: v.fetal_movement_ok == null ? null : !!v.fetal_movement_ok,
+      vaccinesGiven: parseJson<AncVisitEntry['vaccinesGiven']>(v.vaccines_given_json) ?? null,
+      urineKetone: (v.urine_ketone as string | null) ?? null,
+      urineCultureResult: (v.urine_culture_result as string | null) ?? null,
+      iodineGiven: v.iodine_given == null ? null : !!v.iodine_given,
+      multivitaminGiven: v.multivitamin_given == null ? null : !!v.multivitamin_given,
+      vitaminDIu: (v.vitamin_d_iu as number | null) ?? null,
+      nstResult: (v.nst_result as AncVisitEntry['nstResult']) ?? null,
+      bppScore: (v.bpp_score as number | null) ?? null,
+      umbilicalDopplerResult:
+        (v.umbilical_doppler_result as AncVisitEntry['umbilicalDopplerResult']) ?? null,
+      psychosocialScreen: parseJson<AncVisitEntry['psychosocialScreen']>(
+        v.psychosocial_screen_json,
+      ) ?? null,
     }));
 
     // Get latest risk
@@ -159,6 +183,42 @@ export async function GET(
         abortions: r.abortions as number | null,
         livingChildren: r.living_children as number | null,
         pastMedicalHistory: (r.past_medical_history as string | null) ?? null,
+        // RTCOG OB 66-029 journey-level extensions.
+        mcvFl: r.mcv_fl == null ? null : Number(r.mcv_fl),
+        dcipResult: (r.dcip_result as 'POS' | 'NEG' | 'PENDING' | null) ?? null,
+        hbEResult: (r.hb_e_result as 'POS' | 'NEG' | 'PENDING' | null) ?? null,
+        thalassemiaType:
+          (r.thalassemia_type as
+            | 'HB_H'
+            | 'BETA_THAL_MAJOR'
+            | 'BETA_THAL_HB_E'
+            | 'TRAIT'
+            | 'NORMAL'
+            | null) ?? null,
+        cervicalScreenType: (r.cervical_screen_type as 'PAP' | 'HPV' | 'NONE' | null) ?? null,
+        cervicalScreenResult:
+          (r.cervical_screen_result as 'NORMAL' | 'ABNORMAL' | 'PENDING' | null) ?? null,
+        cervicalScreenDate: (r.cervical_screen_date as string | null) ?? null,
+        aneuploidyMethod:
+          (r.aneuploidy_method as 'SERUM_T1' | 'QUAD_T2' | 'CFDNA' | 'NONE' | null) ?? null,
+        aneuploidyResult:
+          (r.aneuploidy_result as 'LOW_RISK' | 'HIGH_RISK' | 'PENDING' | null) ?? null,
+        gbsResult: (r.gbs_result as 'POS' | 'NEG' | 'PENDING' | null) ?? null,
+        gbsCollectedDate: (r.gbs_collected_date as string | null) ?? null,
+        anatomyScanDate: (r.anatomy_scan_date as string | null) ?? null,
+        anatomyScanResult:
+          (r.anatomy_scan_result as 'NORMAL' | 'ABNORMAL' | 'PENDING' | null) ?? null,
+        efwG: (r.efw_g as number | null) ?? null,
+        datingMethod: (r.dating_method as 'LMP' | 'US' | 'ART' | null) ?? null,
+        proteinuria24hMg: (r.proteinuria_24h_mg as number | null) ?? null,
+        creatinineMgDl: r.creatinine_mg_dl == null ? null : Number(r.creatinine_mg_dl),
+        priorPeDvt: r.prior_pe_dvt == null ? null : !!r.prior_pe_dvt,
+        severeLungDisease: r.severe_lung_disease == null ? null : !!r.severe_lung_disease,
+        alloimmunizationCde: r.alloimmunization_cde == null ? null : !!r.alloimmunization_cde,
+        bariatricSurgeryHx: r.bariatric_surgery_hx == null ? null : !!r.bariatric_surgery_hx,
+        teratogenExposure: r.teratogen_exposure == null ? null : !!r.teratogen_exposure,
+        congenitalInfection: r.congenital_infection == null ? null : !!r.congenital_infection,
+        gdmRiskFactors: parseJson<string[]>(r.gdm_risk_factors_json) ?? null,
       },
       ancVisits,
       latestRisk,

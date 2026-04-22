@@ -9,6 +9,10 @@ export interface DashboardHospital {
   level: HospitalLevel;
   connectionStatus: ConnectionStatus;
   lastSyncAt: string | null;
+  provinceCode?: string | null;
+  districtCode?: string | null;
+  lat?: number | null;
+  lon?: number | null;
   counts: {
     low: number;
     medium: number;
@@ -346,6 +350,37 @@ export interface JourneyDetailResponse {
     abortions: number | null;
     livingChildren: number | null;
     pastMedicalHistory: string | null;
+    // RTCOG OB 66-029 (2566) additions — journey-level.
+    mcvFl: number | null;
+    dcipResult: 'POS' | 'NEG' | 'PENDING' | null;
+    hbEResult: 'POS' | 'NEG' | 'PENDING' | null;
+    thalassemiaType:
+      | 'HB_H'
+      | 'BETA_THAL_MAJOR'
+      | 'BETA_THAL_HB_E'
+      | 'TRAIT'
+      | 'NORMAL'
+      | null;
+    cervicalScreenType: 'PAP' | 'HPV' | 'NONE' | null;
+    cervicalScreenResult: 'NORMAL' | 'ABNORMAL' | 'PENDING' | null;
+    cervicalScreenDate: string | null;
+    aneuploidyMethod: 'SERUM_T1' | 'QUAD_T2' | 'CFDNA' | 'NONE' | null;
+    aneuploidyResult: 'LOW_RISK' | 'HIGH_RISK' | 'PENDING' | null;
+    gbsResult: 'POS' | 'NEG' | 'PENDING' | null;
+    gbsCollectedDate: string | null;
+    anatomyScanDate: string | null;
+    anatomyScanResult: 'NORMAL' | 'ABNORMAL' | 'PENDING' | null;
+    efwG: number | null;
+    datingMethod: 'LMP' | 'US' | 'ART' | null;
+    proteinuria24hMg: number | null;
+    creatinineMgDl: number | null;
+    priorPeDvt: boolean | null;
+    severeLungDisease: boolean | null;
+    alloimmunizationCde: boolean | null;
+    bariatricSurgeryHx: boolean | null;
+    teratogenExposure: boolean | null;
+    congenitalInfection: boolean | null;
+    gdmRiskFactors: string[] | null;
   };
   ancVisits: AncVisitEntry[];
   latestRisk: AncRiskEntry | null;
@@ -378,6 +413,27 @@ export interface AncVisitEntry {
   calciumGiven: boolean | null;
   dangerSigns: string[] | null;                // e.g. ['bleeding','severe_headache','reduced_fm']
   fetalMovementOk: boolean | null;             // T3 only
+  // RTCOG OB 66-029 (2566) additions — per-visit.
+  vaccinesGiven: Array<{
+    type: 'TT' | 'DT' | 'TDAP' | 'INFLUENZA' | 'COVID';
+    dose?: number | null;
+    givenAtGa?: number | null;
+  }> | null;
+  urineKetone: string | null;
+  urineCultureResult: string | null;
+  iodineGiven: boolean | null;
+  multivitaminGiven: boolean | null;
+  vitaminDIu: number | null;
+  nstResult: 'REACTIVE' | 'NON_REACTIVE' | 'PENDING' | null;
+  bppScore: number | null;
+  umbilicalDopplerResult: 'NORMAL' | 'ABNORMAL' | null;
+  psychosocialScreen: {
+    alcohol?: boolean;
+    smoking?: boolean;
+    illicitDrugs?: boolean;
+    depressionPhq?: number;
+    domesticViolence?: boolean;
+  } | null;
 }
 
 export interface AncRiskEntry {

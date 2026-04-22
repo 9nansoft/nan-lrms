@@ -17,22 +17,22 @@ const completeData = {
 describe('ClinicalData', () => {
   it('renders all 8 clinical measurements when data is complete', () => {
     render(<ClinicalData {...completeData} />);
-    // Values are rendered in separate elements from units
-    expect(screen.getByText('2')).toBeTruthy();
+    // Tiles render value+unit in separate spans; check the numeric values are present
+    expect(screen.getByText('G2')).toBeTruthy();
     expect(screen.getByText('38')).toBeTruthy();
-    expect(screen.getByText('สัปดาห์')).toBeTruthy();
+    expect(screen.getByText('wk')).toBeTruthy();
     expect(screen.getByText('6')).toBeTruthy();
-    expect(screen.getByText('ครั้ง')).toBeTruthy();
+    // Unit "ครั้ง" is used for the ANC tile and (implicitly) for the GA tile; pick one
+    expect(screen.getAllByText('ครั้ง').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('155')).toBeTruthy();
-    expect(screen.getByText('12')).toBeTruthy();
     expect(screen.getByText('34')).toBeTruthy();
-    expect(screen.getByText('3200')).toBeTruthy();
-    expect(screen.getByText('กรัม')).toBeTruthy();
+    // US weight is localized (3,200)
+    expect(screen.getByText('3,200')).toBeTruthy();
     expect(screen.getByText('36')).toBeTruthy();
     expect(screen.getByText('%')).toBeTruthy();
   });
 
-  it('shows dash "-" for missing/null values', () => {
+  it('shows em-dash "—" for missing/null values', () => {
     const nullData = {
       gravida: null,
       gaWeeks: null,
@@ -44,48 +44,25 @@ describe('ClinicalData', () => {
       hematocritPct: null,
     };
     render(<ClinicalData {...nullData} />);
-    const dashes = screen.getAllByText('-');
+    // Eight tiles, each rendering a single em-dash for the missing value
+    const dashes = screen.getAllByText('—');
     expect(dashes.length).toBe(8);
   });
 
-  it('renders label ครรภ์ที่', () => {
+  it('renders Thai labels for every tile', () => {
     render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('ครรภ์ที่ (Gravida)')).toBeTruthy();
-  });
-
-  it('renders label อายุครรภ์', () => {
-    render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('อายุครรภ์ (GA)')).toBeTruthy();
-  });
-
-  it('renders label ฝากครรภ์', () => {
-    render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('ฝากครรภ์ (ANC)')).toBeTruthy();
-  });
-
-  it('renders label ส่วนสูง', () => {
-    render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('ส่วนสูง')).toBeTruthy();
-  });
-
-  it('renders label ส่วนต่างน้ำหนัก', () => {
-    render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('ส่วนต่างน้ำหนัก')).toBeTruthy();
-  });
-
-  it('renders label ยอดมดลูก', () => {
-    render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('ยอดมดลูก')).toBeTruthy();
-  });
-
-  it('renders label น้ำหนักเด็ก U/S', () => {
-    render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('น้ำหนักเด็ก U/S')).toBeTruthy();
-  });
-
-  it('renders label Hematocrit', () => {
-    render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('Hematocrit')).toBeTruthy();
+    for (const label of [
+      'ครรภ์ที่',
+      'อายุครรภ์',
+      'ฝากครรภ์',
+      'ส่วนสูง',
+      'ส่วนต่างน้ำหนัก',
+      'ยอดมดลูก',
+      'น้ำหนักเด็ก U/S',
+      'Hematocrit',
+    ]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
   });
 
   it('renders section header ข้อมูลทางคลินิก', () => {
@@ -105,7 +82,8 @@ describe('ClinicalData', () => {
       hematocritPct: null,
     };
     render(<ClinicalData {...partialData} />);
-    const dashes = screen.getAllByText('-');
+    // Four null tiles each render one em-dash
+    const dashes = screen.getAllByText('—');
     expect(dashes.length).toBe(4);
   });
 
@@ -117,33 +95,39 @@ describe('ClinicalData', () => {
     expect(screen.getByText('+12')).toBeTruthy();
   });
 
-  it('shows only weightDiffKg when weightKg is not provided', () => {
+  it('renders weight-diff only form when weightKg is not provided', () => {
     render(<ClinicalData {...completeData} />);
-    expect(screen.getByText('12')).toBeTruthy();
+    expect(screen.getByText('+12')).toBeTruthy();
   });
 
-  it('colors weight diff green when gain <= 15', () => {
+  it('colors weight diff with risk-low token when gain <= 15', () => {
     const { container } = render(<ClinicalData {...completeData} weightKg={70} />);
-    const greenDiff = container.querySelector('.text-emerald-600');
-    expect(greenDiff).toBeTruthy();
-    expect(greenDiff?.textContent).toBe('+12');
+    const diff = [...container.querySelectorAll('span')].find(
+      (el) => el.textContent === '+12',
+    );
+    expect(diff).toBeTruthy();
+    expect(diff?.getAttribute('style')).toMatch(/--risk-low/);
   });
 
-  it('colors weight diff amber when gain > 15 and <= 20', () => {
+  it('colors weight diff with risk-medium token when gain > 15 and <= 20', () => {
     const { container } = render(
-      <ClinicalData {...completeData} weightKg={75} weightDiffKg={18} />
+      <ClinicalData {...completeData} weightKg={75} weightDiffKg={18} />,
     );
-    const amberDiff = container.querySelector('.text-amber-600');
-    expect(amberDiff).toBeTruthy();
-    expect(amberDiff?.textContent).toBe('+18');
+    const diff = [...container.querySelectorAll('span')].find(
+      (el) => el.textContent === '+18',
+    );
+    expect(diff).toBeTruthy();
+    expect(diff?.getAttribute('style')).toMatch(/--risk-medium/);
   });
 
-  it('colors weight diff red when gain > 20', () => {
+  it('colors weight diff with risk-high token when gain > 20', () => {
     const { container } = render(
-      <ClinicalData {...completeData} weightKg={75} weightDiffKg={25} />
+      <ClinicalData {...completeData} weightKg={75} weightDiffKg={25} />,
     );
-    const redDiff = container.querySelector('.text-red-600');
-    expect(redDiff).toBeTruthy();
-    expect(redDiff?.textContent).toBe('+25');
+    const diff = [...container.querySelectorAll('span')].find(
+      (el) => el.textContent === '+25',
+    );
+    expect(diff).toBeTruthy();
+    expect(diff?.getAttribute('style')).toMatch(/--risk-high/);
   });
 });

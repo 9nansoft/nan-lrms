@@ -159,7 +159,13 @@ export function HighRiskPatientList({
         { key: 'note', label: 'NOTE', w: 220 },
       ];
 
-  const gridCols = columns.map((c) => (c.w === 0 ? '1fr' : `${c.w}px`)).join(' ');
+  // `minmax(180px, 1fr)` — not plain `1fr` — so a flex column shrinks below
+  // its content's intrinsic min-size. Without this, a long truncated patient
+  // name (which has `white-space: nowrap`) expanded the auto-min past the
+  // header's, and each row resolved `1fr` to a different width — breaking
+  // column alignment row-to-row (each row is its own grid container). The
+  // 180px floor keeps the patient name readable when total width overflows.
+  const gridCols = columns.map((c) => (c.w === 0 ? 'minmax(180px, 1fr)' : `${c.w}px`)).join(' ');
 
   return (
     <div>

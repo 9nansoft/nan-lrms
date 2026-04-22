@@ -34,25 +34,30 @@ const baseProps = {
 };
 
 describe('PatientHeader', () => {
+  it('renders patient name as the primary title', () => {
+    render(<PatientHeader {...baseProps} />);
+    expect(screen.getByText('นางสาวทดสอบ ใจดี')).toBeTruthy();
+  });
+
   it('renders patient HN, AN, and age', () => {
     render(<PatientHeader {...baseProps} />);
     expect(screen.getByText('12345')).toBeTruthy();
     expect(screen.getByText('AN-001')).toBeTruthy();
-    expect(screen.getByText('28 ปี')).toBeTruthy();
+    // The age value is rendered in its own span; check via numeric match
+    expect(screen.getByText('28')).toBeTruthy();
   });
 
   it('shows admit date in Thai format', () => {
     render(<PatientHeader {...baseProps} />);
-    // formatThaiDate mock returns "15 ม.ค. 2569" for Jan 15, 2026
     expect(screen.getByText('15 ม.ค. 2569')).toBeTruthy();
   });
 
-  it('shows labor status badge as "คลอดอยู่" for ACTIVE status', () => {
+  it('shows labor status pill "คลอดอยู่" for ACTIVE status', () => {
     render(<PatientHeader {...baseProps} laborStatus="ACTIVE" />);
     expect(screen.getByText('คลอดอยู่')).toBeTruthy();
   });
 
-  it('shows labor status badge as "คลอดแล้ว" for DELIVERED status', () => {
+  it('shows labor status pill "คลอดแล้ว" for DELIVERED status', () => {
     render(<PatientHeader {...baseProps} laborStatus="DELIVERED" />);
     expect(screen.getByText('คลอดแล้ว')).toBeTruthy();
   });
@@ -60,7 +65,8 @@ describe('PatientHeader', () => {
   it('shows hospital name and level', () => {
     render(<PatientHeader {...baseProps} />);
     expect(screen.getByText('รพ.ขอนแก่น')).toBeTruthy();
-    expect(screen.getByText('A_S')).toBeTruthy();
+    // Level is rendered as "·A_S" inside the hospital pill
+    expect(screen.getByText('·A_S')).toBeTruthy();
   });
 
   it('shows CpdBadge with score when cpdScore is provided', () => {
@@ -72,11 +78,6 @@ describe('PatientHeader', () => {
   it('does not render CpdBadge when cpdScore is null', () => {
     render(<PatientHeader {...baseProps} cpdScore={null} />);
     expect(screen.queryByText('CPD Score')).toBeNull();
-  });
-
-  it('renders patient AN as heading', () => {
-    render(<PatientHeader {...baseProps} />);
-    expect(screen.getAllByText(/AN-001/).length).toBeGreaterThan(0);
   });
 
   it('shows ConnectionStatus when hospital has connectionStatus', () => {
@@ -95,10 +96,10 @@ describe('PatientHeader', () => {
 
   it('shows weight change display when weightKg and weightDiffKg are provided', () => {
     render(<PatientHeader {...baseProps} weightKg={70} weightDiffKg={23} />);
-    // preWeight = 70 - 23 = 47
+    // preWeight = 70 - 23 = 47, current 70, delta +23
     expect(screen.getByText('47')).toBeTruthy();
     expect(screen.getByText('70')).toBeTruthy();
-    expect(screen.getByText('23 กก.')).toBeTruthy();
+    expect(screen.getByText('+23')).toBeTruthy();
   });
 
   it('does not show weight change when weightKg is null', () => {
@@ -116,24 +117,41 @@ describe('PatientHeader', () => {
     expect(screen.queryByText('น.น.')).toBeNull();
   });
 
-  it('colors weight diff green when gain <= 15', () => {
-    const { container } = render(<PatientHeader {...baseProps} weightKg={60} weightDiffKg={10} />);
-    const diffSpan = container.querySelector('.text-emerald-600');
-    expect(diffSpan).toBeTruthy();
-    expect(diffSpan?.textContent).toBe('10 กก.');
+  // The identity band was redesigned onto a navy gradient, so the weight-diff
+  // coloring shifted from the light-theme --risk-* CSS variables to lighter
+  // tailwind-300/400 tones that still read as green/amber/red on dark navy.
+  // These tests pin the semantic color category rather than the exact hex.
+  const weightDiffColor = (container: HTMLElement, text: string): string | null => {
+    const span = [...container.querySelectorAll('span')].find(
+      (el) => el.textContent === text,
+    );
+    return span?.getAttribute('style') ?? null;
+  };
+
+  it('colors weight diff green (safe) when gain <= 15', () => {
+    const { container } = render(
+      <PatientHeader {...baseProps} weightKg={60} weightDiffKg={10} />,
+    );
+    const style = weightDiffColor(container, '+10');
+    // Green tones: bbf7d0 (300) or 86efac (400) — JSDOM normalizes to rgb()
+    expect(style).toMatch(/bbf7d0|86efac|187,\s*247,\s*208|134,\s*239,\s*172/i);
   });
 
-  it('colors weight diff amber when gain > 15 and <= 20', () => {
-    const { container } = render(<PatientHeader {...baseProps} weightKg={65} weightDiffKg={18} />);
-    const diffSpan = container.querySelector('.text-amber-600');
-    expect(diffSpan).toBeTruthy();
-    expect(diffSpan?.textContent).toBe('18 กก.');
+  it('colors weight diff amber (warn) when gain > 15 and <= 20', () => {
+    const { container } = render(
+      <PatientHeader {...baseProps} weightKg={65} weightDiffKg={18} />,
+    );
+    const style = weightDiffColor(container, '+18');
+    // Amber tones: fde68a (200) or fcd34d (300)
+    expect(style).toMatch(/fde68a|fcd34d|253,\s*230,\s*138|252,\s*211,\s*77/i);
   });
 
-  it('colors weight diff red when gain > 20', () => {
-    const { container } = render(<PatientHeader {...baseProps} weightKg={75} weightDiffKg={25} />);
-    const diffSpan = container.querySelector('.text-red-600');
-    expect(diffSpan).toBeTruthy();
-    expect(diffSpan?.textContent).toBe('25 กก.');
+  it('colors weight diff red (alert) when gain > 20', () => {
+    const { container } = render(
+      <PatientHeader {...baseProps} weightKg={75} weightDiffKg={25} />,
+    );
+    const style = weightDiffColor(container, '+25');
+    // Red tones: fca5a5 (300) or fecaca (200)
+    expect(style).toMatch(/fca5a5|fecaca|252,\s*165,\s*165|254,\s*202,\s*202/i);
   });
 });

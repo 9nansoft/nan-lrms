@@ -28,6 +28,33 @@ export const cachedAncVisitsTable: TableDefinition = {
     { name: 'calcium_given', type: 'boolean', nullable: true },
     { name: 'danger_signs_json', type: 'json', nullable: true },               // ['bleeding','severe_headache',...]
     { name: 'fetal_movement_ok', type: 'boolean', nullable: true },            // T3 — asks woman if movements felt normal
+
+    // ─── RTCOG OB 66-029 (2566) expansion — per-visit ─────────────────
+    // Immunization: structured replacement for tt_dose_no so we can record
+    // Tdap/dT/Flu/COVID distinctly (RTCOG wants Tdap every pregnancy 27–36w).
+    // Shape: [{ type: 'TT'|'DT'|'TDAP'|'INFLUENZA'|'COVID', dose?: number,
+    //          given_at_ga?: number }]. tt_dose_no is kept for backward compat.
+    { name: 'vaccines_given_json', type: 'json', nullable: true },
+
+    // Urinalysis additions.
+    { name: 'urine_ketone', type: 'string', maxLength: 10, nullable: true },   // '-','trace','+','++','+++'
+    { name: 'urine_culture_result', type: 'string', maxLength: 20, nullable: true }, // NEGATIVE / POSITIVE / PENDING
+
+    // Full RTCOG supplementation checklist.
+    { name: 'iodine_given', type: 'boolean', nullable: true },
+    { name: 'multivitamin_given', type: 'boolean', nullable: true },
+    { name: 'vitamin_d_iu', type: 'integer', nullable: true },
+
+    // T3 fetal wellbeing (≥28w) — all nullable, only captured when performed.
+    { name: 'nst_result', type: 'string', maxLength: 20, nullable: true },     // REACTIVE / NON_REACTIVE / PENDING
+    { name: 'bpp_score', type: 'integer', nullable: true },                    // 0-10
+    { name: 'umbilical_doppler_result', type: 'string', maxLength: 20, nullable: true }, // NORMAL / ABNORMAL
+
+    // Psychosocial + behavioral screen (booking visit typically).
+    // Shape: { alcohol?: boolean, smoking?: boolean, illicit_drugs?: boolean,
+    //          depression_phq?: number, domestic_violence?: boolean }.
+    { name: 'psychosocial_screen_json', type: 'json', nullable: true },
+
     { name: 'synced_at', type: 'datetime' },
     { name: 'created_at', type: 'datetime' },
   ],

@@ -79,6 +79,26 @@ class SimulationOrchestrator {
     }
 
     await ensureInit();
+
+    const roster: HospitalContext[] = (
+      config.hospitals.length > 0
+        ? KK_HOSPITALS.filter((h) => config.hospitals.includes(h.hcode))
+        : KK_HOSPITALS
+    ).map((h) => ({ hcode: h.hcode, name: h.name }));
+
+    // Pre-flight: issue + verify an API key for every hospital by POSTing an
+    // empty body to the real webhook endpoint. Auth runs before validation on
+    // the server, so:
+    //   401 → auth broken for this hospital (stale cache, bundle-split DB,
+    //         key row missing), count as preflight failure.
+    //   400 VALIDATION_FAILED → auth OK, body rejected (expected), count as
+    //         success.
+    //   anything else → treat as success, but log.
+    // If ANY hospital fails, throw before scheduling workers. This replaces
+    // the old behaviour where every tick flooded the event log with 401s
+    // until someone noticed.
+    await this.preflightValidateAuth(roster);
+
     this.running = true;
     this.config = config;
     this.startedAt = new Date().toISOString();
@@ -86,12 +106,6 @@ class SimulationOrchestrator {
     this.workers.clear();
     resetPlans();           // Tier-3: force fresh plan generation on each start
     resetEvalStats();
-
-    const roster: HospitalContext[] = (
-      config.hospitals.length > 0
-        ? KK_HOSPITALS.filter((h) => config.hospitals.includes(h.hcode))
-        : KK_HOSPITALS
-    ).map((h) => ({ hcode: h.hcode, name: h.name }));
 
     for (const h of roster) {
       const worker: HospitalWorker = {
@@ -113,24 +127,33 @@ class SimulationOrchestrator {
       this.scheduleNext(worker, roster);
     }
 
-    // Kick off Tier-3 plan generation for each hospital in parallel. Each
-    // plan takes a few seconds. We don't await — workers can start before
-    // the plan is ready (they'll fall back to profile sampling until it is).
-    for (const h of roster) {
-      ensurePlan({
-        hospitalName: h.name,
-        hcode: h.hcode,
-        scenario: config.scenario,
-        eventTypes: config.eventTypes,
-        model: config.model,
-        signal: this.workers.get(h.hcode)!.abort.signal,
-      }).catch((err) => {
-        logger.warn('sim_plan_kickoff_failed', {
+    // Kick off Tier-3 plan generation — STAGGERED. vLLM serves one prompt
+    // at a time per model, so firing 26 plan LLM calls simultaneously makes
+    // them all starve each other and time out. We space them 2s apart so
+    // the model chews through one plan before the next arrives. Workers
+    // start immediately and fall back to profile sampling for their first
+    // few events until their plan lands.
+    const STAGGER_MS = 2_000;
+    roster.forEach((h, i) => {
+      setTimeout(() => {
+        if (!this.running) return;
+        const worker = this.workers.get(h.hcode);
+        if (!worker) return;
+        ensurePlan({
+          hospitalName: h.name,
           hcode: h.hcode,
-          err: err instanceof Error ? err.message : String(err),
+          scenario: config.scenario,
+          eventTypes: config.eventTypes,
+          model: config.model,
+          signal: worker.abort.signal,
+        }).catch((err) => {
+          logger.warn('sim_plan_kickoff_failed', {
+            hcode: h.hcode,
+            err: err instanceof Error ? err.message : String(err),
+          });
         });
-      });
-    }
+      }, i * STAGGER_MS);
+    });
 
     // Auto-stop after duration.
     this.stopTimer = setTimeout(() => {
@@ -204,6 +227,79 @@ class SimulationOrchestrator {
       recentEvents: [...this.recentEvents],
       evaluation: { ...evalStats },
     };
+  }
+
+  /**
+   * Issues an API key for each hospital and confirms the webhook endpoint
+   * accepts it (expects HTTP 400 VALIDATION_FAILED on an empty body — auth
+   * runs before payload validation, so 400 proves auth worked). Any 401, or
+   * hospitals missing from the local hospitals table, become a pre-flight
+   * failure that aborts start() before any worker is scheduled.
+   *
+   * Runs hospitals sequentially: the PGlite mutex would serialize them
+   * anyway, and this way one broken hospital doesn't mask the rest.
+   */
+  private async preflightValidateAuth(roster: HospitalContext[]): Promise<void> {
+    const db = await getDatabase();
+    const base = this.webhookBaseUrl;
+    const failures: Array<{ hcode: string; name: string; reason: string }> = [];
+
+    for (const h of roster) {
+      try {
+        const hospRow = await db.query<{ id: string }>(
+          'SELECT id FROM hospitals WHERE hcode = ?',
+          [h.hcode],
+        );
+        if (hospRow.length === 0) {
+          failures.push({ hcode: h.hcode, name: h.name, reason: 'hospital not found in DB' });
+          continue;
+        }
+        const apiKey = await getOrCreateDevApiKey(db, hospRow[0].id, h.hcode);
+        const res = await fetch(`${base}/api/webhooks/patient-data`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({}),
+        });
+        if (res.status === 401) {
+          const txt = await res.text().catch(() => '');
+          failures.push({
+            hcode: h.hcode,
+            name: h.name,
+            reason: `auth rejected (HTTP 401): ${txt.slice(0, 160)}`,
+          });
+        }
+        // 400 (validation failed on empty body) = auth OK. Any other status
+        // we treat as auth-passed too — the point of preflight is to rule
+        // OUT 401, not to fully validate payload contracts.
+      } catch (err) {
+        failures.push({
+          hcode: h.hcode,
+          name: h.name,
+          reason: `preflight threw: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+
+    if (failures.length > 0) {
+      logger.error('sim_preflight_auth_failed', {
+        failureCount: failures.length,
+        total: roster.length,
+        failures,
+      });
+      const summary = failures
+        .slice(0, 5)
+        .map((f) => `${f.hcode} (${f.name}): ${f.reason}`)
+        .join(' | ');
+      const more = failures.length > 5 ? ` (+${failures.length - 5} more)` : '';
+      throw new Error(
+        `Pre-flight webhook auth failed for ${failures.length}/${roster.length} hospital(s). ${summary}${more}`,
+      );
+    }
+
+    logger.info('sim_preflight_auth_ok', { hospitals: roster.length });
   }
 
   private scheduleNext(worker: HospitalWorker, roster: HospitalContext[]): void {
@@ -283,8 +379,8 @@ class SimulationOrchestrator {
           return;
         }
         body = event;
-        const obs = event.observations[0];
-        summary = `Partograph ${obs.an} · hour ${obs.hourNo} · ${obs.cervicalDilationCm}cm`;
+        const latest = event.observations[event.observations.length - 1];
+        summary = `Partograph ${latest.an} · batch ×${event.observations.length} · up to hour ${latest.hourNo} · ${latest.cervicalDilationCm}cm`;
       } else {
         throw new Error(`unsupported event type: ${type}`);
       }

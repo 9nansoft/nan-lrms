@@ -10,7 +10,11 @@ import { logger } from './logger';
 
 const DEFAULT_BASE_URL = 'https://vllm-qwen.bmscloud.in.th/v1';
 const DEFAULT_MODEL = 'gemma4';
-const DEFAULT_TIMEOUT_MS = 30_000;
+// 3-minute ceiling for heavy prompts (shift plans, full clinical records
+// under JSON schema). vLLM under 26-parallel sim load can take 30-90s per
+// response; 180s gives generous headroom while still catching hard hangs.
+const DEFAULT_TIMEOUT_MS = 180_000;
+const DEFAULT_MAX_TOKENS = 8000;
 
 export interface LlmChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -28,6 +32,9 @@ export interface LlmChatOptions {
   jsonSchema?: Record<string, unknown>;
   /** Abort signal so callers can cancel in-flight requests. */
   signal?: AbortSignal;
+  /** Override the internal request-timeout ceiling (ms). Default 30_000. Use
+   *  a larger value for heavy prompts like Tier-3 plan generation. */
+  timeoutMs?: number;
 }
 
 interface ChatCompletionResponse {
@@ -78,7 +85,13 @@ export async function listLlmModels(signal?: AbortSignal): Promise<LlmModelInfo[
 export async function llmChat(opts: LlmChatOptions): Promise<string> {
   const key = apiKey();
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  // Callers can raise the ceiling (planner's 20-event plan needs ~40s on the
+  // shared vLLM). Passing 0 disables the internal timer and defers entirely
+  // to the caller-provided signal.
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const t = timeoutMs > 0
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
   // Merge external signal with internal timeout.
   if (opts.signal) {
     opts.signal.addEventListener('abort', () => controller.abort());
@@ -88,7 +101,7 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
       model: opts.model || defaultModel(),
       messages: opts.messages,
       temperature: opts.temperature ?? 0.7,
-      max_tokens: opts.maxTokens ?? 800,
+      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
     };
     if (opts.jsonMode) {
       body.response_format = { type: 'json_object' };
@@ -121,7 +134,7 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
     });
     throw err;
   } finally {
-    clearTimeout(t);
+    if (t) clearTimeout(t);
   }
 }
 

@@ -27,35 +27,46 @@ function rewritePlaceholders(sql: string): string {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
+// HMR-safe shared lock state. Next.js HMR recreates module instances when we
+// edit any file in the import graph, so putting the mutex on the adapter
+// instance fragments it across reloads — multiple adapters end up issuing
+// queries to the same PGlite WASM concurrently, which tips it over exactly
+// like the unlocked case did. Stashing on `global` survives HMR.
+interface PgliteSharedLock {
+  writeLock: Promise<unknown>;
+  aborted: boolean;
+}
+const _globalAny = global as unknown as { __pgliteLock?: PgliteSharedLock };
+const _lock: PgliteSharedLock = _globalAny.__pgliteLock ?? {
+  writeLock: Promise.resolve(),
+  aborted: false,
+};
+if (!_globalAny.__pgliteLock) _globalAny.__pgliteLock = _lock;
+
 export class PgliteAdapter extends DatabaseAdapter {
   // PGlite runs in a single-threaded WASM runtime. When many concurrent
   // callers hit `.query()` simultaneously (e.g. 26 simulator workers all
   // POSTing to the webhook endpoint at once), the internal state can abort
   // with "RuntimeError: Aborted()" — the classic Emscripten panic. We
-  // serialize every public call through this promise chain so only one
+  // serialize every public call through a global promise chain so only one
   // query is in-flight against the WASM module at any moment.
   //
   // In production we use real Postgres via PostgresAdapter (no WASM), so
   // this serialization is only the dev-path bottleneck.
-  private writeLock: Promise<unknown> = Promise.resolve();
-  /** Set to true once the WASM runtime aborts. After this, every call throws
-   *  a clean DatabaseUnavailableError so callers (API routes, health check)
-   *  can surface the condition in the UI instead of silently returning []. */
-  private aborted = false;
   private async serialized<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.aborted) {
+    if (_lock.aborted) {
       throw new DatabaseUnavailableError('pglite_wasm_aborted');
     }
-    const prev = this.writeLock;
+    const prev = _lock.writeLock;
     let release: () => void = () => {};
-    this.writeLock = new Promise<void>((r) => { release = r; });
+    _lock.writeLock = new Promise<void>((r) => { release = r; });
     try {
       await prev;
       return await fn();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/Aborted\(\)|RuntimeError/.test(msg)) {
-        this.aborted = true;
+        _lock.aborted = true;
         // eslint-disable-next-line no-console
         console.error(
           '[pglite] WASM aborted — every subsequent DB call will reject until the server restarts.',
@@ -72,7 +83,7 @@ export class PgliteAdapter extends DatabaseAdapter {
   /** True after the WASM instance has panicked. Exposed so the health check
    *  can report `database: 'disconnected'` without running a SELECT. */
   isDead(): boolean {
-    return this.aborted;
+    return _lock.aborted;
   }
 
   constructor(private pg: PGlite) {
@@ -94,14 +105,16 @@ export class PgliteAdapter extends DatabaseAdapter {
   }
 
   async getTableNames(): Promise<string[]> {
-    const result = await this.pg.query<{ table_name: string }>(
+    // MUST go through the mutex — metadata queries racing with concurrent
+    // writes was triggering the Emscripten abort under sim load.
+    const result = await this.serialized(() => this.pg.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name",
-    );
+    ));
     return result.rows.map((r) => r.table_name);
   }
 
   async getColumnInfo(table: string): Promise<ColumnInfo[]> {
-    const result = await this.pg.query<{
+    const result = await this.serialized(() => this.pg.query<{
       column_name: string;
       data_type: string;
       is_nullable: string;
@@ -112,7 +125,7 @@ export class PgliteAdapter extends DatabaseAdapter {
         WHERE table_schema = 'public' AND table_name = $1
         ORDER BY ordinal_position`,
       [table],
-    );
+    ));
     return result.rows.map((r) => ({
       name: r.column_name,
       type: r.data_type,

@@ -28,11 +28,18 @@ async function safeQuery<T>(
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const guard = simulationGuard();
   if (guard) return guard;
 
+  const url = new URL(request.url);
+  const targetAn = url.searchParams.get('an');
+  const targetHcode = url.searchParams.get('hcode');
+
   try {
+    if (targetAn && targetHcode) {
+      return await handlePatient(targetHcode, targetAn);
+    }
     return await handle();
   } catch (e) {
     return NextResponse.json(
@@ -40,6 +47,59 @@ export async function GET() {
       { status: 500 },
     );
   }
+}
+
+// Targeted dig — find one patient across labor + partograph + journey.
+async function handlePatient(hcode: string, an: string) {
+  await ensureInit();
+  const db = await getDatabase();
+  const errors: Record<string, string> = {};
+  const labor = await safeQuery<Record<string, unknown>>(db,
+    `SELECT cp.id, cp.hn, cp.an, cp.age, cp.ga_weeks, cp.labor_status,
+            cp.admit_date, cp.created_at, cp.journey_id, h.hcode
+     FROM cached_patients cp
+     JOIN hospitals h ON h.id = cp.hospital_id
+     WHERE cp.an = ? AND h.hcode = ?`,
+    [an, hcode], 'patient:labor', errors);
+  const patientId = labor[0]?.id as string | undefined;
+  const partograph = patientId
+    ? await safeQuery<Record<string, unknown>>(db,
+        `SELECT id, observe_datetime, hour_no, fetal_heart_rate,
+                cervical_dilation_cm, bp_systolic, bp_diastolic, pulse, temperature,
+                contraction_per_10min, source_system
+         FROM cached_partograph_observations
+         WHERE patient_id = ?
+         ORDER BY observe_datetime ASC`,
+        [patientId], 'patient:partograph', errors)
+    : [];
+  const vitals = patientId
+    ? await safeQuery<Record<string, unknown>>(db,
+        `SELECT COUNT(*) as n FROM cached_vital_signs WHERE patient_id = ?`,
+        [patientId], 'patient:vitals', errors)
+    : [];
+  const journey = labor[0]?.journey_id
+    ? await safeQuery<Record<string, unknown>>(db,
+        `SELECT id, care_stage, anc_risk_level, anc_visit_count
+         FROM maternal_journeys WHERE id = ?`,
+        [labor[0].journey_id], 'patient:journey', errors)
+    : [];
+  // How many partograph rows does the WHOLE hospital have? Helps explain
+  // the "missing" feel when the hospital-level aggregate is non-zero.
+  const hospPartographCount = await safeQuery<{ n: number }>(db,
+    `SELECT COUNT(*) as n FROM cached_partograph_observations cpo
+     JOIN cached_patients cp ON cp.id = cpo.patient_id
+     JOIN hospitals h ON h.id = cp.hospital_id
+     WHERE h.hcode = ?`,
+    [hcode], 'hosp:partograph-count', errors);
+  return NextResponse.json({
+    patient: labor[0] ?? null,
+    partographCount: partograph.length,
+    partographSample: partograph.slice(0, 10),
+    vitalCount: Number((vitals[0] as { n?: number } | undefined)?.n ?? 0),
+    journey: journey[0] ?? null,
+    hospitalPartographCount: Number(hospPartographCount[0]?.n ?? 0),
+    errors,
+  });
 }
 
 async function handle() {
@@ -139,6 +199,89 @@ async function handle() {
     `SELECT anc_risk_level, COUNT(*) as n FROM maternal_journeys GROUP BY anc_risk_level`,
     [], 'dist:risk', errors);
 
+  // Patients that actually have partograph observations — handy for clicking
+  // through to /patients/<hcode>-<an> to spot-check the UI.
+  const patientsWithPartograph = await safeQuery<Record<string, unknown>>(db,
+    `SELECT h.hcode, cp.an, cp.hn, cp.age, cp.ga_weeks, cp.labor_status,
+            COUNT(cpo.id) AS partograph_count,
+            MAX(cpo.observe_datetime) AS last_observed_at
+     FROM cached_partograph_observations cpo
+     JOIN cached_patients cp ON cp.id = cpo.patient_id
+     JOIN hospitals h ON h.id = cp.hospital_id
+     GROUP BY h.hcode, cp.an, cp.hn, cp.age, cp.ga_weeks, cp.labor_status
+     ORDER BY partograph_count DESC, last_observed_at DESC
+     LIMIT 20`,
+    [], 'patients-with-partograph', errors);
+
+  // ─── CID-continuity audit ─────────────────────────────────────────────
+  // Goal: measure how often a single CID connects multiple stages
+  // (ANC journey → labor admission → partograph rows → referral) — ideally
+  // also across hospitals (cross-hospital journey via referral).
+
+  const cidJourneyMatchCount = await safeQuery<{ n: number }>(db,
+    `SELECT COUNT(*) AS n
+     FROM cached_patients cp
+     WHERE cp.cid_hash IS NOT NULL AND cp.cid_hash <> ''
+       AND EXISTS (
+         SELECT 1 FROM maternal_journeys mj
+          WHERE mj.cid_hash = cp.cid_hash
+       )`,
+    [], 'cid:patient-with-journey', errors);
+
+  const laborTotal = await safeQuery<{ n: number }>(db,
+    `SELECT COUNT(*) AS n FROM cached_patients WHERE cid_hash IS NOT NULL AND cid_hash <> ''`,
+    [], 'cid:labor-total', errors);
+
+  const cidCrossHospital = await safeQuery<{ n: number }>(db,
+    `SELECT COUNT(DISTINCT cp.cid_hash) AS n
+     FROM cached_patients cp
+     JOIN maternal_journeys mj ON mj.cid_hash = cp.cid_hash
+     WHERE cp.hospital_id <> mj.hospital_id`,
+    [], 'cid:cross-hospital', errors);
+
+  // Referrals: do their (hashed) CIDs match any journey or cached patient?
+  const referralCidMatchJourney = await safeQuery<{ n: number }>(db,
+    `SELECT COUNT(*) AS n
+     FROM cached_referrals cr
+     WHERE EXISTS (
+       SELECT 1 FROM maternal_journeys mj WHERE mj.id = cr.journey_id
+     )`,
+    [], 'cid:referral-with-journey', errors);
+
+  const referralTotal = await safeQuery<{ n: number }>(db,
+    `SELECT COUNT(*) AS n FROM cached_referrals`,
+    [], 'cid:referral-total', errors);
+
+  // Full-graph chain: CID has both a journey AND a labor admission AND
+  // at least one partograph observation. This is the "full journey" case.
+  const fullGraph = await safeQuery<Record<string, unknown>>(db,
+    `SELECT mj.cid_hash, mj.id AS journey_id,
+            COUNT(DISTINCT cp.id) AS labor_count,
+            COUNT(DISTINCT cpo.id) AS partograph_count,
+            COUNT(DISTINCT cr.id) AS referral_count
+     FROM maternal_journeys mj
+     LEFT JOIN cached_patients cp
+            ON cp.cid_hash = mj.cid_hash
+     LEFT JOIN cached_partograph_observations cpo
+            ON cpo.patient_id = cp.id
+     LEFT JOIN cached_referrals cr
+            ON cr.journey_id = mj.id
+     WHERE mj.cid_hash IS NOT NULL AND mj.cid_hash <> ''
+     GROUP BY mj.cid_hash, mj.id
+     HAVING COUNT(DISTINCT cp.id) > 0
+     ORDER BY partograph_count DESC
+     LIMIT 10`,
+    [], 'cid:full-graph', errors);
+
+  const continuityAudit = {
+    laborTotal: Number(laborTotal[0]?.n ?? 0),
+    laborWithMatchingJourney: Number(cidJourneyMatchCount[0]?.n ?? 0),
+    crossHospitalCidMatches: Number(cidCrossHospital[0]?.n ?? 0),
+    referralTotal: Number(referralTotal[0]?.n ?? 0),
+    referralLinkedToJourney: Number(referralCidMatchJourney[0]?.n ?? 0),
+    fullGraphSamples: fullGraph,
+  };
+
   const bloodGroupDist = await safeQuery<{ blood_group: string; n: number }>(db,
     `SELECT COALESCE(blood_group, '—') as blood_group, COUNT(*) as n
      FROM maternal_journeys GROUP BY blood_group`,
@@ -170,6 +313,8 @@ async function handle() {
     riskBreakdown,
     bloodGroupDist,
     rhDist,
+    patientsWithPartograph,
+    continuityAudit,
     samples: {
       journeys: sampleJourneys,
       ancVisits: normalizedVisits,
