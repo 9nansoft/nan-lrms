@@ -204,7 +204,7 @@ export default function ProvinceMapLeaflet({
   const { data: configData } = useSWR<{ config: { active_province_code?: string } }>(
     '/api/admin/config',
   );
-  const activeProvince = configData?.config.active_province_code ?? KK_PROVINCE_CODE;
+  const activeProvince = configData?.config?.active_province_code ?? KK_PROVINCE_CODE;
 
   // For non-KK provinces we fetch the full Thailand GeoJSON + filter to the
   // active province at runtime. KK keeps using the pre-simplified inline

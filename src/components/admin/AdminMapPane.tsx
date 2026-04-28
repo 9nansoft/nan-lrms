@@ -65,7 +65,7 @@ export function AdminMapPane({ onSelectHospital }: AdminMapPaneProps = {}) {
     '/api/admin/provinces',
   );
 
-  const activeCode = configData?.config.active_province_code ?? '40';
+  const activeCode = configData?.config?.active_province_code ?? '40';
   const activeName =
     provincesData?.provinces.find((p) => p.code === activeCode)?.name ?? '—';
 

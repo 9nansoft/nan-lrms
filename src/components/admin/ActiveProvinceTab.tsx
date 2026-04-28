@@ -37,7 +37,7 @@ export function ActiveProvinceTab() {
   const { mutate: globalMutate } = useSWRConfig();
 
   useEffect(() => {
-    if (configData?.config.active_province_code) {
+    if (configData?.config?.active_province_code) {
       setSelectedCode(configData.config.active_province_code);
     }
   }, [configData]);
@@ -47,7 +47,7 @@ export function ActiveProvinceTab() {
   }
 
   const provinces = provincesData?.provinces ?? [];
-  const currentCode = configData?.config.active_province_code ?? '';
+  const currentCode = configData?.config?.active_province_code ?? '';
   const currentProvince = provinces.find((p) => p.code === currentCode);
   const changed = selectedCode !== currentCode;
 

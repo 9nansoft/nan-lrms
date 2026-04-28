@@ -69,7 +69,7 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
   const { data: configData } = useSWR<ConfigResponse>('/api/admin/config');
   const { data: provincesData } = useSWR<ProvincesResponse>('/api/admin/provinces');
 
-  const activeProvince = configData?.config.active_province_code ?? '40';
+  const activeProvince = configData?.config?.active_province_code ?? '40';
   const { data: mophData } = useSWR<{ hospitals: MophHospital[] }>(
     `/api/admin/moph-hospitals?province=${activeProvince}`,
   );
