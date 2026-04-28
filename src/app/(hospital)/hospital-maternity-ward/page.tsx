@@ -1,36 +1,42 @@
-// Hospital maternity-ward kiosk page (Task 25). Renders the room-grouped
-// WardLayoutView for the first ward returned by the BMS Session API, with a
-// header summary (ward name, total/occupied/free counts) and a manual refresh
-// button. Task 40 wires the PatientDrawer: clicking a bed opens the drawer
-// with the matching occupant; closing resets selection.
+// Hospital maternity-ward page — clinical-density redesign (Direction A v5
+// "Information Architect · Clinical Hospital").
+//
+// Consolidates what used to be two routes: the lite tile + DnD bed-move
+// surface formerly at this path, and the dense BedTileFull / WardLayoutViewFull
+// formerly at /hospital-maternity-ward/v2. After visual sign-off the dense
+// tile became the single canonical view; the v2 subroute is gone.
+//
+// Data: WARD_BEDS_OCCUPANCY_FULL via useMaternityWardStateFull. Joins are
+// PK-resolution lookups so the query stays inside the constitution VI 2-second
+// SQL budget for a 12-bed ward.
+//
+// Vital-sign source split (per project memory):
+//   * BP / T / P / RR / SpO2 / pain  → ipd_nurse_note (latest by note_date+time)
+//   * Cx / Stn / FHR / contractions / oxytocin / IV / amniotic
+//                                    → ipt_labour_partograph (latest by observe_datetime)
 'use client';
 import { useEffect, useState } from 'react';
 import { useBmsSession } from '@/hooks/useBmsSession';
-import { useMaternityWardState } from '@/hooks/useMaternityWardState';
+import { useMaternityWardStateFull } from '@/hooks/useMaternityWardStateFull';
 import { useOnboardHosxpWebhook } from '@/hooks/useOnboardHosxpWebhook';
 import {
-  WardLayoutView,
+  WardLayoutViewFull,
   type BedMovePayload,
-} from '@/components/maternity/WardLayoutView';
+} from '@/components/maternity/WardLayoutViewFull';
 import { PatientDrawer } from '@/components/maternity/PatientDrawer';
 import {
   getBedMoveReasons,
   movePatientBed,
 } from '@/services/maternity-ward';
-import { cn } from '@/lib/utils';
-import {
-  AlertCircle,
-  RefreshCw,
-  Bed,
-  UserCheck,
-  BedDouble,
-  Lock,
-  Activity,
-} from 'lucide-react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
-// Inline skeleton primitive — single-purpose, used only by this page so it
-// stays inline rather than getting promoted to a shared component (DRY: rule
-// of three not yet hit).
+const LIVE_GREEN = '#059669';
+const SLATE_INK = '#0F172A';
+const SLATE_MUTE = '#64748B';
+const ACCENT_BLUE = '#1565C0';
+const CRIT_RED = '#DC2626';
+const FONT_MONO = "'IBM Plex Mono', 'SF Mono', Consolas, monospace";
+
 function Skeleton({ className = '' }: { className?: string }) {
   return (
     <div
@@ -40,60 +46,27 @@ function Skeleton({ className = '' }: { className?: string }) {
   );
 }
 
-// Skeleton substitute for the room-grouped bed grid while wards / beds /
-// occupancy are loading. Rough proportions match WardLayoutView's actual
-// 32x32 (8rem) tiles so the layout doesn't reflow once data arrives.
-function BedGridSkeleton() {
-  return (
-    <div className="space-y-6" data-testid="bed-grid-skeleton" aria-busy="true">
-      {[0, 1].map((row) => (
-        <section
-          key={row}
-          className="rounded-xl border border-slate-200 bg-white p-4"
-        >
-          <div className="mb-3 flex items-baseline justify-between">
-            <Skeleton className="h-5 w-32" />
-            <Skeleton className="h-3 w-12" />
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-32 w-32" />
-            ))}
-          </div>
-        </section>
-      ))}
-      <span className="sr-only">กำลังโหลด…</span>
-    </div>
-  );
-}
-
 export default function HospitalMaternityWardPage() {
   const { isReady, error: sessionError, config, userInfo } = useBmsSession();
-  // Auto-provisions HOSxP's webhook_setting row on first kiosk landing (same
-  // flow as the provincial dashboard). No-op when already confirmed. Error
-  // surfaces via the red banner below so the kiosk operator can act on it
-  // without opening DevTools.
   const { state: onboardingState } = useOnboardHosxpWebhook();
   const [onboardingErrorDismissed, setOnboardingErrorDismissed] = useState(false);
   const showOnboardingError =
     !!onboardingState?.error && !onboardingErrorDismissed;
+
   const { wards, ward, beds, occupancy, isLoading, error, mutateBeds, mutateOccupancy } =
-    useMaternityWardState();
+    useMaternityWardStateFull();
   const [selectedAn, setSelectedAn] = useState<string | null>(null);
   const [reasons, setReasons] = useState<string[]>([]);
 
-  // Live "now" tick — drives hours-in-labor + last-observation relative time
-  // so the grid stays honest between SWR revalidations. Updating every 60s is
-  // plenty for hour-granularity displays. Pulled up here (instead of into
-  // BedTile) so all tiles share a single render cadence.
+  // 60s tick — drives hours-since-admit + crit severity classification.
   const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(id);
   }, []);
 
-  // Lazy-load the reason list once a session is available. Failures fall back
-  // to an empty list — the modal Confirm button stays disabled in that case.
+  // Lazy-load bed-move reasons once a session is available. Empty array
+  // disables the Confirm button on the reason modal.
   useEffect(() => {
     if (!config) return;
     let cancelled = false;
@@ -125,7 +98,6 @@ export default function HospitalMaternityWardPage() {
       </div>
     );
   }
-
   if (error) {
     return (
       <div
@@ -150,9 +122,6 @@ export default function HospitalMaternityWardPage() {
       </div>
     );
   }
-
-  // No wards → either none configured or all filtered out by is_maternity_ward.
-  // Distinct from "still loading" so we can give the user an actionable hint.
   if (!isLoading && wards.length === 0) {
     return (
       <div className="mx-auto mt-12 max-w-xl rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
@@ -165,26 +134,22 @@ export default function HospitalMaternityWardPage() {
       </div>
     );
   }
-
   if (isLoading || !ward) {
     return (
-      <div className="mx-auto max-w-[1600px] p-6 lg:p-8">
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-2">
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="h-4 w-64" />
-          </div>
-          <Skeleton className="h-9 w-24" />
-        </header>
-        <BedGridSkeleton />
+      <div className="mx-auto max-w-[1760px] p-7">
+        <Skeleton className="h-9 w-64 mb-3" />
+        <Skeleton className="h-4 w-80 mb-8" />
+        <div className="grid grid-cols-3 gap-5">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <Skeleton key={i} className="h-[300px] rounded-md" />
+          ))}
+        </div>
         <span className="sr-only">กำลังโหลด…</span>
       </div>
     );
   }
 
-  // Filter occupancy to the currently selected ward only. The BMS query can
-  // return admissions for other wards when joins are loose; stats and the grid
-  // must reflect only what's actually displayed.
+  // Filter occupancy to current ward's beds (defensive against loose joins).
   const bednoSet = new Set(beds.map((b) => b.bedno));
   const wardOccupancy = occupancy.filter((o) => bednoSet.has(o.bedno));
   const lockedCount = beds.filter((b) => b.bed_lock === 'Y').length;
@@ -196,6 +161,15 @@ export default function HospitalMaternityWardPage() {
     ? (wardOccupancy.find((o) => o.an === selectedAn) ?? null)
     : null;
 
+  // Critical count — same heuristic as BedTileFull.classify (mirrors page-level
+  // KPI "high-risk" with the per-tile pill so the two never disagree).
+  const critical = wardOccupancy.filter((o) => {
+    const ts = Date.parse(`${o.regdate}T${o.regtime ?? '00:00:00'}`);
+    const hrs = Number.isFinite(ts) ? (now - ts) / 3_600_000 : 0;
+    const cx = o.last_cervix_cm;
+    return hrs >= 12 && (cx === null || cx < 4);
+  }).length;
+
   const handleRefresh = () => {
     void mutateBeds();
     void mutateOccupancy();
@@ -206,9 +180,9 @@ export default function HospitalMaternityWardPage() {
     try {
       await movePatientBed(config, userInfo, userInfo.hospcode, {
         an: payload.an,
-        oldWard: ward!,
+        oldWard: ward,
         oldBedno: payload.oldBedno,
-        newWard: ward!,
+        newWard: ward,
         newBedno: payload.newBedno,
         newRoomno: payload.newRoomno,
         reason: payload.reason,
@@ -231,175 +205,252 @@ export default function HospitalMaternityWardPage() {
     console.warn(`[bed-move] rejected: ${msg}`);
   };
 
-  // Severity roll-ups — keep the summary bar honest without re-running the
-  // per-tile severity logic. Mirrors the thresholds in BedTile.classifySeverity.
-  // Uses the `now` tick (not Date.now()) to stay pure-during-render.
-  const critical = wardOccupancy.filter((o) => {
-    const admitMs = Date.parse(`${o.regdate}T${o.regtime ?? '00:00:00'}`);
-    const hrs = Number.isFinite(admitMs) ? (now - admitMs) / 3_600_000 : 0;
-    const cx = o.last_cervix_cm;
-    return hrs >= 12 && (cx === null || cx < 4);
-  }).length;
-
-  const onboardingBanner = showOnboardingError ? (
-    <div
-      role="alert"
-      className="mb-3 flex items-start gap-3 rounded-lg border bg-white px-4 py-3 text-sm shadow-sm"
-      style={{ borderColor: '#dc2626' }}
-    >
-      <div
-        className="shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-white"
-        style={{ background: '#dc2626' }}
-      >
-        HOSxP WEBHOOK
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-semibold text-slate-900">
-          ไม่สามารถอัปเดต webhook_setting บน HOSxP
-        </div>
-        <div className="mt-0.5 truncate text-xs text-slate-600">
-          {onboardingState?.error}
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={() => setOnboardingErrorDismissed(true)}
-        className="shrink-0 rounded border border-slate-300 bg-white px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-slate-600 hover:bg-slate-50"
-      >
-        ซ่อน
-      </button>
-    </div>
-  ) : null;
-
   return (
-    <div className="mx-auto max-w-[1600px] p-4 lg:p-6">
-      {onboardingBanner}
-      {/* Summary bar — sticky under the navbar so ward context stays visible while scrolling the grid. */}
-      <header className="sticky top-14 z-10 mb-4 rounded-xl border border-slate-200 bg-white/90 shadow-sm backdrop-blur">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 lg:px-5">
-          <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold leading-tight text-slate-900 lg:text-xl">
-              {wardName}
-            </h1>
-            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
-              <span
-                className={cn(
-                  'inline-block h-1.5 w-1.5 rounded-full',
-                  error
-                    ? 'bg-rose-500'
-                    : 'bg-emerald-500 animate-pulse motion-reduce:animate-none',
-                )}
-                aria-hidden
-              />
-              <span>อัปเดตอัตโนมัติทุก 20 วินาที</span>
-            </p>
-            {/* Screen-reader-only summary — also satisfies tests that assert the
-                classic "N เตียง · ใช้งาน X · ว่าง Y" string as a single text node. */}
-            <span className="sr-only">
-              {`${totalBeds} เตียง · ใช้งาน ${occupiedCount} · ว่าง ${freeCount}`}
-            </span>
-          </div>
-
-          {/* KPI chips — pre-attentive scan of ward state. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <KpiChip
-              icon={<Bed className="h-3.5 w-3.5" />}
-              label="ทั้งหมด"
-              value={totalBeds}
-              tone="neutral"
-            />
-            <KpiChip
-              icon={<UserCheck className="h-3.5 w-3.5" />}
-              label="ใช้งาน"
-              value={occupiedCount}
-              tone="emerald"
-            />
-            <KpiChip
-              icon={<BedDouble className="h-3.5 w-3.5" />}
-              label="เตียงว่าง"
-              value={freeCount}
-              tone="sky"
-            />
-            {lockedCount > 0 && (
-              <KpiChip
-                icon={<Lock className="h-3.5 w-3.5" />}
-                label="ล็อก"
-                value={lockedCount}
-                tone="slate"
-              />
-            )}
-            {critical > 0 && (
-              <KpiChip
-                icon={<Activity className="h-3.5 w-3.5" />}
-                label="เสี่ยงสูง"
-                value={critical}
-                tone="rose"
-              />
-            )}
-          </div>
-
-          <button
-            onClick={handleRefresh}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:border-emerald-400 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+    <div
+      className="mx-auto max-w-[1760px]"
+      style={{ padding: '0 28px 80px', background: '#F4F7FB', minHeight: '100vh' }}
+    >
+      {showOnboardingError && (
+        <div
+          role="alert"
+          className="mb-3 flex items-start gap-3 rounded-lg border bg-white px-4 py-3 text-sm shadow-sm"
+          style={{ borderColor: CRIT_RED }}
+        >
+          <div
+            className="shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-white"
+            style={{ background: CRIT_RED }}
           >
-            <RefreshCw className="h-4 w-4" />
-            <span className="hidden sm:inline">รีเฟรช</span>
+            HOSxP WEBHOOK
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-slate-900">
+              ไม่สามารถอัปเดต webhook_setting บน HOSxP
+            </div>
+            <div className="mt-0.5 truncate text-xs text-slate-600">
+              {onboardingState?.error}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOnboardingErrorDismissed(true)}
+            className="shrink-0 rounded border border-slate-300 bg-white px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-slate-600 hover:bg-slate-50"
+          >
+            ซ่อน
           </button>
         </div>
+      )}
+
+      {/* Masthead */}
+      <header
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr auto auto',
+          alignItems: 'end',
+          gap: 32,
+          padding: '28px 0 16px',
+          borderBottom: `2px solid ${SLATE_INK}`,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 14,
+              fontSize: 11,
+              letterSpacing: '0.22em',
+              textTransform: 'uppercase',
+              color: SLATE_MUTE,
+              marginBottom: 12,
+              fontWeight: 600,
+            }}
+          >
+            <span style={{ display: 'inline-block', width: 28, height: 5, background: ACCENT_BLUE }} />
+            <span style={{ color: SLATE_INK, fontWeight: 800, letterSpacing: '0.24em' }}>
+              KK-LRMS / OneLR
+            </span>
+            <span>· จังหวัดขอนแก่น · Provincial Maternity Network</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, flexWrap: 'wrap' }}>
+            <h1
+              style={{
+                fontSize: 38,
+                fontWeight: 800,
+                letterSpacing: '-0.005em',
+                margin: 0,
+                lineHeight: 1,
+                color: SLATE_INK,
+              }}
+            >
+              ห้องคลอด<span style={{ color: ACCENT_BLUE }}>.</span>
+            </h1>
+            <span style={{ fontSize: 14, color: '#1E293B', fontWeight: 600 }}>{wardName}</span>
+          </div>
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gap: 4,
+            fontFamily: FONT_MONO,
+            fontSize: 11,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: SLATE_MUTE,
+            textAlign: 'right',
+            fontWeight: 600,
+          }}
+        >
+          <div
+            style={{
+              color: LIVE_GREEN,
+              fontWeight: 700,
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                display: 'inline-block',
+                width: 7,
+                height: 7,
+                background: LIVE_GREEN,
+                borderRadius: '50%',
+              }}
+            />
+            LIVE · BMS SESSION API
+          </div>
+          <div>อัปเดตอัตโนมัติทุก 20 วินาที</div>
+        </div>
+        <button
+          onClick={handleRefresh}
+          style={{
+            border: `2px solid ${ACCENT_BLUE}`,
+            background: ACCENT_BLUE,
+            color: 'white',
+            fontFamily: FONT_MONO,
+            fontSize: 11,
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            fontWeight: 700,
+            padding: '10px 18px',
+            cursor: 'pointer',
+            borderRadius: 2,
+          }}
+          type="button"
+        >
+          Refresh ↻
+        </button>
       </header>
 
-      <WardLayoutView
-        beds={beds}
-        occupancy={wardOccupancy}
-        now={now}
-        onBedClick={setSelectedAn}
-        onBedMove={(p) => void handleBedMove(p)}
-        onMoveRejected={handleMoveRejected}
-        reasons={reasons}
-      />
+      {/* KPI bar */}
+      <section
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(5, 1fr)',
+          borderBottom: `2px solid ${SLATE_INK}`,
+          background: 'white',
+        }}
+      >
+        {(
+          [
+            { label: 'Total Beds', value: totalBeds, delta: '', accent: SLATE_INK },
+            {
+              label: 'Occupied',
+              value: occupiedCount,
+              delta: totalBeds > 0 ? `${Math.round((occupiedCount / totalBeds) * 100)}%` : '',
+              accent: LIVE_GREEN,
+            },
+            { label: 'Available', value: freeCount, delta: '', accent: ACCENT_BLUE },
+            { label: 'Locked', value: lockedCount, delta: '', accent: SLATE_MUTE },
+            {
+              label: 'High-risk',
+              value: critical,
+              delta: critical > 0 ? 'ACTION LINE' : '',
+              accent: CRIT_RED,
+            },
+          ] as const
+        ).map((k, i) => (
+          <div
+            key={k.label}
+            style={{
+              padding: '18px 18px 16px',
+              borderLeft: i === 0 ? 'none' : '1px solid #E2E8F0',
+              position: 'relative',
+            }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: '100%',
+                height: 3,
+                background: k.accent,
+              }}
+            />
+            <div
+              style={{
+                fontFamily: FONT_MONO,
+                fontSize: 10,
+                letterSpacing: '0.22em',
+                textTransform: 'uppercase',
+                color: SLATE_MUTE,
+                margin: '8px 0',
+                fontWeight: 700,
+              }}
+            >
+              {k.label}
+            </div>
+            <div
+              style={{
+                fontFamily: FONT_MONO,
+                fontSize: 38,
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                lineHeight: 1,
+                color: k.accent,
+              }}
+            >
+              {String(k.value).padStart(2, '0')}
+            </div>
+            {k.delta && (
+              <div
+                style={{
+                  fontFamily: FONT_MONO,
+                  fontSize: 10,
+                  letterSpacing: '0.1em',
+                  color: SLATE_MUTE,
+                  marginTop: 8,
+                  fontWeight: 600,
+                }}
+              >
+                {k.delta}
+              </div>
+            )}
+          </div>
+        ))}
+      </section>
+
+      {/* Ward layout — DnD-enabled bed grid */}
+      <div style={{ paddingTop: 28 }}>
+        <WardLayoutViewFull
+          beds={beds}
+          occupancy={wardOccupancy}
+          now={now}
+          onBedClick={setSelectedAn}
+          onBedMove={(p) => void handleBedMove(p)}
+          onMoveRejected={handleMoveRejected}
+          reasons={reasons}
+        />
+      </div>
+
       <PatientDrawer
         open={selectedAn !== null}
         occupant={selectedOccupant}
         onClose={() => setSelectedAn(null)}
       />
-    </div>
-  );
-}
-
-type KpiTone = 'neutral' | 'emerald' | 'sky' | 'slate' | 'rose';
-
-const KPI_TONES: Record<KpiTone, { chip: string; value: string; icon: string }> = {
-  neutral: { chip: 'bg-slate-50 ring-slate-200',   value: 'text-slate-900',   icon: 'text-slate-500'   },
-  emerald: { chip: 'bg-emerald-50 ring-emerald-200', value: 'text-emerald-800', icon: 'text-emerald-600' },
-  sky:     { chip: 'bg-sky-50 ring-sky-200',         value: 'text-sky-800',     icon: 'text-sky-600'     },
-  slate:   { chip: 'bg-slate-50 ring-slate-200',     value: 'text-slate-700',   icon: 'text-slate-500'   },
-  rose:    { chip: 'bg-rose-50 ring-rose-200',       value: 'text-rose-800',    icon: 'text-rose-600'    },
-};
-
-function KpiChip({
-  icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  tone: KpiTone;
-}) {
-  const t = KPI_TONES[tone];
-  return (
-    <div
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs ring-1',
-        t.chip,
-      )}
-    >
-      <span className={t.icon} aria-hidden>
-        {icon}
-      </span>
-      <span className="text-slate-500">{label}</span>
-      <span className={cn('font-semibold tabular-nums', t.value)}>{value}</span>
     </div>
   );
 }
