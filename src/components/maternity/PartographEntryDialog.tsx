@@ -7,7 +7,7 @@
 // PartographCDSBeforePost + DoSoftConfirmations from the Delphi unit.
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -472,37 +472,120 @@ function CollapsibleSection({
 // Quick-pick chips — one tap to set a value. Appears above the corresponding
 // numeric/select input so the most-frequent values are reachable without
 // typing. Selected state is derived from the current draft string.
+// DraggableChip — tap to set the exact preset, click-and-drag horizontally to
+// micro-adjust by ±step (1 for int fields, 0.1 for float). The chip face
+// previews the dragged value live so the nurse sees what they're committing
+// before releasing. Pixel-per-step (8) is small enough that BP 120 → 125
+// reads as a comfortable thumb-flick.
+const DRAG_PX_PER_STEP = 8;
+
+function DraggableChip({
+  chip,
+  selected,
+  onPick,
+  step,
+  isFloat,
+}: {
+  chip: { value: string; label: string };
+  selected: string;
+  onPick: (v: string) => void;
+  step: number;
+  isFloat: boolean;
+}) {
+  const [drag, setDrag] = useState<{ startX: number; startVal: number; preview: string } | null>(null);
+  const movedRef = useRef(false);
+
+  const fmt = (n: number): string =>
+    isFloat ? n.toFixed(1) : String(Math.round(n));
+
+  const isSelected = drag ? selected === drag.preview : selected === chip.value;
+  const displayLabel = drag ? drag.preview : chip.label;
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        // Suppress synthetic click that follows a real drag — pointerup
+        // already committed the value.
+        if (movedRef.current) {
+          movedRef.current = false;
+          e.preventDefault();
+          return;
+        }
+        onPick(chip.value);
+      }}
+      onPointerDown={(e) => {
+        const startVal = parseFloat(chip.value);
+        if (!Number.isFinite(startVal)) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        movedRef.current = false;
+        setDrag({ startX: e.clientX, startVal, preview: chip.value });
+      }}
+      onPointerMove={(e) => {
+        if (!drag) return;
+        const dx = e.clientX - drag.startX;
+        const stepsCount = Math.round(dx / DRAG_PX_PER_STEP);
+        if (stepsCount === 0) return;
+        movedRef.current = true;
+        const next = drag.startVal + stepsCount * step;
+        const preview = fmt(next);
+        if (preview !== drag.preview) {
+          setDrag({ ...drag, preview });
+        }
+      }}
+      onPointerUp={(e) => {
+        if (!drag) return;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        if (movedRef.current) {
+          onPick(drag.preview);
+        }
+        setDrag(null);
+      }}
+      onPointerCancel={() => {
+        setDrag(null);
+        movedRef.current = false;
+      }}
+      title="แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า"
+      className={cn(
+        'min-w-[48px] cursor-ew-resize touch-none select-none rounded-md border px-3 py-1.5 text-[13px] font-semibold tabular-nums transition-all',
+        isSelected
+          ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
+          : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
+        drag && movedRef.current && 'scale-110 shadow-lg ring-2 ring-cyan-400',
+      )}
+    >
+      {displayLabel}
+    </button>
+  );
+}
+
 function ChipRow({
   options,
   selected,
   onPick,
   ariaLabel,
+  step = 1,
+  isFloat = false,
 }: {
   options: ReadonlyArray<{ value: string; label: string }>;
   selected: string;
   onPick: (v: string) => void;
   ariaLabel?: string;
+  step?: number;
+  isFloat?: boolean;
 }) {
   return (
     <div className="flex flex-wrap gap-2" role="group" aria-label={ariaLabel}>
-      {options.map((o) => {
-        const isSelected = selected === o.value;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => onPick(o.value)}
-            className={cn(
-              'min-w-[44px] rounded-md border px-3 py-1.5 text-[13px] font-semibold tabular-nums transition-all',
-              isSelected
-                ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
-            )}
-          >
-            {o.label}
-          </button>
-        );
-      })}
+      {options.map((o) => (
+        <DraggableChip
+          key={o.value}
+          chip={o}
+          selected={selected}
+          onPick={onPick}
+          step={step}
+          isFloat={isFloat}
+        />
+      ))}
     </div>
   );
 }
@@ -633,6 +716,11 @@ interface FieldProps {
   colSpan?: 'full';
   abnormal?: boolean;
   abnormalHint?: string;
+  /** Quick-pick chip presets rendered INLINE below the input. Tap → onChange(value).
+   *  Selection is derived from the current `value` so chips highlight when they
+   *  match. Keeping chips per-field (vs a section-level row) makes the visual
+   *  binding between helper and input direct. */
+  chips?: ReadonlyArray<{ value: string; label: string }>;
 }
 
 function Field({
@@ -645,6 +733,7 @@ function Field({
   options,
   colSpan,
   abnormal,
+  chips,
 }: FieldProps) {
   const inputId = `pf-${name}`;
   // Numeric fields render in IBM Plex Mono with tabular-nums so columns align
@@ -727,6 +816,16 @@ function Field({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={inputCls}
+        />
+      )}
+      {chips && chips.length > 0 && (
+        <ChipRow
+          ariaLabel={`${name} quick picks`}
+          options={chips}
+          selected={value}
+          onPick={onChange}
+          step={type === 'float' ? 0.1 : 1}
+          isFloat={type === 'float'}
         />
       )}
     </div>
@@ -916,19 +1015,7 @@ export function PartographEntryDialog({
                 relevant input so common values are reachable without typing. */}
 
           <div className="grid gap-2 lg:grid-cols-2">
-            <Section
-              title="ทารกในครรภ์"
-              tone="fhr"
-              cols="grid-cols-3"
-              chips={
-                <ChipRow
-                  ariaLabel="FHR quick picks"
-                  options={FHR_CHIPS}
-                  selected={draft.fetal_heart_rate}
-                  onPick={(v) => set('fetal_heart_rate', v)}
-                />
-              }
-            >
+            <Section title="ทารกในครรภ์" tone="fhr" cols="grid-cols-3">
               <Field
                 name="fetal_heart_rate"
                 label="FHR"
@@ -936,60 +1023,62 @@ export function PartographEntryDialog({
                 value={draft.fetal_heart_rate}
                 onChange={(v) => set('fetal_heart_rate', v)}
                 abnormal={abnormal.fetal_heart_rate}
+                chips={FHR_CHIPS}
               />
               <Field name="amniotic_fluid" label="น้ำคร่ำ" value={draft.amniotic_fluid} options={AMNIOTIC_OPTIONS} onChange={(v) => set('amniotic_fluid', v)} />
               <Field name="moulding" label="Moulding" value={draft.moulding} options={MOULDING_OPTIONS} onChange={(v) => set('moulding', v)} />
             </Section>
 
-            <Section
-              title="ความก้าวหน้าของการคลอด"
-              tone="labour"
-              cols="grid-cols-2"
-              chips={
-                <div className="flex flex-col gap-1.5">
-                  <ChipLabelRow label="Cx" options={CX_CHIPS} selected={draft.cervical_dilation_cm} onPick={(v) => set('cervical_dilation_cm', v)} />
-                  <ChipLabelRow label="Descent" options={DESCENT_CHIPS} selected={draft.descent_of_head} onPick={(v) => set('descent_of_head', v)} />
-                </div>
-              }
-            >
-              <Field name="cervical_dilation_cm" label="ปากมดลูก (ซม)" hint="0–10" type="float" value={draft.cervical_dilation_cm} onChange={(v) => set('cervical_dilation_cm', v)} />
-              <Field name="descent_of_head" label="Descent" value={draft.descent_of_head} options={DESCENT_OPTIONS} onChange={(v) => set('descent_of_head', v)} />
+            <Section title="ความก้าวหน้าของการคลอด" tone="labour" cols="grid-cols-2">
+              <Field
+                name="cervical_dilation_cm"
+                label="ปากมดลูก (ซม)"
+                hint="0–10"
+                type="float"
+                value={draft.cervical_dilation_cm}
+                onChange={(v) => set('cervical_dilation_cm', v)}
+                chips={CX_CHIPS}
+              />
+              <Field
+                name="descent_of_head"
+                label="Descent"
+                value={draft.descent_of_head}
+                options={DESCENT_OPTIONS}
+                onChange={(v) => set('descent_of_head', v)}
+                chips={DESCENT_CHIPS}
+              />
             </Section>
           </div>
 
-          <Section
-            title="การหดรัดตัวของมดลูก"
-            tone="cont"
-            cols="grid-cols-3"
-            chips={
-              <div className="flex flex-col gap-1.5">
-                <ChipLabelRow label="Per/10 min" options={CONTR_FREQ_CHIPS} selected={draft.contraction_per_10min} onPick={(v) => set('contraction_per_10min', v)} />
-                <ChipLabelRow label="Duration" options={CONTR_DUR_CHIPS} selected={draft.contraction_duration_sec} onPick={(v) => set('contraction_duration_sec', v)} />
-                <ChipLabelRow label="Strength" options={STRENGTH_CHIPS} selected={draft.contraction_strength} onPick={(v) => set('contraction_strength', v)} />
-              </div>
-            }
-          >
-            <Field name="contraction_per_10min" label="ครั้ง/10นาที" value={draft.contraction_per_10min} onChange={(v) => set('contraction_per_10min', v)} />
-            <Field name="contraction_duration_sec" label="ระยะเวลา (วิ)" value={draft.contraction_duration_sec} onChange={(v) => set('contraction_duration_sec', v)} />
-            <Field name="contraction_strength" label="ความแรง" value={draft.contraction_strength} options={CONTRACTION_STRENGTH_OPTIONS} onChange={(v) => set('contraction_strength', v)} />
+          <Section title="การหดรัดตัวของมดลูก" tone="cont" cols="grid-cols-3">
+            <Field
+              name="contraction_per_10min"
+              label="ครั้ง/10นาที"
+              value={draft.contraction_per_10min}
+              onChange={(v) => set('contraction_per_10min', v)}
+              chips={CONTR_FREQ_CHIPS}
+            />
+            <Field
+              name="contraction_duration_sec"
+              label="ระยะเวลา (วิ)"
+              value={draft.contraction_duration_sec}
+              onChange={(v) => set('contraction_duration_sec', v)}
+              chips={CONTR_DUR_CHIPS}
+            />
+            <Field
+              name="contraction_strength"
+              label="ความแรง"
+              value={draft.contraction_strength}
+              options={CONTRACTION_STRENGTH_OPTIONS}
+              onChange={(v) => set('contraction_strength', v)}
+              chips={STRENGTH_CHIPS}
+            />
           </Section>
 
           {/* Maternal vitals — moved up before drugs because pulse/BP are
               checked every 30 min during active labour vs. drugs adjusted only
               when augmenting. */}
-          <Section
-            title="สัญญาณชีพมารดา"
-            tone="vitals"
-            cols="grid-cols-2 sm:grid-cols-4"
-            chips={
-              <div className="flex flex-col gap-1.5">
-                <ChipLabelRow label="Pulse" options={PULSE_CHIPS} selected={draft.pulse} onPick={(v) => set('pulse', v)} />
-                <ChipLabelRow label="BP Sys" options={BP_SYS_CHIPS} selected={draft.bp_systolic} onPick={(v) => set('bp_systolic', v)} />
-                <ChipLabelRow label="BP Dia" options={BP_DIA_CHIPS} selected={draft.bp_diastolic} onPick={(v) => set('bp_diastolic', v)} />
-                <ChipLabelRow label="Temp" options={TEMP_CHIPS} selected={draft.temperature} onPick={(v) => set('temperature', v)} />
-              </div>
-            }
-          >
+          <Section title="สัญญาณชีพมารดา" tone="vitals" cols="grid-cols-2 sm:grid-cols-4">
             <Field
               name="pulse"
               label="Pulse"
@@ -997,6 +1086,7 @@ export function PartographEntryDialog({
               value={draft.pulse}
               onChange={(v) => set('pulse', v)}
               abnormal={abnormal.pulse}
+              chips={PULSE_CHIPS}
             />
             <Field
               name="bp_systolic"
@@ -1005,6 +1095,7 @@ export function PartographEntryDialog({
               value={draft.bp_systolic}
               onChange={(v) => set('bp_systolic', v)}
               abnormal={abnormal.bp_systolic}
+              chips={BP_SYS_CHIPS}
             />
             <Field
               name="bp_diastolic"
@@ -1013,6 +1104,7 @@ export function PartographEntryDialog({
               value={draft.bp_diastolic}
               onChange={(v) => set('bp_diastolic', v)}
               abnormal={abnormal.bp_diastolic}
+              chips={BP_DIA_CHIPS}
             />
             <Field
               name="temperature"
@@ -1022,6 +1114,7 @@ export function PartographEntryDialog({
               value={draft.temperature}
               onChange={(v) => set('temperature', v)}
               abnormal={abnormal.temperature}
+              chips={TEMP_CHIPS}
             />
           </Section>
 
@@ -1039,15 +1132,22 @@ export function PartographEntryDialog({
               draft.drugs_iv_fluids !== ''
             }
             badge="เมื่อมีการให้ยา/สารน้ำ"
-            chips={
-              <div className="flex flex-col gap-1.5">
-                <ChipLabelRow label="Oxy U/mL" options={OXY_UML_CHIPS} selected={draft.oxytocin_uml} onPick={(v) => set('oxytocin_uml', v)} />
-                <ChipLabelRow label="Drops/min" options={OXY_DROPS_CHIPS} selected={draft.oxytocin_drops_min} onPick={(v) => set('oxytocin_drops_min', v)} />
-              </div>
-            }
           >
-            <Field name="oxytocin_uml" label="Oxy U/mL" type="float" value={draft.oxytocin_uml} onChange={(v) => set('oxytocin_uml', v)} />
-            <Field name="oxytocin_drops_min" label="Oxy หยด/นาที" value={draft.oxytocin_drops_min} onChange={(v) => set('oxytocin_drops_min', v)} />
+            <Field
+              name="oxytocin_uml"
+              label="Oxy U/mL"
+              type="float"
+              value={draft.oxytocin_uml}
+              onChange={(v) => set('oxytocin_uml', v)}
+              chips={OXY_UML_CHIPS}
+            />
+            <Field
+              name="oxytocin_drops_min"
+              label="Oxy หยด/นาที"
+              value={draft.oxytocin_drops_min}
+              onChange={(v) => set('oxytocin_drops_min', v)}
+              chips={OXY_DROPS_CHIPS}
+            />
             <Field name="drugs_iv_fluids" label="IV / ยา" type="text" value={draft.drugs_iv_fluids} onChange={(v) => set('drugs_iv_fluids', v)} />
           </CollapsibleSection>
 

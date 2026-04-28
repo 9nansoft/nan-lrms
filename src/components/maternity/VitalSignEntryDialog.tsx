@@ -6,7 +6,7 @@
 // same shell.
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -350,37 +350,102 @@ function CollapsibleSection({
   );
 }
 
+// DraggableChip — tap to set the exact preset, click-and-drag horizontally to
+// micro-adjust by ±step (1 for int, 0.1 for float). Live-previews the dragged
+// value on the chip face so the nurse confirms before releasing.
+const DRAG_PX_PER_STEP = 8;
+
+function DraggableChip({
+  chip,
+  selected,
+  onPick,
+  step,
+  isFloat,
+}: {
+  chip: { value: string; label: string };
+  selected: string;
+  onPick: (v: string) => void;
+  step: number;
+  isFloat: boolean;
+}) {
+  const [drag, setDrag] = useState<{ startX: number; startVal: number; preview: string } | null>(null);
+  const movedRef = useRef(false);
+  const fmt = (n: number): string => (isFloat ? n.toFixed(1) : String(Math.round(n)));
+  const isSelected = drag ? selected === drag.preview : selected === chip.value;
+  const displayLabel = drag ? drag.preview : chip.label;
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        if (movedRef.current) {
+          movedRef.current = false;
+          e.preventDefault();
+          return;
+        }
+        onPick(chip.value);
+      }}
+      onPointerDown={(e) => {
+        const startVal = parseFloat(chip.value);
+        if (!Number.isFinite(startVal)) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        movedRef.current = false;
+        setDrag({ startX: e.clientX, startVal, preview: chip.value });
+      }}
+      onPointerMove={(e) => {
+        if (!drag) return;
+        const dx = e.clientX - drag.startX;
+        const stepsCount = Math.round(dx / DRAG_PX_PER_STEP);
+        if (stepsCount === 0) return;
+        movedRef.current = true;
+        const next = drag.startVal + stepsCount * step;
+        const preview = fmt(next);
+        if (preview !== drag.preview) setDrag({ ...drag, preview });
+      }}
+      onPointerUp={(e) => {
+        if (!drag) return;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        if (movedRef.current) onPick(drag.preview);
+        setDrag(null);
+      }}
+      onPointerCancel={() => {
+        setDrag(null);
+        movedRef.current = false;
+      }}
+      title="แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า"
+      className={cn(
+        'min-w-[48px] cursor-ew-resize touch-none select-none rounded-md border px-3 py-1.5 text-[13px] font-semibold tabular-nums transition-all',
+        isSelected
+          ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
+          : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
+        drag && movedRef.current && 'scale-110 shadow-lg ring-2 ring-cyan-400',
+      )}
+    >
+      {displayLabel}
+    </button>
+  );
+}
+
 function ChipRow({
   options,
   selected,
   onPick,
   ariaLabel,
+  step = 1,
+  isFloat = false,
 }: {
   options: ReadonlyArray<{ value: string; label: string }>;
   selected: string;
   onPick: (v: string) => void;
   ariaLabel?: string;
+  step?: number;
+  isFloat?: boolean;
 }) {
   return (
     <div className="flex flex-wrap gap-2" role="group" aria-label={ariaLabel}>
-      {options.map((o) => {
-        const isSelected = selected === o.value;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => onPick(o.value)}
-            className={cn(
-              'min-w-[44px] rounded-md border px-3 py-1.5 text-[13px] font-semibold tabular-nums transition-all',
-              isSelected
-                ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
-            )}
-          >
-            {o.label}
-          </button>
-        );
-      })}
+      {options.map((o) => (
+        <DraggableChip key={o.value} chip={o} selected={selected} onPick={onPick} step={step} isFloat={isFloat} />
+      ))}
     </div>
   );
 }
@@ -462,10 +527,13 @@ interface FieldProps {
   options?: readonly string[];
   colSpan?: 'full';
   abnormal?: boolean;
+  /** Quick-pick chip presets rendered INLINE below the input. Tap → onChange,
+   *  click-and-drag horizontally → micro-adjust by ±step (handled by ChipRow). */
+  chips?: ReadonlyArray<{ value: string; label: string }>;
 }
 
 function Field({
-  name, label, hint, value, onChange, type = 'int', options, colSpan, abnormal,
+  name, label, hint, value, onChange, type = 'int', options, colSpan, abnormal, chips,
 }: FieldProps) {
   const inputId = `nn-${name}`;
   const isNumeric = type === 'int' || type === 'float';
@@ -550,6 +618,16 @@ function Field({
           className={inputCls}
         />
       )}
+      {chips && chips.length > 0 && (
+        <ChipRow
+          ariaLabel={`${name} quick picks`}
+          options={chips}
+          selected={value}
+          onPick={onChange}
+          step={type === 'float' ? 0.1 : 1}
+          isFloat={type === 'float'}
+        />
+      )}
     </div>
   );
 }
@@ -629,33 +707,16 @@ export function VitalSignEntryDialog({
             <Field name="note_time" label="เวลา" type="time" value={draft.note_time} onChange={(v) => set('note_time', v)} />
           </Section>
 
-          <Section
-            title="สัญญาณชีพหลัก"
-            tone="vitals"
-            cols="grid-cols-2 sm:grid-cols-3 lg:grid-cols-4"
-            chips={
-              <div className="flex flex-col gap-1.5">
-                <ChipLabelRow label="Temp" options={TEMP_CHIPS} selected={draft.temperature} onPick={(v) => set('temperature', v)} />
-                <ChipLabelRow label="Pulse" options={PULSE_CHIPS} selected={draft.pulse} onPick={(v) => set('pulse', v)} />
-                <ChipLabelRow label="HR" options={HR_CHIPS} selected={draft.heart_rate} onPick={(v) => set('heart_rate', v)} />
-                <ChipLabelRow label="BP Sys" options={BP_SYS_CHIPS} selected={draft.bp_systolic} onPick={(v) => set('bp_systolic', v)} />
-                <ChipLabelRow label="BP Dia" options={BP_DIA_CHIPS} selected={draft.bp_diastolic} onPick={(v) => set('bp_diastolic', v)} />
-                <ChipLabelRow label="RR" options={RR_CHIPS} selected={draft.respiratory_rate} onPick={(v) => set('respiratory_rate', v)} />
-                <ChipLabelRow label="SpO₂ RA" options={SPO2_CHIPS} selected={draft.spo2_ra} onPick={(v) => set('spo2_ra', v)} />
-                <ChipLabelRow label="SpO₂ O₂" options={SPO2_CHIPS} selected={draft.spo2_o2} onPick={(v) => set('spo2_o2', v)} />
-                <ChipLabelRow label="Pain" options={PAIN_CHIPS} selected={draft.pain_score} onPick={(v) => set('pain_score', v)} />
-              </div>
-            }
-          >
-            <Field name="temperature" label="Temp" hint="°C · <38" type="float" value={draft.temperature} onChange={(v) => set('temperature', v)} abnormal={abn.temperature} />
-            <Field name="pulse" label="Pulse" hint="60–100" value={draft.pulse} onChange={(v) => set('pulse', v)} abnormal={abn.pulse} />
-            <Field name="heart_rate" label="HR" hint="60–100" value={draft.heart_rate} onChange={(v) => set('heart_rate', v)} />
-            <Field name="bp_systolic" label="BP Sys" hint="<140" value={draft.bp_systolic} onChange={(v) => set('bp_systolic', v)} abnormal={abn.bp_systolic} />
-            <Field name="bp_diastolic" label="BP Dia" hint="<90" value={draft.bp_diastolic} onChange={(v) => set('bp_diastolic', v)} abnormal={abn.bp_diastolic} />
-            <Field name="respiratory_rate" label="RR" hint="12–24" value={draft.respiratory_rate} onChange={(v) => set('respiratory_rate', v)} abnormal={abn.respiratory_rate} />
-            <Field name="spo2_ra" label="SpO₂ (RA)" hint="%" value={draft.spo2_ra} onChange={(v) => set('spo2_ra', v)} abnormal={abn.spo2_ra} />
-            <Field name="spo2_o2" label="SpO₂ (on O₂)" hint="%" value={draft.spo2_o2} onChange={(v) => set('spo2_o2', v)} />
-            <Field name="pain_score" label="Pain" hint="0–10" value={draft.pain_score} onChange={(v) => set('pain_score', v)} />
+          <Section title="สัญญาณชีพหลัก" tone="vitals" cols="grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+            <Field name="temperature" label="Temp" hint="°C · <38" type="float" value={draft.temperature} onChange={(v) => set('temperature', v)} abnormal={abn.temperature} chips={TEMP_CHIPS} />
+            <Field name="pulse" label="Pulse" hint="60–100" value={draft.pulse} onChange={(v) => set('pulse', v)} abnormal={abn.pulse} chips={PULSE_CHIPS} />
+            <Field name="heart_rate" label="HR" hint="60–100" value={draft.heart_rate} onChange={(v) => set('heart_rate', v)} chips={HR_CHIPS} />
+            <Field name="bp_systolic" label="BP Sys" hint="<140" value={draft.bp_systolic} onChange={(v) => set('bp_systolic', v)} abnormal={abn.bp_systolic} chips={BP_SYS_CHIPS} />
+            <Field name="bp_diastolic" label="BP Dia" hint="<90" value={draft.bp_diastolic} onChange={(v) => set('bp_diastolic', v)} abnormal={abn.bp_diastolic} chips={BP_DIA_CHIPS} />
+            <Field name="respiratory_rate" label="RR" hint="12–24" value={draft.respiratory_rate} onChange={(v) => set('respiratory_rate', v)} abnormal={abn.respiratory_rate} chips={RR_CHIPS} />
+            <Field name="spo2_ra" label="SpO₂ (RA)" hint="%" value={draft.spo2_ra} onChange={(v) => set('spo2_ra', v)} abnormal={abn.spo2_ra} chips={SPO2_CHIPS} />
+            <Field name="spo2_o2" label="SpO₂ (on O₂)" hint="%" value={draft.spo2_o2} onChange={(v) => set('spo2_o2', v)} chips={SPO2_CHIPS} />
+            <Field name="pain_score" label="Pain" hint="0–10" value={draft.pain_score} onChange={(v) => set('pain_score', v)} chips={PAIN_CHIPS} />
           </Section>
 
           {/* ── Tier 2: contextual sections — auto-open when the row being
