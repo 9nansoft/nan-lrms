@@ -470,7 +470,18 @@ export async function upsertLabour(
   if (exists) {
     await restUpdate('ipt_labour', an, fields as Record<string, unknown>, config);
   } else {
-    await restInsert('ipt_labour', { an, ...fields } as Record<string, unknown>, config);
+    // ipt_labour_id is the PRI key (auto-increment in MySQL but the BMS
+    // REST endpoint won't auto-fill it — sending the body without an id
+    // makes the server default to 0 and collide with the existing id=0
+    // row, surfacing as #23000 Duplicate entry '0' for key 'PRIMARY'.
+    // Mint a fresh serial via get_serialnumber() — same pattern every
+    // other insert in this service uses (partograph, vital-sign, etc.).
+    const id = await mintSerial(config, 'ipt_labour', 'ipt_labour_id');
+    await restInsert(
+      'ipt_labour',
+      { ipt_labour_id: id, an, ...fields } as Record<string, unknown>,
+      config,
+    );
   }
   fireAudit({
     entity: 'ipt_labour',
@@ -497,7 +508,14 @@ export async function upsertLabor(
   if (exists) {
     await restUpdate('labor', an, fields as Record<string, unknown>, config);
   } else {
-    await restInsert('labor', { an, ...fields } as Record<string, unknown>, config);
+    // labor.laborid is PRI; mint a fresh serial before insert (same
+    // duplicate-PK guard as upsertLabour above).
+    const id = await mintSerial(config, 'labor', 'laborid');
+    await restInsert(
+      'labor',
+      { laborid: id, an, ...fields } as Record<string, unknown>,
+      config,
+    );
   }
   fireAudit({
     entity: 'labor',
