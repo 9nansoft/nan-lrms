@@ -9,6 +9,7 @@ import { mintSerial } from '@/lib/bms-serial';
 import {
   BED_MOVE_REASONS,
   DRUG_LOOKUP,
+  DRUGUSAGE_LOOKUP,
   MATERNITY_WARDS,
   PATIENT_COMPLICATIONS_BY_LABOUR_ID,
   PATIENT_INFANTS_BY_AN,
@@ -781,6 +782,26 @@ export async function searchDrugs(
   if (trimmed.length < 1) return [];
   const sql = getQuery(DRUG_LOOKUP, DEFAULT_DIALECT);
   const r = await executeSql<{ icode: string; label: string }>(
+    sql,
+    config,
+    { q: `%${trimmed}%` },
+  );
+  return r.data;
+}
+
+// Drug-usage typeahead — searches `drugusage.shortlist` (the Thai
+// instruction text shown in dropdowns) and `drugusage` (the 7-char code).
+// Returns { drugusage, shortlist } — caller decides whether to store the
+// shortlist text (typical for labour_medication.drugusage which is free-text
+// in this kiosk) or the code (canonical HOSxP storage).
+export async function searchDrugUsage(
+  config: ConnectionConfig,
+  query: string,
+): Promise<Array<{ drugusage: string; shortlist: string }>> {
+  const trimmed = query.trim();
+  if (trimmed.length < 1) return [];
+  const sql = getQuery(DRUGUSAGE_LOOKUP, DEFAULT_DIALECT);
+  const r = await executeSql<{ drugusage: string; shortlist: string }>(
     sql,
     config,
     { q: `%${trimmed}%` },

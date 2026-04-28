@@ -669,6 +669,16 @@ export const DRUG_LOOKUP: SqlQueryTemplate = {
   mysql: `SELECT icode, CONCAT(name, ' ', strength, ' ', units) AS label FROM s_drugitems WHERE name LIKE :q ORDER BY name LIMIT 50`,
 };
 
+// Lookup: drug-usage instructions table — Thai LR practice references this
+// for "1x3 oral หลังอาหาร", PRN, IV bolus etc. PK is `drugusage` (a 7-char
+// code); `shortlist` is the human-readable Thai instruction string used in
+// dropdowns and printed labels (see HOSxPMedicationOrderFrameUnit R84-R86).
+// We search both shortlist and code so the user can type either side.
+export const DRUGUSAGE_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT drugusage, shortlist FROM drugusage WHERE shortlist LIKE :q OR drugusage LIKE :q ORDER BY shortlist LIMIT 50`,
+  mysql: `SELECT drugusage, shortlist FROM drugusage WHERE shortlist LIKE :q OR drugusage LIKE :q ORDER BY shortlist LIMIT 50`,
+};
+
 // Lookup: labour-complication codes
 export const LABOUR_COMPLICATION_LOOKUP: SqlQueryTemplate = {
   postgresql: `SELECT labour_complication_id, name FROM labour_complication ORDER BY name`,
