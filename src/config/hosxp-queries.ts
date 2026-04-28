@@ -629,10 +629,13 @@ export const PATIENT_LABOR_BY_AN: SqlQueryTemplate = {
   mysql: `SELECT * FROM labor WHERE an = :an`,
 };
 
-// Labour-medication rows (free-text meds) for a single admission
+// Labour-medication rows for a single admission. JOINed to s_drugitems so
+// the UI can render a human-readable drug name (e.g. "Pethidine 50mg") next
+// to the raw icode — same pattern PATIENT_STAGE_MED_BY_AN uses for the
+// delivery-room meds table.
 export const PATIENT_LABOUR_MED_BY_AN: SqlQueryTemplate = {
-  postgresql: `SELECT * FROM labour_medication WHERE an = :an`,
-  mysql: `SELECT * FROM labour_medication WHERE an = :an`,
+  postgresql: `SELECT lm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name FROM labour_medication lm LEFT JOIN s_drugitems s ON s.icode = lm.icode WHERE lm.an = :an`,
+  mysql: `SELECT lm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name FROM labour_medication lm LEFT JOIN s_drugitems s ON s.icode = lm.icode WHERE lm.an = :an`,
 };
 
 // Stage-medication rows (delivery-room meds keyed to drug master) with friendly

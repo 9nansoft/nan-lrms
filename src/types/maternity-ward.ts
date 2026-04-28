@@ -259,6 +259,10 @@ export interface LabourMedRow {
   doctor_code: string | null;
   drugusage: string | null;
   medication_note_text: string | null;
+  /** Joined from s_drugitems via the PATIENT_LABOUR_MED_BY_AN query —
+   *  CONCAT(name, ' ', strength, ' ', units). Null when the icode has no
+   *  matching drug master row (rare; usually means a free-text/legacy code). */
+  medication_name?: string | null;
 }
 
 export interface StageMedRow {
