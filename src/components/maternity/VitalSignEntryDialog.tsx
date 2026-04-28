@@ -30,7 +30,7 @@ export interface VitalSignEntryDialogProps {
 
 // Full nurse-note field catalog covering Batches 2.1 → 2.3.
 type AnyField =
-  | 'note_date' | 'note_time'
+  | 'note_date' | 'note_time' | 'ipd_nurse_shift_id'
   // Core + extended vitals
   | 'temperature'
   | 'pulse' | 'heart_rate'
@@ -78,7 +78,7 @@ const STOOL_UNIT_OPTIONS = ['', 'ครั้ง', 'g'];
 
 function blankDraft(): DraftState {
   return {
-    note_date: '', note_time: '',
+    note_date: '', note_time: '', ipd_nurse_shift_id: '',
     temperature: '',
     pulse: '', heart_rate: '',
     bp_systolic: '', bp_diastolic: '',
@@ -126,12 +126,38 @@ function asStr(v: unknown): string {
   return String(v);
 }
 
+// Derive the standard 3-shift `ipd_nurse_shift_id` from a HH:MM time string.
+// Matches the Delphi PulseTempChartEntryFrame query
+//   SELECT ipd_nurse_shift_id FROM ipd_nurse_shift
+//   WHERE time_min <= :note_time ORDER BY time_min DESC LIMIT 1
+// against the canonical shift table rows confirmed live:
+//   1 = เช้า   08:00–15:59:59
+//   2 = บ่าย  16:00–23:59:59
+//   3 = ดึก   00:00–07:59:59
+const SHIFT_OPTIONS = [
+  { id: 1, label: 'เช้า', range: '08:00–16:00' },
+  { id: 2, label: 'บ่าย', range: '16:00–24:00' },
+  { id: 3, label: 'ดึก', range: '00:00–08:00' },
+] as const;
+
+function deriveShiftId(noteTime: string): number | null {
+  const m = /^(\d{2}):(\d{2})/.exec(noteTime);
+  if (!m) return null;
+  const minutes = Number(m[1]) * 60 + Number(m[2]);
+  if (minutes >= 480 && minutes <= 959) return 1;       // 08:00–15:59
+  if (minutes >= 960 && minutes <= 1439) return 2;      // 16:00–23:59
+  if (minutes >= 0 && minutes <= 479) return 3;         // 00:00–07:59
+  return null;
+}
+
 function rowToDraft(row: NurseNoteRow | null): DraftState {
   const d = blankDraft();
   if (!row) {
     const now = todayLocal();
     d.note_date = now.date;
     d.note_time = now.time;
+    const sid = deriveShiftId(now.time);
+    if (sid !== null) d.ipd_nurse_shift_id = String(sid);
     return d;
   }
   // Generic copy — iterate the draft keys and pull from the row when present.
@@ -181,6 +207,7 @@ const FLOAT_FIELDS: AnyField[] = [
   'urine_qty', 'stools_qty',
 ];
 const INT_FIELDS: AnyField[] = [
+  'ipd_nurse_shift_id',
   'pulse', 'heart_rate', 'bp_systolic', 'bp_diastolic',
   'ibps', 'ibpd',
   'respiratory_rate',
@@ -230,10 +257,11 @@ function abnormal(draft: DraftState): Partial<Record<AnyField, boolean>> {
   };
 }
 
-// At least one clinical field must be set — note_date + note_time alone
-// doesn't count. Everything else on the form counts.
+// At least one clinical field must be set — note_date / note_time /
+// ipd_nurse_shift_id are auto-populated header metadata and don't count
+// as "the nurse entered something clinical". Everything else does.
 function hasClinicalValue(p: Partial<NurseNoteRow>): boolean {
-  const ignore = new Set<keyof NurseNoteRow>(['note_date', 'note_time']);
+  const ignore = new Set<keyof NurseNoteRow>(['note_date', 'note_time', 'ipd_nurse_shift_id']);
   return Object.entries(p).some(([k, v]) => {
     if (ignore.has(k as keyof NurseNoteRow)) return false;
     return v !== undefined && v !== null && v !== '';
@@ -670,7 +698,19 @@ export function VitalSignEntryDialog({
   const abn = useMemo(() => abnormal(draft), [draft]);
 
   function set(field: AnyField, value: string) {
-    setDraft((d) => ({ ...d, [field]: value }));
+    setDraft((d) => {
+      const next: DraftState = { ...d, [field]: value };
+      // Auto-derive shift from note_time on every note_time change — mirrors
+      // the Delphi PulseTempChartEntryFrame logic that re-queries
+      // ipd_nurse_shift whenever the time picker fires onChange. Manual
+      // override is still possible by tapping a different shift chip after
+      // setting note_time.
+      if (field === 'note_time') {
+        const sid = deriveShiftId(value);
+        if (sid !== null) next.ipd_nurse_shift_id = String(sid);
+      }
+      return next;
+    });
     if (error) setError(null);
   }
 
@@ -724,9 +764,55 @@ export function VitalSignEntryDialog({
                 Date/time → core vitals → free-text note. These three sections
                 cover ~95% of every-shift entry. */}
 
-          <Section title="วันที่และเวลา" tone="slate" cols="grid-cols-2 sm:grid-cols-4">
+          <Section title="วันที่และเวลา" tone="slate" cols="grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_2fr]">
             <Field name="note_date" label="วันที่" type="date" value={draft.note_date} onChange={(v) => set('note_date', v)} />
             <Field name="note_time" label="เวลา" type="time" value={draft.note_time} onChange={(v) => set('note_time', v)} />
+            {/* Shift selector — three chip buttons matching the canonical
+                ipd_nurse_shift rows. Auto-syncs to note_time on change; user
+                can tap a different chip to override (e.g. for retroactive
+                edits where the entry time and shift don't align). The hidden
+                input keeps `getByLabelText('ipd_nurse_shift_id')` queryable
+                from RTL while the chips drive the visual choice. */}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="nn-ipd_nurse_shift_id" className="flex items-baseline gap-2 text-[13px] font-semibold text-slate-800">
+                <span>เวร</span>
+                <span className="text-[11px] font-normal text-slate-500">
+                  {draft.ipd_nurse_shift_id
+                    ? `· auto: ${SHIFT_OPTIONS.find((s) => String(s.id) === draft.ipd_nurse_shift_id)?.label ?? '—'}`
+                    : '· เลือกเวร'}
+                </span>
+              </label>
+              <input
+                id="nn-ipd_nurse_shift_id"
+                aria-label="ipd_nurse_shift_id"
+                type="hidden"
+                value={draft.ipd_nurse_shift_id}
+                readOnly
+              />
+              <div className="flex flex-wrap gap-2" role="group" aria-label="shift quick picks">
+                {SHIFT_OPTIONS.map((s) => {
+                  const isSelected = draft.ipd_nurse_shift_id === String(s.id);
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => set('ipd_nurse_shift_id', String(s.id))}
+                      className={cn(
+                        'flex h-11 flex-1 flex-col items-center justify-center rounded-md border px-3 text-[13px] font-semibold transition-all',
+                        isSelected
+                          ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
+                      )}
+                    >
+                      <span>{s.label}</span>
+                      <span className={cn('text-[10px] font-normal tabular-nums', isSelected ? 'text-cyan-50' : 'text-slate-400')}>
+                        {s.range}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </Section>
 
           <Section title="สัญญาณชีพหลัก" tone="vitals" cols="grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
