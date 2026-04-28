@@ -180,7 +180,11 @@ export default function PatientDetailPage({
         <QuickStatsBar
           age={patient.age}
           gravida={patient.gravida}
+          para={patient.para}
+          abortion={patient.abortion}
+          livingChildren={patient.livingChildren}
           gaWeeks={patient.gaWeeks}
+          gaDay={patient.gaDay}
           ancCount={patient.ancCount}
           admitDate={patient.admitDate}
           laborStatus={patient.laborStatus}
@@ -479,14 +483,28 @@ export default function PatientDetailPage({
                     )}
                     <ClinicalData
                       gravida={patient.gravida}
+                      para={patient.para}
+                      abortion={patient.abortion}
+                      livingChildren={patient.livingChildren}
+                      pregNo={patient.pregNo}
                       gaWeeks={patient.gaWeeks}
+                      gaDay={patient.gaDay}
                       ancCount={patient.ancCount}
                       heightCm={patient.heightCm}
                       weightKg={patient.weightKg}
                       weightDiffKg={patient.weightDiffKg}
+                      prePregnancyWeightKg={patient.prePregnancyWeightKg}
                       fundalHeightCm={patient.fundalHeightCm}
                       usWeightG={patient.usWeightG}
                       hematocritPct={patient.hematocritPct}
+                      bpSystolicAdmit={patient.bpSystolicAdmit}
+                      bpDiastolicAdmit={patient.bpDiastolicAdmit}
+                      pulseAdmit={patient.pulseAdmit}
+                      rrAdmit={patient.rrAdmit}
+                      temperatureAdmit={patient.temperatureAdmit}
+                      cervicalOpenCmAdmit={patient.cervicalOpenCmAdmit}
+                      effacementPctAdmit={patient.effacementPctAdmit}
+                      stationAdmit={patient.stationAdmit}
                     />
                   </div>
                 </div>

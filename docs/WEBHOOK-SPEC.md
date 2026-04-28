@@ -1,6 +1,6 @@
 # KK-LRMS Webhook API Specification
 
-**Version:** 2.5
+**Version:** 2.6
 **Base URL:** `https://kk-lrms.bmscloud.in.th`
 **Contact:** สำนักงานสาธารณสุขจังหวัดขอนแก่น (สสจ.ขอนแก่น)
 
@@ -160,16 +160,30 @@ Submit labor room patient data. Supports up to **100 patients** per request.
       "name": "นาง ทดสอบ ระบบ",
       "cid": "1100500012345",
       "age": 28,
-      "gravida": 1,
-      "ga_weeks": 41,
-      "anc_count": 3,
+      "gravida": 3,
+      "para": 2,
+      "abortion": 0,
+      "living_children": 2,
+      "preg_no": 3,
+      "ga_weeks": 38,
+      "ga_day": 4,
+      "anc_count": 9,
       "admit_date": "2026-03-08T08:00:00+07:00",
       "height_cm": 148,
       "weight_kg": 75,
       "weight_diff_kg": 20,
+      "pre_pregnancy_weight_kg": 55,
       "fundal_height_cm": 37,
       "us_weight_g": 4000,
       "hematocrit_pct": 29,
+      "bp_systolic_admit": 145,
+      "bp_diastolic_admit": 92,
+      "pulse_admit": 88,
+      "rr_admit": 18,
+      "temperature_admit": 37.2,
+      "cervical_open_cm_admit": 4,
+      "effacement_pct_admit": 80,
+      "station_admit": "-1",
       "labor_status": "ACTIVE"
     }
   ]
@@ -188,21 +202,51 @@ Submit labor room patient data. Supports up to **100 patients** per request.
 | `age`       | number | Patient age in years (whole years). **HOSxP note:** HOSxP stores `birthday` (YYYY-MM-DD), not `age` — calculate as `floor((today − birthday) / 365.25)` |
 | `admit_date`| string | Admission datetime (ISO 8601). **HOSxP note:** combine `ipt.regdate` + `ipt.regtime` → `"2026-03-25T13:26:22+07:00"` |
 
+### Optional Fields — Obstetric Formula (G_P_A_L)
+
+The standard obstetric history pill displayed on the patient card is `G3 P2 A0 L2 — GA 38⁺⁴`. Send all four parts when known so the UI renders the full formula instead of a `G3` placeholder. **HOSxP sources:** `ipt_labour.g/p/a/l/preg_no/ga/ga_day`.
+
+| Field             | Type   | Description |
+|-------------------|--------|-------------|
+| `gravida`         | number | Pregnancy count G (total pregnancies including current). |
+| `para`            | number | Para P (term births ≥ 37 wk). |
+| `abortion`        | number | Abortion A (losses < 20 wk). |
+| `living_children` | number | Living children L. |
+| `preg_no`         | number | Current pregnancy number ("ครรภ์ที่ X"). May differ from `gravida` when prior pregnancies overlap with miscounted gravida. |
+| `ga_weeks`        | number | Gestational age in completed weeks. |
+| `ga_day`          | number | GA day-of-week precision (0–6). When non-null, the UI renders `38⁺4` instead of `38`. |
+
 ### Optional Fields — CPD Risk Factors
 
-| Field              | Type   | Description                         | CPD Score Impact |
-|-------------------|--------|-------------------------------------|-----------------|
-| `gravida`         | number | Pregnancy count (ครรภ์ที่)           | Gravida=1 → +2 pts |
-| `ga_weeks`        | number | Gestational age in weeks            | ≥40 → +1.5 pts |
-| `anc_count`       | number | Antenatal care visits. If null/omitted, ANC-count CPD factor is skipped (scored as 0, flagged in `missingFactors`). **HOSxP source:** `ipt_labour.anc_count` (can be null). | <4 → +1.5 pts |
-| `height_cm`       | number | Maternal height in cm               | <150 → +2 pts |
-| `weight_kg`       | number | Current weight in kg                | — |
-| `weight_diff_kg`  | number | Weight gain during pregnancy        | >20 → +2 pts |
-| `fundal_height_cm`| number | Fundal height in cm                 | >36 → +2 pts |
-| `us_weight_g`     | number | Estimated fetal weight by U/S       | >3500 → +2 pts |
-| `hematocrit_pct`  | number | Hematocrit percentage               | <30 → +1.5 pts |
-| `labor_status`    | string | `"ACTIVE"` (default) or `"DELIVERED"` | — |
-| `action`          | string | `"upsert"` (default) or `"delete"` | — |
+| Field                       | Type   | Description                         | CPD Score Impact |
+|----------------------------|--------|-------------------------------------|-----------------|
+| `gravida`                  | number | Pregnancy count (ครรภ์ที่)           | Gravida=1 → +2 pts |
+| `ga_weeks`                 | number | Gestational age in weeks            | ≥40 → +1.5 pts |
+| `anc_count`                | number | Antenatal care visits. If null/omitted, ANC-count CPD factor is skipped (scored as 0, flagged in `missingFactors`). **HOSxP source:** `ipt_labour.anc_count` (can be null). | <4 → +1.5 pts |
+| `height_cm`                | number | Maternal height in cm               | <150 → +2 pts |
+| `weight_kg`                | number | Current weight in kg (at admission). **HOSxP source:** `ipt_pregnancy_vital_sign.bw`. | — |
+| `weight_diff_kg`           | number | Weight gain during pregnancy. When omitted, the server **derives it** as `weight_kg − pre_pregnancy_weight_kg` (see below). Sender-supplied value wins. | >20 → +2 pts |
+| `pre_pregnancy_weight_kg`  | number | Pre-pregnancy weight (first ANC visit). **HOSxP source:** earliest `person_anc_screen.bw` for this woman, joined via `person.cid → patient.cid`. Lets the dashboard render the gain narrative `"55 → 75 = +20 kg"`. | — (anchor for `weight_diff_kg`) |
+| `fundal_height_cm`         | number | Fundal height in cm                 | >36 → +2 pts |
+| `us_weight_g`              | number | Estimated fetal weight by U/S       | >3500 → +2 pts |
+| `hematocrit_pct`           | number | Hematocrit percentage. **HOSxP source:** `ipt_pregnancy_vital_sign.hct`. | <30 → +1.5 pts |
+| `labor_status`             | string | `"ACTIVE"` (default) or `"DELIVERED"` | — |
+| `action`                   | string | `"upsert"` (default) or `"delete"` | — |
+
+### Optional Fields — Admission Snapshot
+
+These are the **one-shot vitals and cervical exam captured at the moment of `ipt` admission**, distinct from the ongoing partograph time-series. They drive the "ADMISSION SNAPSHOT" card on the provincial dashboard, which lets receiving hospitals see "she came in with BP 145/92, cervix 4 cm" before the partograph rows arrive. **HOSxP source for all of these:** the single row of `ipt_pregnancy_vital_sign` joined on `an`. Omit any field whose source value is null/0 — the dashboard hides the whole card when no admission data is sent.
+
+| Field                        | Type   | Description |
+|-----------------------------|--------|-------------|
+| `bp_systolic_admit`         | number | Systolic BP at admission (mmHg). **HOSxP:** `ipt_pregnancy_vital_sign.bps`. UI severity: ≥160 abnormal (severe HT), 140–159 borderline (gestational HT), <90 borderline (hypotension). |
+| `bp_diastolic_admit`        | number | Diastolic BP at admission (mmHg). **HOSxP:** `ipt_pregnancy_vital_sign.bpd`. UI severity: ≥110 abnormal, 90–109 borderline, <60 borderline. |
+| `pulse_admit`               | number | Pulse at admission (bpm). **HOSxP:** `ipt_pregnancy_vital_sign.hr`. UI severity: ≥120 or <50 abnormal, 100–119 or 50–59 borderline. |
+| `rr_admit`                  | number | Respiratory rate at admission (/min). **HOSxP:** `ipt_pregnancy_vital_sign.rr`. |
+| `temperature_admit`         | number | Temperature at admission (°C). **HOSxP:** `ipt_pregnancy_vital_sign.temperature`. UI severity: ≥38.5 or <35.5 abnormal, ≥37.5 borderline. |
+| `cervical_open_cm_admit`    | number | Cervical dilation at admission (cm). **HOSxP:** `ipt_pregnancy_vital_sign.cervical_open_size`. UI severity: ≥8 abnormal ("Late presentation"), 4–7 borderline ("Active phase"), <4 normal ("Latent"). |
+| `effacement_pct_admit`      | number | Cervical effacement at admission (%). **HOSxP:** `ipt_pregnancy_vital_sign.eff`. |
+| `station_admit`             | string | Fetal head station at admission. Free-form (`-3`, `-2`, `-1`, `0`, `+1`, `+2`, `+3`). **HOSxP:** `ipt_pregnancy_vital_sign.station`. |
 
 ### Ingestion Modes
 
@@ -788,6 +832,24 @@ HOSxP ANC visit records (`person_anc_service`) are not linked to `opdscreen` for
 - Omit `riskLevel` from the payload or send `"LOW"` — the KK-LRMS will classify risk from clinical data automatically
 - Do not send a non-LOW value unless the hospital system has genuinely classified the patient as high-risk
 
+### Partial G_P_A_L Components
+
+`gravida` is the historic single-value field; `para`, `abortion`, and `living_children` are individually optional. Behavior:
+
+- All four present → UI renders full pill `G3 P2 A0 L2`.
+- Only `gravida` present → UI renders `G3` (back-compat with v2.5 senders).
+- Mix (e.g. only `gravida` + `para`) → UI renders only the parts you sent: `G3 P2`.
+
+There is no validation that `gravida = para + abortion + (current pregnancy)`; the system stores what you send. Keep your HIS source of truth authoritative.
+
+### Server-Side `weight_diff_kg` Derivation
+
+When you send `weight_kg` and `pre_pregnancy_weight_kg` but omit `weight_diff_kg`, the server computes `weight_diff_kg = weight_kg − pre_pregnancy_weight_kg` (rounded to 2 decimals). When you supply `weight_diff_kg` explicitly, your value wins (it may include trimester-specific corrections the server doesn't model). When neither anchor is sent, `weight_diff_kg` stays null and the CPD weight-gain factor is skipped.
+
+### Admission Snapshot vs. Partograph
+
+`*_admit` fields are the **vitals at the moment of admission** — a one-shot snapshot stored on the labor row itself. Subsequent observations belong on the partograph (`type: "partograph"` payload, separate endpoint). Sending the same BP value as both `bp_systolic_admit` and an early partograph row is fine; the dashboard distinguishes them and shows the admit value as the baseline.
+
 ### Null `anc_count` for Labor Patients
 
 HOSxP `ipt_labour.anc_count` may be null for labor patients. This is common when the labor admission is entered before the ANC count is recorded. When null:
@@ -1094,6 +1156,7 @@ All data transmitted over HTTPS/TLS.
 
 | Version | Date       | Changes |
 |---------|------------|---------|
+| 2.6     | 2026-04-28 | **Labor payload — Obstetric formula completion:** new optional fields `para`, `abortion`, `living_children`, `preg_no` so the dashboard can render the full `G3 P2 A0 L2` pill instead of just `G3`. **GA precision:** new optional `ga_day` (0–6) renders `38⁺4` instead of `38`. **Pre-pregnancy anchor:** new optional `pre_pregnancy_weight_kg` (from earliest `person_anc_screen.bw`); server **derives** `weight_diff_kg` automatically when sender supplies both anchors but omits the diff. **Admission snapshot:** new optional `bp_systolic_admit`, `bp_diastolic_admit`, `pulse_admit`, `rr_admit`, `temperature_admit`, `cervical_open_cm_admit`, `effacement_pct_admit`, `station_admit` (all from the single `ipt_pregnancy_vital_sign` row), driving a new "ADMISSION SNAPSHOT" card on the patient detail page with clinical severity coloring. All fields are optional and back-compat — v2.5 payloads continue to work unchanged. New Edge Cases: partial G_P_A_L components, server-side `weight_diff_kg` derivation, admission snapshot vs. partograph distinction. |
 | 2.5     | 2026-04-07 | **ANC `hn` now optional** (`string \| null`): community-registered patients have no HN; when null, CID hash becomes sole match key. Record matching table updated. **HOSxP ANC registry clarification:** `person` vs `patient` table distinction documented. **`fundalHeightCm` and `fetalHr`** marked optional but strongly recommended; clarified as unavailable from HOSxP ANC tables. **`referralId` opaque string:** both slash format (`"3803/68"`) and zero-padded format (`"00000014"`) are valid. **`referout.pdx`:** corrected column name (not `icd10`). **`referout.hn` join path:** direct to `patient.hn`, no `ovst` needed. **`referout_emergency_type_id` null note:** maps to ROUTINE at hospitals that don't use it. **New Edge Cases:** null HN for community ANC patients, missing ANC visit vitals, empty `person_anc_risk` → LOW, null `anc_count` in labor, null location codes. |
 | 2.4     | 2026-04-07 | **HOSxP integration clarity:** document `age` derivation from `birthday`, `admit_date` from `regdate`+`regtime`. **New optional field:** `hematocritPct` in ANC visits (from `person_anc.blood_hct_result`). **HOSxP urgencyLevel mapping table:** numeric `referout_emergency_type_id` → `ROUTINE/URGENT/EMERGENCY`. **Edge Cases section:** no-CID patients, null LMP/EDC behavior, missing CPD factors, `visitNumber` cumulative semantics. **Null field guidance:** `fetalHr` null at early visits is expected; `gaWeeks: null` preferred over `0` for unknown GA. **`referralId` slash format** documented as valid. |
 | 2.3     | 2026-03-31 | **Referral check API**: `POST /api/referrals/check` — pre-check eligibility by CID before sending referral. **CID-based patient matching**: all webhook types use CID (not HN) as primary patient key across hospitals. **Overlapping pregnancy detection**: warns when new pregnancy data arrives while previous is active. **Referral monitoring validation**: warns when referral patient has no ANC/labor data. New SSE events: `pregnancy_overlap_warning`, `referral_no_monitoring_warning`. |

@@ -19,15 +19,33 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'cid_hash', type: 'string', maxLength: 64, nullable: true }, // SHA-256 hash for cross-hospital matching
     { name: 'age', type: 'integer' },
     { name: 'gravida', type: 'integer', nullable: true },
+    { name: 'para', type: 'integer', nullable: true },
+    { name: 'abortion', type: 'integer', nullable: true },
+    { name: 'living_children', type: 'integer', nullable: true },
+    { name: 'preg_no', type: 'integer', nullable: true },
     { name: 'ga_weeks', type: 'integer', nullable: true },
+    { name: 'ga_day', type: 'integer', nullable: true },
     { name: 'anc_count', type: 'integer', nullable: true },
     { name: 'admit_date', type: 'datetime' },
     { name: 'height_cm', type: 'decimal', nullable: true },
     { name: 'weight_kg', type: 'decimal', nullable: true },
     { name: 'weight_diff_kg', type: 'decimal', nullable: true },
+    { name: 'pre_pregnancy_weight_kg', type: 'decimal', nullable: true },
     { name: 'fundal_height_cm', type: 'decimal', nullable: true },
     { name: 'us_weight_g', type: 'decimal', nullable: true },
     { name: 'hematocrit_pct', type: 'decimal', nullable: true },
+    // Admission vitals (snapshot at ipt admission) — distinct from partograph
+    // time-series. Lets the UI show "she came in with BP 145/95" without
+    // requiring a separate first-row partograph lookup.
+    { name: 'bp_systolic_admit', type: 'integer', nullable: true },
+    { name: 'bp_diastolic_admit', type: 'integer', nullable: true },
+    { name: 'pulse_admit', type: 'integer', nullable: true },
+    { name: 'rr_admit', type: 'integer', nullable: true },
+    { name: 'temperature_admit', type: 'decimal', nullable: true },
+    // Cervical exam at admission — critical for transfer / triage decisions.
+    { name: 'cervical_open_cm_admit', type: 'decimal', nullable: true },
+    { name: 'effacement_pct_admit', type: 'decimal', nullable: true },
+    { name: 'station_admit', type: 'string', maxLength: 10, nullable: true },
     { name: 'labor_status', type: 'string', maxLength: 20, defaultValue: 'ACTIVE' },
     { name: 'delivered_at', type: 'datetime', nullable: true },
     { name: 'journey_id', type: 'uuid', nullable: true, references: { table: 'maternal_journeys', column: 'id' } },

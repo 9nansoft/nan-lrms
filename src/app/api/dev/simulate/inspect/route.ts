@@ -55,8 +55,15 @@ async function handlePatient(hcode: string, an: string) {
   const db = await getDatabase();
   const errors: Record<string, string> = {};
   const labor = await safeQuery<Record<string, unknown>>(db,
-    `SELECT cp.id, cp.hn, cp.an, cp.age, cp.ga_weeks, cp.labor_status,
-            cp.admit_date, cp.created_at, cp.journey_id, h.hcode
+    `SELECT cp.id, cp.hn, cp.an, cp.age,
+            cp.gravida, cp.para, cp.abortion, cp.living_children, cp.preg_no,
+            cp.ga_weeks, cp.ga_day, cp.anc_count,
+            cp.height_cm, cp.weight_kg, cp.weight_diff_kg, cp.pre_pregnancy_weight_kg,
+            cp.fundal_height_cm, cp.us_weight_g, cp.hematocrit_pct,
+            cp.bp_systolic_admit, cp.bp_diastolic_admit, cp.pulse_admit,
+            cp.rr_admit, cp.temperature_admit,
+            cp.cervical_open_cm_admit, cp.effacement_pct_admit, cp.station_admit,
+            cp.labor_status, cp.admit_date, cp.created_at, cp.journey_id, h.hcode
      FROM cached_patients cp
      JOIN hospitals h ON h.id = cp.hospital_id
      WHERE cp.an = ? AND h.hcode = ?`,

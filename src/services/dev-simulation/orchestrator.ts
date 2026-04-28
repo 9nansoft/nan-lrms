@@ -342,9 +342,55 @@ class SimulationOrchestrator {
       let body: unknown = null;
       let summary = '';
       if (type === 'labor') {
-        const patient = await generateLaborEvent(hosp, this.config.scenario, signal, this.config.model);
+        const result = await generateLaborEvent(hosp, this.config.scenario, signal, this.config.model);
+        // Every admission now ships with a backdated ANC payload (≥ 2 visits)
+        // unless the patient already had ≥ 2 visits in the pool. POST the ANC
+        // FIRST so processWebhookPayload's cid_hash linkage finds the journey
+        // when the labor row is upserted. ANC failure here is logged but does
+        // NOT block the labor send — better to have an unlinked admission than
+        // to drop the event entirely.
+        if (result.priorAnc) {
+          const ancBody = {
+            type: 'anc_data',
+            hospitalCode: worker.hcode,
+            patients: [result.priorAnc],
+          };
+          try {
+            const ancRes = await fetch(`${this.webhookBaseUrl}/api/webhooks/patient-data`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify(ancBody),
+              signal,
+            });
+            if (!ancRes.ok) {
+              const text = await ancRes.text().catch(() => '');
+              this.logEvent({
+                at: new Date().toISOString(),
+                hcode: worker.hcode,
+                type: 'anc',
+                ok: false,
+                summary: `prior-ANC for admit failed (${ancRes.status}): ${text.slice(0, 160)}`,
+              });
+            }
+          } catch (err) {
+            this.logEvent({
+              at: new Date().toISOString(),
+              hcode: worker.hcode,
+              type: 'anc',
+              ok: false,
+              summary: `prior-ANC fetch threw: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+        }
+        const patient = result.labor;
         body = { hospitalCode: worker.hcode, mode: 'incremental', patients: [patient] };
-        summary = `Labor admit · ${patient.an} · GA ${patient.ga_weeks}w`;
+        const ancNote = result.priorAnc
+          ? ` + prior-ANC ×${result.priorAnc.visits?.length ?? 0}`
+          : '';
+        summary = `Labor admit · ${patient.an} · GA ${patient.ga_weeks}w${ancNote}`;
       } else if (type === 'anc') {
         const patient = await generateAncEvent(hosp, this.config.scenario, signal, this.config.model);
         body = { type: 'anc_data', hospitalCode: worker.hcode, patients: [patient] };

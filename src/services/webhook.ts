@@ -19,16 +19,34 @@ export interface WebhookPatientPayload {
   name: string;
   cid: string;           // เลขบัตรประชาชน 13 หลัก (required for cross-hospital matching)
   age: number;
+  // Obstetric formula G_P_A_L. Sender SHOULD include all four when known so
+  // the UI can render the full pill ("G3 P2 A0 L2") instead of just G.
   gravida?: number | null;
+  para?: number | null;
+  abortion?: number | null;
+  living_children?: number | null;
+  preg_no?: number | null;          // current pregnancy number (ครรภ์ที่ X)
   ga_weeks?: number | null;
+  ga_day?: number | null;           // GA day-of-week precision: 38⁺⁴ → ga_weeks=38, ga_day=4
   anc_count?: number | null;
   admit_date: string; // ISO 8601
   height_cm?: number | null;
   weight_kg?: number | null;
   weight_diff_kg?: number | null;
+  pre_pregnancy_weight_kg?: number | null; // First-ANC-visit BW; lets us derive weight_diff_kg
   fundal_height_cm?: number | null;
   us_weight_g?: number | null;
   hematocrit_pct?: number | null;
+  // Admission vital signs (snapshot at ipt admission, not partograph).
+  bp_systolic_admit?: number | null;
+  bp_diastolic_admit?: number | null;
+  pulse_admit?: number | null;
+  rr_admit?: number | null;
+  temperature_admit?: number | null;
+  // Cervical exam at admission — drives transfer/triage decisions.
+  cervical_open_cm_admit?: number | null;
+  effacement_pct_admit?: number | null;
+  station_admit?: string | null;    // free-form (-3 / -2 / -1 / 0 / +1 / etc)
   labor_status?: string; // ACTIVE (default), DELIVERED
   action?: 'upsert' | 'delete'; // default: 'upsert'
 }
@@ -506,15 +524,29 @@ export async function processWebhookPayload(
       cidHash,
       age: p.age,
       gravida: p.gravida ?? null,
+      para: p.para ?? null,
+      abortion: p.abortion ?? null,
+      livingChildren: p.living_children ?? null,
+      pregNo: p.preg_no ?? null,
       gaWeeks: p.ga_weeks ?? null,
+      gaDay: p.ga_day ?? null,
       ancCount: p.anc_count ?? null,
       admitDate: p.admit_date,
       heightCm: p.height_cm ?? null,
       weightKg: p.weight_kg ?? null,
       weightDiffKg: p.weight_diff_kg ?? null,
+      prePregnancyWeightKg: p.pre_pregnancy_weight_kg ?? null,
       fundalHeightCm: p.fundal_height_cm ?? null,
       usWeightG: p.us_weight_g ?? null,
       hematocritPct: p.hematocrit_pct ?? null,
+      bpSystolicAdmit: p.bp_systolic_admit ?? null,
+      bpDiastolicAdmit: p.bp_diastolic_admit ?? null,
+      pulseAdmit: p.pulse_admit ?? null,
+      rrAdmit: p.rr_admit ?? null,
+      temperatureAdmit: p.temperature_admit ?? null,
+      cervicalOpenCmAdmit: p.cervical_open_cm_admit ?? null,
+      effacementPctAdmit: p.effacement_pct_admit ?? null,
+      stationAdmit: p.station_admit ?? null,
       laborStatus: p.labor_status ?? 'ACTIVE',
       syncedAt: new Date().toISOString(),
     };

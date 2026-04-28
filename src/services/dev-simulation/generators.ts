@@ -18,6 +18,7 @@ import { logger } from '@/lib/logger';
 import type {
   WebhookPatientPayload,
   WebhookAncPatient,
+  WebhookAncVisit,
   WebhookReferralCreatePayload,
   WebhookReferralUpdatePayload,
   WebhookPartographPayload,
@@ -201,7 +202,103 @@ const NARRATIVE_SCHEMA = {
   },
 };
 
+// ─── Prior-ANC synthesis (every labor admission gets ≥ 2 backdated visits) ─
+
+/** WHO 2016 / Thai MOH 8-contact ANC schedule. Same canonical milestones used
+ *  by `generateAncEvent` so the synthesized prior history looks identical to
+ *  organically-generated ANC. */
+const ANC_CONTACT_WEEKS = [12, 20, 26, 30, 34, 36, 38, 40] as const;
+
+/** Pick the visit GAs to materialise as backdated ANC visits for a labor
+ *  admission whose current GA is `currentGa`. Guarantees ≥ 2 visits and that
+ *  the latest visit is at least 2 weeks before admission (clinically real). */
+function chooseBackdatedVisitGas(currentGa: number): number[] {
+  // Standard path: take the latest 3 schedule milestones strictly before the
+  // current GA (so the most recent is ~2 weeks before delivery, mirroring real
+  // pregnancies where ANC tightens to weekly near term).
+  const cutoff = Math.max(8, currentGa - 2);
+  const onSchedule = ANC_CONTACT_WEEKS.filter((w) => w <= cutoff).slice(-3);
+  if (onSchedule.length >= 2) return onSchedule;
+  // Preterm fallback: if the schedule yields fewer than 2 (e.g. labor at GA
+  // 14), synthesize two evenly-spaced earlier visits so the journey still has
+  // history — clinical realism is best-effort here since preterm < 14 wk is
+  // already an outlier scenario.
+  const second = Math.max(8, currentGa - 4);
+  const first = Math.max(6, second - 4);
+  return [first, second];
+}
+
+interface PriorAncArgs {
+  profile: ClinicalProfile;
+  hosp: HospitalContext;
+  cid: string;
+  hn: string;
+  name: string;
+  age: number;
+  gravida: number;
+  /** Pregnancy GA at admission (weeks). */
+  currentGa: number;
+  /** Labor admission ISO datetime — backdated ANC visits land before this. */
+  admitIso: string;
+}
+
+/** Build a `WebhookAncPatient` payload representing the same woman's ANC
+ *  history with at least 2 backdated visits. Posted to /api/webhooks/patient-data
+ *  with `type: "anc_data"` BEFORE the labor event so the server's
+ *  `processWebhookPayload` can link the labor row to the new maternal_journey
+ *  via cid_hash. Returns null if the labor is too early to plausibly have ANC
+ *  (currentGa < 6 — extremely early loss; never happens for live admissions). */
+function buildPriorAncPayload(args: PriorAncArgs): WebhookAncPatient | null {
+  if (args.currentGa < 6) return null;
+
+  const visitGas = chooseBackdatedVisitGas(args.currentGa);
+  // LMP = admit − currentGa weeks. Visits at LMP + visitGa weeks (jittered
+  // ±2 days for human-looking timestamps, capped at admit-1d).
+  const admitMs = new Date(args.admitIso).getTime();
+  const lmpMs = admitMs - args.currentGa * 7 * 86400_000;
+  const lmpIso = new Date(lmpMs).toISOString();
+  const edcIso = new Date(lmpMs + 280 * 86400_000).toISOString();
+  const ageMs = (year: number) => new Date(`${year}-01-01`).getTime();
+  void ageMs;
+
+  const visits: WebhookAncVisit[] = visitGas.map((visitGa, idx) => {
+    const jitterDays = rnd(-2, 2);
+    const raw = lmpMs + visitGa * 7 * 86400_000 + jitterDays * 86400_000;
+    // Cap so the latest visit is ≤ admit − 1 day (no same-day or future visits).
+    const cap = admitMs - 86400_000;
+    const visitAt = new Date(Math.min(raw, cap));
+    return applyProfileToAncVisit(args.profile, visitGa, idx + 1, visitAt.toISOString());
+  });
+
+  // Birthday derived from age — needed by WebhookAncPatient.
+  const birthYear = new Date().getFullYear() - args.age;
+  const birthday = `${birthYear}-${String(rnd(1, 12)).padStart(2, '0')}-${String(rnd(1, 28)).padStart(2, '0')}`;
+
+  return applyProfileToAnc({
+    profile: args.profile,
+    name: args.name,
+    hn: args.hn,
+    cid: args.cid,
+    birthday,
+    gravida: args.gravida,
+    lmpIso,
+    edcIso,
+    changwatCode: '40',
+    amphurCode: pick(AMPHUR_CODES),
+    visits,
+    currentGa: args.currentGa,
+  });
+}
+
 // ─── Labor admission ───────────────────────────────────────────────────
+
+/** Return shape for a labor event — when `priorAnc` is non-null, the
+ *  orchestrator MUST POST it (as `type: "anc_data"`) before the labor body so
+ *  the server has the journey row to link to via cid_hash. */
+export interface GeneratedLaborEvent {
+  labor: WebhookPatientPayload;
+  priorAnc: WebhookAncPatient | null;
+}
 
 function laborJsonSchema(p: ClinicalProfile) {
   return {
@@ -278,7 +375,7 @@ export async function generateLaborEvent(
   scenario: string | undefined,
   signal: AbortSignal,
   model: string,
-): Promise<WebhookPatientPayload> {
+): Promise<GeneratedLaborEvent> {
   const resolved = resolveProfile(hosp.hcode, 'labor');
   const profile = resolved.profile;
 
@@ -287,7 +384,9 @@ export async function generateLaborEvent(
   //      arrives and gets admitted (same CID, closes cross-hospital loop).
   //   2. ANC-registered mother (with 20% cross-hospital chance to model real
   //      migration — e.g., ANC at tambon clinic, labor at community hospital).
-  //   3. Brand-new synthetic CID if nothing available.
+  //   3. Brand-new synthetic CID if nothing available — in this branch we ALSO
+  //      synthesize a backdated ANC payload (≥ 2 visits) so every admission
+  //      has a journey to link to via cid_hash.
   const arrived = consumeArrivedReferralForAdmission(hosp.hcode);
   const ancPatient = arrived ? null : (Math.random() < 0.4 ? findAncPatient(hosp.hcode, 0.25) : null);
   const existing: PooledPatient | null = ancPatient;
@@ -297,7 +396,11 @@ export async function generateLaborEvent(
   const reuseName = arrived?.name ?? existing?.name ?? null;
   const an = synthAn();
   const gaWeeks = existing?.ga ?? rnd(36, profile.id === 'post_term' ? 42 : 41);
-  const ancCount = existing ? Math.max(existing.ancVisits, 0) : pick([0, 2, 3, 4, 4, 5, 6, 8]);
+  // ancCount represents what's already in the journey for this CID. For the
+  // branch where we synthesize prior-ANC below it gets bumped to the number of
+  // backdated visits we just emitted, so the labor row's anc_count reflects
+  // reality (and CPD scoring uses the correct factor).
+  let ancCount = existing ? Math.max(existing.ancVisits, 0) : 0;
   const gravida = existing?.pregNo ?? Math.min(5, Math.max(1, Math.floor(Math.random() * 3) + 1));
   const admitIso = new Date().toISOString();
 
@@ -341,9 +444,42 @@ export async function generateLaborEvent(
     });
   }
 
+  // Synthesize a backdated ANC payload whenever the chosen patient lacks a
+  // ≥ 2-visit history. This applies to:
+  //   • fresh synthetic CIDs (branch 3 — never had ANC)
+  //   • arrived referrals whose home hospital didn't seed ANC in this run
+  //   • ANC-pool patients still on their first visit
+  // The orchestrator POSTs this payload (as `type: "anc_data"`) BEFORE the
+  // labor body, so the server's processWebhookPayload can link the labor row
+  // via cid_hash to the new maternal_journey.
+  const patientName = reuseName ?? resolved.plannedName ?? llmName ?? 'นาง ทดลอง ระบบ';
+  // Age is profile-driven for fresh CIDs; reuse from pool when available so
+  // birthday/age stay coherent across the patient's lifetime in the sim.
+  const ageGuess = existing?.birthday
+    ? Math.max(13, new Date().getFullYear() - new Date(existing.birthday).getFullYear())
+    : rnd(profile.ageYears.min, profile.ageYears.max);
+  let priorAnc: WebhookAncPatient | null = null;
+  const needsPriorAnc = !existing || existing.ancVisits < 2;
+  if (needsPriorAnc) {
+    priorAnc = buildPriorAncPayload({
+      profile,
+      hosp,
+      cid,
+      hn,
+      name: patientName,
+      age: ageGuess,
+      gravida,
+      currentGa: gaWeeks,
+      admitIso,
+    });
+    if (priorAnc?.visits && priorAnc.visits.length > ancCount) {
+      ancCount = priorAnc.visits.length;
+    }
+  }
+
   const laborInput: DeterministicLaborInput = {
     profile,
-    name: reuseName ?? resolved.plannedName ?? llmName ?? 'นาง ทดลอง ระบบ',
+    name: patientName,
     hn, an, cid,
     gaWeeks,
     gravida,
@@ -388,7 +524,7 @@ export async function generateLaborEvent(
     admittedAt: Date.now(),
     partographHours: 0,
   });
-  return event;
+  return { labor: event, priorAnc };
 }
 
 // ─── ANC registration ──────────────────────────────────────────────────

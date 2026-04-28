@@ -12,12 +12,39 @@ import type { ReactNode } from 'react';
 interface QuickStatsBarProps {
   age: number;
   gravida: number | null;
+  para?: number | null;
+  abortion?: number | null;
+  livingChildren?: number | null;
   gaWeeks: number | null;
+  gaDay?: number | null;
   ancCount: number | null;
   admitDate: string;
   laborStatus: string;
   currentDilationCm: number | null;
   latestVitalAt: string | null;
+}
+
+// Render G_P_A_L formula. Falls back to "G3" when only gravida is known so
+// behavior is back-compat with older rows that lack the P/A/L fields.
+function formatGpal(
+  g: number | null,
+  p: number | null | undefined,
+  a: number | null | undefined,
+  l: number | null | undefined,
+): string {
+  if (g == null) return '—';
+  const parts = [`G${g}`];
+  if (p != null) parts.push(`P${p}`);
+  if (a != null) parts.push(`A${a}`);
+  if (l != null) parts.push(`L${l}`);
+  return parts.join(' ');
+}
+
+// "GA 38⁺⁴" if both weeks and day; just "38" otherwise.
+function formatGa(weeks: number | null, day: number | null | undefined): string {
+  if (weeks == null) return '—';
+  if (day != null && day > 0) return `${weeks}⁺${day}`;
+  return String(weeks);
 }
 
 function formatLaborDuration(admitDate: string): string {
@@ -146,7 +173,11 @@ function StatItem({
 export function QuickStatsBar({
   age,
   gravida,
+  para,
+  abortion,
+  livingChildren,
   gaWeeks,
+  gaDay,
   admitDate,
   currentDilationCm,
   latestVitalAt,
@@ -180,16 +211,16 @@ export function QuickStatsBar({
       />
       <StatItem
         icon={<Activity className="h-3.5 w-3.5" />}
-        labelTh="ครรภ์ที่"
-        labelEn="GRAVIDA"
-        value={gravida !== null ? `G${gravida}` : '—'}
+        labelTh="G_P_A_L"
+        labelEn="OB FORMULA"
+        value={formatGpal(gravida, para, abortion, livingChildren)}
         color="var(--accent-navy)"
       />
       <StatItem
         icon={<Calendar className="h-3.5 w-3.5" />}
         labelTh="อายุครรภ์"
         labelEn="GA"
-        value={gaWeeks !== null ? gaWeeks : '—'}
+        value={formatGa(gaWeeks, gaDay)}
         unit="wk"
         color={gaColor}
         sub={

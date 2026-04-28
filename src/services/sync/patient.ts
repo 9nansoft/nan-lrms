@@ -14,15 +14,29 @@ export interface SyncPatientData {
   cidHash: string | null;
   age: number;
   gravida: number | null;
+  para?: number | null;
+  abortion?: number | null;
+  livingChildren?: number | null;
+  pregNo?: number | null;
   gaWeeks: number | null;
+  gaDay?: number | null;
   ancCount: number | null;
   admitDate: string;
   heightCm?: number | null;
   weightKg?: number | null;
   weightDiffKg?: number | null;
+  prePregnancyWeightKg?: number | null;
   fundalHeightCm?: number | null;
   usWeightG?: number | null;
   hematocritPct?: number | null;
+  bpSystolicAdmit?: number | null;
+  bpDiastolicAdmit?: number | null;
+  pulseAdmit?: number | null;
+  rrAdmit?: number | null;
+  temperatureAdmit?: number | null;
+  cervicalOpenCmAdmit?: number | null;
+  effacementPctAdmit?: number | null;
+  stationAdmit?: string | null;
   laborStatus: string;
   syncedAt: string;
 }
@@ -73,35 +87,68 @@ export async function upsertCachedPatients(
       [hospitalId, p.an],
     );
 
+    // Compute weight_diff_kg server-side when sender supplied both anchors but
+    // not the diff itself. Sender-supplied diff still wins (it may include
+    // trimester-specific corrections we don't replicate here).
+    const weightDiffKg =
+      p.weightDiffKg ??
+      (p.weightKg != null && p.prePregnancyWeightKg != null
+        ? Number((p.weightKg - p.prePregnancyWeightKg).toFixed(2))
+        : null);
+
     if (existing.length > 0) {
       await db.execute(
         `UPDATE cached_patients SET
-          hn = ?, name = ?, cid = ?, cid_hash = ?, age = ?, gravida = ?, ga_weeks = ?,
+          hn = ?, name = ?, cid = ?, cid_hash = ?, age = ?,
+          gravida = ?, para = ?, abortion = ?, living_children = ?, preg_no = ?,
+          ga_weeks = ?, ga_day = ?,
           anc_count = ?, admit_date = ?, height_cm = ?, weight_kg = ?,
-          weight_diff_kg = ?, fundal_height_cm = ?, us_weight_g = ?,
-          hematocrit_pct = ?, labor_status = ?, synced_at = ?, updated_at = ?
+          weight_diff_kg = ?, pre_pregnancy_weight_kg = ?,
+          fundal_height_cm = ?, us_weight_g = ?, hematocrit_pct = ?,
+          bp_systolic_admit = ?, bp_diastolic_admit = ?, pulse_admit = ?,
+          rr_admit = ?, temperature_admit = ?,
+          cervical_open_cm_admit = ?, effacement_pct_admit = ?, station_admit = ?,
+          labor_status = ?, synced_at = ?, updated_at = ?
         WHERE id = ?`,
         [
-          p.hn, p.name, p.cid, p.cidHash ?? null, p.age, p.gravida, p.gaWeeks,
+          p.hn, p.name, p.cid, p.cidHash ?? null, p.age,
+          p.gravida, p.para ?? null, p.abortion ?? null, p.livingChildren ?? null, p.pregNo ?? null,
+          p.gaWeeks, p.gaDay ?? null,
           p.ancCount, p.admitDate, p.heightCm ?? null, p.weightKg ?? null,
-          p.weightDiffKg ?? null, p.fundalHeightCm ?? null, p.usWeightG ?? null,
-          p.hematocritPct ?? null, p.laborStatus, p.syncedAt, now,
+          weightDiffKg, p.prePregnancyWeightKg ?? null,
+          p.fundalHeightCm ?? null, p.usWeightG ?? null, p.hematocritPct ?? null,
+          p.bpSystolicAdmit ?? null, p.bpDiastolicAdmit ?? null, p.pulseAdmit ?? null,
+          p.rrAdmit ?? null, p.temperatureAdmit ?? null,
+          p.cervicalOpenCmAdmit ?? null, p.effacementPctAdmit ?? null, p.stationAdmit ?? null,
+          p.laborStatus, p.syncedAt, now,
           existing[0].id,
         ],
       );
     } else {
       await db.execute(
         `INSERT INTO cached_patients (
-          id, hospital_id, hn, an, name, cid, cid_hash, age, gravida, ga_weeks,
-          anc_count, admit_date, height_cm, weight_kg, weight_diff_kg,
-          fundal_height_cm, us_weight_g, hematocrit_pct, labor_status,
-          synced_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, hospital_id, hn, an, name, cid, cid_hash, age,
+          gravida, para, abortion, living_children, preg_no,
+          ga_weeks, ga_day,
+          anc_count, admit_date, height_cm, weight_kg,
+          weight_diff_kg, pre_pregnancy_weight_kg,
+          fundal_height_cm, us_weight_g, hematocrit_pct,
+          bp_systolic_admit, bp_diastolic_admit, pulse_admit,
+          rr_admit, temperature_admit,
+          cervical_open_cm_admit, effacement_pct_admit, station_admit,
+          labor_status, synced_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuidv4(), hospitalId, p.hn, p.an, p.name, p.cid, p.cidHash ?? null, p.age,
-          p.gravida, p.gaWeeks, p.ancCount, p.admitDate,
-          p.heightCm ?? null, p.weightKg ?? null, p.weightDiffKg ?? null,
+          p.gravida, p.para ?? null, p.abortion ?? null, p.livingChildren ?? null, p.pregNo ?? null,
+          p.gaWeeks, p.gaDay ?? null,
+          p.ancCount, p.admitDate,
+          p.heightCm ?? null, p.weightKg ?? null,
+          weightDiffKg, p.prePregnancyWeightKg ?? null,
           p.fundalHeightCm ?? null, p.usWeightG ?? null, p.hematocritPct ?? null,
+          p.bpSystolicAdmit ?? null, p.bpDiastolicAdmit ?? null, p.pulseAdmit ?? null,
+          p.rrAdmit ?? null, p.temperatureAdmit ?? null,
+          p.cervicalOpenCmAdmit ?? null, p.effacementPctAdmit ?? null, p.stationAdmit ?? null,
           p.laborStatus, p.syncedAt, now, now,
         ],
       );

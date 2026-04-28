@@ -48,15 +48,29 @@ export async function GET(
       journey_id: string | null;
       age: number;
       gravida: number | null;
+      para: number | null;
+      abortion: number | null;
+      living_children: number | null;
+      preg_no: number | null;
       ga_weeks: number | null;
+      ga_day: number | null;
       anc_count: number | null;
       admit_date: string;
       height_cm: number | null;
       weight_kg: number | null;
       weight_diff_kg: number | null;
+      pre_pregnancy_weight_kg: number | null;
       fundal_height_cm: number | null;
       us_weight_g: number | null;
       hematocrit_pct: number | null;
+      bp_systolic_admit: number | null;
+      bp_diastolic_admit: number | null;
+      pulse_admit: number | null;
+      rr_admit: number | null;
+      temperature_admit: number | null;
+      cervical_open_cm_admit: number | null;
+      effacement_pct_admit: number | null;
+      station_admit: string | null;
       labor_status: string;
       synced_at: string;
       hcode: string;
@@ -64,10 +78,15 @@ export async function GET(
       level: string;
     }>(
       `SELECT cp.id, cp.hn, cp.an, cp.name, cp.cid, cp.cid_hash, cp.journey_id,
-              cp.age, cp.gravida,
-              cp.ga_weeks, cp.anc_count, cp.admit_date, cp.height_cm,
-              cp.weight_kg, cp.weight_diff_kg, cp.fundal_height_cm,
-              cp.us_weight_g, cp.hematocrit_pct, cp.labor_status, cp.synced_at,
+              cp.age,
+              cp.gravida, cp.para, cp.abortion, cp.living_children, cp.preg_no,
+              cp.ga_weeks, cp.ga_day, cp.anc_count, cp.admit_date,
+              cp.height_cm, cp.weight_kg, cp.weight_diff_kg, cp.pre_pregnancy_weight_kg,
+              cp.fundal_height_cm, cp.us_weight_g, cp.hematocrit_pct,
+              cp.bp_systolic_admit, cp.bp_diastolic_admit, cp.pulse_admit,
+              cp.rr_admit, cp.temperature_admit,
+              cp.cervical_open_cm_admit, cp.effacement_pct_admit, cp.station_admit,
+              cp.labor_status, cp.synced_at,
               h.hcode, h.name as hospital_name, h.level
        FROM cached_patients cp
        JOIN hospitals h ON h.id = cp.hospital_id
@@ -179,15 +198,29 @@ export async function GET(
         name: decryptedName,
         age: p.age,
         gravida: p.gravida,
+        para: p.para,
+        abortion: p.abortion,
+        livingChildren: p.living_children,
+        pregNo: p.preg_no,
         gaWeeks: p.ga_weeks,
+        gaDay: p.ga_day,
         ancCount: p.anc_count,
         admitDate: p.admit_date,
         heightCm: p.height_cm,
         weightKg: p.weight_kg,
         weightDiffKg: p.weight_diff_kg,
+        prePregnancyWeightKg: p.pre_pregnancy_weight_kg,
         fundalHeightCm: p.fundal_height_cm,
         usWeightG: p.us_weight_g,
         hematocritPct: p.hematocrit_pct,
+        bpSystolicAdmit: p.bp_systolic_admit,
+        bpDiastolicAdmit: p.bp_diastolic_admit,
+        pulseAdmit: p.pulse_admit,
+        rrAdmit: p.rr_admit,
+        temperatureAdmit: p.temperature_admit,
+        cervicalOpenCmAdmit: p.cervical_open_cm_admit,
+        effacementPctAdmit: p.effacement_pct_admit,
+        stationAdmit: p.station_admit,
         laborStatus: p.labor_status as PatientDetailResponse['patient']['laborStatus'],
         hospital: {
           hcode: p.hcode,
