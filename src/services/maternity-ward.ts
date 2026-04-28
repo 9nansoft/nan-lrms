@@ -472,21 +472,24 @@ export async function upsertLabour(
 
 // ─── Task 44: legacy `labor` table upsert (delivery-room outcome) ──────────
 // Mirrors upsertLabour but writes to the legacy `labor` table (American spelling).
-// We assume one row per AN — the BMS REST endpoint accepts the AN as resource id
-// for this table the same way ipt_labour does. If the row does not exist yet
-// (rare; HOSxP usually creates it at admission) the BMS will surface a 404 from
-// restUpdate, which the caller propagates as a Thai inline error.
+// One row per AN; AN acts as the BMS REST resource id. INSERT-or-UPDATE
+// dispatch via the `exists` parameter — same pattern as upsertLabour.
 export async function upsertLabor(
   config: ConnectionConfig,
   userInfo: UserInfo,
   an: string,
   fields: Partial<LaborRecord>,
   hcode: string,
+  exists = true,
 ): Promise<void> {
-  await restUpdate('labor', an, fields as Record<string, unknown>, config);
+  if (exists) {
+    await restUpdate('labor', an, fields as Record<string, unknown>, config);
+  } else {
+    await restInsert('labor', { an, ...fields } as Record<string, unknown>, config);
+  }
   fireAudit({
     entity: 'labor',
-    op: 'update',
+    op: exists ? 'update' : 'insert',
     resourceId: an,
     hcode,
     staff: userInfo.loginname,
