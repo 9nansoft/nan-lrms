@@ -1,19 +1,36 @@
-// Task 35: StageMedTab read-only.
-// Task 46: extended with table+inline-edit CRUD. Editable fields: icode,
-// med_number, qty, medication_date, medication_time, medication_note. The
-// joined display fields (medication_name from s_drugitems, staff_name from
-// opduser) are read-only — they refresh next time the SWR key revalidates.
+// StageMedTab — labour_stage_medication CRUD with table + inline-edit row.
+// Mirrors the v2 design of MedicationsTab so the kiosk reads as one app:
+//   * Drug-name autocomplete (LookupPicker over s_drugitems via searchDrugs).
+//   * qty chip presets above a free-text input.
+//   * Date + time pickers (medication_date / medication_time).
+//   * Hoisted EditRow + module-scope helpers — fixes the same remount bug
+//     the Medications tab originally had.
+//   * v2 visual: cyan brand bar, slate-900 title rule, 18px bold title,
+//     hoverable rows, dashed empty-state with CTA.
+//
+// Service notes:
+//   * PATIENT_STAGE_MED_BY_AN was reduced to a single LEFT JOIN
+//     (s_drugitems only) because BMS Validation rejected the second JOIN
+//     (opduser) in this tunnel — the row's `staff` (loginname) is shown
+//     directly when the joined name is absent.
+//   * getPatientStageMedications sorts client-side by (medication_date,
+//     medication_time) — BMS validator also rejects ORDER BY in this query.
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useBmsSession } from '@/hooks/useBmsSession';
 import {
   deleteStageMedication,
   getPatientStageMedications,
+  searchDrugs,
   upsertStageMedication,
 } from '@/services/maternity-ward';
 import type { StageMedRow } from '@/types/maternity-ward';
+import type { ConnectionConfig } from '@/types/bms-browser';
+import { cn } from '@/lib/utils';
+
+// ─── Types & helpers ──────────────────────────────────────────────────────
 
 type EditState = {
   labour_stage_medication_id?: number;
@@ -40,6 +57,328 @@ function toNumberOrNull(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function todayLocal(): { date: string; time: string } {
+  const d = new Date();
+  const p = (n: number) => n.toString().padStart(2, '0');
+  return {
+    date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+    time: `${p(d.getHours())}:${p(d.getMinutes())}`,
+  };
+}
+
+const QTY_PRESETS = ['1', '2', '3', '5', '10'];
+
+// ─── LookupPicker — same shape as Medications tab ─────────────────────────
+
+interface LookupItem {
+  primary: string;
+  secondary: string;
+  payload: string;
+}
+
+interface LookupPickerProps {
+  ariaLabel: string;
+  placeholder: string;
+  initialQuery: string;
+  fetch: (q: string) => Promise<LookupItem[]>;
+  onPick: (item: LookupItem) => void;
+}
+
+function LookupPicker({ ariaLabel, placeholder, initialQuery, fetch, onPick }: LookupPickerProps) {
+  const [query, setQuery] = useState(initialQuery);
+  const [items, setItems] = useState<LookupItem[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const lastPickedRef = useRef<string>(initialQuery);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length === 0 || trimmed === lastPickedRef.current) {
+      setItems([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      fetch(trimmed)
+        .then((rows) => {
+          if (!cancelled) setItems(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setItems([]);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, fetch]);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+      />
+      {open && (items.length > 0 || loading) && (
+        <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {loading && items.length === 0 && (
+            <div className="px-3 py-2 text-[12px] text-slate-500">กำลังค้นหา…</div>
+          )}
+          {items.map((it, idx) => (
+            <button
+              key={`${it.payload}-${idx}`}
+              type="button"
+              onClick={() => {
+                onPick(it);
+                lastPickedRef.current = it.primary;
+                setQuery(it.primary);
+                setOpen(false);
+                setItems([]);
+              }}
+              className="flex w-full flex-col gap-0.5 border-b border-slate-100 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-cyan-50/60"
+            >
+              <span className="text-[14px] font-semibold text-slate-900">{it.primary}</span>
+              {it.secondary && (
+                <span className="font-mono text-[11px] text-slate-500">{it.secondary}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Chip row + inline input ──────────────────────────────────────────────
+
+function ChipRow({
+  options,
+  selected,
+  onPick,
+  ariaLabel,
+}: {
+  options: readonly string[];
+  selected: string;
+  onPick: (v: string) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label={ariaLabel}>
+      {options.map((opt) => {
+        const isSelected = selected === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onPick(opt)}
+            className={cn(
+              'rounded-md border px-2.5 py-1 text-[12px] font-semibold transition-all',
+              isSelected
+                ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
+            )}
+          >
+            {opt}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+interface InlineInputProps {
+  ariaLabel: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  type?: 'text' | 'number' | 'date' | 'time';
+}
+function InlineInput({ ariaLabel, value, onChange, placeholder, type = 'text' }: InlineInputProps) {
+  return (
+    <input
+      type={type === 'number' ? 'text' : type}
+      inputMode={type === 'number' ? 'numeric' : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      className={cn(
+        'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20',
+        (type === 'number' || type === 'time') && 'font-semibold tabular-nums',
+      )}
+    />
+  );
+}
+
+// ─── EditRow — module-scope so React preserves picker instances ──────────
+
+interface EditRowProps {
+  config: ConnectionConfig;
+  draft: EditState;
+  setDraft: React.Dispatch<React.SetStateAction<EditState>>;
+  initialDrugLabel: string;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}
+
+function EditRow({
+  config, draft, setDraft, initialDrugLabel, saving, onCancel, onSave,
+}: EditRowProps) {
+  return (
+    <tr className="bg-cyan-50/40">
+      <td colSpan={6} className="px-4 py-4">
+        <div className="space-y-4">
+          {/* DRUG SECTION — name autocomplete + icode display */}
+          <div className="rounded-md border border-cyan-200 bg-white p-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
+              <div className="flex flex-col gap-1">
+                <label className="text-[12px] font-semibold text-slate-700">
+                  ค้นหายา · Drug name
+                </label>
+                <LookupPicker
+                  ariaLabel="drug_search"
+                  placeholder="พิมพ์ชื่อยา เช่น Oxytocin…"
+                  initialQuery={initialDrugLabel}
+                  fetch={async (q) => {
+                    const rows = await searchDrugs(config, q);
+                    return rows.map((r) => ({
+                      primary: r.label,
+                      secondary: r.icode,
+                      payload: r.icode,
+                    }));
+                  }}
+                  onPick={(it) => setDraft((d) => ({ ...d, icode: it.payload }))}
+                />
+                <div className="text-[11px] text-slate-500">
+                  พิมพ์ชื่อยาบางส่วน — แตะเลือกจากผลค้นหา
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[12px] font-semibold text-slate-700">
+                  รหัสยา · icode
+                </label>
+                <InlineInput
+                  ariaLabel="icode"
+                  value={draft.icode}
+                  onChange={(v) => setDraft((d) => ({ ...d, icode: v }))}
+                  placeholder="ระบบเติมเอง"
+                />
+                <div className="text-[11px] text-slate-500">
+                  เลือกจากผลค้นหา หรือพิมพ์เอง
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* TIMING + QTY + SEQUENCE */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_0.8fr_0.8fr_1fr]">
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-semibold text-slate-700">วันที่</label>
+              <InlineInput
+                ariaLabel="medication_date"
+                value={draft.medication_date}
+                onChange={(v) => setDraft((d) => ({ ...d, medication_date: v }))}
+                type="date"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-semibold text-slate-700">เวลา</label>
+              <InlineInput
+                ariaLabel="medication_time"
+                value={draft.medication_time}
+                onChange={(v) => setDraft((d) => ({ ...d, medication_time: v }))}
+                type="time"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-semibold text-slate-700">จำนวน</label>
+              <ChipRow
+                ariaLabel="qty quick picks"
+                options={QTY_PRESETS}
+                selected={draft.qty}
+                onPick={(v) => setDraft((d) => ({ ...d, qty: v }))}
+              />
+              <InlineInput
+                ariaLabel="qty"
+                value={draft.qty}
+                onChange={(v) => setDraft((d) => ({ ...d, qty: v }))}
+                type="number"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-semibold text-slate-700">ลำดับ (med #)</label>
+              <InlineInput
+                ariaLabel="med_number"
+                value={draft.med_number}
+                onChange={(v) => setDraft((d) => ({ ...d, med_number: v }))}
+                type="number"
+                placeholder="1"
+              />
+            </div>
+          </div>
+
+          {/* NOTE */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[12px] font-semibold text-slate-700">หมายเหตุ</label>
+            <InlineInput
+              ariaLabel="medication_note"
+              value={draft.medication_note}
+              onChange={(v) => setDraft((d) => ({ ...d, medication_note: v }))}
+              placeholder="เช่น IV bolus, IM, oral"
+            />
+          </div>
+
+          {/* Action bar */}
+          <div className="flex justify-end gap-2 border-t border-cyan-200 pt-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !draft.icode.trim()}
+              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-5 py-2 text-[13px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+              title={!draft.icode.trim() ? 'ต้องเลือกยาก่อน' : undefined}
+            >
+              {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+            </button>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Main ──────────────────────────────────────────────────────────────────
+
 export function StageMedTab({ an }: { an: string }) {
   const { config, userInfo } = useBmsSession();
   const { data, error, isLoading, mutate } = useSWR<StageMedRow[]>(
@@ -49,6 +388,7 @@ export function StageMedTab({ an }: { an: string }) {
 
   const [editingId, setEditingId] = useState<number | 'new' | null>(null);
   const [draft, setDraft] = useState<EditState>(EMPTY_DRAFT);
+  const [initialDrugLabel, setInitialDrugLabel] = useState('');
   const [saving, setSaving] = useState(false);
 
   if (!config) {
@@ -64,10 +404,15 @@ export function StageMedTab({ an }: { an: string }) {
   const isEmpty = rows.length === 0 && editingId !== 'new';
 
   function startAdd() {
+    const now = todayLocal();
     setEditingId('new');
-    setDraft(EMPTY_DRAFT);
+    setDraft({
+      ...EMPTY_DRAFT,
+      medication_date: now.date,
+      medication_time: now.time,
+    });
+    setInitialDrugLabel('');
   }
-
   function startEdit(row: StageMedRow) {
     setEditingId(row.labour_stage_medication_id);
     setDraft({
@@ -76,16 +421,15 @@ export function StageMedTab({ an }: { an: string }) {
       med_number: row.med_number?.toString() ?? '',
       qty: row.qty?.toString() ?? '',
       medication_date: row.medication_date ?? '',
-      medication_time: row.medication_time ?? '',
+      medication_time: (row.medication_time ?? '').slice(0, 5),
       medication_note: row.medication_note ?? '',
     });
+    setInitialDrugLabel(row.medication_name ?? '');
   }
-
   function cancel() {
     setEditingId(null);
     setDraft(EMPTY_DRAFT);
   }
-
   async function save() {
     if (!config || !userInfo) return;
     setSaving(true);
@@ -109,7 +453,6 @@ export function StageMedTab({ an }: { an: string }) {
       setSaving(false);
     }
   }
-
   async function remove(id: number) {
     if (!config || !userInfo) return;
     if (!window.confirm('ยืนยันการลบรายการนี้หรือไม่?')) return;
@@ -122,113 +465,135 @@ export function StageMedTab({ an }: { an: string }) {
     }
   }
 
-  function textInput(name: keyof Omit<EditState, 'labour_stage_medication_id'>, width = 'w-24') {
-    return (
-      <input
-        type="text"
-        value={draft[name] ?? ''}
-        onChange={(e) => setDraft((d) => ({ ...d, [name]: e.target.value }))}
-        className={`${width} rounded border border-slate-300 px-1 py-0.5 text-sm`}
-        aria-label={name}
-      />
-    );
-  }
-
-  function editRow(key: string) {
-    return (
-      <tr key={key} className="border-b bg-amber-50">
-        <td className="py-2">{textInput('medication_date')}</td>
-        <td>{textInput('medication_time', 'w-20')}</td>
-        <td>{textInput('icode')}</td>
-        <td>-</td>
-        <td>{textInput('qty', 'w-12')}</td>
-        <td>{textInput('medication_note', 'w-32')}</td>
-        <td className="space-x-2 text-right">
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving}
-            className="rounded bg-blue-600 px-2 py-1 text-xs text-white disabled:opacity-50"
-          >
-            {saving ? 'กำลังบันทึก…' : 'บันทึก'}
-          </button>
-          <button
-            type="button"
-            onClick={cancel}
-            disabled={saving}
-            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
-          >
-            ยกเลิก
-          </button>
-        </td>
-      </tr>
-    );
-  }
-
   return (
-    <div className="overflow-x-auto p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-medium text-slate-700">บันทึกการให้ยาในห้องคลอด</h3>
+    <div className="space-y-4 p-4">
+      {/* Title + add button */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 pb-3">
+        <div className="flex items-center gap-3">
+          <span aria-hidden className="block h-1.5 w-8 bg-cyan-600" />
+          <h2 className="text-[18px] font-bold tracking-tight text-slate-900">
+            บันทึกการให้ยาในห้องคลอด
+          </h2>
+          {rows.length > 0 && (
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-700">
+              {rows.length} รายการ
+            </span>
+          )}
+        </div>
         <button
           type="button"
           onClick={startAdd}
           disabled={editingId !== null}
-          className="rounded bg-emerald-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+          className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-4 py-2 text-[14px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
         >
           + เพิ่มรายการยา
         </button>
       </div>
+
       {isEmpty ? (
-        <div className="p-4 text-slate-500">ไม่พบข้อมูล</div>
+        <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-8 text-center">
+          <div className="text-[14px] font-medium text-slate-600">ไม่พบข้อมูล</div>
+          <div className="mt-1 text-[12px] text-slate-500">
+            กดปุ่ม <strong>+ เพิ่มรายการยา</strong> ด้านบนเพื่อบันทึกยาที่ให้ในห้องคลอด
+          </div>
+        </div>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left text-xs text-slate-500">
-              <th className="py-2">วันที่</th>
-              <th>เวลา</th>
-              <th>ยา</th>
-              <th>ผู้บันทึก</th>
-              <th>จำนวน</th>
-              <th>หมายเหตุ</th>
-              <th className="text-right">การจัดการ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {editingId === 'new' && editRow('new')}
-            {rows.map((row) =>
-              editingId === row.labour_stage_medication_id ? (
-                editRow(`edit-${row.labour_stage_medication_id}`)
-              ) : (
-                <tr key={row.labour_stage_medication_id} className="border-b">
-                  <td className="py-2">{row.medication_date ?? '-'}</td>
-                  <td>{row.medication_time ?? '-'}</td>
-                  <td>{row.medication_name ?? row.icode}</td>
-                  <td>{row.staff_name ?? row.staff ?? '-'}</td>
-                  <td>{row.qty ?? '-'}</td>
-                  <td>{row.medication_note ?? '-'}</td>
-                  <td className="space-x-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() => startEdit(row)}
-                      disabled={editingId !== null}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 disabled:opacity-50"
-                    >
-                      แก้ไข
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => remove(row.labour_stage_medication_id)}
-                      disabled={editingId !== null || saving}
-                      className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 disabled:opacity-50"
-                    >
-                      ลบ
-                    </button>
-                  </td>
-                </tr>
-              ),
-            )}
-          </tbody>
-        </table>
+        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
+          <table className="w-full text-[14px]">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-left text-[12px] font-bold uppercase tracking-wide text-slate-600">
+                <th className="px-4 py-3">วันที่ · เวลา</th>
+                <th className="px-4 py-3">ยา</th>
+                <th className="px-4 py-3">ผู้บันทึก</th>
+                <th className="px-4 py-3 text-right">จำนวน</th>
+                <th className="px-4 py-3">หมายเหตุ</th>
+                <th className="px-4 py-3 text-right">การจัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {editingId === 'new' && (
+                <EditRow
+                  config={config}
+                  draft={draft}
+                  setDraft={setDraft}
+                  initialDrugLabel={initialDrugLabel}
+                  saving={saving}
+                  onCancel={cancel}
+                  onSave={save}
+                />
+              )}
+              {rows.map((row) =>
+                editingId === row.labour_stage_medication_id ? (
+                  <EditRow
+                    key={`edit-${row.labour_stage_medication_id}`}
+                    config={config}
+                    draft={draft}
+                    setDraft={setDraft}
+                    initialDrugLabel={initialDrugLabel}
+                    saving={saving}
+                    onCancel={cancel}
+                    onSave={save}
+                  />
+                ) : (
+                  <tr
+                    key={row.labour_stage_medication_id}
+                    className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/50"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-mono font-semibold tabular-nums text-slate-900">
+                          {row.medication_date ?? '—'}
+                        </span>
+                        <span className="font-mono text-[11px] tabular-nums text-slate-500">
+                          {row.medication_time ?? '—'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-0.5">
+                        {row.medication_name ? (
+                          <>
+                            <span className="font-semibold text-slate-900">{row.medication_name}</span>
+                            <span className="font-mono text-[11px] text-slate-500">{row.icode}</span>
+                          </>
+                        ) : (
+                          <span className="font-mono font-semibold text-slate-900">{row.icode}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {row.staff_name ?? row.staff ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
+                      {row.qty ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{row.medication_note ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => startEdit(row)}
+                          disabled={editingId !== null}
+                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
+                        >
+                          แก้ไข
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => remove(row.labour_stage_medication_id)}
+                          disabled={editingId !== null || saving}
+                          className="rounded-md border border-rose-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-40"
+                        >
+                          ลบ
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
