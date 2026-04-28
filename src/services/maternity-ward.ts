@@ -167,16 +167,25 @@ export async function getPatientLabourMedications(
   return r.data;
 }
 
-// Task 35: read delivery-room (stage) medication rows for an admission. Joined
-// to s_drugitems / opduser server-side so the result already carries
-// medication_name + staff_name; rows are PK'd by labour_stage_medication_id.
+// Task 35: read delivery-room (stage) medication rows for an admission.
+// PATIENT_STAGE_MED_BY_AN joins s_drugitems server-side for medication_name
+// (the second JOIN to opduser was dropped — BMS Validation rejected it).
+// Sorting by (medication_date, medication_time) is done CLIENT-SIDE here
+// since the BMS validator also rejects ORDER BY in this query shape.
 export async function getPatientStageMedications(
   config: ConnectionConfig,
   an: string,
 ): Promise<StageMedRow[]> {
   const sql = getQuery(PATIENT_STAGE_MED_BY_AN, DEFAULT_DIALECT);
   const r = await executeSql<StageMedRow>(sql, config, { an });
-  return r.data;
+  // Chronological ascending — older entries at top, newest at bottom.
+  // Null dates/times sort last (typical Thai chart convention is
+  // "incomplete records appear after the in-order ones").
+  return [...r.data].sort((a, b) => {
+    const ka = `${a.medication_date ?? '9999-99-99'} ${a.medication_time ?? '99:99:99'}`;
+    const kb = `${b.medication_date ?? '9999-99-99'} ${b.medication_time ?? '99:99:99'}`;
+    return ka.localeCompare(kb);
+  });
 }
 
 // Task 36: read labour complications for a given ipt_labour_id (NOT an — the

@@ -638,11 +638,21 @@ export const PATIENT_LABOUR_MED_BY_AN: SqlQueryTemplate = {
   mysql: `SELECT lm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name FROM labour_medication lm LEFT JOIN s_drugitems s ON s.icode = lm.icode WHERE lm.an = :an`,
 };
 
-// Stage-medication rows (delivery-room meds keyed to drug master) with friendly
-// medication + staff names joined in
+// Stage-medication rows (delivery-room meds keyed to drug master) with the
+// drug name joined in. Mirrors the shape of PATIENT_LABOUR_MED_BY_AN —
+// single LEFT JOIN to s_drugitems, no ORDER BY, no second JOIN — which is
+// the only shape the BMS Session API's SQL validator currently accepts for
+// this kiosk's tunnel. Adding a second JOIN (opduser for staff_name) or an
+// ORDER BY with table-aliased columns triggers
+//   {"MessageCode": <non-200>, "Message": "SQL Validation Failed"}
+// on the live BMS server even though the query is valid MySQL.
+//
+// The UI sorts by (medication_date, medication_time) client-side and shows
+// the raw `staff` loginname when no joined name is available — RN.XXX
+// loginnames are already legible to the staff who see them.
 export const PATIENT_STAGE_MED_BY_AN: SqlQueryTemplate = {
-  postgresql: `SELECT lsm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name, o.name AS staff_name FROM labour_stage_medication lsm LEFT JOIN s_drugitems s ON s.icode = lsm.icode LEFT JOIN opduser o ON o.loginname = lsm.staff WHERE lsm.an = :an ORDER BY lsm.medication_date, lsm.medication_time`,
-  mysql: `SELECT lsm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name, o.name AS staff_name FROM labour_stage_medication lsm LEFT JOIN s_drugitems s ON s.icode = lsm.icode LEFT JOIN opduser o ON o.loginname = lsm.staff WHERE lsm.an = :an ORDER BY lsm.medication_date, lsm.medication_time`,
+  postgresql: `SELECT lsm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name FROM labour_stage_medication lsm LEFT JOIN s_drugitems s ON s.icode = lsm.icode WHERE lsm.an = :an`,
+  mysql: `SELECT lsm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name FROM labour_stage_medication lsm LEFT JOIN s_drugitems s ON s.icode = lsm.icode WHERE lsm.an = :an`,
 };
 
 // Labour complications keyed by ipt_labour_id (NOT an), joined to lookup name
