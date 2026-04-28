@@ -12,11 +12,19 @@ import {
   setMarketplaceToken,
 } from '@/utils/bms-session-storage';
 
+interface AccessDeniedInfo {
+  reason: 'not_registered' | 'deactivated';
+  hospitalCode: string;
+  hospitalName: string;
+  message: string;
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [sessionId, setSessionId] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState<AccessDeniedInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const autoLoginAttempted = useRef(false);
 
@@ -38,15 +46,57 @@ function LoginForm() {
   async function doLogin(id: string) {
     setLoading(true);
     setError(null);
+    setAccessDenied(null);
 
     try {
       const trimmed = id.trim();
+
+      // Preflight: differentiate "bad session" from "hospital not registered"
+      // BEFORE NextAuth swallows the rejection reason into a generic
+      // CredentialsSignin error. The endpoint is public (no auth needed).
+      const preflightRes = await fetch('/api/auth/hospital-preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: trimmed }),
+      });
+      const preflight = (await preflightRes.json().catch(() => null)) as
+        | {
+            ok: boolean;
+            reason?: 'invalid_session' | 'not_registered' | 'deactivated' | 'invalid_request';
+            hospitalCode?: string;
+            hospitalName?: string;
+            message?: string;
+          }
+        | null;
+
+      if (!preflight) {
+        setError('ไม่สามารถตรวจสอบ session ได้ — กรุณาลองใหม่');
+        return;
+      }
+
+      if (!preflight.ok) {
+        if (preflight.reason === 'not_registered' || preflight.reason === 'deactivated') {
+          setAccessDenied({
+            reason: preflight.reason,
+            hospitalCode: preflight.hospitalCode ?? '',
+            hospitalName: preflight.hospitalName ?? '',
+            message: preflight.message ?? '',
+          });
+        } else {
+          setError(preflight.message ?? 'Session ID ไม่ถูกต้องหรือหมดอายุ');
+        }
+        return;
+      }
+
       const result = await signIn('credentials', {
         sessionId: trimmed,
         redirect: false,
       });
 
       if (result?.error) {
+        // Should be rare — preflight passed but signIn failed (race condition
+        // where hospital was deactivated between preflight and signIn, or BMS
+        // session expired in the same window).
         setError('Session ID ไม่ถูกต้องหรือหมดอายุ');
       } else {
         // Persist the BMS session + marketplace token so BmsSessionProvider
@@ -178,7 +228,33 @@ function LoginForm() {
               />
             </div>
 
-            {error && (
+            {accessDenied && (
+              <div className="rounded-xl border-2 border-red-300 bg-red-50 p-4 text-sm">
+                <div className="flex items-start gap-2 mb-2">
+                  <Shield className="h-5 w-5 shrink-0 text-red-600 mt-0.5" />
+                  <div className="text-red-800 font-semibold">
+                    {accessDenied.reason === 'deactivated'
+                      ? 'โรงพยาบาลถูกปิดการใช้งาน'
+                      : 'ไม่ได้รับสิทธิ์ใช้งานระบบ'}
+                  </div>
+                </div>
+                <div className="text-red-700 text-xs mb-2">
+                  <div>
+                    โรงพยาบาล: <span className="font-semibold">{accessDenied.hospitalName || '—'}</span>
+                  </div>
+                  <div>
+                    รหัสโรงพยาบาล: <span className="font-mono font-semibold">{accessDenied.hospitalCode || '—'}</span>
+                  </div>
+                </div>
+                <div className="text-red-700 text-xs leading-relaxed border-t border-red-200 pt-2">
+                  {accessDenied.reason === 'deactivated'
+                    ? 'โรงพยาบาลของท่านถูกปิดการใช้งานในระบบ KK-LRMS หากท่านคิดว่าเป็นความผิดพลาด กรุณาติดต่อผู้ดูแลระบบ (สสจ.ขอนแก่น) เพื่อขอเปิดใช้งานอีกครั้ง'
+                    : 'โรงพยาบาลของท่านยังไม่ได้รับการลงทะเบียนในระบบ KK-LRMS หากท่านคิดว่าเป็นความผิดพลาด หรือต้องการเข้าร่วมเครือข่าย กรุณาติดต่อผู้ดูแลระบบ (สสจ.ขอนแก่น) เพื่อขอลงทะเบียนโรงพยาบาลของท่านในระบบ'}
+                </div>
+              </div>
+            )}
+
+            {error && !accessDenied && (
               <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">
                 {error}
               </div>

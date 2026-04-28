@@ -1,5 +1,4 @@
 // POST /api/sync/trigger — on-demand data sync for the user's hospital
-import { v4 as uuidv4 } from 'uuid';
 import { NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
@@ -26,40 +25,33 @@ export async function POST() {
       return NextResponse.json({ synced: false, reason: 'no_hospital_code', lastSyncAt: null });
     }
 
-    // Resolve hcode → hospital UUID (auto-register if not found)
-    let hospitals = await db.query<{ id: string }>(
-      'SELECT id FROM hospitals WHERE hcode = ?',
+    // Resolve hcode → hospital UUID. We previously auto-registered the row
+    // here when not found, which was a security hole: any director-role user
+    // from an unregistered hospital who hit the dashboard could silently
+    // graft their facility into the registry, bypassing /admin · โรงพยาบาล.
+    // Now we 403 — registration must go through an admin who explicitly adds
+    // the hospital. The login-time hospital-access-guard should already have
+    // blocked this path; this 403 is defense-in-depth for stale sessions.
+    const hospitals = await db.query<{ id: string }>(
+      'SELECT id FROM hospitals WHERE hcode = ? AND is_active = true',
       [hospitalCode],
     );
 
     if (hospitals.length === 0) {
-      // Auto-register hospital from user's BMS profile
-      const hospitalId = uuidv4();
-      const now = new Date().toISOString();
-      const hospitalName = session.user.hospitalName || `รพ.${hospitalCode}`;
-
-      await db.execute(
-        `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        // Postgres strict boolean — use true, not 1 (SQLite is loose).
-        [hospitalId, hospitalCode, hospitalName, 'M2', true, 'UNKNOWN', now, now],
-      );
-
-      // Also store BMS tunnel config if available
-      if (session.user.tunnelUrl) {
-        await db.execute(
-          `INSERT INTO hospital_bms_config (id, hospital_id, tunnel_url, database_type, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [uuidv4(), hospitalId, session.user.tunnelUrl, session.user.databaseType || 'postgresql', now, now],
-        );
-      }
-
-      logger.info('hospital_auto_registered', {
-        hospitalName,
+      logger.warn('sync_trigger_rejected_unregistered_hospital', {
         hospitalCode,
-        tunnelUrl: session.user.tunnelUrl || 'none',
+        hospitalName: session.user.hospitalName,
       });
-      hospitals = [{ id: hospitalId }];
+      return NextResponse.json(
+        {
+          error: 'hospital_not_registered',
+          hospitalCode,
+          hospitalName: session.user.hospitalName,
+          message:
+            'โรงพยาบาลของท่านยังไม่ได้รับสิทธิ์ใช้งานระบบ — กรุณาติดต่อผู้ดูแลระบบ',
+        },
+        { status: 403 },
+      );
     }
 
     const result = await requestImmediateSync(db, hospitals[0].id, sseManager);

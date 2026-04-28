@@ -24,18 +24,22 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!identity) return null;
 
         // Reject the login when the BMS identity belongs to a hospital that
-        // isn't registered in /admin (exempt: ADMIN role, hcode 00000, 99999).
-        // Failure closed so an operator removing a hospital from the admin
-        // list immediately blocks new sessions.
-        const allowed = await assertHospitalAccess({
+        // isn't registered (or is deactivated). Exempt only: hcode 00000 /
+        // 99999 (system + provincial admin). Role does NOT bypass — even
+        // ADMIN role from an unregistered hospital is denied; cross-province
+        // admins must use one of the exempt hcodes. Failure closed so an
+        // operator removing a hospital from the admin list immediately
+        // blocks new sessions.
+        const access = await assertHospitalAccess({
           hospitalCode: identity.hospitalCode,
           role: identity.role,
         });
-        if (!allowed) {
-          logger.warn('bms_login_rejected_unregistered_hospital', {
+        if (!access.allowed) {
+          logger.warn('bms_login_rejected', {
             hospitalCode: identity.hospitalCode,
             hospitalName: identity.hospitalName,
             role: identity.role,
+            reason: access.reason,
           });
           return null;
         }

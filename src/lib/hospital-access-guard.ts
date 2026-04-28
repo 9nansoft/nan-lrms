@@ -3,16 +3,19 @@
 // validateBmsSession() has returned an identity — if the gate denies, the
 // login is rejected (authorize returns null) and the user never gets a JWT.
 //
-// Policy:
-//   1. ADMIN role → always allowed (system administrators have cross-province
-//      access and may operate against not-yet-registered hospitals during
-//      onboarding).
-//   2. Exempt facility codes → always allowed:
+// Policy (in order):
+//   1. Exempt facility codes → always allowed:
 //        '00000' reserved system-level account
 //        '99999' reserved provincial/admin testing account
-//   3. Otherwise → hcode must match an active row in the operational
-//      `hospitals` table. A hospital removed or deactivated by an admin
-//      (via /admin · โรงพยาบาล) cannot issue new sessions.
+//      Cross-province administrators MUST use one of these hcodes — the
+//      role-based ADMIN bypass that previously sat above this rule was
+//      removed because mapPositionToRole() promotes any BMS user whose
+//      position contains "director"/"ผู้อำนวยการ" to ADMIN, which let
+//      directors of unregistered hospitals into the system.
+//   2. Hcode must match an active row in the operational `hospitals` table.
+//      A hospital removed or deactivated by an admin (via /admin ·
+//      โรงพยาบาล) cannot issue new sessions. Role does NOT influence this
+//      check — even ADMIN users from unregistered hospitals are denied.
 //
 // The check runs once per login, not per request. Existing sessions whose
 // hospital is removed remain valid until JWT expiry (session.maxAge, 8 h).
@@ -39,40 +42,69 @@ export interface HospitalAccessInput {
   role: UserRole | string;
 }
 
+export type HospitalAccessReason =
+  | 'allowed_exempt'
+  | 'allowed_registered'
+  | 'denied_hospital_not_registered'
+  | 'denied_hospital_inactive';
+
+export interface HospitalAccessResult {
+  allowed: boolean;
+  reason: HospitalAccessReason;
+}
+
 /**
- * Returns true iff the identity is allowed to hold a KK-LRMS session.
- * The optional `db` parameter lets tests inject a pre-built adapter without
- * bootstrapping the global `ensureInit()` singleton — production callers
- * omit it and let the gate resolve the live database.
+ * Returns the access decision plus the reason. ADMIN role no longer bypasses
+ * the registry check — the only bypass is the EXEMPT_HCODES set. The optional
+ * `db` parameter lets tests inject a pre-built adapter without bootstrapping
+ * the global `ensureInit()` singleton — production callers omit it.
  */
+export async function checkHospitalAccess(
+  input: HospitalAccessInput,
+  db?: DatabaseAdapter,
+): Promise<HospitalAccessResult> {
+  if (EXEMPT_HCODES.has(input.hospitalCode)) {
+    return { allowed: true, reason: 'allowed_exempt' };
+  }
+
+  const adapter = db ?? (await resolveDefaultDb());
+
+  // Distinguish "no row" from "row exists but inactive" so the login page can
+  // show a different message: not-registered vs. deactivated-by-admin.
+  const rows = await adapter.query<{ is_active: boolean }>(
+    'SELECT is_active FROM hospitals WHERE hcode = ?',
+    [input.hospitalCode],
+  );
+  if (rows.length === 0) {
+    return { allowed: false, reason: 'denied_hospital_not_registered' };
+  }
+  if (!rows[0].is_active) {
+    return { allowed: false, reason: 'denied_hospital_inactive' };
+  }
+  return { allowed: true, reason: 'allowed_registered' };
+}
+
+/** Back-compat boolean wrapper. New code should call checkHospitalAccess. */
 export async function isHospitalAccessAllowed(
   input: HospitalAccessInput,
   db?: DatabaseAdapter,
 ): Promise<boolean> {
-  if (input.role === UserRole.ADMIN) return true;
-  if (EXEMPT_HCODES.has(input.hospitalCode)) return true;
-
-  const adapter = db ?? (await resolveDefaultDb());
-
-  const rows = await adapter.query<{ id: string }>(
-    'SELECT id FROM hospitals WHERE hcode = ? AND is_active = true',
-    [input.hospitalCode],
-  );
-  return rows.length > 0;
+  const result = await checkHospitalAccess(input, db);
+  return result.allowed;
 }
 
 /** Convenience wrapper that logs the rejection reason for observability. */
 export async function assertHospitalAccess(
   input: HospitalAccessInput,
   db?: DatabaseAdapter,
-): Promise<boolean> {
-  const allowed = await isHospitalAccessAllowed(input, db);
-  if (!allowed) {
+): Promise<HospitalAccessResult> {
+  const result = await checkHospitalAccess(input, db);
+  if (!result.allowed) {
     logger.warn('hospital_access_denied', {
       hospitalCode: input.hospitalCode,
       role: input.role,
-      reason: 'hcode_not_in_registered_hospitals',
+      reason: result.reason,
     });
   }
-  return allowed;
+  return result;
 }
