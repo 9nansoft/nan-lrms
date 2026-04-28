@@ -485,14 +485,16 @@ function DraggableChip({
   onPick,
   step,
   isFloat,
+  range,
 }: {
   chip: { value: string; label: string };
   selected: string;
   onPick: (v: string) => void;
   step: number;
   isFloat: boolean;
+  range?: { min: number; max: number };
 }) {
-  const [drag, setDrag] = useState<{ startX: number; startVal: number; preview: string } | null>(null);
+  const [drag, setDrag] = useState<{ startX: number; startVal: number; preview: string; clamped: boolean } | null>(null);
   const movedRef = useRef(false);
 
   const fmt = (n: number): string =>
@@ -505,8 +507,6 @@ function DraggableChip({
     <button
       type="button"
       onClick={(e) => {
-        // Suppress synthetic click that follows a real drag — pointerup
-        // already committed the value.
         if (movedRef.current) {
           movedRef.current = false;
           e.preventDefault();
@@ -519,7 +519,7 @@ function DraggableChip({
         if (!Number.isFinite(startVal)) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         movedRef.current = false;
-        setDrag({ startX: e.clientX, startVal, preview: chip.value });
+        setDrag({ startX: e.clientX, startVal, preview: chip.value, clamped: false });
       }}
       onPointerMove={(e) => {
         if (!drag) return;
@@ -527,10 +527,14 @@ function DraggableChip({
         const stepsCount = Math.round(dx / DRAG_PX_PER_STEP);
         if (stepsCount === 0) return;
         movedRef.current = true;
-        const next = drag.startVal + stepsCount * step;
-        const preview = fmt(next);
-        if (preview !== drag.preview) {
-          setDrag({ ...drag, preview });
+        const raw = drag.startVal + stepsCount * step;
+        const clamped = range
+          ? Math.max(range.min, Math.min(range.max, raw))
+          : raw;
+        const wasClamped = clamped !== raw;
+        const preview = fmt(clamped);
+        if (preview !== drag.preview || wasClamped !== drag.clamped) {
+          setDrag({ ...drag, preview, clamped: wasClamped });
         }
       }}
       onPointerUp={(e) => {
@@ -545,13 +549,21 @@ function DraggableChip({
         setDrag(null);
         movedRef.current = false;
       }}
-      title="แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า"
+      title={
+        range
+          ? `แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า (${range.min}–${range.max})`
+          : 'แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า'
+      }
       className={cn(
         'min-w-[48px] cursor-ew-resize touch-none select-none rounded-md border px-3 py-1.5 text-[13px] font-semibold tabular-nums transition-all',
         isSelected
           ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
           : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
-        drag && movedRef.current && 'scale-110 shadow-lg ring-2 ring-cyan-400',
+        drag && movedRef.current && !drag.clamped && 'scale-110 shadow-lg ring-2 ring-cyan-400',
+        // Visual feedback when the drag is pinned at the range edge — amber
+        // ring so the nurse sees they've hit min/max and further drag won't
+        // move the value.
+        drag && movedRef.current && drag.clamped && 'scale-110 shadow-lg ring-2 ring-amber-400 cursor-not-allowed',
       )}
     >
       {displayLabel}
@@ -566,6 +578,7 @@ function ChipRow({
   ariaLabel,
   step = 1,
   isFloat = false,
+  range,
 }: {
   options: ReadonlyArray<{ value: string; label: string }>;
   selected: string;
@@ -573,6 +586,7 @@ function ChipRow({
   ariaLabel?: string;
   step?: number;
   isFloat?: boolean;
+  range?: { min: number; max: number };
 }) {
   return (
     <div className="flex flex-wrap gap-2" role="group" aria-label={ariaLabel}>
@@ -584,6 +598,7 @@ function ChipRow({
           onPick={onPick}
           step={step}
           isFloat={isFloat}
+          range={range}
         />
       ))}
     </div>
@@ -721,6 +736,13 @@ interface FieldProps {
    *  match. Keeping chips per-field (vs a section-level row) makes the visual
    *  binding between helper and input direct. */
   chips?: ReadonlyArray<{ value: string; label: string }>;
+  /** Min/max bounds for chip drag-adjust. The DraggableChip clamps the
+   *  previewed value to [min, max] and shows an amber edge-pinned ring when
+   *  the drag tries to push past either end — the nurse sees they've hit the
+   *  legal range. Required for any field that uses `chips` with numeric
+   *  values; categorical chips ('Mild' / '5/5') ignore the range and don't
+   *  drag at all. */
+  chipRange?: { min: number; max: number };
 }
 
 function Field({
@@ -734,6 +756,7 @@ function Field({
   colSpan,
   abnormal,
   chips,
+  chipRange,
 }: FieldProps) {
   const inputId = `pf-${name}`;
   // Numeric fields render in IBM Plex Mono with tabular-nums so columns align
@@ -826,6 +849,7 @@ function Field({
           onPick={onChange}
           step={type === 'float' ? 0.1 : 1}
           isFloat={type === 'float'}
+          range={chipRange}
         />
       )}
     </div>
@@ -1024,6 +1048,7 @@ export function PartographEntryDialog({
                 onChange={(v) => set('fetal_heart_rate', v)}
                 abnormal={abnormal.fetal_heart_rate}
                 chips={FHR_CHIPS}
+                chipRange={{ min: 60, max: 220 }}
               />
               <Field name="amniotic_fluid" label="น้ำคร่ำ" value={draft.amniotic_fluid} options={AMNIOTIC_OPTIONS} onChange={(v) => set('amniotic_fluid', v)} />
               <Field name="moulding" label="Moulding" value={draft.moulding} options={MOULDING_OPTIONS} onChange={(v) => set('moulding', v)} />
@@ -1038,6 +1063,7 @@ export function PartographEntryDialog({
                 value={draft.cervical_dilation_cm}
                 onChange={(v) => set('cervical_dilation_cm', v)}
                 chips={CX_CHIPS}
+                chipRange={{ min: 0, max: 10 }}
               />
               <Field
                 name="descent_of_head"
@@ -1057,6 +1083,7 @@ export function PartographEntryDialog({
               value={draft.contraction_per_10min}
               onChange={(v) => set('contraction_per_10min', v)}
               chips={CONTR_FREQ_CHIPS}
+              chipRange={{ min: 0, max: 10 }}
             />
             <Field
               name="contraction_duration_sec"
@@ -1064,6 +1091,7 @@ export function PartographEntryDialog({
               value={draft.contraction_duration_sec}
               onChange={(v) => set('contraction_duration_sec', v)}
               chips={CONTR_DUR_CHIPS}
+              chipRange={{ min: 10, max: 120 }}
             />
             <Field
               name="contraction_strength"
@@ -1087,6 +1115,7 @@ export function PartographEntryDialog({
               onChange={(v) => set('pulse', v)}
               abnormal={abnormal.pulse}
               chips={PULSE_CHIPS}
+              chipRange={{ min: 30, max: 200 }}
             />
             <Field
               name="bp_systolic"
@@ -1096,6 +1125,7 @@ export function PartographEntryDialog({
               onChange={(v) => set('bp_systolic', v)}
               abnormal={abnormal.bp_systolic}
               chips={BP_SYS_CHIPS}
+              chipRange={{ min: 60, max: 220 }}
             />
             <Field
               name="bp_diastolic"
@@ -1105,6 +1135,7 @@ export function PartographEntryDialog({
               onChange={(v) => set('bp_diastolic', v)}
               abnormal={abnormal.bp_diastolic}
               chips={BP_DIA_CHIPS}
+              chipRange={{ min: 30, max: 130 }}
             />
             <Field
               name="temperature"
@@ -1115,6 +1146,7 @@ export function PartographEntryDialog({
               onChange={(v) => set('temperature', v)}
               abnormal={abnormal.temperature}
               chips={TEMP_CHIPS}
+              chipRange={{ min: 34, max: 42 }}
             />
           </Section>
 
@@ -1140,6 +1172,7 @@ export function PartographEntryDialog({
               value={draft.oxytocin_uml}
               onChange={(v) => set('oxytocin_uml', v)}
               chips={OXY_UML_CHIPS}
+              chipRange={{ min: 0, max: 100 }}
             />
             <Field
               name="oxytocin_drops_min"
@@ -1147,6 +1180,7 @@ export function PartographEntryDialog({
               value={draft.oxytocin_drops_min}
               onChange={(v) => set('oxytocin_drops_min', v)}
               chips={OXY_DROPS_CHIPS}
+              chipRange={{ min: 0, max: 100 }}
             />
             <Field name="drugs_iv_fluids" label="IV / ยา" type="text" value={draft.drugs_iv_fluids} onChange={(v) => set('drugs_iv_fluids', v)} />
           </CollapsibleSection>

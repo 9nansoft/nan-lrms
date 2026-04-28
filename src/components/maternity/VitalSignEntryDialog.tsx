@@ -361,14 +361,16 @@ function DraggableChip({
   onPick,
   step,
   isFloat,
+  range,
 }: {
   chip: { value: string; label: string };
   selected: string;
   onPick: (v: string) => void;
   step: number;
   isFloat: boolean;
+  range?: { min: number; max: number };
 }) {
-  const [drag, setDrag] = useState<{ startX: number; startVal: number; preview: string } | null>(null);
+  const [drag, setDrag] = useState<{ startX: number; startVal: number; preview: string; clamped: boolean } | null>(null);
   const movedRef = useRef(false);
   const fmt = (n: number): string => (isFloat ? n.toFixed(1) : String(Math.round(n)));
   const isSelected = drag ? selected === drag.preview : selected === chip.value;
@@ -390,7 +392,7 @@ function DraggableChip({
         if (!Number.isFinite(startVal)) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         movedRef.current = false;
-        setDrag({ startX: e.clientX, startVal, preview: chip.value });
+        setDrag({ startX: e.clientX, startVal, preview: chip.value, clamped: false });
       }}
       onPointerMove={(e) => {
         if (!drag) return;
@@ -398,9 +400,13 @@ function DraggableChip({
         const stepsCount = Math.round(dx / DRAG_PX_PER_STEP);
         if (stepsCount === 0) return;
         movedRef.current = true;
-        const next = drag.startVal + stepsCount * step;
-        const preview = fmt(next);
-        if (preview !== drag.preview) setDrag({ ...drag, preview });
+        const raw = drag.startVal + stepsCount * step;
+        const clamped = range ? Math.max(range.min, Math.min(range.max, raw)) : raw;
+        const wasClamped = clamped !== raw;
+        const preview = fmt(clamped);
+        if (preview !== drag.preview || wasClamped !== drag.clamped) {
+          setDrag({ ...drag, preview, clamped: wasClamped });
+        }
       }}
       onPointerUp={(e) => {
         if (!drag) return;
@@ -412,13 +418,18 @@ function DraggableChip({
         setDrag(null);
         movedRef.current = false;
       }}
-      title="แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า"
+      title={
+        range
+          ? `แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า (${range.min}–${range.max})`
+          : 'แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า'
+      }
       className={cn(
         'min-w-[48px] cursor-ew-resize touch-none select-none rounded-md border px-3 py-1.5 text-[13px] font-semibold tabular-nums transition-all',
         isSelected
           ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
           : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
-        drag && movedRef.current && 'scale-110 shadow-lg ring-2 ring-cyan-400',
+        drag && movedRef.current && !drag.clamped && 'scale-110 shadow-lg ring-2 ring-cyan-400',
+        drag && movedRef.current && drag.clamped && 'scale-110 shadow-lg ring-2 ring-amber-400 cursor-not-allowed',
       )}
     >
       {displayLabel}
@@ -433,6 +444,7 @@ function ChipRow({
   ariaLabel,
   step = 1,
   isFloat = false,
+  range,
 }: {
   options: ReadonlyArray<{ value: string; label: string }>;
   selected: string;
@@ -440,11 +452,12 @@ function ChipRow({
   ariaLabel?: string;
   step?: number;
   isFloat?: boolean;
+  range?: { min: number; max: number };
 }) {
   return (
     <div className="flex flex-wrap gap-2" role="group" aria-label={ariaLabel}>
       {options.map((o) => (
-        <DraggableChip key={o.value} chip={o} selected={selected} onPick={onPick} step={step} isFloat={isFloat} />
+        <DraggableChip key={o.value} chip={o} selected={selected} onPick={onPick} step={step} isFloat={isFloat} range={range} />
       ))}
     </div>
   );
@@ -530,10 +543,14 @@ interface FieldProps {
   /** Quick-pick chip presets rendered INLINE below the input. Tap → onChange,
    *  click-and-drag horizontally → micro-adjust by ±step (handled by ChipRow). */
   chips?: ReadonlyArray<{ value: string; label: string }>;
+  /** Min/max bounds for chip drag-adjust. Required for any field that uses
+   *  numeric chips — clamps the dragged preview to the legal clinical range
+   *  and shows an amber edge ring when pinned at min/max. */
+  chipRange?: { min: number; max: number };
 }
 
 function Field({
-  name, label, hint, value, onChange, type = 'int', options, colSpan, abnormal, chips,
+  name, label, hint, value, onChange, type = 'int', options, colSpan, abnormal, chips, chipRange,
 }: FieldProps) {
   const inputId = `nn-${name}`;
   const isNumeric = type === 'int' || type === 'float';
@@ -626,6 +643,7 @@ function Field({
           onPick={onChange}
           step={type === 'float' ? 0.1 : 1}
           isFloat={type === 'float'}
+          range={chipRange}
         />
       )}
     </div>
@@ -708,15 +726,15 @@ export function VitalSignEntryDialog({
           </Section>
 
           <Section title="สัญญาณชีพหลัก" tone="vitals" cols="grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-            <Field name="temperature" label="Temp" hint="°C · <38" type="float" value={draft.temperature} onChange={(v) => set('temperature', v)} abnormal={abn.temperature} chips={TEMP_CHIPS} />
-            <Field name="pulse" label="Pulse" hint="60–100" value={draft.pulse} onChange={(v) => set('pulse', v)} abnormal={abn.pulse} chips={PULSE_CHIPS} />
-            <Field name="heart_rate" label="HR" hint="60–100" value={draft.heart_rate} onChange={(v) => set('heart_rate', v)} chips={HR_CHIPS} />
-            <Field name="bp_systolic" label="BP Sys" hint="<140" value={draft.bp_systolic} onChange={(v) => set('bp_systolic', v)} abnormal={abn.bp_systolic} chips={BP_SYS_CHIPS} />
-            <Field name="bp_diastolic" label="BP Dia" hint="<90" value={draft.bp_diastolic} onChange={(v) => set('bp_diastolic', v)} abnormal={abn.bp_diastolic} chips={BP_DIA_CHIPS} />
-            <Field name="respiratory_rate" label="RR" hint="12–24" value={draft.respiratory_rate} onChange={(v) => set('respiratory_rate', v)} abnormal={abn.respiratory_rate} chips={RR_CHIPS} />
-            <Field name="spo2_ra" label="SpO₂ (RA)" hint="%" value={draft.spo2_ra} onChange={(v) => set('spo2_ra', v)} abnormal={abn.spo2_ra} chips={SPO2_CHIPS} />
-            <Field name="spo2_o2" label="SpO₂ (on O₂)" hint="%" value={draft.spo2_o2} onChange={(v) => set('spo2_o2', v)} chips={SPO2_CHIPS} />
-            <Field name="pain_score" label="Pain" hint="0–10" value={draft.pain_score} onChange={(v) => set('pain_score', v)} chips={PAIN_CHIPS} />
+            <Field name="temperature" label="Temp" hint="°C · <38" type="float" value={draft.temperature} onChange={(v) => set('temperature', v)} abnormal={abn.temperature} chips={TEMP_CHIPS} chipRange={{ min: 34, max: 42 }} />
+            <Field name="pulse" label="Pulse" hint="60–100" value={draft.pulse} onChange={(v) => set('pulse', v)} abnormal={abn.pulse} chips={PULSE_CHIPS} chipRange={{ min: 30, max: 200 }} />
+            <Field name="heart_rate" label="HR" hint="60–100" value={draft.heart_rate} onChange={(v) => set('heart_rate', v)} chips={HR_CHIPS} chipRange={{ min: 30, max: 220 }} />
+            <Field name="bp_systolic" label="BP Sys" hint="<140" value={draft.bp_systolic} onChange={(v) => set('bp_systolic', v)} abnormal={abn.bp_systolic} chips={BP_SYS_CHIPS} chipRange={{ min: 60, max: 220 }} />
+            <Field name="bp_diastolic" label="BP Dia" hint="<90" value={draft.bp_diastolic} onChange={(v) => set('bp_diastolic', v)} abnormal={abn.bp_diastolic} chips={BP_DIA_CHIPS} chipRange={{ min: 30, max: 130 }} />
+            <Field name="respiratory_rate" label="RR" hint="12–24" value={draft.respiratory_rate} onChange={(v) => set('respiratory_rate', v)} abnormal={abn.respiratory_rate} chips={RR_CHIPS} chipRange={{ min: 4, max: 60 }} />
+            <Field name="spo2_ra" label="SpO₂ (RA)" hint="%" value={draft.spo2_ra} onChange={(v) => set('spo2_ra', v)} abnormal={abn.spo2_ra} chips={SPO2_CHIPS} chipRange={{ min: 50, max: 100 }} />
+            <Field name="spo2_o2" label="SpO₂ (on O₂)" hint="%" value={draft.spo2_o2} onChange={(v) => set('spo2_o2', v)} chips={SPO2_CHIPS} chipRange={{ min: 50, max: 100 }} />
+            <Field name="pain_score" label="Pain" hint="0–10" value={draft.pain_score} onChange={(v) => set('pain_score', v)} chips={PAIN_CHIPS} chipRange={{ min: 0, max: 10 }} />
           </Section>
 
           {/* ── Tier 2: contextual sections — auto-open when the row being
