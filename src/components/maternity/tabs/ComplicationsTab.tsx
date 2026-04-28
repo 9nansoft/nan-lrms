@@ -1,22 +1,35 @@
-// Task 36: ComplicationsTab read-only.
-// Task 47: extended with table+inline-edit CRUD. Editable fields:
-// labour_complication_id (free-number input for v1; lookup picker is future
-// work), complication_note, labour_stage_id. CRUD is keyed by ipt_labour_id
-// resolved from getPatientLabour(an). Add/Edit/Delete are disabled until that
-// resolves; if no labour record exists for the AN, complications cannot be
-// created (matches HOSxP FK).
+// ComplicationsTab — labour complication CRUD keyed by ipt_labour_id
+// (resolved from getPatientLabour(an)).
+//
+// Bug fixed (2026-04-28): the query selected `lcl.name AS complication_name`
+// but the live `labour_complication` table column is
+// `labour_complication_name`. The SQL error caused the tab to render either
+// empty or with a "โหลดไม่สำเร็จ" banner — fixed at the query layer.
+//
+// UX upgrades — match the Medications/DR Med tabs:
+//   * v2 design language (cyan brand bar, slate-900 title rule, large
+//     readable typography, hoisted EditRow).
+//   * Complication-name dropdown sourced from labour_complication. Users
+//     pick a known complication instead of typing the integer ID — the
+//     picker writes labour_complication_id under the hood while showing
+//     the Thai/English name in the input.
+//   * Clearer empty-state when no ipt_labour record yet — explains why
+//     Add is disabled and points at the Pre-labour / Stage tabs.
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useBmsSession } from '@/hooks/useBmsSession';
 import {
   deleteComplication,
   getPatientComplications,
   getPatientLabour,
+  listLabourComplications,
   upsertComplication,
 } from '@/services/maternity-ward';
 import type { ComplicationRow, LabourRecord } from '@/types/maternity-ward';
+import type { ConnectionConfig } from '@/types/bms-browser';
+import { cn } from '@/lib/utils';
 
 type EditState = {
   ipt_labour_complication_id?: number;
@@ -36,6 +49,204 @@ function toNumberOrNull(v: string): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
+
+const STAGE_OPTIONS = [
+  { value: '', label: '—' },
+  { value: '1', label: '1 · ระยะที่ 1 (Latent / Active)' },
+  { value: '2', label: '2 · ระยะที่ 2 (Pushing / Birth)' },
+  { value: '3', label: '3 · ระยะที่ 3 (Placenta)' },
+];
+
+// ─── ComplicationPicker — name dropdown over labour_complication ─────────
+
+interface ComplicationOption {
+  labour_complication_id: number;
+  name: string;
+}
+
+function ComplicationPicker({
+  config,
+  selectedId,
+  onPick,
+}: {
+  config: ConnectionConfig;
+  selectedId: string;
+  onPick: (opt: ComplicationOption) => void;
+}) {
+  const { data: options } = useSWR<ComplicationOption[]>(
+    config ? ['labour-complication-list', config.apiUrl] : null,
+    () => listLabourComplications(config),
+  );
+
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Resolve the selected name from the option list whenever selectedId or
+  // options change, so editing an existing row populates the search input
+  // with the current complication's name.
+  const selectedName = useMemo(() => {
+    if (!selectedId || !options) return '';
+    const sid = Number(selectedId);
+    return options.find((o) => o.labour_complication_id === sid)?.name ?? '';
+  }, [selectedId, options]);
+
+  useEffect(() => {
+    if (selectedName && query === '') setQuery(selectedName);
+  }, [selectedName, query]);
+
+  const filtered = useMemo(() => {
+    if (!options) return [];
+    const q = query.trim().toLowerCase();
+    if (q === '' || q === selectedName.toLowerCase()) return options.slice(0, 50);
+    return options
+      .filter((o) => o.name.toLowerCase().includes(q))
+      .slice(0, 50);
+  }, [options, query, selectedName]);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder="พิมพ์เพื่อค้นหา หรือคลิกเลือก…"
+        aria-label="complication_search"
+        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {filtered.map((o) => (
+            <button
+              key={o.labour_complication_id}
+              type="button"
+              onClick={() => {
+                onPick(o);
+                setQuery(o.name);
+                setOpen(false);
+              }}
+              className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-cyan-50/60"
+            >
+              <span className="text-[14px] font-semibold text-slate-900">{o.name}</span>
+              <span className="font-mono text-[11px] text-slate-500">
+                #{o.labour_complication_id}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── EditRow — module-scope ───────────────────────────────────────────────
+
+interface EditRowProps {
+  config: ConnectionConfig;
+  draft: EditState;
+  setDraft: React.Dispatch<React.SetStateAction<EditState>>;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}
+
+function EditRow({ config, draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
+  return (
+    <tr className="bg-cyan-50/40">
+      <td colSpan={4} className="px-4 py-4">
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_0.7fr_2fr]">
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-semibold text-slate-700">ภาวะแทรกซ้อน</label>
+              <ComplicationPicker
+                config={config}
+                selectedId={draft.labour_complication_id}
+                onPick={(opt) =>
+                  setDraft((d) => ({ ...d, labour_complication_id: String(opt.labour_complication_id) }))
+                }
+              />
+              {/* Hidden input so getByLabelText('labour_complication_id') still
+                  resolves for the existing tests; also lets a power user enter
+                  the integer ID directly when needed. */}
+              <input
+                type="text"
+                aria-label="labour_complication_id"
+                value={draft.labour_complication_id}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, labour_complication_id: e.target.value }))
+                }
+                placeholder="ID (เลือกจากรายการ หรือพิมพ์เอง)"
+                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-[12px] text-slate-700 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-semibold text-slate-700">ระยะ</label>
+              <select
+                aria-label="labour_stage_id"
+                value={draft.labour_stage_id}
+                onChange={(e) => setDraft((d) => ({ ...d, labour_stage_id: e.target.value }))}
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+              >
+                {STAGE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-semibold text-slate-700">หมายเหตุ</label>
+              <input
+                type="text"
+                aria-label="complication_note"
+                value={draft.complication_note}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, complication_note: e.target.value }))
+                }
+                placeholder="รายละเอียดที่ต้องบันทึก"
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-cyan-200 pt-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !draft.labour_complication_id.trim()}
+              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-5 py-2 text-[13px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+              title={!draft.labour_complication_id.trim() ? 'ต้องเลือกภาวะแทรกซ้อนก่อน' : undefined}
+            >
+              {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+            </button>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Main ──────────────────────────────────────────────────────────────────
 
 export function ComplicationsTab({ an }: { an: string }) {
   const { config, userInfo } = useBmsSession();
@@ -122,110 +333,125 @@ export function ComplicationsTab({ an }: { an: string }) {
     }
   }
 
-  function textInput(
-    name: keyof Omit<EditState, 'ipt_labour_complication_id'>,
-    width = 'w-32',
-  ) {
-    return (
-      <input
-        type="text"
-        value={draft[name] ?? ''}
-        onChange={(e) => setDraft((d) => ({ ...d, [name]: e.target.value }))}
-        className={`${width} rounded border border-slate-300 px-1 py-0.5 text-sm`}
-        aria-label={name}
-      />
-    );
-  }
-
-  function editRow(key: string) {
-    return (
-      <tr key={key} className="border-b bg-amber-50">
-        <td className="py-2">{textInput('labour_complication_id', 'w-20')}</td>
-        <td>{textInput('complication_note', 'w-40')}</td>
-        <td>{textInput('labour_stage_id', 'w-16')}</td>
-        <td className="space-x-2 text-right">
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving}
-            className="rounded bg-blue-600 px-2 py-1 text-xs text-white disabled:opacity-50"
-          >
-            {saving ? 'กำลังบันทึก…' : 'บันทึก'}
-          </button>
-          <button
-            type="button"
-            onClick={cancel}
-            disabled={saving}
-            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
-          >
-            ยกเลิก
-          </button>
-        </td>
-      </tr>
-    );
-  }
-
   return (
-    <div className="overflow-x-auto p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-medium text-slate-700">ภาวะแทรกซ้อน</h3>
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 pb-3">
+        <div className="flex items-center gap-3">
+          <span aria-hidden className="block h-1.5 w-8 bg-cyan-600" />
+          <h2 className="text-[18px] font-bold tracking-tight text-slate-900">
+            ภาวะแทรกซ้อน
+          </h2>
+          {rows.length > 0 && (
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-700">
+              {rows.length} รายการ
+            </span>
+          )}
+        </div>
         <button
           type="button"
           onClick={startAdd}
           disabled={editingId !== null || noLabour}
-          title={noLabour ? 'ไม่มี ipt_labour record — ไม่สามารถเพิ่ม' : ''}
-          className="rounded bg-emerald-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+          title={noLabour ? 'ต้องสร้าง ipt_labour record ก่อน — กรอกแท็บ ก่อนคลอด หรือ Stage' : ''}
+          className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-4 py-2 text-[14px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
         >
           + เพิ่มภาวะแทรกซ้อน
         </button>
       </div>
+
+      {/* Empty state — distinguishes "no labour record" from "no complications". */}
       {isEmpty ? (
-        <div className="p-4 text-slate-500">ไม่พบข้อมูล</div>
+        <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-8 text-center">
+          <div className="text-[14px] font-medium text-slate-600">ไม่พบข้อมูล</div>
+          {noLabour ? (
+            <div className="mt-1 text-[12px] text-slate-500">
+              ยังไม่มีข้อมูล <code className="font-mono">ipt_labour</code> สำหรับ AN{' '}
+              <span className="font-mono font-semibold">{an}</span> — ไปที่แท็บ{' '}
+              <strong>ก่อนคลอด</strong> หรือ <strong>Stage</strong> เพื่อสร้างข้อมูลก่อน
+            </div>
+          ) : (
+            <div className="mt-1 text-[12px] text-slate-500">
+              กดปุ่ม <strong>+ เพิ่มภาวะแทรกซ้อน</strong> ด้านบนเพื่อบันทึกใหม่
+            </div>
+          )}
+        </div>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left text-xs text-slate-500">
-              <th className="py-2">ภาวะแทรกซ้อน</th>
-              <th>หมายเหตุ</th>
-              <th>Stage</th>
-              <th className="text-right">การจัดการ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {editingId === 'new' && editRow('new')}
-            {rows.map((row) =>
-              editingId === row.ipt_labour_complication_id ? (
-                editRow(`edit-${row.ipt_labour_complication_id}`)
-              ) : (
-                <tr key={row.ipt_labour_complication_id} className="border-b">
-                  <td className="py-2">
-                    {row.complication_name ?? row.labour_complication_id ?? '-'}
-                  </td>
-                  <td>{row.complication_note ?? '-'}</td>
-                  <td>{row.labour_stage_id ?? '-'}</td>
-                  <td className="space-x-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() => startEdit(row)}
-                      disabled={editingId !== null}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 disabled:opacity-50"
-                    >
-                      แก้ไข
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => remove(row.ipt_labour_complication_id)}
-                      disabled={editingId !== null || saving}
-                      className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 disabled:opacity-50"
-                    >
-                      ลบ
-                    </button>
-                  </td>
-                </tr>
-              ),
-            )}
-          </tbody>
-        </table>
+        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
+          <table className="w-full text-[14px]">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-left text-[12px] font-bold uppercase tracking-wide text-slate-600">
+                <th className="px-4 py-3">ภาวะแทรกซ้อน</th>
+                <th className="px-4 py-3">หมายเหตุ</th>
+                <th className="px-4 py-3 text-right">ระยะ</th>
+                <th className="px-4 py-3 text-right">การจัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {editingId === 'new' && (
+                <EditRow
+                  config={config}
+                  draft={draft}
+                  setDraft={setDraft}
+                  saving={saving}
+                  onCancel={cancel}
+                  onSave={save}
+                />
+              )}
+              {rows.map((row) =>
+                editingId === row.ipt_labour_complication_id ? (
+                  <EditRow
+                    key={`edit-${row.ipt_labour_complication_id}`}
+                    config={config}
+                    draft={draft}
+                    setDraft={setDraft}
+                    saving={saving}
+                    onCancel={cancel}
+                    onSave={save}
+                  />
+                ) : (
+                  <tr
+                    key={row.ipt_labour_complication_id}
+                    className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/50"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-semibold text-slate-900">
+                          {row.complication_name ?? '—'}
+                        </span>
+                        <span className="font-mono text-[11px] text-slate-500">
+                          #{row.labour_complication_id ?? '—'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{row.complication_note ?? '—'}</td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
+                      {row.labour_stage_id ?? '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => startEdit(row)}
+                          disabled={editingId !== null}
+                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
+                        >
+                          แก้ไข
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => remove(row.ipt_labour_complication_id)}
+                          disabled={editingId !== null || saving}
+                          className="rounded-md border border-rose-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-40"
+                        >
+                          ลบ
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

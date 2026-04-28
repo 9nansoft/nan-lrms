@@ -655,10 +655,20 @@ export const PATIENT_STAGE_MED_BY_AN: SqlQueryTemplate = {
   mysql: `SELECT lsm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name FROM labour_stage_medication lsm LEFT JOIN s_drugitems s ON s.icode = lsm.icode WHERE lsm.an = :an`,
 };
 
-// Labour complications keyed by ipt_labour_id (NOT an), joined to lookup name
+// Labour complications keyed by ipt_labour_id (NOT an), joined to the
+// labour_complication lookup for the human-readable name.
+//
+// **Bug fixed (2026-04-28)**: the original query selected `lcl.name AS
+// complication_name`, but the live HOSxP `labour_complication` table has
+// no `name` column — the actual column is `labour_complication_name`. The
+// missing column produced a SQL error, which the ComplicationsTab surfaced
+// as either an empty table (when the BMS swallowed the error and returned
+// no rows) or a Thai "โหลดไม่สำเร็จ" banner. Schema confirmed via
+// mysql_query against the live DB:
+//   labour_complication.labour_complication_name varchar(150) NOT NULL UNI
 export const PATIENT_COMPLICATIONS_BY_LABOUR_ID: SqlQueryTemplate = {
-  postgresql: `SELECT lc.*, lcl.name AS complication_name FROM ipt_labour_complication lc LEFT JOIN labour_complication lcl ON lcl.labour_complication_id = lc.labour_complication_id WHERE lc.ipt_labour_id = :ipt_labour_id`,
-  mysql: `SELECT lc.*, lcl.name AS complication_name FROM ipt_labour_complication lc LEFT JOIN labour_complication lcl ON lcl.labour_complication_id = lc.labour_complication_id WHERE lc.ipt_labour_id = :ipt_labour_id`,
+  postgresql: `SELECT lc.*, lcl.labour_complication_name AS complication_name FROM ipt_labour_complication lc LEFT JOIN labour_complication lcl ON lcl.labour_complication_id = lc.labour_complication_id WHERE lc.ipt_labour_id = :ipt_labour_id`,
+  mysql: `SELECT lc.*, lcl.labour_complication_name AS complication_name FROM ipt_labour_complication lc LEFT JOIN labour_complication lcl ON lcl.labour_complication_id = lc.labour_complication_id WHERE lc.ipt_labour_id = :ipt_labour_id`,
 };
 
 // Newborn + ipt_labour_infant join for a single admission
@@ -689,10 +699,12 @@ export const DRUGUSAGE_LOOKUP: SqlQueryTemplate = {
   mysql: `SELECT drugusage, shortlist FROM drugusage WHERE shortlist LIKE :q OR drugusage LIKE :q ORDER BY shortlist LIMIT 50`,
 };
 
-// Lookup: labour-complication codes
+// Lookup: labour-complication codes. Real column is
+// `labour_complication_name`; aliased to `name` so existing callers that
+// destructure `{ labour_complication_id, name }` keep working.
 export const LABOUR_COMPLICATION_LOOKUP: SqlQueryTemplate = {
-  postgresql: `SELECT labour_complication_id, name FROM labour_complication ORDER BY name`,
-  mysql: `SELECT labour_complication_id, name FROM labour_complication ORDER BY name`,
+  postgresql: `SELECT labour_complication_id, labour_complication_name AS name FROM labour_complication ORDER BY labour_complication_name`,
+  mysql: `SELECT labour_complication_id, labour_complication_name AS name FROM labour_complication ORDER BY labour_complication_name`,
 };
 
 // Lookup: discharge-type codes

@@ -10,6 +10,7 @@ import {
   BED_MOVE_REASONS,
   DRUG_LOOKUP,
   DRUGUSAGE_LOOKUP,
+  LABOUR_COMPLICATION_LOOKUP,
   MATERNITY_WARDS,
   PATIENT_COMPLICATIONS_BY_LABOUR_ID,
   PATIENT_INFANTS_BY_AN,
@@ -795,6 +796,18 @@ export async function searchDrugs(
     config,
     { q: `%${trimmed}%` },
   );
+  return r.data;
+}
+
+// Labour-complication lookup — full list (small enough to fetch once and
+// filter client-side). Returned shape mirrors LABOUR_COMPLICATION_LOOKUP:
+// { labour_complication_id, name } where `name` is the aliased
+// `labour_complication_name`.
+export async function listLabourComplications(
+  config: ConnectionConfig,
+): Promise<Array<{ labour_complication_id: number; name: string }>> {
+  const sql = getQuery(LABOUR_COMPLICATION_LOOKUP, DEFAULT_DIALECT);
+  const r = await executeSql<{ labour_complication_id: number; name: string }>(sql, config);
   return r.data;
 }
 
