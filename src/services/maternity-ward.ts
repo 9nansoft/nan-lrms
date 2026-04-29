@@ -20,7 +20,12 @@ import {
   PATIENT_LABOUR_BY_AN,
   DCHSTTS_LOOKUP,
   DCHTYPE_LOOKUP,
+  HOSPCODE_LOOKUP,
   IPT_SEVERE_TYPE_LOOKUP,
+  PATIENT_REFEROUT_BY_AN,
+  REFEROUT_EMERGENCY_TYPE_LOOKUP,
+  REFER_CAUSE_LOOKUP,
+  REFER_TYPE_LOOKUP,
   SPCLTY_LOOKUP,
   PATIENT_BED_MOVES_BY_AN,
   PATIENT_LABOUR_MED_BY_AN,
@@ -52,6 +57,8 @@ import type {
   NurseNoteRow,
   PartographRow,
   PregnancyRecord,
+  ReferOutArgs,
+  ReferOutRow,
   StageMedRow,
   VitalSignRow,
 } from '@/types/maternity-ward';
@@ -919,6 +926,113 @@ export async function listIptSevereTypes(
     ipt_severe_type_name: string;
   }>(sql, config);
   return r.data;
+}
+
+// ─── Refer-out support (discharge by transfer / dchtype='04') ─────────────
+// HOSxP opens a separate ReferOutEntry form when dchtype='04'. We inline
+// the same payload via a dialog launched from DischargeTab; service helpers
+// here mirror the Delphi referout CRUD.
+
+export async function listReferCauses(
+  config: ConnectionConfig,
+): Promise<Array<{ id: number; name: string }>> {
+  const sql = getQuery(REFER_CAUSE_LOOKUP, DEFAULT_DIALECT);
+  const r = await executeSql<{ id: number; name: string }>(sql, config);
+  return r.data;
+}
+
+export async function listReferTypes(
+  config: ConnectionConfig,
+): Promise<Array<{ refer_type: number; refer_type_name: string }>> {
+  const sql = getQuery(REFER_TYPE_LOOKUP, DEFAULT_DIALECT);
+  const r = await executeSql<{ refer_type: number; refer_type_name: string }>(
+    sql,
+    config,
+  );
+  return r.data;
+}
+
+export async function listReferoutEmergencyTypes(
+  config: ConnectionConfig,
+): Promise<
+  Array<{ referout_emergency_type_id: number; referout_emergency_type_name: string }>
+> {
+  const sql = getQuery(REFEROUT_EMERGENCY_TYPE_LOOKUP, DEFAULT_DIALECT);
+  const r = await executeSql<{
+    referout_emergency_type_id: number;
+    referout_emergency_type_name: string;
+  }>(sql, config);
+  return r.data;
+}
+
+// Hospital code typeahead. Caller passes a fragment; we wrap it as
+// '%fragment%' so partial matches anywhere in the name or code work.
+export async function searchHospcodes(
+  config: ConnectionConfig,
+  query: string,
+): Promise<Array<{ hospcode: string; name: string }>> {
+  const trimmed = query.trim();
+  if (trimmed.length < 1) return [];
+  const sql = getQuery(HOSPCODE_LOOKUP, DEFAULT_DIALECT);
+  const r = await executeSql<{ hospcode: string; name: string }>(sql, config, {
+    q: `%${trimmed}%`,
+  });
+  return r.data;
+}
+
+// Read existing referout for an AN. Returns null when nothing has been
+// entered yet (so the dialog opens in INSERT mode).
+export async function getPatientReferOut(
+  config: ConnectionConfig,
+  an: string,
+): Promise<ReferOutRow | null> {
+  const sql = getQuery(PATIENT_REFEROUT_BY_AN, DEFAULT_DIALECT);
+  const r = await executeSql<ReferOutRow>(sql, config, { an });
+  return r.data?.[0] ?? null;
+}
+
+// INSERT-or-UPDATE for referout. Matches HOSxP behavior: one row per
+// admission keyed by vn=an. INSERT path mints referout_id via
+// get_serialnumber and stores hospcode + refer_hospcode as the same value
+// (legacy alias the Delphi form keeps in sync).
+export async function upsertReferOut(
+  config: ConnectionConfig,
+  userInfo: UserInfo,
+  args: ReferOutArgs,
+  hcode: string,
+): Promise<ReferOutRow> {
+  const { referout_id, an, hn, ...rest } = args;
+  // Keep hospcode + refer_hospcode aligned. If only one is set, mirror it.
+  const refHosp = rest.refer_hospcode ?? rest.hospcode ?? null;
+  const fields: Record<string, unknown> = { ...rest };
+  if (refHosp) {
+    fields.refer_hospcode = refHosp;
+    fields.hospcode = refHosp;
+  }
+  const isNew = referout_id === undefined;
+  if (isNew) {
+    const id = await mintSerial(config, 'referout', 'referout_id');
+    const payload = { ...fields, referout_id: id, vn: an, hn: hn ?? null };
+    await restInsert('referout', payload, config);
+    fireAudit({
+      entity: 'referout',
+      op: 'insert',
+      resourceId: String(id),
+      hcode,
+      staff: userInfo.loginname,
+    });
+    return payload as unknown as ReferOutRow;
+  }
+  await restUpdate('referout', String(referout_id), fields, config);
+  fireAudit({
+    entity: 'referout',
+    op: 'update',
+    resourceId: String(referout_id),
+    hcode,
+    staff: userInfo.loginname,
+    fieldsTouched: Object.keys(fields),
+  });
+  return { ...fields, referout_id, vn: an, hn: hn ?? null } as unknown as ReferOutRow;
 }
 
 // Drug-usage typeahead — searches `drugusage.shortlist` (the Thai

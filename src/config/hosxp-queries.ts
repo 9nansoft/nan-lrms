@@ -724,6 +724,42 @@ export const IPT_SEVERE_TYPE_LOOKUP: SqlQueryTemplate = {
   mysql: `SELECT ipt_severe_type_id, ipt_severe_type_name FROM ipt_severe_type`,
 };
 
+// Refer-out master tables — small lookups for the discharge-by-transfer
+// flow. HOSxP shows ReferButton when dchtype='04'; the button opens
+// HOSxPReferOutEntryFormUnit which writes the referout table. We inline
+// those inputs into DischargeTab when dchtype='04'.
+export const REFER_CAUSE_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT id, name FROM refer_cause`,
+  mysql: `SELECT id, name FROM refer_cause`,
+};
+export const REFER_TYPE_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT refer_type, refer_type_name FROM refer_type`,
+  mysql: `SELECT refer_type, refer_type_name FROM refer_type`,
+};
+
+// Hospital code typeahead — searches name OR code; LIKE :q so caller passes
+// '%fragment%'. Active-only filter; LIMIT 30 keeps the dropdown snappy.
+export const HOSPCODE_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT hospcode, name FROM hospcode WHERE active_status = 'Y' AND (hospcode LIKE :q OR name LIKE :q) ORDER BY name LIMIT 30`,
+  mysql: `SELECT hospcode, name FROM hospcode WHERE active_status = 'Y' AND (hospcode LIKE :q OR name LIKE :q) ORDER BY name LIMIT 30`,
+};
+
+// Refer-out emergency-type master (5 levels: Life threatening, Emergency,
+// Urgent, Acute, Non acute). Used for OB transfers to triage urgency at
+// the receiving site.
+export const REFEROUT_EMERGENCY_TYPE_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT referout_emergency_type_id, referout_emergency_type_name FROM referout_emergency_type`,
+  mysql: `SELECT referout_emergency_type_id, referout_emergency_type_name FROM referout_emergency_type`,
+};
+
+// Read existing referout for an AN — HOSxP keys it by `vn` which holds the AN
+// for IPD records (Delphi: `select referout_id from referout where vn = '...'`).
+// Only one row per admission; the dialog UPDATEs if found, INSERTs otherwise.
+export const PATIENT_REFEROUT_BY_AN: SqlQueryTemplate = {
+  postgresql: `SELECT * FROM referout WHERE vn = :an`,
+  mysql: `SELECT * FROM referout WHERE vn = :an`,
+};
+
 // Bed-move history for a single admission. iptbedmove records every move from
 // admit through discharge — the BedTab uses it to render an audit-trail
 // timeline. Two LEFT JOINs to `ward` resolve old/new ward codes to readable

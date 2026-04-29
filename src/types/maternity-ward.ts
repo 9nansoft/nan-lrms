@@ -317,6 +317,48 @@ export interface BedMoveArgs {
   reason: string;
 }
 
+/** Refer-out row (HOSxP `referout` table). Loaded into the ReferOutDialog
+ *  when the dialog opens; INSERT-or-UPDATE keyed by referout_id. The full
+ *  schema has 70+ columns; we surface the clinically meaningful subset. */
+export interface ReferOutRow {
+  referout_id: number;
+  vn: string;                // = AN for IPD admissions
+  hn?: string | null;
+  refer_date: string | null;
+  refer_time: string | null;
+  refer_hospcode: string | null;
+  hospcode: string | null;
+  spclty: string | null;
+  doctor: string | null;
+  refer_cause: number | null;
+  refer_type: number | null;
+  referout_emergency_type_id: number | null;
+  pre_diagnosis: string | null;
+  pdx: string | null;
+  pmh: string | null;
+  hpi: string | null;
+  lab_text: string | null;
+  treatment_text: string | null;
+  request_text: string | null;
+  ptstatus_text: string | null;
+  with_doctor: string | null;
+  with_nurse: string | null;
+  with_ambulance: string | null;
+  car_registration_no: string | null;
+  refer_in_province: string | null;
+  refer_in_region: string | null;
+  [key: string]: unknown;
+}
+
+/** Inputs accepted by upsertReferOut. Matches HOSxP refer_out semantics —
+ *  vn = AN for IPD; hospcode and refer_hospcode are stored as the same
+ *  value (legacy alias the Delphi form keeps in sync). */
+export type ReferOutArgs = {
+  referout_id?: number;       // present on UPDATE
+  an: string;
+  hn?: string | null;
+} & Partial<Omit<ReferOutRow, 'referout_id' | 'vn' | 'hn'>>;
+
 /** A single row from iptbedmove with old/new ward names resolved via JOIN.
  *  Powers the BedTab move-history timeline. */
 export interface BedMoveRow {

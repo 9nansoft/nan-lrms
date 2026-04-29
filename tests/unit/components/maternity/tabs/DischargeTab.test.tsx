@@ -27,6 +27,15 @@ vi.mock('@/services/maternity-ward', () => ({
     { ipt_severe_type_id: 3, ipt_severe_type_name: 'ระดับ 3' },
     { ipt_severe_type_id: 4, ipt_severe_type_name: 'ระดับ 4' },
   ]),
+  // Refer-out support — DischargeTab fetches existing referout to drive the
+  // warning banner / "edit" affordance. Tests don't exercise the dialog path
+  // so a no-data stub is fine.
+  getPatientReferOut: vi.fn(async () => null),
+  listReferCauses: vi.fn(async () => []),
+  listReferTypes: vi.fn(async () => []),
+  listReferoutEmergencyTypes: vi.fn(async () => []),
+  searchHospcodes: vi.fn(async () => []),
+  upsertReferOut: vi.fn(async () => ({})),
 }));
 import { SWRConfig } from 'swr';
 import type { ReactNode } from 'react';

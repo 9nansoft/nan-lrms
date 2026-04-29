@@ -36,6 +36,7 @@ import useSWR from 'swr';
 import { useBmsSession } from '@/hooks/useBmsSession';
 import {
   dischargePatient,
+  getPatientReferOut,
   listDchStatuses,
   listDchTypes,
   listIptSevereTypes,
@@ -43,6 +44,7 @@ import {
 } from '@/services/maternity-ward';
 import type { BedOccupancy } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
+import { ReferOutDialog } from '../ReferOutDialog';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -260,6 +262,15 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discharged, setDischarged] = useState(false);
   const [activeScenario, setActiveScenario] = useState<string | null>(null);
+  const [referDialogOpen, setReferDialogOpen] = useState(false);
+
+  // Existing referout for this AN — drives the "ยังไม่มีข้อมูลส่งต่อ" warning
+  // when dchtype='04' and presents an "edit" affordance otherwise.
+  const referOut = useSWR(
+    config && occupant ? ['referout', config.apiUrl, occupant.an] : null,
+    () => getPatientReferOut(config!, occupant!.an),
+    { revalidateOnFocus: false },
+  );
 
   // Master-table fetches — small, cacheable, never invalidate on focus.
   const dchTypes = useSWR(
@@ -379,6 +390,15 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
     if (draft.dchdate && occupant.regdate && draft.dchdate < occupant.regdate.slice(0, 10)) {
       setSaveError('วันที่จำหน่ายต้องไม่ก่อนวันที่แอดมิต');
       return;
+    }
+    // Per the user's spec: don't BLOCK when dchtype='04' and no referout
+    // exists, but warn the operator before they commit. A confirm prompt
+    // gives them the option to cancel, open the refer dialog, then re-save.
+    if (draft.dchtype === '04' && !referOut.data) {
+      const proceed = window.confirm(
+        'ประเภทจำหน่ายเป็น "ส่งต่อ" แต่ยังไม่มีข้อมูล Refer Out ในระบบ — ยืนยันบันทึกโดยไม่กรอกข้อมูลส่งต่อ?',
+      );
+      if (!proceed) return;
     }
     const promptText =
       draft.confirm_discharge === 'Y'
@@ -687,16 +707,66 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
           </div>
         </div>
 
-        {/* Refer / Death subform hints — match HOSxP cxDBLookupComboBox3/4
-            ValueChanged handlers that show ReferButton when dchtype='04' and
-            DeathButton when dchstts in 08/09. Those open separate Delphi
-            forms (refer-out registry, patient-death entry) that live outside
-            the maternity-LR scope. We surface the hint so the nurse knows
-            extra paperwork is pending. */}
+        {/* Refer-out card — visible when dchtype='04'. Shows warning when no
+            referout row exists, "edit" affordance when one does, and opens
+            the full ReferOutDialog with all 4 sections (destination, cause,
+            clinical brief, transit team). Saving the discharge does NOT
+            auto-create a referout — the operator must explicitly open the
+            dialog. Per HOSxP, the refer entry is a separate composite write. */}
         {draft.dchtype === '04' && (
-          <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-[12px] text-amber-900">
-            ⚠ <strong>ส่งต่อ (Refer Out)</strong> — กรุณากรอกข้อมูล Refer Out ใน HOSxP เพิ่มเติม
-            (ใบส่งต่อ, รพ.ปลายทาง, เหตุผล)
+          <div
+            className={cn(
+              'mt-3 rounded-md border-2 p-3',
+              referOut.data
+                ? 'border-emerald-300 bg-emerald-50'
+                : 'border-amber-300 bg-amber-50',
+            )}
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-2 text-[13px] font-bold">
+                  {referOut.data ? (
+                    <>
+                      <span className="text-emerald-900">
+                        ✓ มีข้อมูลส่งต่อแล้ว
+                      </span>
+                      {referOut.data.refer_hospcode && (
+                        <span className="rounded-md border border-emerald-300 bg-white px-2 py-0.5 font-mono text-[11px] text-emerald-800">
+                          → {referOut.data.refer_hospcode}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-amber-900">
+                      ⚠ ยังไม่มีข้อมูลส่งต่อ (Refer Out)
+                    </span>
+                  )}
+                </div>
+                <div
+                  className={cn(
+                    'text-[12px]',
+                    referOut.data ? 'text-emerald-700' : 'text-amber-700',
+                  )}
+                >
+                  {referOut.data
+                    ? 'สามารถแก้ไขรายละเอียดได้ — เปิด dialog เพื่อตรวจสอบข้อมูลก่อนยืนยันการจำหน่าย'
+                    : 'การจำหน่ายแบบ "ส่งต่อ" ควรมีข้อมูลปลายทาง · เหตุผล · การรักษาที่ให้ก่อนส่ง — กรุณากรอกข้อมูลส่งต่อ'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReferDialogOpen(true)}
+                disabled={!config}
+                className={cn(
+                  'rounded-md border-2 px-4 py-2 text-[13px] font-bold text-white transition-colors disabled:opacity-40',
+                  referOut.data
+                    ? 'border-emerald-700 bg-emerald-700 hover:bg-emerald-800'
+                    : 'border-amber-700 bg-amber-700 hover:bg-amber-800',
+                )}
+              >
+                {referOut.data ? 'แก้ไขข้อมูลส่งต่อ' : 'เพิ่มข้อมูลส่งต่อ'}
+              </button>
+            </div>
           </div>
         )}
         {(draft.dchstts === '08' || draft.dchstts === '09') && (
@@ -833,6 +903,25 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
           </button>
         </div>
       </section>
+
+      {/* Refer-out dialog — opens when the operator clicks the "เพิ่มข้อมูลส่งต่อ"
+          button on the dchtype='04' card. Shares the same config/userInfo
+          as the parent and re-validates the SWR for referOut on save so the
+          warning banner flips from amber → emerald. */}
+      <ReferOutDialog
+        open={referDialogOpen}
+        config={config}
+        userInfo={userInfo ?? null}
+        hcode={hcode}
+        an={occupant.an}
+        hn={occupant.hn}
+        defaultDate={draft.dchdate}
+        defaultTime={draft.dchtime}
+        onClose={() => setReferDialogOpen(false)}
+        onSaved={() => {
+          void referOut.mutate();
+        }}
+      />
     </div>
   );
 }
