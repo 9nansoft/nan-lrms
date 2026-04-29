@@ -14,16 +14,17 @@
 // placenta) the original 6-field port was missing.
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { useBmsSession } from '@/hooks/useBmsSession';
 import {
   getPatientLabor,
   getPatientLabour,
+  getPatientPartograph,
   upsertLabor,
   upsertLabour,
 } from '@/services/maternity-ward';
-import type { LaborRecord, LabourRecord } from '@/types/maternity-ward';
+import type { LaborRecord, LabourRecord, PartographRow } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
 
 // ─── Draft state ──────────────────────────────────────────────────────────
@@ -64,9 +65,65 @@ function strField(row: Record<string, unknown> | null | undefined, k: string): s
   return String(v);
 }
 
+// Derive the first three Stage milestones from Partograph observations:
+//   - onset (labour_startdate/time)            ← earliest observe_datetime
+//   - active phase (labour_cervical_3cm_date/time) ← first observation
+//                                                with cervical_dilation_cm ≥ 3
+//   - full dilation (labour_closedate/time)    ← first observation
+//                                                with cervical_dilation_cm ≥ 10
+// Birth (labour_finishdate/time) and placenta (labour_otherdate/time) stay
+// manual — the partograph doesn't carry an explicit birth marker. Manual
+// values entered on the Stage tab always win over derived ones (see
+// rowsToDraft below); we only fill blanks.
+interface DerivedTimes {
+  start_date: string;       start_time: string;
+  cervical_3cm_date: string; cervical_3cm_time: string;
+  close_date: string;       close_time: string;
+}
+
+function splitDateTime(observeDt: string): { date: string; time: string } {
+  // observe_datetime comes back as 'YYYY-MM-DD HH:mm:ss' or 'YYYY-MM-DDTHH:mm:ss…'
+  // Normalize either by extracting the first 10 + the next 8 chars.
+  if (!observeDt) return { date: '', time: '' };
+  const sep = observeDt.indexOf('T') >= 0 ? 'T' : ' ';
+  const [date, rest = ''] = observeDt.split(sep);
+  return { date: date ?? '', time: rest.slice(0, 8) };
+}
+
+function deriveStageTimesFromPartograph(rows: PartographRow[] | undefined): DerivedTimes {
+  const empty: DerivedTimes = {
+    start_date: '', start_time: '',
+    cervical_3cm_date: '', cervical_3cm_time: '',
+    close_date: '', close_time: '',
+  };
+  if (!rows || rows.length === 0) return empty;
+  // Ascending sort so [0] is the earliest observation.
+  const sorted = [...rows].sort((a, b) => a.observe_datetime.localeCompare(b.observe_datetime));
+  const earliest = sorted[0];
+  const first3cm = sorted.find((r) => (r.cervical_dilation_cm ?? -1) >= 3);
+  const firstFull = sorted.find((r) => (r.cervical_dilation_cm ?? -1) >= 10);
+
+  const onset = earliest ? splitDateTime(earliest.observe_datetime) : { date: '', time: '' };
+  const active = first3cm ? splitDateTime(first3cm.observe_datetime) : { date: '', time: '' };
+  const full = firstFull ? splitDateTime(firstFull.observe_datetime) : { date: '', time: '' };
+
+  return {
+    start_date: onset.date,         start_time: onset.time,
+    cervical_3cm_date: active.date, cervical_3cm_time: active.time,
+    close_date: full.date,          close_time: full.time,
+  };
+}
+
+// Fill blanks from `derived`, but never override a value the nurse already
+// typed on the labor row.
+function preferLabor(stored: string, derived: string): string {
+  return stored !== '' ? stored : derived;
+}
+
 function rowsToDraft(
   labour: LabourRecord | null | undefined,
   labor: LaborRecord | null | undefined,
+  partograph?: PartographRow[],
 ): DraftState {
   const d = blankDraft();
   if (labour) {
@@ -90,6 +147,15 @@ function rowsToDraft(
     d.other_date         = strField(lr, 'labour_otherdate');
     d.other_time         = strField(lr, 'labour_othertime');
   }
+  // Auto-fill stage-1/2/3 timestamps from partograph observations when the
+  // labor row didn't store them. Manual-entered values always win.
+  const derived = deriveStageTimesFromPartograph(partograph);
+  d.start_date         = preferLabor(d.start_date, derived.start_date);
+  d.start_time         = preferLabor(d.start_time, derived.start_time);
+  d.cervical_3cm_date  = preferLabor(d.cervical_3cm_date, derived.cervical_3cm_date);
+  d.cervical_3cm_time  = preferLabor(d.cervical_3cm_time, derived.cervical_3cm_time);
+  d.close_date         = preferLabor(d.close_date, derived.close_date);
+  d.close_time         = preferLabor(d.close_time, derived.close_time);
   return d;
 }
 
@@ -227,23 +293,40 @@ export function StageTab({ an }: { an: string }) {
     config ? ['labor', config.apiUrl, an] : null,
     () => getPatientLabor(config!, an),
   );
+  // Partograph observations feed the derived stage-1/2/3 timestamps. We
+  // tolerate failures here (treated as "no derivation available") so a
+  // partograph fetch error doesn't block manual stage entry.
+  const partograph = useSWR<PartographRow[]>(
+    config ? ['partograph', config.apiUrl, an] : null,
+    () => getPatientPartograph(config!, an),
+  );
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<DraftState>(() => blankDraft());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Pre-compute derived times so the section header can show a count + source
+  // hint even when the user has already filled the labor row manually.
+  const derivedTimes = useMemo(
+    () => deriveStageTimesFromPartograph(partograph.data),
+    [partograph.data],
+  );
+  const partographCount = partograph.data?.length ?? 0;
+
   const labourReady = !labour.isLoading && !labour.error;
   const laborReady = !labor.isLoading && !labor.error;
+  // Partograph readiness intentionally NOT a blocker — derive runs whenever
+  // its data lands, but the form is usable even before partograph loads.
   useEffect(() => {
     if (!labourReady || !laborReady) return;
     if (editing) return;
-    setDraft(rowsToDraft(labour.data, labor.data));
+    setDraft(rowsToDraft(labour.data, labor.data, partograph.data));
     if (labour.data === null && labor.data === null) {
       setEditing(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labourReady, laborReady, labour.data, labor.data]);
+  }, [labourReady, laborReady, labour.data, labor.data, partograph.data]);
 
   if (!config) {
     return <div className="p-4 text-slate-500">ไม่พร้อมใช้งาน (ไม่มี BMS session)</div>;
@@ -262,12 +345,12 @@ export function StageTab({ an }: { an: string }) {
   const noRowsYet = !labourExists && !laborExists;
 
   function startEdit() {
-    setDraft(rowsToDraft(labour.data, labor.data));
+    setDraft(rowsToDraft(labour.data, labor.data, partograph.data));
     setSaveError(null);
     setEditing(true);
   }
   function cancel() {
-    setDraft(rowsToDraft(labour.data, labor.data));
+    setDraft(rowsToDraft(labour.data, labor.data, partograph.data));
     setSaveError(null);
     setEditing(false);
   }
@@ -390,6 +473,38 @@ export function StageTab({ an }: { an: string }) {
           {saveError}
         </div>
       )}
+
+      {/* Partograph auto-sync banner — surfaces when derivation contributed
+          values, so the nurse knows where the timestamps came from and can
+          override or accept by clicking บันทึก. */}
+      {partographCount > 0 &&
+        (derivedTimes.start_date ||
+          derivedTimes.cervical_3cm_date ||
+          derivedTimes.close_date) && (
+          <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-[12px] text-violet-900">
+            <span className="font-semibold">ระยะที่ 1–3 ดึงจาก Partograph อัตโนมัติ</span>
+            {' · '}
+            <span className="text-violet-700">{partographCount} observations</span>
+            {derivedTimes.start_date && (
+              <>
+                {' · '}เริ่มเจ็บ <span className="font-mono font-semibold">{derivedTimes.start_date} {derivedTimes.start_time.slice(0, 5)}</span>
+              </>
+            )}
+            {derivedTimes.cervical_3cm_date && (
+              <>
+                {' · '}3 ซม. <span className="font-mono font-semibold">{derivedTimes.cervical_3cm_date} {derivedTimes.cervical_3cm_time.slice(0, 5)}</span>
+              </>
+            )}
+            {derivedTimes.close_date && (
+              <>
+                {' · '}ปากเปิดหมด <span className="font-mono font-semibold">{derivedTimes.close_date} {derivedTimes.close_time.slice(0, 5)}</span>
+              </>
+            )}
+            <div className="mt-0.5 text-[11px] text-violet-600">
+              ค่าที่กรอกเองจะแทนที่ค่าจาก Partograph เสมอ — กดบันทึกเพื่อยืนยัน
+            </div>
+          </div>
+        )}
 
       {/* Stage timeline — 5 milestones, each a date+time pair */}
       <Section title="ระยะการคลอด · Timeline" tone="timeline" cols="grid-cols-2 sm:grid-cols-4 lg:grid-cols-4">
