@@ -15,7 +15,11 @@ services:
       retries: 10
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_BUILD_ID: ${BUILD_SHA:-dev}
+        NEXT_PUBLIC_BUILD_TIME: ${BUILD_TIME:-}
     restart: unless-stopped
     depends_on:
       postgres:
