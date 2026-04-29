@@ -126,10 +126,16 @@ export function PatientDrawer({ open, occupant, onClose }: PatientDrawerProps) {
         onClick={onClose}
         className="flex-1 cursor-default bg-black/30"
       />
-      {/* Sheet panel — slides in from right; full width on mobile, 60vw desktop. */}
+      {/* Sheet panel — slides in from right; full width on mobile, 60vw desktop.
+          min-h-0 + h-full pin the panel to the dialog's 100vh: without min-h-0,
+          a tall tab (Discharge has 4 sections + chips) lets the panel grow
+          past 100vh because flex items default to min-height:auto = content
+          height. That growth defeats every overflow constraint downstream —
+          the inner Tabs scroll wrapper never gets a finite size to scroll
+          inside, and the bottom of the active tab falls below the dialog. */}
       <div
         className={cn(
-          'flex h-full w-full flex-col bg-white shadow-xl',
+          'flex h-full max-h-screen min-h-0 w-full flex-col bg-white shadow-xl',
           'sm:w-[60vw] sm:max-w-[1100px]',
           'animate-in slide-in-from-right',
         )}
@@ -178,7 +184,10 @@ export function PatientDrawer({ open, occupant, onClose }: PatientDrawerProps) {
         </div>
 
         {occupant && (
-          <div className="flex-1 overflow-hidden">
+          // min-h-0 here for the same flexbox-shrink reason as on the panel:
+          // without it, the wrapper expands to fit the active Tabs's content
+          // and the inner scroller never receives a bounded height.
+          <div className="min-h-0 flex-1 overflow-hidden">
             <Tabs
               defaultValue={PATIENT_DRAWER_TABS[0].value}
               className="flex h-full min-h-0 flex-col gap-2 px-4 py-3"
