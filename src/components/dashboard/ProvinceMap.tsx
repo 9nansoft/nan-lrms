@@ -16,6 +16,14 @@ export interface ProvinceMapProps {
   size?: 'mini' | 'full';
 }
 
+// System-reserved hcodes never belong on the GIS map even after they get
+// auto-registered for onboarding/sandbox purposes (see
+// /api/onboarding/webhook-key + EXEMPT_HCODES in lib/hospital-access-guard).
+// Mirrors that set deliberately — keep in sync if it ever expands. Filtered
+// here at the wrapper so every map consumer (dashboard, admin, kiosk) gets
+// the exclusion automatically without each having to remember.
+const MAP_EXCLUDED_HCODES: ReadonlySet<string> = new Set(['00000', '99999']);
+
 const ProvinceMapLeaflet = dynamic(() => import('./ProvinceMapLeaflet'), {
   ssr: false,
   loading: () => (
@@ -31,5 +39,6 @@ const ProvinceMapLeaflet = dynamic(() => import('./ProvinceMapLeaflet'), {
 });
 
 export function ProvinceMap(props: ProvinceMapProps) {
-  return <ProvinceMapLeaflet {...props} />;
+  const hospitals = props.hospitals.filter((h) => !MAP_EXCLUDED_HCODES.has(h.hcode));
+  return <ProvinceMapLeaflet {...props} hospitals={hospitals} />;
 }
