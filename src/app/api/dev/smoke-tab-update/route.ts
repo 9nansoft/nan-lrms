@@ -42,6 +42,7 @@ import {
   upsertLabourMedication,
   upsertStageMedication,
   upsertComplication,
+  deleteComplication,
   upsertLabourInfant,
 } from '@/services/maternity-ward';
 
@@ -573,6 +574,54 @@ async function runServiceProbes(
   } catch (e) {
     out.push({
       table: 'ComplicationsTab → upsertComplication',
+      pkColumn: 'ipt_labour_complication_id',
+      status: 'error',
+      message: (e as Error).message,
+    });
+  }
+
+  // 7b. ComplicationsTab → upsertComplication INSERT path (the actual user
+  // bug: "can't add data"). Mints a fresh PK, inserts a smoke row, then
+  // deletes it so we don't leak test data.
+  try {
+    const labour = await getPatientLabour(config, an);
+    if (!labour) {
+      out.push({
+        table: 'ComplicationsTab → upsertComplication (INSERT)',
+        pkColumn: 'ipt_labour_complication_id',
+        status: 'no-data',
+        message: 'no parent ipt_labour row',
+      });
+    } else {
+      const result = await upsertComplication(
+        config,
+        userInfo,
+        labour.ipt_labour_id,
+        {
+          // No ipt_labour_complication_id → triggers INSERT path.
+          labour_complication_id: 1,
+          complication_note: 'smoke-test (auto-deleted)',
+          labour_stage_id: null,
+        },
+        hcode,
+      );
+      const insertedId = (result as { ipt_labour_complication_id?: number })
+        .ipt_labour_complication_id;
+      // Tidy up so we don't pollute clinical data.
+      if (insertedId !== undefined) {
+        await deleteComplication(config, userInfo, insertedId, hcode);
+      }
+      out.push({
+        table: 'ComplicationsTab → upsertComplication (INSERT)',
+        pkColumn: 'ipt_labour_complication_id',
+        status: 'ok',
+        pkValue: insertedId,
+        message: 'inserted then deleted',
+      });
+    }
+  } catch (e) {
+    out.push({
+      table: 'ComplicationsTab → upsertComplication (INSERT)',
       pkColumn: 'ipt_labour_complication_id',
       status: 'error',
       message: (e as Error).message,

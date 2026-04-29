@@ -263,6 +263,7 @@ export function ComplicationsTab({ an }: { an: string }) {
   const [editingId, setEditingId] = useState<number | 'new' | null>(null);
   const [draft, setDraft] = useState<EditState>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   if (!config) {
     return <div className="p-4 text-slate-500">ไม่พร้อมใช้งาน (ไม่มี BMS session)</div>;
@@ -283,6 +284,7 @@ export function ComplicationsTab({ an }: { an: string }) {
   function startAdd() {
     setEditingId('new');
     setDraft(EMPTY_DRAFT);
+    setSaveError(null);
   }
 
   function startEdit(row: ComplicationRow) {
@@ -293,16 +295,25 @@ export function ComplicationsTab({ an }: { an: string }) {
       complication_note: row.complication_note ?? '',
       labour_stage_id: row.labour_stage_id?.toString() ?? '',
     });
+    setSaveError(null);
   }
 
   function cancel() {
     setEditingId(null);
     setDraft(EMPTY_DRAFT);
+    setSaveError(null);
   }
 
   async function save() {
-    if (!config || !userInfo || !iptLabourId) return;
+    if (!config || !userInfo) return;
+    if (!iptLabourId) {
+      setSaveError(
+        'ไม่พบข้อมูล ipt_labour สำหรับ AN นี้ — กรุณาสร้างข้อมูลที่แท็บ ก่อนคลอด หรือ Stage ก่อน',
+      );
+      return;
+    }
     setSaving(true);
+    setSaveError(null);
     try {
       const payload: Partial<ComplicationRow> = {
         labour_complication_id: toNumberOrNull(draft.labour_complication_id),
@@ -312,7 +323,16 @@ export function ComplicationsTab({ an }: { an: string }) {
       if (typeof draft.ipt_labour_complication_id === 'number') {
         payload.ipt_labour_complication_id = draft.ipt_labour_complication_id;
       }
-      await upsertComplication(config, userInfo, iptLabourId, payload, hcode);
+      try {
+        await upsertComplication(config, userInfo, iptLabourId, payload, hcode);
+      } catch (e) {
+        // Surface the actual error so silent-failure mode (the user's bug
+        // report "ไม่สามารถเพิ่มข้อมูล") becomes visible — previously a
+        // throw inside try/finally only flipped saving off without ever
+        // showing what went wrong.
+        setSaveError(`บันทึกไม่สำเร็จ: ${(e as Error).message}`);
+        return;
+      }
       await comps.mutate();
       setEditingId(null);
       setDraft(EMPTY_DRAFT);
@@ -357,6 +377,12 @@ export function ComplicationsTab({ an }: { an: string }) {
           + เพิ่มภาวะแทรกซ้อน
         </button>
       </div>
+
+      {saveError && (
+        <div role="alert" className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-[13px] font-semibold text-rose-700 shadow-sm">
+          {saveError}
+        </div>
+      )}
 
       {/* Empty state — distinguishes "no labour record" from "no complications". */}
       {isEmpty ? (
