@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next';
 import { Sarabun, JetBrains_Mono } from 'next/font/google';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { SWRProvider } from './swr-provider';
+import { BuildBadge } from '@/components/shared/BuildBadge';
 import './globals.css';
 
 const sarabun = Sarabun({
@@ -41,6 +42,7 @@ export default function RootLayout({
         <SWRProvider>
           <TooltipProvider>{children}</TooltipProvider>
         </SWRProvider>
+        <BuildBadge />
       </body>
     </html>
   );
