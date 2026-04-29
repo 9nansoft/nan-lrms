@@ -12,7 +12,7 @@ const STATIC_PATHS = ['/_next', '/favicon.ico'];
 // Dev-only API routes that are already guarded server-side by simulationGuard()
 // (which throws 404 in production). Listing them here lets local CLI tooling
 // curl them without a NextAuth cookie. No-op in prod because the guard fires first.
-const DEV_ONLY_API_PATHS = ['/api/dev/simulate'];
+const DEV_ONLY_API_PATHS = ['/api/dev/simulate', '/api/dev/smoke-tab-update'];
 
 // T108: Add security headers to all responses
 //

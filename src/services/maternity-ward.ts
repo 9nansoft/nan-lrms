@@ -467,8 +467,23 @@ export async function upsertLabour(
   hcode: string,
   exists = true,
 ): Promise<void> {
+  // ipt_labour PK = ipt_labour_id (int). The BMS REST endpoint /api/rest/{table}/{id}
+  // requires the surrogate PK in the URL — passing AN here surfaces as
+  // "Record not found". The caller must include fields.ipt_labour_id on the
+  // update path (typically forwarded from the read-side getPatientLabour result).
+  const { ipt_labour_id, ...body } = fields as Partial<LabourRecord> & {
+    ipt_labour_id?: number;
+  };
   if (exists) {
-    await restUpdate('ipt_labour', an, fields as Record<string, unknown>, config);
+    if (ipt_labour_id === undefined) {
+      throw new Error('upsertLabour: update path requires fields.ipt_labour_id');
+    }
+    await restUpdate(
+      'ipt_labour',
+      String(ipt_labour_id),
+      body as Record<string, unknown>,
+      config,
+    );
   } else {
     // ipt_labour_id is the PRI key (auto-increment in MySQL but the BMS
     // REST endpoint won't auto-fill it — sending the body without an id
@@ -479,17 +494,17 @@ export async function upsertLabour(
     const id = await mintSerial(config, 'ipt_labour', 'ipt_labour_id');
     await restInsert(
       'ipt_labour',
-      { ipt_labour_id: id, an, ...fields } as Record<string, unknown>,
+      { ipt_labour_id: id, an, ...body } as Record<string, unknown>,
       config,
     );
   }
   fireAudit({
     entity: 'ipt_labour',
     op: exists ? 'update' : 'insert',
-    resourceId: an,
+    resourceId: ipt_labour_id !== undefined ? String(ipt_labour_id) : an,
     hcode,
     staff: userInfo.loginname,
-    fieldsTouched: Object.keys(fields),
+    fieldsTouched: Object.keys(body),
   });
 }
 
@@ -505,25 +520,38 @@ export async function upsertLabor(
   hcode: string,
   exists = true,
 ): Promise<void> {
+  // labor PK = laborid (int). Same constraint as upsertLabour above —
+  // BMS REST /api/rest/{table}/{id} requires the surrogate PK in the URL.
+  const { laborid, ...body } = fields as Partial<LaborRecord> & {
+    laborid?: number;
+  };
   if (exists) {
-    await restUpdate('labor', an, fields as Record<string, unknown>, config);
+    if (laborid === undefined) {
+      throw new Error('upsertLabor: update path requires fields.laborid');
+    }
+    await restUpdate(
+      'labor',
+      String(laborid),
+      body as Record<string, unknown>,
+      config,
+    );
   } else {
     // labor.laborid is PRI; mint a fresh serial before insert (same
     // duplicate-PK guard as upsertLabour above).
     const id = await mintSerial(config, 'labor', 'laborid');
     await restInsert(
       'labor',
-      { laborid: id, an, ...fields } as Record<string, unknown>,
+      { laborid: id, an, ...body } as Record<string, unknown>,
       config,
     );
   }
   fireAudit({
     entity: 'labor',
     op: exists ? 'update' : 'insert',
-    resourceId: an,
+    resourceId: laborid !== undefined ? String(laborid) : an,
     hcode,
     staff: userInfo.loginname,
-    fieldsTouched: Object.keys(fields),
+    fieldsTouched: Object.keys(body),
   });
 }
 

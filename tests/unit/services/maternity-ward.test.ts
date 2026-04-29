@@ -522,15 +522,23 @@ describe('upsertLabour', () => {
       json: async () => ({ ok: true }),
     });
 
-    await upsertLabour(cfg, userInfo, 'AN1', { g: 3, ga: 39, anc_count: 8 }, '10670');
-    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/ipt_labour/AN1');
+    // BMS REST keys ipt_labour by its surrogate PK (ipt_labour_id), not by AN.
+    // Caller forwards the PK from the read-side getPatientLabour result.
+    await upsertLabour(
+      cfg,
+      userInfo,
+      'AN1',
+      { ipt_labour_id: 42, g: 3, ga: 39, anc_count: 8 },
+      '10670',
+    );
+    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/ipt_labour/42');
     expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
     await new Promise((r) => setTimeout(r, 0));
     const auditBody = JSON.parse(mockFetch.mock.calls[1][1].body);
     expect(auditBody).toMatchObject({
       entity: 'ipt_labour',
       op: 'update',
-      resourceId: 'AN1',
+      resourceId: '42',
       hcode: '10670',
       fieldsTouched: ['g', 'ga', 'anc_count'],
     });
@@ -554,21 +562,22 @@ describe('upsertLabor', () => {
       json: async () => ({ ok: true }),
     });
 
+    // BMS REST keys labor by laborid (int), not AN.
     await upsertLabor(
       cfg,
       userInfo,
       'AN1',
-      { mother_gvalue: 3, mother_hct: 36, mother_aging: 28 },
+      { laborid: 7, mother_gvalue: 3, mother_hct: 36, mother_aging: 28 },
       '10670',
     );
-    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/labor/AN1');
+    expect(mockFetch.mock.calls[0][0]).toBe('https://t.example/api/api/rest/labor/7');
     expect(mockFetch.mock.calls[0][1].method).toBe('PUT');
     await new Promise((r) => setTimeout(r, 0));
     const auditBody = JSON.parse(mockFetch.mock.calls[1][1].body);
     expect(auditBody).toMatchObject({
       entity: 'labor',
       op: 'update',
-      resourceId: 'AN1',
+      resourceId: '7',
       hcode: '10670',
       fieldsTouched: ['mother_gvalue', 'mother_hct', 'mother_aging'],
     });
@@ -582,7 +591,7 @@ describe('upsertLabor', () => {
     });
     mockFetch.mockRejectedValueOnce(new Error('audit endpoint down'));
     await expect(
-      upsertLabor(cfg, userInfo, 'AN1', { mother_gvalue: 3 }, '10670'),
+      upsertLabor(cfg, userInfo, 'AN1', { laborid: 7, mother_gvalue: 3 }, '10670'),
     ).resolves.not.toThrow();
   });
 });

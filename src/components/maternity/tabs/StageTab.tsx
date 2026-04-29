@@ -278,15 +278,21 @@ export function StageTab({ an }: { an: string }) {
     setSaveError(null);
     try {
       try {
+        // Forward the surrogate PK on the update path — BMS REST endpoint
+        // expects /api/rest/ipt_labour/{ipt_labour_id}, not /{an}.
+        const labourFields: Partial<LabourRecord> & { ipt_labour_id?: number } = {
+          g: toIntOrNull(draft.labour_g),
+          ga: toIntOrNull(draft.labour_ga),
+          anc_count: toIntOrNull(draft.anc_count),
+        };
+        if (labourExists && labour.data?.ipt_labour_id !== undefined) {
+          labourFields.ipt_labour_id = labour.data.ipt_labour_id;
+        }
         await upsertLabour(
           config,
           userInfo,
           an,
-          {
-            g: toIntOrNull(draft.labour_g),
-            ga: toIntOrNull(draft.labour_ga),
-            anc_count: toIntOrNull(draft.anc_count),
-          },
+          labourFields,
           hcode,
           labourExists,
         );
@@ -295,7 +301,7 @@ export function StageTab({ an }: { an: string }) {
         return;
       }
       try {
-        const laborFields: Record<string, unknown> = {
+        const laborFields: Partial<LaborRecord> & { laborid?: number } = {
           mother_gvalue: toIntOrNull(draft.mother_gvalue),
           mother_hct: toFloatOrNull(draft.mother_hct),
           mother_aging: toIntOrNull(draft.mother_aging),
@@ -310,11 +316,14 @@ export function StageTab({ an }: { an: string }) {
           labour_otherdate: toStrOrNull(draft.other_date),
           labour_othertime: toStrOrNull(draft.other_time),
         };
+        if (laborExists && labor.data?.laborid !== undefined) {
+          laborFields.laborid = labor.data.laborid;
+        }
         await upsertLabor(
           config,
           userInfo,
           an,
-          laborFields as Partial<LaborRecord>,
+          laborFields,
           hcode,
           laborExists,
         );
