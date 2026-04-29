@@ -1,20 +1,20 @@
-// POST /api/dev/simulate/reset-onboarding — dev-only. Undoes the admin
-// onboarding work: deactivates every registered hospital, wipes BMS
-// configurations, and revokes all webhook API keys.
+// POST /api/dev/simulate/reset-onboarding — dev-only. Hard-resets the admin
+// onboarding registry so the next onboarding flow starts from a true blank
+// slate.
 //
-// Sibling to /api/dev/simulate/clear which preserves the hospital registry.
-// This endpoint is the *opposite* — it wipes the registry so a subsequent
-// onboarding flow can be tested from a true blank slate. Patient-side caches
-// (patients / journeys / partograph / referrals) are NOT touched here; those
-// belong to /api/dev/simulate/clear. Run both to fully reset.
+// Wipes (in FK-safe order):
+//   - All cached patient/journey/labour/partograph/referral/newborn rows
+//     (FK-dependent on hospitals)
+//   - hospital_bms_config (1:1 child of hospitals)
+//   - webhook_api_keys (N:1 child of hospitals)
+//   - hospitals (HARD DELETE — row removed, not soft-deactivated)
 //
-// Hospitals are soft-deleted (is_active=false) rather than hard-deleted
-// because cached_* tables hold FK references and a hard delete would cascade
-// or fail (6 child tables per the DELETE handler in
-// /api/admin/hospitals/[hcode]). The admin GET endpoint filters is_active=true
-// so the row vanishes from the registered-hospitals list. To resurrect, the
-// admin can re-add via the MoPH registry picker (this re-uses the existing
-// row by hcode and flips is_active back to true).
+// Sibling endpoint /api/dev/simulate/clear preserves hospitals + BMS config +
+// webhook keys (it's the "clear patient data only" path). This endpoint is
+// the destructive opposite — it removes everything tied to onboarded
+// hospitals so a fresh onboarding cycle can be tested. Patient-side rows are
+// taken too because they FK-reference hospital ids; keeping them would block
+// the DELETE FROM hospitals statement.
 import { NextResponse } from 'next/server';
 import { simulationGuard } from '../_guard';
 import { simulationOrchestrator } from '@/services/dev-simulation/orchestrator';
@@ -28,12 +28,30 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 
+// FK-dependent tables on hospitals (and on each other). Order matters for
+// hard-delete: leaves first, parents last. Mirrors the order used in
+// /api/dev/simulate/clear, with hospitals appended at the very end.
+const FK_DEPENDENT_TABLES = [
+  'cpd_scores',
+  'cached_vital_signs',
+  'cached_partograph_observations',
+  'cached_anc_risks',
+  'cached_anc_visits',
+  'cached_newborns',
+  'cached_referrals',
+  'cached_patients',
+  'maternal_journeys',
+  // direct hospital children
+  'webhook_api_keys',
+  'hospital_bms_config',
+] as const;
+
 export async function POST() {
   const guard = simulationGuard();
   if (guard) return guard;
 
-  // Mirror /clear: drop in-memory key cache + stop orchestrator first so a
-  // running sim tick can't re-create rows we're about to wipe.
+  // Drop in-memory key cache + stop orchestrator before touching the DB so a
+  // running sim tick can't re-create rows mid-wipe.
   const cachedBefore = getDevApiKeyCacheSize();
   clearDevApiKeyCache();
 
@@ -46,64 +64,74 @@ export async function POST() {
   await ensureInit();
   const db = await getDatabase();
 
-  // Snapshot what we're about to remove for the response payload.
   const counts: Record<string, number> = {};
 
-  const beforeWebhookKeys = await db.query<{ n: number }>(
-    'SELECT COUNT(*) as n FROM webhook_api_keys',
-  );
-  counts['webhook_api_keys'] = Number(beforeWebhookKeys[0]?.n ?? 0);
+  try {
+    // Snapshot row counts before wiping so the response shows what was deleted.
+    for (const t of FK_DEPENDENT_TABLES) {
+      const before = await db.query<{ n: number }>(`SELECT COUNT(*) as n FROM ${t}`);
+      counts[t] = Number(before[0]?.n ?? 0);
+    }
+    const beforeHospitals = await db.query<{ n: number }>(
+      'SELECT COUNT(*) as n FROM hospitals',
+    );
+    counts['hospitals'] = Number(beforeHospitals[0]?.n ?? 0);
 
-  const beforeBmsConfig = await db.query<{ n: number }>(
-    'SELECT COUNT(*) as n FROM hospital_bms_config',
-  );
-  counts['hospital_bms_config'] = Number(beforeBmsConfig[0]?.n ?? 0);
+    // Wipe FK leaves → roots. Anything still holding FKs to hospitals after
+    // this loop will block the final DELETE.
+    for (const t of FK_DEPENDENT_TABLES) {
+      await db.execute(`DELETE FROM ${t}`);
+    }
 
-  const beforeActiveHospitals = await db.query<{ n: number }>(
-    'SELECT COUNT(*) as n FROM hospitals WHERE is_active = true',
-  );
-  counts['hospitals (deactivated)'] = Number(beforeActiveHospitals[0]?.n ?? 0);
+    // HARD delete hospitals — registry truly empty after this. Re-add via
+    // /admin → โรงพยาบาล tab (re-creates the row from MoPH master).
+    await db.execute('DELETE FROM hospitals');
 
-  // 1. Hard delete webhook keys — small table, no inbound FKs to other rows.
-  await db.execute('DELETE FROM webhook_api_keys');
+    // Reset in-process state belt-and-suspenders.
+    resetPool();
+    clearDevApiKeyCache();
 
-  // 2. Hard delete BMS configs — 1:1 child of hospitals; FKs go inward only.
-  await db.execute('DELETE FROM hospital_bms_config');
+    // Tell dashboards to re-fetch — admin / hospital table / map listen to
+    // `sync-complete` and call refreshAll().
+    const sse = SseManager.getInstance();
+    sse.broadcast('sync-complete', {
+      hcode: '',
+      patientsUpdated: 0,
+      reason: 'onboarding_reset',
+      timestamp: new Date().toISOString(),
+    });
 
-  // 3. Soft-delete hospitals — flips is_active=false. Hard delete would fail
-  //    against FK references from cached_patients / cached_anc_visits / ... .
-  //    The admin GET filters is_active=true so the row vanishes from the UI.
-  await db.execute(
-    'UPDATE hospitals SET is_active = ?, connection_status = ?, updated_at = ? WHERE is_active = true',
-    [false, 'disconnected', new Date().toISOString()],
-  );
-
-  // 4. Reset in-process state belt-and-suspenders.
-  resetPool();
-  clearDevApiKeyCache();
-
-  // 5. Tell dashboards to re-fetch — onboarding rail / hospital table / map
-  //    listen to `sync-complete` and call refreshAll().
-  const sse = SseManager.getInstance();
-  sse.broadcast('sync-complete', {
-    hcode: '',
-    patientsUpdated: 0,
-    reason: 'onboarding_reset',
-    timestamp: new Date().toISOString(),
-  });
-
-  logger.warn('sim_onboarding_reset', {
-    counts,
-    cacheEntriesPurged: cachedBefore,
-    orchestratorWasRunning,
-  });
-
-  return NextResponse.json({
-    ok: true,
-    cleared: counts,
-    diagnostics: {
+    logger.warn('sim_onboarding_reset', {
+      counts,
       cacheEntriesPurged: cachedBefore,
       orchestratorWasRunning,
-    },
-  });
+    });
+
+    return NextResponse.json({
+      ok: true,
+      cleared: counts,
+      diagnostics: {
+        cacheEntriesPurged: cachedBefore,
+        orchestratorWasRunning,
+      },
+    });
+  } catch (error) {
+    // Surface the actual DB error to the caller — opaque 500s here have cost
+    // hours of debugging in the past (varchar overflow on connection_status,
+    // FK violations from missed dependent tables, etc.).
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error('sim_onboarding_reset_failed', {
+      error: message,
+      countsBeforeFailure: counts,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'reset-onboarding failed',
+        detail: message,
+        countsBeforeFailure: counts,
+      },
+      { status: 500 },
+    );
+  }
 }

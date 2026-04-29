@@ -544,13 +544,15 @@ export function SimulationControl() {
                   </div>
                 )}
 
-                {/* Reset onboarding — wipes registered hospitals, BMS configs,
-                    webhook keys. Distinct from "Clear patient data" so each
-                    destructive flow can be triggered alone. */}
+                {/* Reset onboarding — NUCLEAR. Hard-deletes hospitals + every
+                    FK-dependent row (cached_*, journey, BMS config, webhook
+                    keys). Distinct from "Clear patient data" — that one
+                    preserves the hospital registry; this one wipes it too. */}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-red-200 pt-3">
                   <div className="text-[11px] leading-snug text-[var(--ink-navy-dim)]">
-                    <strong className="text-red-700">Reset onboarding</strong> · ลบโรงพยาบาลที่ลงทะเบียน +
-                    BMS config + webhook keys ทั้งหมด — ไม่แตะข้อมูลผู้ป่วย/journey
+                    <strong className="text-red-700">Reset onboarding</strong> · NUCLEAR &mdash;
+                    ลบโรงพยาบาลที่ลงทะเบียน + BMS config + webhook keys + ข้อมูลผู้ป่วย/journey
+                    ที่ link กับ รพ. ทั้งหมด (FK constraints)
                   </div>
                   {!confirmResetOnboarding ? (
                     <button
@@ -564,7 +566,7 @@ export function SimulationControl() {
                       title={
                         status.running
                           ? 'Stop the running simulation first'
-                          : 'Deactivate ALL registered hospitals, drop BMS configs, revoke ALL webhook keys (dev only)'
+                          : 'Hard-delete ALL hospitals + cached patient/journey data + BMS configs + webhook keys (dev only, irreversible)'
                       }
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -573,11 +575,11 @@ export function SimulationControl() {
                   ) : (
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-[10px] font-semibold text-red-800">
-                        ยืนยัน Reset onboarding? โรงพยาบาลทั้งหมดจะถูกปิดใช้งาน BMS config และ webhook key
-                        ทุกตัวจะถูกลบ
+                        ยืนยัน Reset onboarding? ทุกอย่างที่ link กับ รพ. จะถูกลบหมด —
+                        registry, BMS config, webhook keys, patient/journey/partograph caches
                       </span>
                       <span className="font-mono text-[10px] text-[var(--ink-navy-dim)]">
-                        Patient/journey data is preserved. Re-add hospitals via /admin → โรงพยาบาล tab.
+                        Hard-delete; irreversible. Re-add hospitals via /admin → โรงพยาบาล tab.
                       </span>
                       <div className="mt-1 flex items-center gap-2">
                         <button
