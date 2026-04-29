@@ -190,7 +190,12 @@ export function PatientDrawer({ open, occupant, onClose }: PatientDrawerProps) {
                   </TabsTrigger>
                 ))}
               </TabsList>
-              <div className="flex-1 overflow-auto overscroll-contain">
+              {/* min-h-0 is the critical bit: without it, the flex child
+                  grows to fit its tallest tab's content rather than capping
+                  at the parent's height, so overflow-auto has nothing to
+                  scroll. The Discharge tab (4 sections) was the first to
+                  surface this since other tabs fit within ~80vh. */}
+              <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
                 {PATIENT_DRAWER_TABS.map((t) => (
                   <TabsContent key={t.value} value={t.value}>
                     {t.value === 'partograph' ? (
