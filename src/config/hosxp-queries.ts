@@ -635,8 +635,8 @@ export const PATIENT_LABOR_BY_AN: SqlQueryTemplate = {
 // to the raw icode — same pattern PATIENT_STAGE_MED_BY_AN uses for the
 // delivery-room meds table.
 export const PATIENT_LABOUR_MED_BY_AN: SqlQueryTemplate = {
-  postgresql: `SELECT lm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name FROM labour_medication lm LEFT JOIN s_drugitems s ON s.icode = lm.icode WHERE lm.an = :an`,
-  mysql: `SELECT lm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name FROM labour_medication lm LEFT JOIN s_drugitems s ON s.icode = lm.icode WHERE lm.an = :an`,
+  postgresql: `SELECT lm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name, du.shortlist AS drugusage_text FROM labour_medication lm LEFT JOIN s_drugitems s ON s.icode = lm.icode LEFT JOIN drugusage du ON du.drugusage = lm.drugusage WHERE lm.an = :an`,
+  mysql: `SELECT lm.*, CONCAT(s.name, ' ', s.strength, ' ', s.units) AS medication_name, du.shortlist AS drugusage_text FROM labour_medication lm LEFT JOIN s_drugitems s ON s.icode = lm.icode LEFT JOIN drugusage du ON du.drugusage = lm.drugusage WHERE lm.an = :an`,
 };
 
 // Stage-medication rows (delivery-room meds keyed to drug master) with the

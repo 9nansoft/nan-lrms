@@ -25,7 +25,6 @@ import type { ConnectionConfig } from '@/types/bms-browser';
 import { cn } from '@/lib/utils';
 import {
   ChipRow as DraggableChipRow,
-  SimpleChipRow,
   type ChipOption,
 } from '../shared/DraggableChips';
 
@@ -52,12 +51,13 @@ function toNumberOrNull(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Common drug-usage strings — Thai LR practice. Tap to set; the field stays
-// fully editable for one-off cases (the chip is just an accelerator).
-const DRUGUSAGE_PRESETS = [
-  '1x1 oral', '1x2 oral', '1x3 oral', '1x4 oral',
-  'PRN', 'stat', 'IV bolus', 'IM',
-];
+// (Removed DRUGUSAGE_PRESETS: previous hardcoded chip values were Thai
+// description strings like '1x3 oral' / 'PRN' — but `labour_medication.drugusage`
+// is a varchar(7) FK to drugusage.drugusage (the CODE, e.g. '1703' or 'P11').
+// Committing a description corrupted real rows: a saved value of '13pt(1 เม'
+// in the field on this BMS proves the bug. The drugusage lookup picker is now
+// the only source of truth — it commits the code while displaying the
+// shortlist for human readability.)
 // Numeric qty chips support click-and-drag micro-adjust (±1 per 8px) —
 // nurses tap a preset then drag to fine-tune (e.g., 5 → 7) without retyping.
 const QTY_CHIPS: ChipOption[] = [
@@ -283,25 +283,23 @@ function EditRow({
               />
             </div>
 
-            {/* drugusage — table lookup + chip presets + free text */}
+            {/* drugusage — search by description, store the code.
+                The picker shows shortlist (description) as the visible primary
+                + drugusage code as the small secondary. Picking commits the
+                CODE to draft.drugusage; the displayed text in the search box
+                shows the description for the nurse's confirmation. */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[12px] font-semibold text-slate-700">วิธีใช้</label>
-              <SimpleChipRow
-                ariaLabel="drugusage quick picks"
-                options={DRUGUSAGE_PRESETS}
-                selected={draft.drugusage}
-                onPick={(v) => setDraft((d) => ({ ...d, drugusage: v }))}
-              />
               <LookupPicker
                 ariaLabel="drugusage_search"
-                placeholder="ค้นหาวิธีใช้ในตาราง drugusage…"
+                placeholder="ค้นหาวิธีใช้ — พิมพ์คำอธิบายหรือรหัส…"
                 initialQuery={initialDrugUsage}
                 fetch={async (q) => {
                   const rows = await searchDrugUsage(config, q);
                   return rows.map((r) => ({
                     primary: r.shortlist,
                     secondary: r.drugusage,
-                    payload: r.shortlist,
+                    payload: r.drugusage,
                   }));
                 }}
                 onPick={(it) => setDraft((d) => ({ ...d, drugusage: it.payload }))}
@@ -310,8 +308,11 @@ function EditRow({
                 ariaLabel="drugusage"
                 value={draft.drugusage}
                 onChange={(v) => setDraft((d) => ({ ...d, drugusage: v }))}
-                placeholder="เช่น 1x3 oral หรือพิมพ์เอง"
+                placeholder="รหัส drugusage (เช่น 1703)"
               />
+              <div className="text-[11px] text-slate-500">
+                บันทึก: รหัสจาก dropdown — ไม่ใช่คำอธิบาย
+              </div>
             </div>
 
             {/* note */}
@@ -397,7 +398,12 @@ export function MedicationsTab({ an }: { an: string }) {
       medication_note_text: row.medication_note_text ?? '',
     });
     setInitialDrugLabel(row.medication_name ?? '');
-    setInitialDrugUsage(row.drugusage ?? '');
+    // Seed the picker with the description (drugusage_text) for human
+    // readability; the underlying field stores the code (drugusage). When the
+    // legacy data has a corrupted code (description string accidentally
+    // written into the column), drugusage_text will be null — fall back to
+    // the raw code so the user at least sees what's stored and can fix it.
+    setInitialDrugUsage(row.drugusage_text ?? row.drugusage ?? '');
   }
   function cancel() {
     setEditingId(null);
@@ -525,7 +531,18 @@ export function MedicationsTab({ an }: { an: string }) {
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
                       {row.qty ?? '—'}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{row.drugusage ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {row.drugusage_text ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span>{row.drugusage_text}</span>
+                          <span className="font-mono text-[11px] text-slate-500">{row.drugusage}</span>
+                        </div>
+                      ) : row.drugusage ? (
+                        <span className="font-mono">{row.drugusage}</span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-slate-700">{row.medication_note_text ?? '—'}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">

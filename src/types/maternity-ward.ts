@@ -257,12 +257,19 @@ export interface LabourMedRow {
   icode: string;
   qty: number | null;
   doctor_code: string | null;
+  /** Drug-usage CODE (FK to drugusage.drugusage, varchar 7). Stored as code,
+   *  NEVER as the human-readable description — picking a chip / lookup row
+   *  must commit `drugusage` (the code), not `shortlist` (the description). */
   drugusage: string | null;
   medication_note_text: string | null;
   /** Joined from s_drugitems via the PATIENT_LABOUR_MED_BY_AN query —
    *  CONCAT(name, ' ', strength, ' ', units). Null when the icode has no
    *  matching drug master row (rare; usually means a free-text/legacy code). */
   medication_name?: string | null;
+  /** Joined from drugusage.shortlist via PATIENT_LABOUR_MED_BY_AN. Null when
+   *  the stored drugusage code has no matching master row (legacy data or
+   *  the prior bug that stored the description in this column). */
+  drugusage_text?: string | null;
 }
 
 export interface StageMedRow {
