@@ -100,6 +100,12 @@ export function SimulationControl() {
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
   const [clearing, setClearing] = useState<boolean>(false);
   const [clearResult, setClearResult] = useState<Record<string, number> | null>(null);
+  // Reset-onboarding (admin-side wipe) — separate destructive action that
+  // deactivates registered hospitals + drops BMS configs + revokes webhook
+  // keys. Distinct from clear-patient-data so each can be triggered alone.
+  const [confirmResetOnboarding, setConfirmResetOnboarding] = useState<boolean>(false);
+  const [resettingOnboarding, setResettingOnboarding] = useState<boolean>(false);
+  const [resetOnboardingResult, setResetOnboardingResult] = useState<Record<string, number> | null>(null);
 
   // Form state
   const [presetId, setPresetId] = useState<string>('normal');
@@ -206,6 +212,26 @@ export function SimulationControl() {
       setSubmitErr(e instanceof Error ? e.message : String(e));
     } finally {
       setClearing(false);
+    }
+  };
+
+  const onResetOnboarding = async () => {
+    setSubmitErr(null);
+    setResettingOnboarding(true);
+    try {
+      const res = await fetch('/api/dev/simulate/reset-onboarding', { method: 'POST' });
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; cleared?: Record<string, number>; error?: string }
+        | null;
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.error ?? `reset-onboarding failed (${res.status})`);
+      }
+      setResetOnboardingResult(body.cleared ?? {});
+      setConfirmResetOnboarding(false);
+    } catch (e) {
+      setSubmitErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setResettingOnboarding(false);
     }
   };
 
@@ -512,6 +538,73 @@ export function SimulationControl() {
                   <div className="mt-2 font-mono text-[10px] text-[var(--ink-navy-dim)]">
                     <span className="font-semibold text-red-700">Cleared:</span>{' '}
                     {Object.entries(clearResult)
+                      .filter(([, n]) => n > 0)
+                      .map(([t, n]) => `${t}=${n}`)
+                      .join(' · ') || 'already empty'}
+                  </div>
+                )}
+
+                {/* Reset onboarding — wipes registered hospitals, BMS configs,
+                    webhook keys. Distinct from "Clear patient data" so each
+                    destructive flow can be triggered alone. */}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-red-200 pt-3">
+                  <div className="text-[11px] leading-snug text-[var(--ink-navy-dim)]">
+                    <strong className="text-red-700">Reset onboarding</strong> · ลบโรงพยาบาลที่ลงทะเบียน +
+                    BMS config + webhook keys ทั้งหมด — ไม่แตะข้อมูลผู้ป่วย/journey
+                  </div>
+                  {!confirmResetOnboarding ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmResetOnboarding(true);
+                        setResetOnboardingResult(null);
+                      }}
+                      disabled={status.running || resettingOnboarding || clearing}
+                      className="inline-flex items-center gap-1.5 rounded-sm border border-red-500 bg-white px-3 py-1.5 font-mono text-[11px] font-semibold tracking-[0.06em] text-red-700 hover:bg-red-100 disabled:opacity-40"
+                      title={
+                        status.running
+                          ? 'Stop the running simulation first'
+                          : 'Deactivate ALL registered hospitals, drop BMS configs, revoke ALL webhook keys (dev only)'
+                      }
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Reset onboarding
+                    </button>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      <span className="font-mono text-[10px] font-semibold text-red-800">
+                        ยืนยัน Reset onboarding? โรงพยาบาลทั้งหมดจะถูกปิดใช้งาน BMS config และ webhook key
+                        ทุกตัวจะถูกลบ
+                      </span>
+                      <span className="font-mono text-[10px] text-[var(--ink-navy-dim)]">
+                        Patient/journey data is preserved. Re-add hospitals via /admin → โรงพยาบาล tab.
+                      </span>
+                      <div className="mt-1 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmResetOnboarding(false)}
+                          disabled={resettingOnboarding}
+                          className="rounded-sm border border-[var(--rule-strong)] bg-white px-2.5 py-1 font-mono text-[10px] tracking-[0.06em] text-[var(--ink-navy-dim)] hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onResetOnboarding}
+                          disabled={resettingOnboarding}
+                          className="inline-flex items-center gap-1 rounded-sm bg-red-700 px-3 py-1 font-mono text-[10px] font-semibold tracking-[0.06em] text-white hover:bg-red-800 disabled:opacity-60"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          {resettingOnboarding ? 'Resetting…' : 'Reset onboarding'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {resetOnboardingResult && (
+                  <div className="mt-2 font-mono text-[10px] text-[var(--ink-navy-dim)]">
+                    <span className="font-semibold text-red-700">Onboarding reset:</span>{' '}
+                    {Object.entries(resetOnboardingResult)
                       .filter(([, n]) => n > 0)
                       .map(([t, n]) => `${t}=${n}`)
                       .join(' · ') || 'already empty'}
