@@ -744,6 +744,35 @@ export const HOSPCODE_LOOKUP: SqlQueryTemplate = {
   mysql: `SELECT hospcode, name FROM hospcode WHERE active_status = 'Y' AND (hospcode LIKE :q OR name LIKE :q) ORDER BY name LIMIT 30`,
 };
 
+// Doctor master typeahead — searches code OR name (Thai). Active-only,
+// LIMIT 30 keeps the dropdown snappy. Used by ReferOutDialog and the
+// DischargeTab dch_doctor field; mirrors what HOSxP DoctorSearchFormUnit does.
+export const DOCTOR_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT code, name FROM doctor WHERE active = 'Y' AND (code LIKE :q OR name LIKE :q) ORDER BY name LIMIT 30`,
+  mysql: `SELECT code, name FROM doctor WHERE active = 'Y' AND (code LIKE :q OR name LIKE :q) ORDER BY name LIMIT 30`,
+};
+
+// Specialty master typeahead — small fixed list (~30 rows on test BMS) but
+// we surface it as a typeahead for parity with the other pickers. The
+// existing SPCLTY_LOOKUP returns all active rows; this one filters server-
+// side so a typed fragment narrows quickly.
+export const SPCLTY_LOOKUP_SEARCH: SqlQueryTemplate = {
+  postgresql: `SELECT spclty, name FROM spclty WHERE active_status = 'Y' AND (spclty LIKE :q OR name LIKE :q) ORDER BY display_order, spclty LIMIT 30`,
+  mysql: `SELECT spclty, name FROM spclty WHERE active_status = 'Y' AND (spclty LIKE :q OR name LIKE :q) ORDER BY display_order, spclty LIMIT 30`,
+};
+
+// ICD10 master typeahead (table `icd101`). Searches code, English name, or
+// Thai name (tname). PK = code (varchar 7). active_status='Y' filters retired
+// codes. We DON'T filter by ipd_valid='Y' — in production HOSxP that flag
+// is populated, but on the test BMS every row has it null (~41K codes
+// returned 0 with the flag), so the picker would be empty on dev. Relying
+// on active_status alone keeps the picker working everywhere; the OB nurse
+// already knows which codes are appropriate for a maternity transfer.
+export const ICD10_LOOKUP: SqlQueryTemplate = {
+  postgresql: `SELECT code, name, tname FROM icd101 WHERE active_status = 'Y' AND (code LIKE :q OR name LIKE :q OR tname LIKE :q) ORDER BY code LIMIT 30`,
+  mysql: `SELECT code, name, tname FROM icd101 WHERE active_status = 'Y' AND (code LIKE :q OR name LIKE :q OR tname LIKE :q) ORDER BY code LIMIT 30`,
+};
+
 // Refer-out emergency-type master (5 levels: Life threatening, Emergency,
 // Urgent, Acute, Non acute). Used for OB transfers to triage urgency at
 // the receiving site.

@@ -41,10 +41,12 @@ import {
   listDchTypes,
   listIptSevereTypes,
   listSpecialties,
+  searchDoctors,
 } from '@/services/maternity-ward';
 import type { BedOccupancy } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
 import { ReferOutDialog } from '../ReferOutDialog';
+import { LookupAutocomplete, type LookupItem } from '../shared/LookupAutocomplete';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -95,6 +97,7 @@ interface DraftState {
   ipt_spclty: string;
   dch_severe_type_id: string; // empty = not set; numeric string otherwise
   dch_doctor: string;
+  dch_doctor_name: string;    // display label paired with dch_doctor
   followup: 'Y' | 'N';
   /** confirm_discharge — user-controlled toggle bound to ipt.confirm_discharge.
    *  'Y' = the patient is officially discharged (leaves the active-ward
@@ -117,6 +120,7 @@ const EMPTY_DRAFT: DraftState = {
   ipt_spclty: '03',
   dch_severe_type_id: '',
   dch_doctor: '',
+  dch_doctor_name: '',
   followup: 'N',
   confirm_discharge: 'N',
 };
@@ -589,14 +593,30 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
           </div>
           <div className="flex flex-col gap-1 sm:col-span-2">
             <FormLabel>แพทย์ผู้สั่งจำหน่าย</FormLabel>
-            <input
-              type="text"
-              value={draft.dch_doctor}
-              onChange={(e) => setDraft((d) => ({ ...d, dch_doctor: e.target.value }))}
-              aria-label="dch_doctor"
-              placeholder="รหัสหรือชื่อแพทย์"
-              className={inputCls}
-            />
+            {config ? (
+              <LookupAutocomplete
+                ariaLabel="dch_doctor"
+                placeholder="พิมพ์ชื่อแพทย์ หรือรหัส…"
+                value={draft.dch_doctor}
+                valueLabel={draft.dch_doctor_name}
+                fetch={async (q) => {
+                  const rows = await searchDoctors(config, q);
+                  return rows.map<LookupItem>((r) => ({
+                    value: r.code,
+                    primary: r.name,
+                    secondary: r.code,
+                  }));
+                }}
+                onPick={(it) =>
+                  setDraft((d) => ({ ...d, dch_doctor: it.value, dch_doctor_name: it.primary }))
+                }
+              />
+            ) : (
+              <input className={inputCls} disabled />
+            )}
+            {draft.dch_doctor && (
+              <div className="font-mono text-[11px] text-slate-500">รหัส: {draft.dch_doctor}</div>
+            )}
           </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-4">
             <FormLabel>แผนกที่จำหน่าย</FormLabel>

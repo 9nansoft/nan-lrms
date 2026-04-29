@@ -35,6 +35,9 @@ vi.mock('@/services/maternity-ward', () => ({
   listReferTypes: vi.fn(async () => []),
   listReferoutEmergencyTypes: vi.fn(async () => []),
   searchHospcodes: vi.fn(async () => []),
+  searchDoctors: vi.fn(async () => []),
+  searchSpecialties: vi.fn(async () => []),
+  searchIcd10: vi.fn(async () => []),
   upsertReferOut: vi.fn(async () => ({})),
 }));
 import { SWRConfig } from 'swr';

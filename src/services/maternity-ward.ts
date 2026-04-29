@@ -20,13 +20,16 @@ import {
   PATIENT_LABOUR_BY_AN,
   DCHSTTS_LOOKUP,
   DCHTYPE_LOOKUP,
+  DOCTOR_LOOKUP,
   HOSPCODE_LOOKUP,
+  ICD10_LOOKUP,
   IPT_SEVERE_TYPE_LOOKUP,
   PATIENT_REFEROUT_BY_AN,
   REFEROUT_EMERGENCY_TYPE_LOOKUP,
   REFER_CAUSE_LOOKUP,
   REFER_TYPE_LOOKUP,
   SPCLTY_LOOKUP,
+  SPCLTY_LOOKUP_SEARCH,
   PATIENT_BED_MOVES_BY_AN,
   PATIENT_LABOUR_MED_BY_AN,
   PATIENT_PARTOGRAPH_BY_AN,
@@ -977,6 +980,54 @@ export async function searchHospcodes(
   const r = await executeSql<{ hospcode: string; name: string }>(sql, config, {
     q: `%${trimmed}%`,
   });
+  return r.data;
+}
+
+// Doctor master typeahead — searches code OR Thai name. Active doctors only.
+export async function searchDoctors(
+  config: ConnectionConfig,
+  query: string,
+): Promise<Array<{ code: string; name: string }>> {
+  const trimmed = query.trim();
+  if (trimmed.length < 1) return [];
+  const sql = getQuery(DOCTOR_LOOKUP, DEFAULT_DIALECT);
+  const r = await executeSql<{ code: string; name: string }>(sql, config, {
+    q: `%${trimmed}%`,
+  });
+  return r.data;
+}
+
+// Specialty typeahead — small master, but presented as a typeahead for
+// parity with the other pickers. Filters server-side so a 1-char typed
+// fragment narrows quickly.
+export async function searchSpecialties(
+  config: ConnectionConfig,
+  query: string,
+): Promise<Array<{ spclty: string; name: string }>> {
+  const trimmed = query.trim();
+  if (trimmed.length < 1) return [];
+  const sql = getQuery(SPCLTY_LOOKUP_SEARCH, DEFAULT_DIALECT);
+  const r = await executeSql<{ spclty: string; name: string }>(sql, config, {
+    q: `%${trimmed}%`,
+  });
+  return r.data;
+}
+
+// ICD10 master typeahead. Returns code, English name, Thai name. Restricted
+// to ipd_valid='Y' and active_status='Y' so retired or OPD-only codes don't
+// pollute the dropdown.
+export async function searchIcd10(
+  config: ConnectionConfig,
+  query: string,
+): Promise<Array<{ code: string; name: string; tname: string | null }>> {
+  const trimmed = query.trim();
+  if (trimmed.length < 1) return [];
+  const sql = getQuery(ICD10_LOOKUP, DEFAULT_DIALECT);
+  const r = await executeSql<{ code: string; name: string; tname: string | null }>(
+    sql,
+    config,
+    { q: `%${trimmed}%` },
+  );
   return r.data;
 }
 

@@ -17,7 +17,7 @@
 // hospcode + refer_hospcode are kept aligned in the service layer.
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import {
   Dialog,
@@ -30,27 +30,33 @@ import {
   listReferCauses,
   listReferTypes,
   listReferoutEmergencyTypes,
+  searchDoctors,
   searchHospcodes,
+  searchIcd10,
+  searchSpecialties,
   upsertReferOut,
 } from '@/services/maternity-ward';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 import type { ReferOutRow } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
-import { AnchoredDropdown } from './shared/AnchoredDropdown';
+import { LookupAutocomplete, type LookupItem } from './shared/LookupAutocomplete';
 
 interface DraftState {
   referout_id?: number;
   refer_hospcode: string;
-  refer_hospcode_name: string;     // display-only label for the picker
+  refer_hospcode_name: string;     // display label paired with refer_hospcode
   refer_date: string;
   refer_time: string;
-  doctor: string;
+  doctor: string;                  // doctor.code committed to DB
+  doctor_name: string;             // display label paired with doctor
   spclty: string;
+  spclty_name: string;             // display label paired with spclty
   refer_cause: string;             // numeric string (master id) or '' for unset
   refer_type: string;
   referout_emergency_type_id: string;
   pre_diagnosis: string;
-  pdx: string;
+  pdx: string;                     // ICD10 code committed to DB
+  pdx_name: string;                // display label (Thai or English) paired with pdx
   pmh: string;
   hpi: string;
   lab_text: string;
@@ -69,12 +75,15 @@ const EMPTY_DRAFT: DraftState = {
   refer_date: '',
   refer_time: '',
   doctor: '',
+  doctor_name: '',
   spclty: '03', // maternity-LR default
+  spclty_name: 'สูติกรรม',
   refer_cause: '1',
   refer_type: '1',
   referout_emergency_type_id: '',
   pre_diagnosis: '',
   pdx: '',
+  pdx_name: '',
   pmh: '',
   hpi: '',
   lab_text: '',
@@ -167,108 +176,6 @@ function ToneChip({
   );
 }
 
-// Hospcode autocomplete — debounced typeahead over the hospcode master,
-// search by name OR code. Picking commits the code; the dialog stores the
-// human-readable name separately for display.
-function HospitalPicker({
-  config,
-  value,
-  valueName,
-  onPick,
-  onChange,
-}: {
-  config: ConnectionConfig;
-  value: string;
-  valueName: string;
-  onPick: (code: string, name: string) => void;
-  onChange: (raw: string) => void;
-}) {
-  const [query, setQuery] = useState(valueName || value);
-  const [items, setItems] = useState<Array<{ hospcode: string; name: string }>>([]);
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const lastPickedRef = useRef<string>(valueName || value);
-
-  // Re-seed the visible query whenever the parent's saved name/value changes
-  // (e.g., when the dialog re-opens with a fresh referout row).
-  useEffect(() => {
-    setQuery(valueName || value);
-    lastPickedRef.current = valueName || value;
-  }, [valueName, value]);
-
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length === 0 || trimmed === lastPickedRef.current) {
-      setItems([]);
-      return;
-    }
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      setLoading(true);
-      searchHospcodes(config, trimmed)
-        .then((rows) => {
-          if (!cancelled) setItems(rows);
-        })
-        .catch(() => {
-          if (!cancelled) setItems([]);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query, config]);
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="text"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          onChange(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        placeholder="พิมพ์ชื่อโรงพยาบาลหรือรหัส 5/9 หลัก…"
-        aria-label="refer_hospcode_search"
-        className={inputCls}
-      />
-      <AnchoredDropdown
-        open={open && (items.length > 0 || loading)}
-        anchorRef={inputRef}
-        onDismiss={() => setOpen(false)}
-      >
-        {loading && items.length === 0 && (
-          <div className="px-3 py-2 text-[12px] text-slate-500">กำลังค้นหา…</div>
-        )}
-        {items.map((it) => (
-          <button
-            key={it.hospcode}
-            type="button"
-            onClick={() => {
-              onPick(it.hospcode, it.name);
-              setQuery(it.name);
-              lastPickedRef.current = it.name;
-              setOpen(false);
-              setItems([]);
-            }}
-            className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-cyan-50/60"
-          >
-            <span className="text-[14px] font-semibold text-slate-900">{it.name}</span>
-            <span className="font-mono text-[11px] text-slate-500">{it.hospcode}</span>
-          </button>
-        ))}
-      </AnchoredDropdown>
-    </>
-  );
-}
-
 // Severity tone for emergency type — 1 Life threatening = rose, 5 Non acute = emerald.
 function emergencyTone(id: number): 'emerald' | 'lime' | 'amber' | 'rose' {
   if (id === 1) return 'rose';
@@ -325,6 +232,10 @@ export function ReferOutDialog({
     if (row) {
       const num = (v: unknown): string => (v === null || v === undefined ? '' : String(v));
       const yn = (v: unknown): 'Y' | 'N' => (v === 'Y' ? 'Y' : 'N');
+      // valueLabel fields stay empty on hydrate from existing row — the
+      // LookupAutocomplete components show the raw code in the input until
+      // the operator picks again. (Storing the resolved name on the row
+      // would require denormalizing across writes; not worth the cost.)
       setDraft({
         referout_id: row.referout_id,
         refer_hospcode: num(row.refer_hospcode ?? row.hospcode),
@@ -332,12 +243,15 @@ export function ReferOutDialog({
         refer_date: num(row.refer_date).slice(0, 10) || defaultDate || '',
         refer_time: num(row.refer_time).slice(0, 8) || defaultTime || '',
         doctor: num(row.doctor),
+        doctor_name: '',
         spclty: num(row.spclty) || '03',
+        spclty_name: '',
         refer_cause: num(row.refer_cause) || '1',
         refer_type: num(row.refer_type) || '1',
         referout_emergency_type_id: num(row.referout_emergency_type_id),
         pre_diagnosis: num(row.pre_diagnosis),
         pdx: num(row.pdx),
+        pdx_name: '',
         pmh: num(row.pmh),
         hpi: num(row.hpi),
         lab_text: num(row.lab_text),
@@ -468,19 +382,25 @@ export function ReferOutDialog({
             <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-2">
               <FormLabel required>โรงพยาบาลปลายทาง</FormLabel>
               {config ? (
-                <HospitalPicker
-                  config={config}
+                <LookupAutocomplete
+                  ariaLabel="refer_hospcode_search"
+                  placeholder="พิมพ์ชื่อโรงพยาบาลหรือรหัส 5/9 หลัก…"
                   value={draft.refer_hospcode}
-                  valueName={draft.refer_hospcode_name}
-                  onPick={(code, name) =>
+                  valueLabel={draft.refer_hospcode_name}
+                  fetch={async (q) => {
+                    const rows = await searchHospcodes(config, q);
+                    return rows.map<LookupItem>((r) => ({
+                      value: r.hospcode,
+                      primary: r.name,
+                      secondary: r.hospcode,
+                    }));
+                  }}
+                  onPick={(it) =>
                     setDraft((d) => ({
                       ...d,
-                      refer_hospcode: code,
-                      refer_hospcode_name: name,
+                      refer_hospcode: it.value,
+                      refer_hospcode_name: it.primary,
                     }))
-                  }
-                  onChange={(raw) =>
-                    setDraft((d) => ({ ...d, refer_hospcode: raw, refer_hospcode_name: '' }))
                   }
                 />
               ) : (
@@ -515,28 +435,57 @@ export function ReferOutDialog({
             </div>
             <div className="flex flex-col gap-1 sm:col-span-2">
               <FormLabel>แพทย์ผู้ส่งต่อ</FormLabel>
-              <input
-                type="text"
-                value={draft.doctor}
-                onChange={(e) => setF('doctor', e.target.value)}
-                aria-label="refer_doctor"
-                placeholder="รหัสหรือชื่อแพทย์"
-                className={inputCls}
-              />
+              {config ? (
+                <LookupAutocomplete
+                  ariaLabel="refer_doctor"
+                  placeholder="พิมพ์ชื่อแพทย์ หรือรหัส…"
+                  value={draft.doctor}
+                  valueLabel={draft.doctor_name}
+                  fetch={async (q) => {
+                    const rows = await searchDoctors(config, q);
+                    return rows.map<LookupItem>((r) => ({
+                      value: r.code,
+                      primary: r.name,
+                      secondary: r.code,
+                    }));
+                  }}
+                  onPick={(it) =>
+                    setDraft((d) => ({ ...d, doctor: it.value, doctor_name: it.primary }))
+                  }
+                />
+              ) : (
+                <input className={inputCls} disabled />
+              )}
+              {draft.doctor && (
+                <div className="font-mono text-[11px] text-slate-500">รหัส: {draft.doctor}</div>
+              )}
             </div>
             <div className="flex flex-col gap-1 sm:col-span-2">
               <FormLabel>แผนกที่ส่งต่อ (spclty)</FormLabel>
-              <input
-                type="text"
-                value={draft.spclty}
-                onChange={(e) => setF('spclty', e.target.value)}
-                aria-label="refer_spclty"
-                placeholder="03"
-                maxLength={2}
-                className={cn(inputCls, 'font-mono')}
-              />
+              {config ? (
+                <LookupAutocomplete
+                  ariaLabel="refer_spclty"
+                  placeholder="พิมพ์ชื่อแผนก เช่น สูติกรรม…"
+                  value={draft.spclty}
+                  valueLabel={draft.spclty_name}
+                  fetch={async (q) => {
+                    const rows = await searchSpecialties(config, q);
+                    return rows.map<LookupItem>((r) => ({
+                      value: r.spclty,
+                      primary: r.name,
+                      secondary: r.spclty,
+                    }));
+                  }}
+                  onPick={(it) =>
+                    setDraft((d) => ({ ...d, spclty: it.value, spclty_name: it.primary }))
+                  }
+                />
+              ) : (
+                <input className={inputCls} disabled />
+              )}
               <div className="text-[11px] text-slate-500">
-                ค่า default 03 = สูติกรรม (อ้างอิง spclty master)
+                ค่า default 03 = สูติกรรม · รหัสปัจจุบัน:{' '}
+                <span className="font-mono font-semibold">{draft.spclty || '—'}</span>
               </div>
             </div>
           </div>
@@ -624,15 +573,30 @@ export function ReferOutDialog({
             </div>
             <div className="flex flex-col gap-1">
               <FormLabel>ICD10 หลัก (pdx)</FormLabel>
-              <input
-                type="text"
-                value={draft.pdx}
-                onChange={(e) => setF('pdx', e.target.value.toUpperCase())}
-                aria-label="pdx"
-                placeholder="O72.0"
-                maxLength={7}
-                className={cn(inputCls, 'font-mono')}
-              />
+              {config ? (
+                <LookupAutocomplete
+                  ariaLabel="pdx"
+                  placeholder="พิมพ์รหัสหรือชื่อโรค (TH/EN)…"
+                  value={draft.pdx}
+                  valueLabel={draft.pdx_name}
+                  fetch={async (q) => {
+                    const rows = await searchIcd10(config, q);
+                    return rows.map<LookupItem>((r) => ({
+                      value: r.code,
+                      primary: r.tname || r.name,
+                      secondary: r.code,
+                    }));
+                  }}
+                  onPick={(it) =>
+                    setDraft((d) => ({ ...d, pdx: it.value, pdx_name: it.primary }))
+                  }
+                />
+              ) : (
+                <input className={inputCls} disabled />
+              )}
+              {draft.pdx && (
+                <div className="font-mono text-[11px] text-slate-500">รหัส: {draft.pdx}</div>
+              )}
             </div>
             <div /> {/* layout filler */}
             <div className="flex flex-col gap-1">
