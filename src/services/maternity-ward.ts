@@ -1020,13 +1020,10 @@ export async function dischargePatient(
     dchtime: args.dchtime,
     dchtype: args.dchtype,
     dchstts: args.dchstts,
-    // CRITICAL: confirm_discharge='Y' is the actual flag that flips the
-    // patient out of the active-ward roster. WARD_BEDS_OCCUPANCY filters on
-    // confirm_discharge='N'. Without this, the patient stays in the kiosk's
-    // bed list even after dchdate/dchtime are filled — matching HOSxP's
-    // confirm-discharge checkbox semantics.
-    confirm_discharge: 'Y',
   };
+  if (args.confirm_discharge === 'Y' || args.confirm_discharge === 'N') {
+    iptFields.confirm_discharge = args.confirm_discharge;
+  }
   if (args.dch_doctor !== undefined && args.dch_doctor !== null && args.dch_doctor !== '') {
     iptFields.dch_doctor = args.dch_doctor;
   }

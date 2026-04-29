@@ -94,11 +94,19 @@ interface DraftState {
   dch_severe_type_id: string; // empty = not set; numeric string otherwise
   dch_doctor: string;
   followup: 'Y' | 'N';
+  /** confirm_discharge — user-controlled toggle bound to ipt.confirm_discharge.
+   *  'Y' = the patient is officially discharged (leaves the active-ward
+   *  roster). 'N' = the dch fields exist as a draft but the admission is
+   *  still open. Mirrors the Delphi form's cxDBCheckBox1; HOSxP NEVER auto-
+   *  sets this — it's the operator's intent. */
+  confirm_discharge: 'Y' | 'N';
 }
 
 // Maternity-LR canonical defaults — '01' (With Approval) for type, '04'
 // (Normal Delivery) for status, '03' (สูติกรรม) for specialty. The nurse
 // can change any before confirming. Date+time auto-fill to "now".
+// confirm_discharge starts at 'N' (draft mode). The user must explicitly
+// flip it to 'Y' to release the bed — same as the HOSxP checkbox.
 const EMPTY_DRAFT: DraftState = {
   dchdate: '',
   dchtime: '',
@@ -108,6 +116,7 @@ const EMPTY_DRAFT: DraftState = {
   dch_severe_type_id: '',
   dch_doctor: '',
   followup: 'N',
+  confirm_discharge: 'N',
 };
 
 // ─── Quick-scenario presets (common LR patterns) ───────────────────────────
@@ -322,15 +331,60 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
     return 'rose';
   }
 
+  // Toggle handler for confirm_discharge — matches HOSxP cxDBCheckBox1Click.
+  // When the user flips Y→N the Delphi form clears all dch fields (unless
+  // system var NO_CLEAR_ADMIT_STATE='Y'). We replicate that with a confirm
+  // prompt so the nurse can keep their work in progress if it was a misclick.
+  function toggleConfirmDischarge(next: 'Y' | 'N') {
+    if (next === draft.confirm_discharge) return;
+    if (next === 'N' && draft.confirm_discharge === 'Y') {
+      // Down-toggle → ask before clearing.
+      const ok = window.confirm(
+        'ยกเลิกการจำหน่าย? ข้อมูล วัน/เวลา/ประเภท/สถานะ/แพทย์ ที่กรอกไว้จะถูกล้าง',
+      );
+      if (!ok) return;
+      setDraft((d) => ({
+        ...d,
+        confirm_discharge: 'N',
+        dchdate: '',
+        dchtime: '',
+        dchtype: '01',
+        dchstts: '04',
+        dch_doctor: '',
+        // Preserve specialty + severity + followup — those are draft notes
+        // that may stay valid across confirm cycles, matching HOSxP behavior
+        // (only the 5 fields the Delphi handler nulls are wiped).
+      }));
+      return;
+    }
+    // N→Y is just a flag flip; values stay.
+    setDraft((d) => ({ ...d, confirm_discharge: 'Y' }));
+  }
+
   async function confirmAndSave() {
     if (!config || !userInfo || !occupant) return;
+    // HOSxP cxButton1Click always rejects empty dchdate ("Invalid Discharge
+    // Date"). Match that — even a draft save needs a real timestamp; the
+    // confirm_discharge toggle separately decides whether the bed is
+    // released.
     if (!draft.dchdate || !draft.dchtime) {
       setSaveError('กรุณาระบุวันที่และเวลาจำหน่าย');
       return;
     }
-    if (!window.confirm('ยืนยันการจำหน่ายผู้ป่วย? การดำเนินการนี้จะเปลี่ยนสถานะใน HOSxP')) {
+    // Date sanity from HOSxP: max=today, min=admit. Catches typos.
+    if (draft.dchdate && draft.dchdate > todayIso()) {
+      setSaveError('วันที่จำหน่ายต้องไม่อยู่ในอนาคต');
       return;
     }
+    if (draft.dchdate && occupant.regdate && draft.dchdate < occupant.regdate.slice(0, 10)) {
+      setSaveError('วันที่จำหน่ายต้องไม่ก่อนวันที่แอดมิต');
+      return;
+    }
+    const promptText =
+      draft.confirm_discharge === 'Y'
+        ? 'ยืนยันการจำหน่ายผู้ป่วย? ผู้ป่วยจะออกจากรายชื่อเตียงในหอผู้ป่วยทันที'
+        : 'บันทึกร่างการจำหน่าย (confirm_discharge = N)? ผู้ป่วยจะคงอยู่ในรายชื่อเตียง';
+    if (!window.confirm(promptText)) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -345,8 +399,12 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
         dch_severe_type_id:
           draft.dch_severe_type_id !== '' ? Number(draft.dch_severe_type_id) : null,
         followup: draft.followup,
+        confirm_discharge: draft.confirm_discharge,
       });
-      setDischarged(true);
+      // Switch to the discharged-confirmation view ONLY when confirm_discharge='Y'.
+      // For draft saves we stay on the form so the nurse can keep editing.
+      if (draft.confirm_discharge === 'Y') setDischarged(true);
+      else setSaveError('บันทึกร่างเรียบร้อย — confirm_discharge ยังเป็น N');
     } catch (e) {
       setSaveError(`จำหน่ายไม่สำเร็จ: ${(e as Error).message}`);
     } finally {
@@ -485,17 +543,21 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex flex-col gap-1">
-            <FormLabel required>วันที่จำหน่าย</FormLabel>
+            <FormLabel required={draft.confirm_discharge === 'Y'}>วันที่จำหน่าย</FormLabel>
             <input
               type="date"
               value={draft.dchdate}
               onChange={(e) => setDraft((d) => ({ ...d, dchdate: e.target.value }))}
               aria-label="dchdate"
+              // HOSxP cxDBDateEdit1: MaxDate = today, MinDate = regdate. Browser
+              // honors min/max for native validation; we also guard in save().
+              min={occupant.regdate ? occupant.regdate.slice(0, 10) : undefined}
+              max={todayIso()}
               className={cn(inputCls, 'tabular-nums')}
             />
           </div>
           <div className="flex flex-col gap-1">
-            <FormLabel required>เวลาจำหน่าย</FormLabel>
+            <FormLabel required={draft.confirm_discharge === 'Y'}>เวลาจำหน่าย</FormLabel>
             <input
               type="time"
               step="1"
@@ -624,6 +686,25 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
             </div>
           </div>
         </div>
+
+        {/* Refer / Death subform hints — match HOSxP cxDBLookupComboBox3/4
+            ValueChanged handlers that show ReferButton when dchtype='04' and
+            DeathButton when dchstts in 08/09. Those open separate Delphi
+            forms (refer-out registry, patient-death entry) that live outside
+            the maternity-LR scope. We surface the hint so the nurse knows
+            extra paperwork is pending. */}
+        {draft.dchtype === '04' && (
+          <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-[12px] text-amber-900">
+            ⚠ <strong>ส่งต่อ (Refer Out)</strong> — กรุณากรอกข้อมูล Refer Out ใน HOSxP เพิ่มเติม
+            (ใบส่งต่อ, รพ.ปลายทาง, เหตุผล)
+          </div>
+        )}
+        {(draft.dchstts === '08' || draft.dchstts === '09') && (
+          <div className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-[12px] text-rose-900">
+            ⚠ <strong>เสียชีวิต ({draft.dchstts === '08' ? 'Stillbirth' : 'Dead'})</strong> —
+            กรุณาบันทึกใบมรณบัตรในระบบ Patient Death ของ HOSxP
+          </div>
+        )}
       </section>
 
       {/* Section 3: ติดตามต่อเนื่อง */}
@@ -662,24 +743,93 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
         </div>
       </section>
 
-      {/* Confirm-discharge banner + save */}
-      <section className="rounded-lg border-2 border-rose-200 bg-rose-50 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-1">
-            <div className="text-[13px] font-bold text-rose-900">
-              ⚠ การกดยืนยันจะตั้งค่า <span className="font-mono">confirm_discharge = 'Y'</span> ใน HOSxP
-            </div>
-            <div className="text-[12px] text-rose-700">
-              ผู้ป่วยจะถูกย้ายออกจากรายชื่อเตียงในหอผู้ป่วยทันทีหลังบันทึก
+      {/* Confirm-discharge toggle — HOSxP cxDBCheckBox1 bound directly to
+          ipt.confirm_discharge. The user owns the flip; saving with N keeps
+          the admission open as a draft. Toggling Y→N clears the dch fields
+          via the toggleConfirmDischarge handler (matches Delphi semantics). */}
+      <section
+        className={cn(
+          'rounded-lg border-2 p-4',
+          draft.confirm_discharge === 'Y'
+            ? 'border-rose-300 bg-rose-50'
+            : 'border-slate-300 bg-slate-50',
+        )}
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex flex-1 items-start gap-3">
+            <button
+              type="button"
+              onClick={() => toggleConfirmDischarge(draft.confirm_discharge === 'Y' ? 'N' : 'Y')}
+              role="switch"
+              aria-checked={draft.confirm_discharge === 'Y'}
+              aria-label="confirm_discharge"
+              className={cn(
+                'relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2',
+                draft.confirm_discharge === 'Y'
+                  ? 'border-rose-700 bg-rose-700'
+                  : 'border-slate-400 bg-white',
+              )}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow ring-1 ring-slate-200 transition-transform',
+                  draft.confirm_discharge === 'Y' ? 'translate-x-5' : 'translate-x-1',
+                )}
+              />
+            </button>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2 text-[13px] font-bold">
+                <span className={draft.confirm_discharge === 'Y' ? 'text-rose-900' : 'text-slate-700'}>
+                  ยืนยันการจำหน่าย (confirm_discharge)
+                </span>
+                <span
+                  className={cn(
+                    'rounded-full border px-2 py-0.5 font-mono text-[11px] font-bold uppercase',
+                    draft.confirm_discharge === 'Y'
+                      ? 'border-rose-300 bg-rose-100 text-rose-800'
+                      : 'border-slate-300 bg-white text-slate-700',
+                  )}
+                >
+                  {draft.confirm_discharge}
+                </span>
+              </div>
+              <div
+                className={cn(
+                  'text-[12px]',
+                  draft.confirm_discharge === 'Y' ? 'text-rose-700' : 'text-slate-600',
+                )}
+              >
+                {draft.confirm_discharge === 'Y' ? (
+                  <>
+                    ผู้ป่วยจะถูกย้ายออกจากรายชื่อเตียงในหอผู้ป่วยทันทีหลังบันทึก ·
+                    <span className="font-semibold"> วันที่และเวลาจำหน่ายจำเป็น</span>
+                  </>
+                ) : (
+                  <>
+                    บันทึกเป็นร่าง — ผู้ป่วยยังคงอยู่ในรายชื่อเตียง สามารถกลับมาแก้ไขภายหลังได้ ·
+                    เปิดสวิตช์เพื่อปิดการแอดมิตจริง
+                  </>
+                )}
+              </div>
             </div>
           </div>
           <button
             type="button"
             onClick={confirmAndSave}
             disabled={saving || !config}
-            className="rounded-md border-2 border-rose-700 bg-rose-700 px-5 py-2 text-[14px] font-bold text-white transition-colors hover:bg-rose-800 disabled:opacity-40"
+            className={cn(
+              'rounded-md border-2 px-5 py-2 text-[14px] font-bold text-white transition-colors disabled:opacity-40',
+              draft.confirm_discharge === 'Y'
+                ? 'border-rose-700 bg-rose-700 hover:bg-rose-800'
+                : 'border-slate-700 bg-slate-700 hover:bg-slate-800',
+            )}
           >
-            {saving ? 'กำลังบันทึก…' : 'ยืนยันการจำหน่าย'}
+            {saving
+              ? 'กำลังบันทึก…'
+              : draft.confirm_discharge === 'Y'
+                ? 'ยืนยันการจำหน่าย'
+                : 'บันทึกร่าง'}
           </button>
         </div>
       </section>

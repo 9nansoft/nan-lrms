@@ -355,4 +355,13 @@ export interface DischargeArgs {
   dch_severe_type_id?: number | null;
   /** Followup-needed flag (ipt.followup, char 1 Y/N). */
   followup?: 'Y' | 'N' | null;
+  /** ipt.confirm_discharge (char 1 Y/N). User-controlled toggle bound to a
+   *  checkbox in the HOSxP form (cxDBCheckBox1, perm-gated by
+   *  IPD_CONFIRM_DISCHARGE:EDIT). 'Y' is what flips the patient out of the
+   *  active-ward roster — caller decides when to set it; the service no
+   *  longer forces it. Caller is also responsible for matching the
+   *  Delphi-form behavior when toggled Y→N (see DischargeTab): clear
+   *  dchdate/dchtime/dchtype/dchstts/dch_doctor unless the operator opts
+   *  out (HOSxP system variable NO_CLEAR_ADMIT_STATE='Y'). */
+  confirm_discharge?: 'Y' | 'N' | null;
 }

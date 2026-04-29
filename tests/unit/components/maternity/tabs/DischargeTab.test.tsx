@@ -93,8 +93,15 @@ describe('DischargeTab CRUD', () => {
     expect(screen.getByLabelText('dchstts')).toBeInTheDocument();
   });
 
+  // Helper: flip confirm_discharge toggle from default 'N' → 'Y' so the save
+  // button reads "ยืนยันการจำหน่าย" (in 'N' state it reads "บันทึกร่าง").
+  function flipConfirmToggleOn() {
+    fireEvent.click(screen.getByRole('switch', { name: 'confirm_discharge' }));
+  }
+
   it('blocks save when date is empty (Thai validation message)', () => {
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
+    flipConfirmToggleOn();
     // The form now auto-fills today/now on mount as a UX accelerator —
     // clear them to exercise the empty-input validation path.
     fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '' } });
@@ -109,21 +116,24 @@ describe('DischargeTab CRUD', () => {
     window.confirm = vi.fn().mockReturnValue(true);
     mockDischarge.mockResolvedValue(undefined);
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
+    flipConfirmToggleOn();
     fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
     fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });
     fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
     expect(window.confirm).toHaveBeenCalled();
     await waitFor(() => expect(mockDischarge).toHaveBeenCalled());
     const args = mockDischarge.mock.calls[0][3];
-    // Defaults now match real HOSxP master codes (varchar 2). Maternity LR
+    // Defaults match real HOSxP master codes (varchar 2). Maternity LR
     // canonical defaults: dchtype '01' (With Approval) + dchstts '04'
-    // (Normal Delivery). The previous '1'/'1' values were invalid FKs.
+    // (Normal Delivery). confirm_discharge='Y' here because the test flipped
+    // the toggle on — matches HOSxP cxDBCheckBox1 semantics.
     expect(args).toMatchObject({
       an: 'AN1',
       dchdate: '2026-04-19',
       dchtime: '14:30:00',
       dchtype: '01',
       dchstts: '04',
+      confirm_discharge: 'Y',
     });
     await waitFor(() =>
       expect(screen.getByText(/ดำเนินการจำหน่ายเรียบร้อย/)).toBeInTheDocument(),
@@ -135,6 +145,7 @@ describe('DischargeTab CRUD', () => {
     const origConfirm = window.confirm;
     window.confirm = vi.fn().mockReturnValue(false);
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
+    flipConfirmToggleOn();
     fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
     fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });
     fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
@@ -148,6 +159,7 @@ describe('DischargeTab CRUD', () => {
     window.confirm = vi.fn().mockReturnValue(true);
     mockDischarge.mockRejectedValue(new Error('rest 500'));
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
+    flipConfirmToggleOn();
     fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
     fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });
     fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
