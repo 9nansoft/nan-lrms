@@ -812,7 +812,7 @@ export async function processAncWebhook(
       for (const visit of patient.visits) {
         await db.execute(
           `INSERT INTO cached_anc_visits
-           (id, journey_id, visit_date, visit_number, ga_weeks,
+           (id, journey_id, hospital_id, visit_date, visit_number, ga_weeks,
             fundal_height_cm, weight_kg, bp_systolic, bp_diastolic,
             fetal_hr, presentation, engagement,
             urine_protein, urine_glucose, hb_g_dl, hct_pct,
@@ -823,10 +823,14 @@ export async function processAncWebhook(
             nst_result, bpp_score, umbilical_doppler_result,
             psychosocial_screen_json,
             synced_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            uuidv4(), journeyId, visit.date, visit.visitNumber,
+            // hospital_id is the webhook's authenticated hospital — visits
+            // arrive in the payload of THAT hospital's webhook, so attribute
+            // each visit to it. Cross-hospital ANC for referred patients is
+            // captured because the receiving hospital's webhook reports it.
+            uuidv4(), journeyId, hospitalId, visit.date, visit.visitNumber,
             visit.gaWeeks ?? null,
             visit.fundalHeightCm ?? null, visit.weightKg ?? null,
             visit.bpSystolic ?? null, visit.bpDiastolic ?? null,

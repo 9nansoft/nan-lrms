@@ -37,6 +37,8 @@ import {
 interface AncVisit {
   visitDate: string;
   visitNumber: number;
+  hospitalName: string | null;
+  hcode: string | null;
   gaWeeks: number | null;
   fundalHeightCm: number | null;
   weightKg: number | null;
@@ -324,8 +326,6 @@ function formatThaiDateTime(dateStr: string | null): string {
 function daysBetween(fromIso: string, toIso: string): number {
   return Math.floor((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 86400_000);
 }
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 // ─── Small pieces ─────────────────────────────────────────────────────────
 
@@ -973,9 +973,12 @@ export default function JourneyDetailPage({
   const { journeyId } = use(params);
   const router = useRouter();
 
-  const { data, isLoading } = useSWR<JourneyDetailResponse>(
+  // Use the global SWRProvider fetcher (src/app/swr-provider.tsx) which
+  // throws FetchError on non-2xx so `error` actually populates. The page
+  // previously defined a local fetcher that swallowed errors, causing every
+  // 404/500 to render the generic "ไม่พบข้อมูลการฝากครรภ์" empty state.
+  const { data, error, isLoading } = useSWR<JourneyDetailResponse>(
     `/api/journeys/${journeyId}`,
-    fetcher,
     { refreshInterval: 60000 },
   );
 
@@ -997,9 +1000,15 @@ export default function JourneyDetailPage({
 
     // Visits sorted chronologically — the timeline + trend sparklines expect
     // oldest-first so the x-axis reads left-to-right like a clinical chart.
-    const visitsChrono = [...(data.ancVisits ?? [])].sort(
-      (a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime(),
-    );
+    // Secondary sort by visit_number mirrors the API: when two visits share
+    // a date (common in HOSxP — date column has no time component), tied
+    // entries previously appeared in undefined order so clinicians saw the
+    // table flicker between renders.
+    const visitsChrono = [...(data.ancVisits ?? [])].sort((a, b) => {
+      const d = new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime();
+      if (d !== 0) return d;
+      return (a.visitNumber ?? 0) - (b.visitNumber ?? 0);
+    });
 
     const attendedWeeks = Array.from(
       new Set(
@@ -1151,16 +1160,36 @@ export default function JourneyDetailPage({
     return <LoadingState message="กำลังโหลดข้อมูลการฝากครรภ์..." />;
   }
 
-  if (!data?.journey) {
+  if (error || !data?.journey) {
+    // Surface the API's actual reason — 404 NOT_FOUND vs 500 INTERNAL_ERROR
+    // look identical to the user otherwise. The FetchError carries the
+    // server-side message ("ไม่พบข้อมูลการตั้งครรภ์", or a column-missing
+    // diagnostic) so admins can act on it instead of guessing.
+    const status =
+      error && typeof error === 'object' && 'status' in error
+        ? (error as { status: number }).status
+        : null;
+    const apiMessage =
+      error instanceof Error
+        ? error.message
+        : 'ไม่พบข้อมูลการฝากครรภ์';
+    const heading =
+      status === 404 ? 'ไม่พบข้อมูลการฝากครรภ์' : 'เกิดข้อผิดพลาด';
+    const Icon = status === 404 ? Baby : AlertTriangle;
     return (
       <div
         className="flex flex-col items-center justify-center gap-3 py-24 px-6"
         style={{ background: 'var(--surface-cool)', minHeight: '100%' }}
       >
-        <Baby className="h-10 w-10 text-[var(--ink-navy-muted)] opacity-50" />
+        <Icon className="h-10 w-10 text-[var(--ink-navy-muted)] opacity-50" />
         <p className="font-mono text-[12px] text-[var(--ink-navy-muted)]">
-          ไม่พบข้อมูลการฝากครรภ์
+          {heading}
         </p>
+        {error ? (
+          <p className="max-w-md text-center font-mono text-[11px] text-red-600">
+            {apiMessage}
+          </p>
+        ) : null}
         <button
           onClick={() => router.back()}
           className="inline-flex items-center gap-1.5 rounded-sm border bg-white px-3 py-1.5 font-mono text-[11px] text-[var(--ink-navy-dim)] hover:bg-[var(--accent-navy-soft)]"
@@ -1562,15 +1591,16 @@ export default function JourneyDetailPage({
                     className="grid gap-2 border-b px-3 py-2 font-mono text-[10px] font-bold tracking-[0.1em]"
                     style={{
                       gridTemplateColumns:
-                        '32px 100px 42px 50px 54px 56px 76px 54px 74px 62px 1fr',
+                        '32px 100px 120px 42px 50px 54px 56px 76px 54px 74px 62px 1fr',
                       borderColor: 'var(--accent-navy)',
                       background: 'var(--accent-navy)',
                       color: 'white',
-                      minWidth: 820,
+                      minWidth: 940,
                     }}
                   >
                     <div>#</div>
                     <div>DATE</div>
+                    <div>HOSPITAL</div>
                     <div>GAP</div>
                     <div>GA</div>
                     <div>FH</div>
@@ -1601,14 +1631,17 @@ export default function JourneyDetailPage({
                       anemia || preeclampsiaSuspect || reducedFm || dangers.length > 0;
                     return (
                       <div
-                        key={v.visitNumber}
+                        // Composite key: HOSxP can store duplicate visit_number
+                        // (re-sync, transfer, or two visits on the same day),
+                        // so visitNumber alone is not unique within a journey.
+                        key={`${v.visitDate}-${v.visitNumber}-${idx}`}
                         className="grid items-center gap-2 border-b px-3 text-[12px] transition-colors hover:bg-[var(--accent-navy-soft)]"
                         style={{
                           gridTemplateColumns:
-                            '32px 100px 42px 50px 54px 56px 76px 54px 74px 62px 1fr',
+                            '32px 100px 120px 42px 50px 54px 56px 76px 54px 74px 62px 1fr',
                           borderColor: 'var(--rule-hair)',
                           height: 40,
-                          minWidth: 820,
+                          minWidth: 940,
                           background: idx % 2 === 1 ? 'rgba(231,234,245,0.35)' : 'white',
                         }}
                       >
@@ -1623,6 +1656,15 @@ export default function JourneyDetailPage({
                         </div>
                         <div className="font-mono text-[11px] tabular-nums">
                           {formatThai(v.visitDate)}
+                        </div>
+                        <div
+                          className="truncate text-[11px]"
+                          style={{ color: 'var(--ink-navy-dim)' }}
+                          title={v.hospitalName ?? '—'}
+                        >
+                          {v.hospitalName ?? (
+                            <span className="text-[var(--ink-navy-muted)]">—</span>
+                          )}
                         </div>
                         <div className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-muted)]">
                           {gap != null ? `${gap}d` : '—'}

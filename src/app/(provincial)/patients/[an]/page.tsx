@@ -51,7 +51,12 @@ export default function PatientDetailPage({
   const router = useRouter();
   const mainHeaderRef = useRef<HTMLDivElement>(null);
 
-  const { patient, cpdScore, journeyContext, vitals, contractions, isLoading, mutate } =
+  // Frozen render-time anchor — react-hooks/purity forbids bare Date.now()
+  // in render code. SWR's 30s refresh re-derives "X days since last ANC"
+  // from new data anyway, so a per-mount snapshot is fine.
+  const [now] = useState<number>(() => Date.now());
+
+  const { patient, cpdScore, journeyContext, vitals, contractions, isLoading, error, mutate } =
     usePatient(patientId);
   const { partogram } = usePartogram(patientId);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('summary');
@@ -70,17 +75,49 @@ export default function PatientDetailPage({
     return <LoadingState message="กำลังโหลดข้อมูลผู้คลอด..." />;
   }
 
-  if (!patient) {
+  if (error || !patient) {
+    // Surface the underlying API reason. The /api/patients/[an] route returns
+    // structured 400 (Invalid patient ID format) / 404 (Patient not found) /
+    // 500 (Internal server error). Without showing the actual message the
+    // page just rendered "ไม่พบข้อมูลผู้คลอด" for every failure mode — most
+    // commonly a malformed URL like /patients/<bare-an> instead of the
+    // composite /patients/<hcode>-<an> that the route requires.
+    const status =
+      error && typeof error === 'object' && 'status' in error
+        ? (error as { status: number }).status
+        : null;
+    const apiMessage =
+      error instanceof Error ? error.message : 'ไม่พบข้อมูลผู้คลอด';
+    const heading =
+      status === 400
+        ? 'รูปแบบรหัสผู้คลอดไม่ถูกต้อง'
+        : status === 404
+          ? 'ไม่พบข้อมูลผู้คลอด'
+          : 'เกิดข้อผิดพลาด';
     return (
       <div
         className="flex h-64 items-center justify-center"
         style={{ color: 'var(--ink-navy-muted)' }}
       >
-        <div className="text-center">
-          <p className="font-mono text-[12px]">ไม่พบข้อมูลผู้คลอด</p>
+        <div className="max-w-md text-center">
+          <p className="font-mono text-[13px] font-semibold text-[var(--ink-navy)]">
+            {heading}
+          </p>
+          {error && (
+            <p className="mt-2 font-mono text-[11px] text-red-600">
+              {apiMessage}
+            </p>
+          )}
+          {status === 400 && (
+            <p className="mt-2 font-mono text-[11px] text-[var(--ink-navy-dim)]">
+              URL ต้องอยู่ในรูปแบบ <code className="rounded bg-[var(--rule-hair)] px-1">/patients/&lt;hcode&gt;-&lt;an&gt;</code>
+              <br />
+              เช่น <code className="rounded bg-[var(--rule-hair)] px-1">/patients/10670-69000123</code>
+            </p>
+          )}
           <button
             onClick={() => router.back()}
-            className="mt-2 font-mono text-[11px] underline"
+            className="mt-3 font-mono text-[11px] underline"
             style={{ color: 'var(--accent-navy)' }}
           >
             BACK
@@ -215,7 +252,7 @@ export default function PatientDetailPage({
           });
         };
         const daysSinceLastAnc = journeyContext.lastAncDate
-          ? Math.floor((Date.now() - new Date(journeyContext.lastAncDate).getTime()) / 86400_000)
+          ? Math.floor((now - new Date(journeyContext.lastAncDate).getTime()) / 86400_000)
           : null;
         const ancBelowMin = journeyContext.ancVisitCount < 4;
         const ancBelowTarget = journeyContext.ancVisitCount < 8 && !ancBelowMin;

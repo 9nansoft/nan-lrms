@@ -16,7 +16,10 @@ const FULL_BLEED_ROUTES = new Set<string>([
   '/admin',
 ]);
 // Prefix-match routes for dynamic children (e.g. /pregnancies/[journeyId]).
-const FULL_BLEED_PREFIXES = ['/pregnancies/', '/patients/'];
+// `/hospitals/` is included so the hospital console (Mission Console + Detail
+// layout) gets the same edge-to-edge canvas as its parent /hospitals — its
+// 6-cell KPI strip and split list/preview pane own their own padding.
+const FULL_BLEED_PREFIXES = ['/pregnancies/', '/patients/', '/hospitals/'];
 
 function isFullBleed(pathname: string): boolean {
   if (FULL_BLEED_ROUTES.has(pathname)) return true;

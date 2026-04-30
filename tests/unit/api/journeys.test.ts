@@ -268,6 +268,8 @@ describe('Journey API Logic', () => {
       const visits: AncVisitEntry[] = visitRows.map((v) => ({
         visitDate: v.visit_date as string,
         visitNumber: v.visit_number as number,
+        hospitalName: null,
+        hcode: null,
         gaWeeks: v.ga_weeks as number | null,
         fundalHeightCm: v.fundal_height_cm as number | null,
         weightKg: v.weight_kg as number | null,

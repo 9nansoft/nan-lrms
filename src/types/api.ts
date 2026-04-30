@@ -405,6 +405,10 @@ export interface JourneyDetailResponse {
 export interface AncVisitEntry {
   visitDate: string;
   visitNumber: number;
+  /** Hospital where this visit was recorded. Null for legacy rows that
+   *  predate per-visit hospital tracking and weren't backfillable. */
+  hospitalName: string | null;
+  hcode: string | null;
   gaWeeks: number | null;
   fundalHeightCm: number | null;
   weightKg: number | null;

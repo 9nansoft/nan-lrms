@@ -18,6 +18,17 @@ class FetchError extends Error {
   }
 }
 
+function extractErrorMessage(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const err = (body as { error?: unknown }).error;
+  if (typeof err === 'string') return err;
+  if (err && typeof err === 'object') {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === 'string') return msg;
+  }
+  return null;
+}
+
 async function fetcher(url: string): Promise<unknown> {
   const res = await fetch(url);
   const text = await res.text();
@@ -30,10 +41,12 @@ async function fetcher(url: string): Promise<unknown> {
     }
   }
   if (!res.ok) {
-    const message =
-      (body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string')
-        ? (body as { error: string }).error
-        : `${res.status} ${res.statusText || 'Request failed'}`;
+    // API contract returns either { error: "string" } (legacy) or
+    // { error: { code, message, details } } (current). Extract the human
+    // message from whichever shape is present so the UI can show
+    // "ไม่พบข้อมูลการตั้งครรภ์" instead of the generic "500 Internal Server
+    // Error" status text.
+    const message = extractErrorMessage(body) ?? `${res.status} ${res.statusText || 'Request failed'}`;
     throw new FetchError(res.status, message, body);
   }
   return body;

@@ -202,14 +202,36 @@ export async function getHospitalPatientList(
   const { status = 'active', riskLevel, page = 1, perPage = 20, dateFrom, dateTo } = filters;
   const offset = (page - 1) * perPage;
 
-  // Get hospital ID
-  const hospitals = await db.query<{ id: string }>(
-    'SELECT id FROM hospitals WHERE hcode = ?',
+  // Get hospital ID + meta. The detail page renders the hospital header
+  // (name, level, connection status) from this response — without surfacing
+  // these fields here, the page silently fell back to `รหัส ${hcode}` even
+  // when the hospital exists.
+  const hospitals = await db.query<{
+    id: string;
+    name: string;
+    level: string;
+    connection_status: string;
+    last_sync_at: string | null;
+  }>(
+    'SELECT id, name, level, connection_status, last_sync_at FROM hospitals WHERE hcode = ?',
     [hcode],
   );
-  if (hospitals.length === 0) return { patients: [], pagination: { total: 0, page, perPage, totalPages: 0 } };
+  if (hospitals.length === 0) {
+    return {
+      hospital: null,
+      patients: [],
+      pagination: { total: 0, page, perPage, totalPages: 0 },
+    };
+  }
 
-  const hospitalId = hospitals[0].id;
+  const hospitalRow = hospitals[0];
+  const hospitalId = hospitalRow.id;
+  const hospital = {
+    name: hospitalRow.name,
+    level: hospitalRow.level,
+    connectionStatus: hospitalRow.connection_status,
+    lastSyncAt: hospitalRow.last_sync_at,
+  };
 
   let whereClause = 'WHERE cp.hospital_id = ?';
   const params: unknown[] = [hospitalId];
@@ -267,6 +289,7 @@ export async function getHospitalPatientList(
   }));
 
   return {
+    hospital,
     patients,
     pagination: {
       total,

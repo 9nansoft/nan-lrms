@@ -41,15 +41,20 @@ export async function GET(
 
     // Get journey with hospital info + latest known maternal height (labor-side,
     // if this journey has crossed over to a cached_patients record).
+    // LEFT JOIN on current_hospital_id + COALESCE so a stale or NULL
+    // current_hospital_id (possible after onboarding reset hard-deletes a
+    // hospital row that journeys still reference) doesn't 404 the whole
+    // detail page. Falls back to the registering hospital.
     const journeyRows = await db.query<Record<string, unknown>>(
       `SELECT mj.*, h.name as hospital_name, h.hcode,
-              ch.name as current_hospital_name, ch.hcode as current_hcode,
+              COALESCE(ch.name, h.name) as current_hospital_name,
+              COALESCE(ch.hcode, h.hcode) as current_hcode,
               (SELECT cp.height_cm FROM cached_patients cp
                  WHERE cp.journey_id = mj.id AND cp.height_cm IS NOT NULL
                  ORDER BY cp.updated_at DESC LIMIT 1) as height_cm
        FROM maternal_journeys mj
        JOIN hospitals h ON h.id = mj.hospital_id
-       JOIN hospitals ch ON ch.id = mj.current_hospital_id
+       LEFT JOIN hospitals ch ON ch.id = mj.current_hospital_id
        WHERE mj.id = ?`,
       [journeyId],
     );
@@ -63,14 +68,24 @@ export async function GET(
 
     const r = journeyRows[0];
 
-    // Get ANC visits
+    // Get ANC visits — LEFT JOIN hospitals so each visit can show where it
+    // happened (referred patients can attend ANC across multiple hospitals).
+    // Secondary sort by visit_number stabilises ordering when two visits
+    // share the same date — Postgres returns ties in undefined order
+    // otherwise, which made the timeline look "unsorted" to clinicians.
     const visitRows = await db.query<Record<string, unknown>>(
-      `SELECT * FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date`,
+      `SELECT cv.*, vh.name AS visit_hospital_name, vh.hcode AS visit_hcode
+         FROM cached_anc_visits cv
+         LEFT JOIN hospitals vh ON vh.id = cv.hospital_id
+        WHERE cv.journey_id = ?
+        ORDER BY cv.visit_date, cv.visit_number`,
       [journeyId],
     );
     const ancVisits: AncVisitEntry[] = visitRows.map((v) => ({
       visitDate: v.visit_date as string,
       visitNumber: v.visit_number as number,
+      hospitalName: (v.visit_hospital_name as string | null) ?? null,
+      hcode: (v.visit_hcode as string | null) ?? null,
       gaWeeks: v.ga_weeks as number | null,
       fundalHeightCm: v.fundal_height_cm as number | null,
       weightKg: v.weight_kg as number | null,
@@ -111,7 +126,11 @@ export async function GET(
     );
     const latestRisk: AncRiskEntry | null = riskRows.length > 0 ? {
       riskLevel: riskRows[0].risk_level as string,
-      triggeredRules: JSON.parse(riskRows[0].triggered_rules as string || '[]'),
+      // Use the tolerant parser — pg driver returns JSONB as a parsed JS array
+      // already, but better-sqlite3 returns it as a TEXT string. Strict
+      // JSON.parse blows up on the array path with "Unexpected token 'x',
+      // 'rule_a,rule_b' is not valid JSON" (Array→String coercion).
+      triggeredRules: parseJson<string[]>(riskRows[0].triggered_rules) ?? [],
       screenedAt: riskRows[0].screened_at as string,
       recommendedFacility: riskRows[0].recommended_facility as string | null,
     } : null;
@@ -229,8 +248,17 @@ export async function GET(
     return NextResponse.json(response);
   } catch (error) {
     logger.error('journey_detail_api_failed', { error });
+    // In non-prod, surface the underlying error message so the client error
+    // panel actually says WHY it failed ("column X does not exist", "syntax
+    // error near …") instead of the generic Thai placeholder. Production
+    // keeps the placeholder to avoid leaking DB internals to end users.
+    const detail = error instanceof Error ? error.message : String(error);
+    const message =
+      process.env.NODE_ENV === 'production'
+        ? 'เกิดข้อผิดพลาด กรุณาลองใหม่'
+        : `เกิดข้อผิดพลาด: ${detail}`;
     return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
+      { error: { code: 'INTERNAL_ERROR', message, details: null } },
       { status: 500 },
     );
   }

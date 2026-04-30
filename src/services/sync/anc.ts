@@ -112,7 +112,10 @@ export async function syncAncData(
 
     const visits = ancServices.filter((s) => s.person_anc_id === anc.person_anc_id);
     for (const visit of visits) {
-      await upsertAncVisit(db, currentJourney.id, visit);
+      // hospitalId here is the hospital whose tunnel this sync ran against —
+      // the visit was recorded at that hospital's HOSxP. Carries through so
+      // the journey detail timeline can show per-visit hospital.
+      await upsertAncVisit(db, currentJourney.id, hospitalId, visit);
     }
 
     const now = new Date().toISOString();
@@ -187,6 +190,7 @@ export async function syncAncData(
 async function upsertAncVisit(
   db: DatabaseAdapter,
   journeyId: string,
+  hospitalId: string,
   visit: HosxpAncServiceRow,
 ): Promise<void> {
   const now = new Date().toISOString();
@@ -197,11 +201,11 @@ async function upsertAncVisit(
 
   if (existing.length > 0) {
     await db.execute(
-      `UPDATE cached_anc_visits SET visit_number = ?, ga_weeks = ?, ga_days = ?,
+      `UPDATE cached_anc_visits SET hospital_id = ?, visit_number = ?, ga_weeks = ?, ga_days = ?,
        fundal_height_cm = ?, weight_kg = ?, bp_systolic = ?, bp_diastolic = ?,
        fetal_hr = ?, presentation = ?, engagement = ?, pass_quality = ?,
        provider_code = ?, synced_at = ? WHERE id = ?`,
-      [visit.anc_service_number, visit.pa_week, visit.pa_day,
+      [hospitalId, visit.anc_service_number, visit.pa_week, visit.pa_day,
        visit.fundal_height, visit.bw, visit.bps, visit.bpd,
        visit.fetal_heart_rate, visit.baby_position, visit.baby_lead,
        visit.pass_quality === 'Y', visit.doctor_code, now,
@@ -209,11 +213,11 @@ async function upsertAncVisit(
     );
   } else {
     await db.execute(
-      `INSERT INTO cached_anc_visits (id, journey_id, visit_date, visit_number, ga_weeks, ga_days,
+      `INSERT INTO cached_anc_visits (id, journey_id, hospital_id, visit_date, visit_number, ga_weeks, ga_days,
        fundal_height_cm, weight_kg, bp_systolic, bp_diastolic, fetal_hr,
        presentation, engagement, pass_quality, provider_code, synced_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [uuidv4(), journeyId, visit.service_date, visit.anc_service_number,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [uuidv4(), journeyId, hospitalId, visit.service_date, visit.anc_service_number,
        visit.pa_week, visit.pa_day, visit.fundal_height, visit.bw,
        visit.bps, visit.bpd, visit.fetal_heart_rate,
        visit.baby_position, visit.baby_lead,

@@ -5,6 +5,12 @@ export const cachedAncVisitsTable: TableDefinition = {
   fields: [
     { name: 'id', type: 'uuid', primaryKey: true },
     { name: 'journey_id', type: 'uuid', references: { table: 'maternal_journeys', column: 'id' } },
+    // Hospital where THIS specific visit was recorded — distinct from the
+    // journey's registering or current hospital, because referred-out
+    // patients can attend ANC visits at multiple hospitals across the
+    // province. Nullable for legacy rows; backfilled at startup from
+    // maternal_journeys.current_hospital_id.
+    { name: 'hospital_id', type: 'uuid', nullable: true, references: { table: 'hospitals', column: 'id' } },
     { name: 'visit_date', type: 'datetime' },
     { name: 'visit_number', type: 'integer' },
     { name: 'ga_weeks', type: 'integer', nullable: true },

@@ -29,6 +29,25 @@ export async function initializeApp(): Promise<void> {
     await SchemaSync.sync(db, ALL_TABLES, driver as 'sqlite' | 'postgresql');
     logger.info('schema_synced', { tableCount: ALL_TABLES.length });
 
+    // 2b. One-shot idempotent backfill for cached_anc_visits.hospital_id —
+    // the column was added after data already existed; populate from the
+    // parent journey's current_hospital_id (best available proxy). Subquery
+    // syntax works on both SQLite and PostgreSQL.
+    const beforeBackfill = await db.query<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM cached_anc_visits WHERE hospital_id IS NULL`,
+    );
+    await db.execute(
+      `UPDATE cached_anc_visits
+          SET hospital_id = (
+            SELECT mj.current_hospital_id FROM maternal_journeys mj
+             WHERE mj.id = cached_anc_visits.journey_id
+          )
+        WHERE hospital_id IS NULL`,
+    );
+    logger.info('cached_anc_visits_hospital_backfilled', {
+      pendingBefore: Number(beforeBackfill[0]?.count ?? 0),
+    });
+
     // 3. Run seeders
     const seedOrchestrator = new SeedOrchestrator();
     await seedOrchestrator.run(db);

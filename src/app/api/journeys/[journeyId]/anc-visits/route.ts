@@ -35,13 +35,19 @@ export async function GET(
     const db = await getDatabase();
 
     const rows = await db.query<Record<string, unknown>>(
-      `SELECT * FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date`,
+      `SELECT cv.*, vh.name AS visit_hospital_name, vh.hcode AS visit_hcode
+         FROM cached_anc_visits cv
+         LEFT JOIN hospitals vh ON vh.id = cv.hospital_id
+        WHERE cv.journey_id = ?
+        ORDER BY cv.visit_date, cv.visit_number`,
       [journeyId],
     );
 
     const visits: AncVisitEntry[] = rows.map((v) => ({
       visitDate: v.visit_date as string,
       visitNumber: v.visit_number as number,
+      hospitalName: (v.visit_hospital_name as string | null) ?? null,
+      hcode: (v.visit_hcode as string | null) ?? null,
       gaWeeks: v.ga_weeks as number | null,
       fundalHeightCm: v.fundal_height_cm as number | null,
       weightKg: v.weight_kg as number | null,
@@ -78,8 +84,13 @@ export async function GET(
     return NextResponse.json({ visits });
   } catch (error) {
     logger.error('anc_visits_api_failed', { error });
+    const detail = error instanceof Error ? error.message : String(error);
+    const message =
+      process.env.NODE_ENV === 'production'
+        ? 'เกิดข้อผิดพลาด กรุณาลองใหม่'
+        : `เกิดข้อผิดพลาด: ${detail}`;
     return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'เกิดข้อผิดพลาด กรุณาลองใหม่', details: null } },
+      { error: { code: 'INTERNAL_ERROR', message, details: null } },
       { status: 500 },
     );
   }
