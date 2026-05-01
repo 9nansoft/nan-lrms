@@ -1,3 +1,5 @@
+import { logger } from '@/lib/logger';
+
 export interface ProviderOrganization {
   business_id: string;
   hcode: string;
@@ -193,9 +195,15 @@ async function readJson<T>(response: Response): Promise<T> {
 export async function completeProviderOAuth(
   code: string,
   redirectUri: string,
+  flowId: string,
 ): Promise<ProviderPendingSession> {
   const config = getProviderConfig();
 
+  logger.info('provider_id_moph_token_request', {
+    flowId,
+    endpoint: `${config.mophOAuthUrl}/api/v1/token`,
+    redirectUri,
+  });
   const tokenResponse = await fetch(`${config.mophOAuthUrl}/api/v1/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -210,22 +218,48 @@ export async function completeProviderOAuth(
   });
   const tokenData = await readJson<MophTokenResponse>(tokenResponse);
   if (!tokenResponse.ok || tokenData.status !== 'success' || !tokenData.data?.access_token) {
+    logger.warn('provider_id_moph_token_failed', {
+      flowId,
+      httpStatus: tokenResponse.status,
+      apiStatus: tokenData.status,
+      message: tokenData.message,
+    });
     throw new Error(tokenData.message || 'ProviderID token exchange failed');
   }
 
   const accessToken = tokenData.data.access_token;
   const mophClaims = parseJwtPayload<MophAccessTokenPayload>(accessToken);
   const userCid = mophClaims?.scopes_detail?.id_card;
+  logger.info('provider_id_moph_token_ok', {
+    flowId,
+    expiresIn: tokenData.data.expires_in,
+    accountId: tokenData.data.account_id,
+    hasMophClaims: Boolean(mophClaims),
+    hasIdCardScope: Boolean(mophClaims?.scopes_detail?.id_card),
+  });
 
+  logger.info('provider_id_moph_account_request', { flowId });
   const accountResponse = await fetch(`${config.mophOAuthUrl}/api/v1/accounts`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     signal: AbortSignal.timeout(15_000),
   });
   const accountData = await readJson<MophAccountResponse>(accountResponse);
   if (!accountResponse.ok || accountData.status !== 'success' || !accountData.data) {
+    logger.warn('provider_id_moph_account_failed', {
+      flowId,
+      httpStatus: accountResponse.status,
+      apiStatus: accountData.status,
+      message: accountData.message,
+    });
     throw new Error(accountData.message || 'Unable to fetch MOPH account profile');
   }
+  logger.info('provider_id_moph_account_ok', {
+    flowId,
+    hasMobile: Boolean(accountData.data.mobile_number),
+    hasBirthDate: Boolean(accountData.data.birth_date),
+  });
 
+  logger.info('provider_id_provider_token_request', { flowId });
   const providerTokenResponse = await fetch(`${config.providerApiUrl}/api/v1/services/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -243,9 +277,20 @@ export async function completeProviderOAuth(
     providerTokenData.status !== 200 ||
     !providerTokenData.data?.access_token
   ) {
+    logger.warn('provider_id_provider_token_failed', {
+      flowId,
+      httpStatus: providerTokenResponse.status,
+      apiStatus: providerTokenData.status,
+      message: providerTokenData.message,
+    });
     throw new Error(providerTokenData.message || 'Unable to fetch ProviderID service token');
   }
+  logger.info('provider_id_provider_token_ok', {
+    flowId,
+    expiresIn: providerTokenData.data.expires_in,
+  });
 
+  logger.info('provider_id_staff_profile_request', { flowId });
   const staffResponse = await fetch(`${config.providerApiUrl}/api/v1/services/moph-idp/profile-staff`, {
     method: 'POST',
     headers: {
@@ -260,11 +305,35 @@ export async function completeProviderOAuth(
   });
   const staffData = await readJson<StaffProfileResponse>(staffResponse);
   if (!staffResponse.ok || staffData.status !== 200 || !staffData.data) {
+    logger.warn('provider_id_staff_profile_failed', {
+      flowId,
+      httpStatus: staffResponse.status,
+      apiStatus: staffData.status,
+      message: staffData.message,
+    });
     throw new Error(staffData.message || 'Unable to fetch ProviderID staff profile');
   }
 
   const organizations = staffData.data.organization ?? [];
+  logger.info('provider_id_staff_profile_ok', {
+    flowId,
+    providerId: staffData.data.provider_id,
+    orgCount: organizations.length,
+    orgs: organizations.map((org) => ({
+      hcode: org.hcode,
+      hcode9: org.hcode9,
+      hnameTh: org.hname_th,
+      position: org.position,
+      affiliation: org.affiliation,
+      isDirector: org.is_director,
+      isHrAdmin: org.is_hr_admin,
+    })),
+  });
   if (organizations.length === 0) {
+    logger.warn('provider_id_no_organization', {
+      flowId,
+      providerId: staffData.data.provider_id,
+    });
     throw new Error('ProviderID profile has no organization');
   }
 

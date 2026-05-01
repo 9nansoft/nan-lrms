@@ -27,14 +27,41 @@ function redirectToLogin(request: NextRequest, message: string): NextResponse {
 
 export async function GET(request: NextRequest) {
   const error = request.nextUrl.searchParams.get('error');
-  if (error) {
-    return redirectToLogin(request, request.nextUrl.searchParams.get('error_description') ?? error);
-  }
-
+  const errorDescription = request.nextUrl.searchParams.get('error_description');
   const code = request.nextUrl.searchParams.get('code');
   const state = request.nextUrl.searchParams.get('state');
   const expectedState = request.cookies.get(STATE_COOKIE)?.value;
+  const flowId = (state ?? expectedState ?? '').slice(0, 8) || 'no-state';
+
+  logger.info('provider_id_callback_received', {
+    flowId,
+    hasCode: Boolean(code),
+    hasState: Boolean(state),
+    hasExpectedState: Boolean(expectedState),
+    stateMatch: Boolean(state && expectedState && state === expectedState),
+    oauthError: error,
+    oauthErrorDescription: errorDescription,
+    host: request.headers.get('host') ?? null,
+    forwardedHost: request.headers.get('x-forwarded-host') ?? null,
+  });
+
+  if (error) {
+    logger.warn('provider_id_callback_oauth_error', {
+      flowId,
+      error,
+      errorDescription,
+    });
+    return redirectToLogin(request, errorDescription ?? error);
+  }
+
   if (!code || !state || !expectedState || state !== expectedState) {
+    logger.warn('provider_id_callback_state_invalid', {
+      flowId,
+      hasCode: Boolean(code),
+      hasState: Boolean(state),
+      hasExpectedState: Boolean(expectedState),
+      stateMatch: Boolean(state && expectedState && state === expectedState),
+    });
     return redirectToLogin(request, 'ProviderID login state is invalid or expired');
   }
 
@@ -43,8 +70,15 @@ export async function GET(request: NextRequest) {
   const callbackUrl = sanitizeCallbackUrl(request.cookies.get(CALLBACK_COOKIE)?.value);
 
   try {
-    const pending = await completeProviderOAuth(code, redirectUri);
-    const token = storeProviderPendingSession(pending);
+    const pending = await completeProviderOAuth(code, redirectUri, flowId);
+    const token = storeProviderPendingSession(pending, flowId);
+    logger.info('provider_id_callback_succeeded', {
+      flowId,
+      providerId: pending.user.provider_id,
+      orgCount: pending.organizations.length,
+      hcodes: pending.organizations.map((org) => org.hcode),
+      callbackUrl,
+    });
     const completeUrl = new URL('/provider/complete', baseUrl);
     completeUrl.searchParams.set('token', token);
     completeUrl.searchParams.set('callbackUrl', callbackUrl);
@@ -54,7 +88,7 @@ export async function GET(request: NextRequest) {
     response.cookies.delete(CALLBACK_COOKIE);
     return response;
   } catch (err) {
-    logger.error('provider_id_callback_failed', { error: err });
+    logger.error('provider_id_callback_failed', { flowId, error: err });
     const message = err instanceof Error ? err.message : 'ProviderID login failed';
     const response = redirectToLogin(request, message);
     response.cookies.delete(STATE_COOKIE);

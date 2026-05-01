@@ -1,18 +1,28 @@
-// Gate that decides whether a BMS-session identity is allowed to hold a
-// KK-LRMS session at all. Called from the NextAuth authorize callback after
-// validateBmsSession() has returned an identity — if the gate denies, the
-// login is rejected (authorize returns null) and the user never gets a JWT.
+// Gate that decides whether an authenticated identity (BMS or ProviderID) is
+// allowed to hold a KK-LRMS session at all. Called from the NextAuth authorize
+// callback — if the gate denies, the login is rejected (authorize returns
+// null) and the user never gets a JWT.
 //
 // Policy (in order):
-//   1. Exempt facility codes → always allowed:
+//   1. EXEMPT_HCODES → always allowed regardless of auth method or role.
 //        '00000' reserved system-level account
 //        '99999' reserved provincial/admin testing account
-//      Cross-province administrators MUST use one of these hcodes — the
-//      role-based ADMIN bypass that previously sat above this rule was
-//      removed because mapPositionToRole() promotes any BMS user whose
-//      position contains "director"/"ผู้อำนวยการ" to ADMIN, which let
-//      directors of unregistered hospitals into the system.
-//   2. Hcode must match an active row in the operational `hospitals` table.
+//      These are also honored by /api/onboarding/* to auto-register webhook
+//      keys + HOSxP sync. Do NOT add real organization codes here — use
+//      READONLY_LOGIN_HCODES instead. Cross-province administrators MUST
+//      use one of these hcodes; the role-based ADMIN bypass that previously
+//      sat above this rule was removed because mapPositionToRole() promotes
+//      any user whose position contains "director"/"ผู้อำนวยการ" to ADMIN.
+//   2. READONLY_LOGIN_HCODES (env-driven) → allowed only when the caller
+//      passes accessMode='readonly'. Used for non-hospital MOPH units
+//      (provincial / regional health offices, สสจ., เขตสุขภาพ) whose staff
+//      need to view dashboards via ProviderID but MUST NOT trigger webhook
+//      onboarding or HOSxP sync. The onboarding routes only honor
+//      EXEMPT_HCODES, and the readonly middleware (middleware.ts:85-100)
+//      already 403s any non-GET on /api/admin · /api/onboarding ·
+//      /api/sync/trigger · /api/referrals · /api/hospital/audit-log, so
+//      these sessions are structurally read-only.
+//   3. Hcode must match an active row in the operational `hospitals` table.
 //      A hospital removed or deactivated by an admin (via /admin ·
 //      โรงพยาบาล) cannot issue new sessions. Role does NOT influence this
 //      check — even ADMIN users from unregistered hospitals are denied.
@@ -35,15 +45,36 @@ async function resolveDefaultDb(): Promise<DatabaseAdapter> {
   return getDatabase();
 }
 
-export const EXEMPT_HCODES: ReadonlySet<string> = new Set(['00000', '99999']);
+function parseHcodeSet(
+  envValue: string | undefined,
+  builtin: readonly string[] = [],
+): ReadonlySet<string> {
+  const fromEnv = (envValue ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return new Set([...builtin, ...fromEnv]);
+}
+
+export const EXEMPT_HCODES: ReadonlySet<string> = parseHcodeSet(undefined, ['00000', '99999']);
+
+export const READONLY_LOGIN_HCODES: ReadonlySet<string> = parseHcodeSet(
+  process.env.READONLY_LOGIN_HCODES,
+);
 
 export interface HospitalAccessInput {
   hospitalCode: string;
   role: UserRole | string;
+  /** When 'readonly', READONLY_LOGIN_HCODES is consulted in addition to
+   *  EXEMPT_HCODES + the registry. Omit (or pass 'readwrite') for BMS
+   *  sessions so PHO/regional units can't sneak in via a write-capable
+   *  auth method. */
+  accessMode?: 'readonly' | 'readwrite';
 }
 
 export type HospitalAccessReason =
   | 'allowed_exempt'
+  | 'allowed_readonly_unit'
   | 'allowed_registered'
   | 'denied_hospital_not_registered'
   | 'denied_hospital_inactive';
@@ -65,6 +96,13 @@ export async function checkHospitalAccess(
 ): Promise<HospitalAccessResult> {
   if (EXEMPT_HCODES.has(input.hospitalCode)) {
     return { allowed: true, reason: 'allowed_exempt' };
+  }
+
+  if (
+    input.accessMode === 'readonly' &&
+    READONLY_LOGIN_HCODES.has(input.hospitalCode)
+  ) {
+    return { allowed: true, reason: 'allowed_readonly_unit' };
   }
 
   const adapter = db ?? (await resolveDefaultDb());

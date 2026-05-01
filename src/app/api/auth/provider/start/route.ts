@@ -23,10 +23,22 @@ function sanitizeCallbackUrl(value: string | null): string {
 export async function GET(request: NextRequest) {
   try {
     const state = randomBytes(24).toString('base64url');
+    const flowId = state.slice(0, 8);
     const baseUrl = getBaseUrl(request);
     const redirectUri = `${baseUrl}/api/auth/provider/callback`;
     const authorizeUrl = buildProviderAuthorizeUrl(redirectUri, state);
     const callbackUrl = sanitizeCallbackUrl(request.nextUrl.searchParams.get('callbackUrl'));
+
+    logger.info('provider_id_start_initiated', {
+      flowId,
+      baseUrl,
+      redirectUri,
+      callbackUrl,
+      hasNextAuthUrl: Boolean(process.env.NEXTAUTH_URL),
+      forwardedHost: request.headers.get('x-forwarded-host') ?? null,
+      forwardedProto: request.headers.get('x-forwarded-proto') ?? null,
+      host: request.headers.get('host') ?? null,
+    });
 
     const response = NextResponse.redirect(authorizeUrl);
     const cookieOptions = {

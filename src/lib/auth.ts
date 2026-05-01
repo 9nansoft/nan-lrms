@@ -38,6 +38,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const access = await assertHospitalAccess({
           hospitalCode: identity.hospitalCode,
           role: identity.role,
+          accessMode: 'readwrite',
         });
         if (!access.allowed) {
           logger.warn('bms_login_rejected', {
@@ -73,31 +74,82 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         const token = typeof credentials?.token === 'string' ? credentials.token : '';
         const organizationIndex = Number(credentials?.organizationIndex ?? 0);
-        if (!token || !Number.isInteger(organizationIndex)) return null;
+        logger.info('provider_id_authorize_attempt', {
+          hasToken: Boolean(token),
+          organizationIndex,
+        });
+        if (!token || !Number.isInteger(organizationIndex)) {
+          logger.warn('provider_id_authorize_rejected', {
+            reason: 'invalid_credentials',
+            hasToken: Boolean(token),
+            organizationIndex,
+          });
+          return null;
+        }
 
-        const pending = consumeProviderPendingSession(token, organizationIndex);
-        if (!pending) return null;
+        const consumed = consumeProviderPendingSession(token, organizationIndex);
+        if (!consumed.ok) {
+          logger.warn('provider_id_authorize_rejected', {
+            reason: consumed.reason,
+            organizationIndex,
+          });
+          return null;
+        }
 
-        const { data } = pending;
-        const org = data.organizations[pending.organizationIndex];
-        if (!org?.hcode) return null;
+        const { data, flowId } = consumed;
+        const org = data.organizations[consumed.organizationIndex];
+        if (!org?.hcode) {
+          logger.warn('provider_id_authorize_rejected', {
+            flowId,
+            reason: 'org_missing_hcode',
+            organizationIndex: consumed.organizationIndex,
+            providerId: data.user.provider_id,
+          });
+          return null;
+        }
 
         const mappedRole = mapPositionToRole(org.position ?? '');
         const readonlyRole = mappedRole === UserRole.ADMIN ? UserRole.NURSE : mappedRole;
 
+        logger.info('provider_id_authorize_org_selected', {
+          flowId,
+          providerId: data.user.provider_id,
+          organizationIndex: consumed.organizationIndex,
+          hospitalCode: org.hcode,
+          hospitalName: org.hname_th,
+          position: org.position,
+          mappedRole,
+          readonlyRole,
+        });
+
         const access = await assertHospitalAccess({
           hospitalCode: org.hcode,
           role: readonlyRole,
+          accessMode: 'readonly',
         });
         if (!access.allowed) {
           logger.warn('provider_id_login_rejected', {
+            flowId,
             hospitalCode: org.hcode,
             hospitalName: org.hname_th,
             providerId: data.user.provider_id,
+            position: org.position,
+            mappedRole,
+            readonlyRole,
             reason: access.reason,
           });
           return null;
         }
+
+        logger.info('provider_id_login_succeeded', {
+          flowId,
+          providerId: data.user.provider_id,
+          hospitalCode: org.hcode,
+          hospitalName: org.hname_th || org.hname_eng || `รพ.${org.hcode}`,
+          role: readonlyRole,
+          accessMode: 'readonly',
+          accessReason: access.reason,
+        });
 
         return {
           id: `provider:${data.user.provider_id}`,

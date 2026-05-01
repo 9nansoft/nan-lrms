@@ -7,6 +7,7 @@ const SESSION_TTL_MS = 5 * 60_000;
 interface StoredProviderSession {
   data: ProviderPendingSession;
   expiresAt: number;
+  flowId: string;
 }
 
 const pendingSessions = new Map<string, StoredProviderSession>();
@@ -20,49 +21,71 @@ function cleanupExpiredSessions(): void {
   }
 }
 
-export function storeProviderPendingSession(data: ProviderPendingSession): string {
+export function storeProviderPendingSession(
+  data: ProviderPendingSession,
+  flowId: string,
+): string {
   cleanupExpiredSessions();
   const token = randomBytes(32).toString('base64url');
   pendingSessions.set(token, {
     data,
+    flowId,
     expiresAt: Date.now() + SESSION_TTL_MS,
   });
   return token;
 }
 
-export function peekProviderPendingSession(token: string): ProviderPendingSession | null {
+export function peekProviderPendingSession(
+  token: string,
+): { data: ProviderPendingSession; flowId: string } | null {
   cleanupExpiredSessions();
   const session = pendingSessions.get(token);
-  return session?.data ?? null;
+  if (!session) return null;
+  return { data: session.data, flowId: session.flowId };
 }
+
+export type ConsumeProviderResult =
+  | {
+      ok: true;
+      data: ProviderPendingSession;
+      organizationIndex: number;
+      flowId: string;
+    }
+  | { ok: false; reason: 'token_not_found' | 'index_out_of_range' };
 
 export function consumeProviderPendingSession(
   token: string,
   organizationIndex: number,
-): { data: ProviderPendingSession; organizationIndex: number } | null {
+): ConsumeProviderResult {
   cleanupExpiredSessions();
   const session = pendingSessions.get(token);
-  if (!session) return null;
+  if (!session) return { ok: false, reason: 'token_not_found' };
   if (
     !Number.isInteger(organizationIndex) ||
     organizationIndex < 0 ||
     organizationIndex >= session.data.organizations.length
   ) {
-    return null;
+    return { ok: false, reason: 'index_out_of_range' };
   }
   pendingSessions.delete(token);
-  return { data: session.data, organizationIndex };
+  return {
+    ok: true,
+    data: session.data,
+    organizationIndex,
+    flowId: session.flowId,
+  };
 }
 
 export function getProviderPendingSummary(token: string) {
-  const session = peekProviderPendingSession(token);
-  if (!session) return null;
+  const peek = peekProviderPendingSession(token);
+  if (!peek) return null;
   return {
+    flowId: peek.flowId,
     user: {
-      nameTh: session.user.name_th,
-      titleTh: session.user.title_th,
-      providerId: session.user.provider_id,
+      nameTh: peek.data.user.name_th,
+      titleTh: peek.data.user.title_th,
+      providerId: peek.data.user.provider_id,
     },
-    organizations: summarizeProviderOrgs(session.organizations),
+    organizations: summarizeProviderOrgs(peek.data.organizations),
   };
 }
