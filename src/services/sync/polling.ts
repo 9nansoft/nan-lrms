@@ -1426,6 +1426,9 @@ export async function startPolling(db: DatabaseAdapter, sseManager: SseManager):
           let bmsUrl = config.tunnel_url;
           let dbType = (config.database_type ?? 'postgresql') as DatabaseDialect;
 
+          // is_active gate. Re-read per cycle so the toggle flip from
+          // /admin takes effect within 30s without a restart. JOIN to
+          // hospitals so we don't have to query twice.
           const freshConfig = await db.query<{
             session_jwt: string | null;
             session_expires_at: string | null;
@@ -1433,12 +1436,26 @@ export async function startPolling(db: DatabaseAdapter, sseManager: SseManager):
             marketplace_token: string | null;
             last_authenticity_status: string | null;
             last_authenticity_check_at: string | null;
+            is_active: boolean | number;
           }>(
-            `SELECT session_jwt, session_expires_at, database_type, marketplace_token,
-                    last_authenticity_status, last_authenticity_check_at
-             FROM hospital_bms_config WHERE hospital_id = ?`,
+            `SELECT hbc.session_jwt, hbc.session_expires_at, hbc.database_type,
+                    hbc.marketplace_token, hbc.last_authenticity_status,
+                    hbc.last_authenticity_check_at, h.is_active
+             FROM hospital_bms_config hbc
+             JOIN hospitals h ON h.id = hbc.hospital_id
+             WHERE hbc.hospital_id = ?`,
             [config.hospital_id],
           );
+          if (
+            freshConfig.length > 0 &&
+            freshConfig[0].is_active !== true &&
+            freshConfig[0].is_active !== 1
+          ) {
+            logger.info('poll_cycle_skipped_hospital_inactive', {
+              hospitalId: config.hospital_id,
+            });
+            return;
+          }
           if (freshConfig.length > 0) {
             // Authenticity cooldown: skip the cycle entirely if a recent probe
             // failed. The hospital has to be re-onboarded to refresh the

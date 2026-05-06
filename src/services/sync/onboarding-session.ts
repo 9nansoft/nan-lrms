@@ -175,6 +175,36 @@ export async function startOnboardingHosxpSync(
   const intervalMs = getIntervalMs();
   const ttlMs = getTtlMs();
 
+  // is_active guard. When admin toggles "เปิดใช้งาน" off in /admin, the
+  // hospital should be inert — neither dashboard reads nor sync writes. A
+  // still-open admin tab on `/` keeps firing useOnboardHosxpSync, so we
+  // have to enforce this server-side rather than relying on the browser
+  // to stop. Returning a no-op result lets the hook log "blocked" and
+  // stop polling status (it gates on .started || .alreadyRunning).
+  const hospitalRows = await input.db.query<{ is_active: boolean | number }>(
+    'SELECT is_active FROM hospitals WHERE id = ?',
+    [input.hospitalId],
+  );
+  const hospitalActive = hospitalRows[0]?.is_active === true ||
+    hospitalRows[0]?.is_active === 1;
+  if (!hospitalActive) {
+    // Stop any in-flight job from a prior active state so the next cycle
+    // doesn't fire after the toggle flips.
+    if (jobs.has(input.hospitalId)) {
+      stopOnboardingHosxpSync(input.hospitalId);
+    }
+    logger.info('onboarding_hosxp_sync_blocked_hospital_inactive', {
+      hcode: input.hcode,
+      hospitalId: input.hospitalId,
+    });
+    return {
+      started: false,
+      alreadyRunning: false,
+      intervalMs,
+      ttlMs,
+    };
+  }
+
   // Purge guard. /api/admin/hospitals/[hcode]/data sets data_purged_at when
   // the admin wipes a hospital's cached data; until an admin re-onboards
   // explicitly (confirmReonboard=true), every heartbeat from a still-open
