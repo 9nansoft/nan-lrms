@@ -12,6 +12,7 @@ import type {
 } from '@/types/hosxp';
 import { encrypt } from '@/lib/encryption';
 import { calculateAge } from '@/lib/utils';
+import { isValidThaiCidChecksum } from '@/lib/cid';
 import {
   createJourney,
   getActiveJourneyByCid,
@@ -41,8 +42,40 @@ export async function syncAncData(
     }
   }
   let count = 0;
+  let skippedInvalidCid = 0;
 
   for (const anc of ancPatients) {
+    // Per-row CID gate. The polling-level fingerprint (pollHospital) already
+    // suspends a whole cycle when the FIRST row's CID is malformed, but old
+    // HOSxP versions can mix valid + 13-digit-but-fake values within the
+    // same payload (observed at hcode 10996: ~148 rows, all checksum-
+    // invalid). Skip individual bad rows so the rest of the batch ingests
+    // cleanly. Format-level rejection (not 13 digits) is hard-skip; failed
+    // checksum is a soft-skip with a warning so legitimate non-Thai
+    // patients don't silently disappear if a hospital uses placeholder CIDs.
+    const rawCid: string = typeof anc.cid === 'string' ? anc.cid.trim() : '';
+    if (!/^\d{13}$/.test(rawCid)) {
+      skippedInvalidCid++;
+      logger.warn('anc_skipped_invalid_cid_format', {
+        hospitalId,
+        hn: anc.hn,
+        cidLength: rawCid.length,
+        cidSample: rawCid ? `${rawCid.slice(0, 6)}…` : '(empty)',
+      });
+      continue;
+    }
+    if (!isValidThaiCidChecksum(rawCid)) {
+      skippedInvalidCid++;
+      logger.warn('anc_skipped_invalid_cid_checksum', {
+        hospitalId,
+        hn: anc.hn,
+        // Don't log the raw CID — log a hash prefix so the row is traceable
+        // without leaking PDPA-protected data into structured logs.
+        cidHashPrefix: createHash('sha256').update(rawCid).digest('hex').slice(0, 8),
+      });
+      continue;
+    }
+
     const fullName = `${anc.pname}${anc.fname} ${anc.lname}`.trim();
     const encryptedName = encrypt(fullName, encryptionKey);
     const cidHash = anc.cid
@@ -184,6 +217,13 @@ export async function syncAncData(
     count++;
   }
 
+  if (skippedInvalidCid > 0) {
+    logger.warn('anc_sync_skipped_invalid_cids', {
+      hospitalId,
+      skipped: skippedInvalidCid,
+      ingested: count,
+    });
+  }
   return count;
 }
 

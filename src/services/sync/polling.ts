@@ -27,6 +27,7 @@ import { syncAncData } from './anc';
 import { logger } from '@/lib/logger';
 import { APP_IDENTIFIER } from '@/lib/bms-browser-client';
 import { decryptSafe } from '@/lib/encryption';
+import { isValidThaiCidChecksum } from '@/lib/cid';
 import type {
   HosxpAncClassifyingRow,
   HosxpAncRiskRow,
@@ -87,6 +88,7 @@ const AUTHENTICITY_COOLDOWN_MS = 60 * 60 * 1000; // 1h after a transient failure
 const AUTHENTICITY_FAILURE_STATUSES = new Set([
   'cid_unstable',
   'hn_unstable',
+  'cid_invalid_checksum',
   'no_id_field',
   'probe_failed',
   'missing_marketplace_token',
@@ -117,7 +119,7 @@ function isWithinAuthenticityCooldown(
 async function recordAuthenticityVerdict(
   db: DatabaseAdapter,
   hospitalId: string,
-  status: 'authentic' | 'cid_unstable' | 'hn_unstable' | 'no_id_field' | 'probe_failed' | 'missing_marketplace_token' | 'no_data',
+  status: 'authentic' | 'cid_unstable' | 'hn_unstable' | 'cid_invalid_checksum' | 'no_id_field' | 'probe_failed' | 'missing_marketplace_token' | 'no_data',
   reason: string | null,
 ): Promise<void> {
   const now = new Date().toISOString();
@@ -136,9 +138,16 @@ async function recordAuthenticityVerdict(
 // unsafe to interpolate — both reasons to skip rather than escape.
 const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+type AuthenticityFailureStatus =
+  | 'cid_unstable'
+  | 'hn_unstable'
+  | 'cid_invalid_checksum'
+  | 'no_id_field'
+  | 'probe_failed';
+
 class HospitalDataUnauthenticError extends Error {
-  status: 'cid_unstable' | 'hn_unstable' | 'no_id_field' | 'probe_failed';
-  constructor(status: 'cid_unstable' | 'hn_unstable' | 'no_id_field' | 'probe_failed') {
+  status: AuthenticityFailureStatus;
+  constructor(status: AuthenticityFailureStatus) {
     super(`Hospital sync aborted — authenticity status=${status}`);
     this.name = 'HospitalDataUnauthenticError';
     this.status = status;
@@ -153,7 +162,7 @@ async function fingerprintFirstRow(
   firstRow: Record<string, unknown>,
 ): Promise<
   | { ok: true; idField: 'cid' | 'hn'; idValue: string }
-  | { ok: false; status: 'cid_unstable' | 'hn_unstable' | 'no_id_field' | 'probe_failed'; detail: string }
+  | { ok: false; status: AuthenticityFailureStatus; detail: string }
 > {
   const queryOptions = {
     appIdentifier: APP_IDENTIFIER,
@@ -173,6 +182,20 @@ async function fingerprintFirstRow(
       );
       if (r.data.length === 0) {
         return { ok: false, status: 'cid_unstable', detail: `cid=${rawCid} did not round-trip` };
+      }
+      // Round-trip alone isn't enough: some old HOSxP builds return values
+      // that are 13 digits but checksum-invalid (the "13-digit-but-fake"
+      // pattern observed at hcode 10996). Those CIDs ARE persisted in the
+      // upstream `patient` table — so the round-trip succeeds — yet they're
+      // garbage from KK-LRMS's perspective (cidHash never collides with the
+      // real person, transfer detection breaks). Reject the cycle here so
+      // the data never lands in cached_patients / maternal_journeys.
+      if (!isValidThaiCidChecksum(rawCid)) {
+        return {
+          ok: false,
+          status: 'cid_invalid_checksum',
+          detail: `cid=${rawCid} round-trips but fails the Thai national-ID checksum`,
+        };
       }
       return { ok: true, idField: 'cid', idValue: rawCid };
     } catch (error) {
