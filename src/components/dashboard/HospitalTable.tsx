@@ -140,7 +140,18 @@ export function HospitalTable({ hospitals, selected, onSelect, variant = 'light'
       <div className={cn(isKiosk ? 'max-h-[360px]' : 'max-h-[420px]', 'overflow-y-auto')}>
         {sorted.map((h) => {
           const isSel = selected === h.hcode;
-          const isOffline = h.connectionStatus !== ConnectionStatusEnum.ONLINE;
+          const isOnline = h.connectionStatus === ConnectionStatusEnum.ONLINE;
+          const isOffline = h.connectionStatus === ConnectionStatusEnum.OFFLINE;
+          // Render a connection-state badge for every row, not just OFFLINE.
+          // The previous "OFFLINE only" rendering meant ONLINE / UNKNOWN rows
+          // looked identical, even though UNKNOWN means "we've never reached
+          // the tunnel" — operators couldn't tell the two apart at a glance.
+          const statusLabel = isOnline ? 'ONLINE' : isOffline ? 'OFFLINE' : 'UNKNOWN';
+          const statusColor = isOnline
+            ? 'var(--risk-low)'
+            : isOffline
+              ? 'var(--risk-high)'
+              : inkMuted;
           const sev =
             h.counts.high > 0
               ? 'var(--risk-high)'
@@ -198,14 +209,27 @@ export function HospitalTable({ hospitals, selected, onSelect, variant = 'light'
                 >
                   {h.level}
                 </span>
-                {isOffline && (
+                <span
+                  className="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-wide"
+                  style={{ color: statusColor }}
+                  aria-label={`สถานะการเชื่อมต่อ: ${statusLabel}`}
+                >
                   <span
-                    className="font-mono text-[9px]"
-                    style={{ color: 'var(--risk-high)' }}
-                  >
-                    OFFLINE
-                  </span>
-                )}
+                    aria-hidden="true"
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: statusColor,
+                      // Hollow ring for OFFLINE, solid dot for ONLINE/UNKNOWN
+                      // — matches the existing risk-dot conventions on this
+                      // table (offline rows already use a circular shape).
+                      boxShadow: isOffline ? `inset 0 0 0 1px ${statusColor}` : undefined,
+                      opacity: isOffline ? 0.85 : 1,
+                    }}
+                  />
+                  {statusLabel}
+                </span>
               </div>
               <div>
                 <RiskBar
