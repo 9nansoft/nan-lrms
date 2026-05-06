@@ -1,12 +1,38 @@
 // T012: KK-LRMS domain types and enums
 
+// MoPH service-plan levels.
+//
+// The first block (A_S..F3) is the LEGACY classification still applied to
+// hospitals outside Khon Kaen that haven't been reclassified under SAP.
+//
+// The second block is the SAP framework ratified by อ.ก.พ. มติ 3/2568
+// (20 พ.ค. 2568) — see the August 2025 PHO Khon Kaen circular forwarded
+// from MoPH สธ ๐๒๐๗.๑๑/ว ๒๐๖๘๙. 904 health-service units across all 12
+// regions were reclassified; KK_HOSPITALS in src/config/hospitals.ts is
+// updated accordingly.
+//
+// DB column hospitals.level is varchar(10) so all values fit. The `S_C`
+// short code stands for "S เงื่อนไข" (S with development conditions
+// pending — see hospitals.development_condition for the specific
+// requirements).
 export enum HospitalLevel {
+  // Legacy
   A_S = 'A_S',
   M1 = 'M1',
   M2 = 'M2',
   F1 = 'F1',
   F2 = 'F2',
   F3 = 'F3',
+  // SAP (อ.ก.พ. 3/2568)
+  P_PLUS = 'P+',
+  P = 'P',
+  A_PLUS = 'A+',
+  A = 'A',
+  S_PLUS = 'S+',
+  S = 'S',
+  S_C = 'S_C',
+  M = 'M',
+  F = 'F',
 }
 
 // Service-role classification for the kk-lrms maternity network.

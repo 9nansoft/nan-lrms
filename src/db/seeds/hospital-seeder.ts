@@ -5,14 +5,19 @@ import { DataSeeder } from './seeder';
 import { KK_HOSPITALS } from '@/config/hospitals';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
 
-// Default service-type for seeded hospitals based on MOPH level:
-//   A_S     → provincial hub (Khon Kaen Regional)
-//   M1/M2   → district with maternity (large referral hubs)
-//   F1/F2/F3 → district with maternity by default; admins can flip the
-//             smaller F2/F3 sites that don't actually deliver to
-//             DISTRICT_NO_MATERNITY from /admin · โรงพยาบาล
+// Default service-type by level. Updated for SAP framework:
+//   P+ / P / A_S → provincial hub (regional centre)
+//   A+ / A / M1 / M2 / S+ / S / S_C / M / F1 / F2 / F3 / F → district
+//     with maternity by default; admins can flip non-maternity sites
+//     to DISTRICT_NO_MATERNITY from /admin · โรงพยาบาล.
 function defaultServiceType(level: HospitalLevel): HospitalServiceType {
-  if (level === HospitalLevel.A_S) return HospitalServiceType.PROVINCIAL_HUB;
+  if (
+    level === HospitalLevel.P_PLUS ||
+    level === HospitalLevel.P ||
+    level === HospitalLevel.A_S
+  ) {
+    return HospitalServiceType.PROVINCIAL_HUB;
+  }
   return HospitalServiceType.DISTRICT_WITH_MATERNITY;
 }
 
@@ -34,9 +39,10 @@ export class HospitalSeeder extends DataSeeder {
 
     for (const hospital of KK_HOSPITALS) {
       await db.execute(
-        `INSERT INTO hospitals (id, hcode, name, level, service_type, is_active,
-          connection_status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO hospitals (id, hcode, name, level, service_type,
+          is_active, connection_status, development_condition,
+          created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuidv4(),
           hospital.hcode,
@@ -45,6 +51,7 @@ export class HospitalSeeder extends DataSeeder {
           defaultServiceType(hospital.level),
           true,
           'UNKNOWN',
+          hospital.developmentCondition ?? null,
           now,
           now,
         ],

@@ -140,10 +140,27 @@ const KK_BOUNDS: LatLngBoundsExpression = [
 ];
 const KK_CENTER: LatLngExpression = [16.35, 102.45];
 
+// Pin radius by SAP/legacy tier. Larger pins for higher-tier referral
+// receivers so the operator can spot the hub at province-level zoom.
+// Falls through to DEFAULT_RADIUS for any tier not in the map.
 const LEVEL_BASE_RADIUS: Partial<Record<HospitalLevel, number>> = {
+  // SAP framework (อ.ก.พ. 3/2568)
+  [HospitalLevel.P_PLUS]: 13,
+  [HospitalLevel.P]: 12,
+  [HospitalLevel.A_PLUS]: 11,
+  [HospitalLevel.A]: 10,
+  [HospitalLevel.S_PLUS]: 9,
+  [HospitalLevel.S]: 8,
+  [HospitalLevel.S_C]: 7,
+  [HospitalLevel.M]: 8,
+  [HospitalLevel.F]: 7,
+  // Legacy
   [HospitalLevel.A_S]: 11,
   [HospitalLevel.M1]: 9,
+  [HospitalLevel.M2]: 8,
+  [HospitalLevel.F1]: 8,
   [HospitalLevel.F2]: 7,
+  [HospitalLevel.F3]: 6,
 };
 const DEFAULT_RADIUS = 7;
 
