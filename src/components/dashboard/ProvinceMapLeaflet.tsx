@@ -78,8 +78,10 @@ function buildHospitalIcon(params: {
   isHigh: boolean;
   isSelected: boolean;
   connectionStatus: 'ONLINE' | 'OFFLINE' | 'UNKNOWN';
+  syncStatus: 'OK' | 'BLOCKED' | 'NEVER_SYNCED';
+  syncBlockedReason: string | null;
 }): DivIcon {
-  const { color, sizePx, isHigh, isSelected, connectionStatus } = params;
+  const { color, sizePx, isHigh, isSelected, connectionStatus, syncStatus, syncBlockedReason } = params;
   const isOffline = connectionStatus === 'OFFLINE';
   const classes = [
     'kk-pin',
@@ -89,21 +91,31 @@ function buildHospitalIcon(params: {
   ]
     .filter(Boolean)
     .join(' ');
-  // Corner status dot — present on every pin so ONLINE / OFFLINE / UNKNOWN
-  // are all distinguishable. Existing offline visual (gray body + red
-  // strikethrough) is preserved alongside the dot.
-  const statusClass =
-    connectionStatus === 'ONLINE'
+  // Corner status dot priority:
+  //   BLOCKED  → orange (sync suspended; tunnel may still be ONLINE)
+  //   OFFLINE  → red    (tunnel unreachable)
+  //   ONLINE   → green
+  //   UNKNOWN / NEVER_SYNCED → gray
+  // BLOCKED takes priority over ONLINE so the operator doesn't read a
+  // healthy tunnel as a healthy sync. NEVER_SYNCED falls under UNKNOWN
+  // visually since it's a similar "no data flowing" message.
+  const isBlocked = syncStatus === 'BLOCKED';
+  const statusClass = isBlocked
+    ? 'kk-pin__status--blocked'
+    : connectionStatus === 'ONLINE' && syncStatus !== 'NEVER_SYNCED'
       ? 'kk-pin__status--online'
       : connectionStatus === 'OFFLINE'
         ? 'kk-pin__status--offline'
         : 'kk-pin__status--unknown';
-  const statusTitle =
-    connectionStatus === 'ONLINE'
-      ? 'Online'
-      : connectionStatus === 'OFFLINE'
-        ? 'Offline'
-        : 'Unknown';
+  const statusTitle = isBlocked
+    ? `Sync ถูกระงับ — ${syncBlockedReason ?? 'unknown'}`
+    : syncStatus === 'NEVER_SYNCED'
+      ? 'ยังไม่เคยมีการเชื่อมต่อ Sync'
+      : connectionStatus === 'ONLINE'
+        ? 'Online'
+        : connectionStatus === 'OFFLINE'
+          ? 'Offline'
+          : 'Unknown';
   const html =
     `<div class="${classes}" style="--kk-pin-color:${color};--kk-pin-size:${sizePx}px">` +
     '<div class="kk-pin__halo"></div>' +
@@ -312,12 +324,16 @@ export default function ProvinceMapLeaflet({
             : 'UNKNOWN';
       const isOnline = connectionStatus === 'ONLINE';
       const isHigh = !!live && live.counts.high > 0;
+      const syncStatus = live?.syncStatus ?? 'NEVER_SYNCED';
+      const syncBlockedReason = live?.syncBlockedReason ?? null;
       const icon = buildHospitalIcon({
         color,
         sizePx,
         isHigh,
         isSelected: isSel,
         connectionStatus,
+        syncStatus,
+        syncBlockedReason,
       });
       return {
         hcode,

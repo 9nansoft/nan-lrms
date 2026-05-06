@@ -142,16 +142,33 @@ export function HospitalTable({ hospitals, selected, onSelect, variant = 'light'
           const isSel = selected === h.hcode;
           const isOnline = h.connectionStatus === ConnectionStatusEnum.ONLINE;
           const isOffline = h.connectionStatus === ConnectionStatusEnum.OFFLINE;
-          // Render a connection-state badge for every row, not just OFFLINE.
-          // The previous "OFFLINE only" rendering meant ONLINE / UNKNOWN rows
-          // looked identical, even though UNKNOWN means "we've never reached
-          // the tunnel" — operators couldn't tell the two apart at a glance.
-          const statusLabel = isOnline ? 'ONLINE' : isOffline ? 'OFFLINE' : 'UNKNOWN';
-          const statusColor = isOnline
-            ? 'var(--risk-low)'
-            : isOffline
-              ? 'var(--risk-high)'
-              : inkMuted;
+          // Sync state OVERRIDES connection state in the badge — a hospital
+          // can be ONLINE (tunnel responds) but BLOCKED (authenticity probe
+          // failed or admin purged), and showing "ONLINE" for that case
+          // misled operators into thinking sync was healthy.
+          const isBlocked = h.syncStatus === 'BLOCKED';
+          const isNeverSynced = h.syncStatus === 'NEVER_SYNCED';
+          const statusLabel = isBlocked
+            ? 'BLOCKED'
+            : isNeverSynced && !isOffline
+              ? 'NO SYNC'
+              : isOnline
+                ? 'ONLINE'
+                : isOffline
+                  ? 'OFFLINE'
+                  : 'UNKNOWN';
+          const statusColor = isBlocked
+            ? 'var(--risk-medium)'
+            : isOnline && !isNeverSynced
+              ? 'var(--risk-low)'
+              : isOffline
+                ? 'var(--risk-high)'
+                : inkMuted;
+          const statusTitle = isBlocked
+            ? `Sync ถูกระงับ — ${h.syncBlockedReason ?? 'unknown reason'}`
+            : isNeverSynced
+              ? 'ยังไม่เคยมีการเชื่อมต่อ Sync — รอผู้ใช้จากโรงพยาบาลนี้เปิด KK-LRMS ครั้งแรก'
+              : '';
           const sev =
             h.counts.high > 0
               ? 'var(--risk-high)'
@@ -212,7 +229,8 @@ export function HospitalTable({ hospitals, selected, onSelect, variant = 'light'
                 <span
                   className="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-wide"
                   style={{ color: statusColor }}
-                  aria-label={`สถานะการเชื่อมต่อ: ${statusLabel}`}
+                  aria-label={`สถานะ: ${statusLabel}`}
+                  title={statusTitle || undefined}
                 >
                   <span
                     aria-hidden="true"

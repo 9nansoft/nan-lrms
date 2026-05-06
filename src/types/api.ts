@@ -3,6 +3,16 @@
 import type { RiskLevel, ConnectionStatus, HospitalLevel, LaborStatus } from './domain';
 
 // Dashboard
+//
+// syncStatus is orthogonal to connectionStatus:
+//   connectionStatus = is the BMS tunnel reachable?
+//   syncStatus       = is the sync pipeline writing real data right now?
+//
+// A hospital can be ONLINE + BLOCKED (tunnel responds, but
+// authenticity-probe failed or admin purged it) — that's the case the map
+// pin used to mislead operators about, before the orange BLOCKED dot.
+export type DashboardSyncStatus = 'OK' | 'BLOCKED' | 'NEVER_SYNCED';
+
 export interface DashboardHospital {
   hcode: string;
   name: string;
@@ -19,6 +29,11 @@ export interface DashboardHospital {
     high: number;
     total: number;
   };
+  syncStatus: DashboardSyncStatus;
+  /** When syncStatus is BLOCKED, this carries the underlying reason
+   *  (e.g. 'purged_pending_reonboard', 'missing_marketplace_token') so
+   *  the UI can show an actionable tooltip. */
+  syncBlockedReason: string | null;
 }
 
 export interface DashboardSummary {

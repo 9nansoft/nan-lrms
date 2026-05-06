@@ -43,7 +43,21 @@ interface DashboardRow {
   district_code: string | null;
   lat: number | string | null;
   lon: number | string | null;
+  // Joined from hospital_bms_config — null when never onboarded.
+  has_bms_config: number | boolean | null;
+  last_authenticity_status: string | null;
+  data_purged_at: string | null;
 }
+
+const SYNC_FAILURE_STATUSES = new Set([
+  'cid_unstable',
+  'hn_unstable',
+  'cid_invalid_checksum',
+  'no_id_field',
+  'probe_failed',
+  'missing_marketplace_token',
+  'purged_pending_reonboard',
+]);
 
 interface PatientCountRow {
   hospital_id: string;
@@ -59,11 +73,18 @@ export interface DashboardResult {
 }
 
 export async function getProvinceDashboard(db: DatabaseAdapter): Promise<DashboardResult> {
-  // Get all active hospitals
+  // Get all active hospitals + their BMS sync verdict so the map and the
+  // hospital list can render BLOCKED separately from OFFLINE. LEFT JOIN so
+  // never-onboarded hospitals (no hospital_bms_config row) still appear.
   const hospitals = await db.query<DashboardRow>(
-    `SELECT hcode, name, level, connection_status, last_sync_at, is_active,
-            province_code, district_code, lat, lon
-     FROM hospitals WHERE is_active = true ORDER BY name`,
+    `SELECT h.hcode, h.name, h.level, h.connection_status, h.last_sync_at,
+            h.is_active, h.province_code, h.district_code, h.lat, h.lon,
+            CASE WHEN hbc.id IS NULL THEN false ELSE true END AS has_bms_config,
+            hbc.last_authenticity_status, hbc.data_purged_at
+     FROM hospitals h
+     LEFT JOIN hospital_bms_config hbc ON hbc.hospital_id = h.id
+     WHERE h.is_active = true
+     ORDER BY h.name`,
   );
 
   // Get patient counts per hospital grouped by risk level
@@ -88,6 +109,30 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
     // downstream consumers (map, mobile clients) get numbers.
     const lat = h.lat === null ? null : Number(h.lat);
     const lon = h.lon === null ? null : Number(h.lon);
+    // Sync verdict precedence:
+    //   1. data_purged_at non-null → BLOCKED ('purged_pending_reonboard'),
+    //      even if the authenticity probe later wrote 'authentic' (it
+    //      shouldn't, since the cooldown blocks polling, but be explicit).
+    //   2. last_authenticity_status in failure set → BLOCKED.
+    //   3. No BMS config row at all → NEVER_SYNCED.
+    //   4. last_sync_at null but has config → NEVER_SYNCED (onboarded but
+    //      first cycle hasn't completed).
+    //   5. Otherwise OK.
+    const hasConfig = h.has_bms_config === true || h.has_bms_config === 1;
+    const status = h.last_authenticity_status;
+    let syncStatus: 'OK' | 'BLOCKED' | 'NEVER_SYNCED' = 'OK';
+    let syncBlockedReason: string | null = null;
+    if (h.data_purged_at) {
+      syncStatus = 'BLOCKED';
+      syncBlockedReason = 'purged_pending_reonboard';
+    } else if (status && SYNC_FAILURE_STATUSES.has(status)) {
+      syncStatus = 'BLOCKED';
+      syncBlockedReason = status;
+    } else if (!hasConfig) {
+      syncStatus = 'NEVER_SYNCED';
+    } else if (!h.last_sync_at) {
+      syncStatus = 'NEVER_SYNCED';
+    }
     hospitalMap.set(h.hcode, {
       hcode: h.hcode,
       name: h.name,
@@ -99,6 +144,8 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
       lat: lat !== null && Number.isFinite(lat) ? lat : null,
       lon: lon !== null && Number.isFinite(lon) ? lon : null,
       counts: { low: 0, medium: 0, high: 0, total: 0 },
+      syncStatus,
+      syncBlockedReason,
     });
   }
 

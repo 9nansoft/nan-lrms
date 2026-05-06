@@ -19,6 +19,8 @@ const sampleHospitals: DashboardHospital[] = [
     connectionStatus: ConnectionStatus.ONLINE,
     lastSyncAt: '2026-01-15T10:00:00Z',
     counts: { low: 5, medium: 3, high: 2, total: 10 },
+    syncStatus: 'OK',
+    syncBlockedReason: null,
   },
   {
     hcode: 'H002',
@@ -27,6 +29,8 @@ const sampleHospitals: DashboardHospital[] = [
     connectionStatus: ConnectionStatus.OFFLINE,
     lastSyncAt: null,
     counts: { low: 2, medium: 1, high: 0, total: 3 },
+    syncStatus: 'OK',
+    syncBlockedReason: null,
   },
 ];
 

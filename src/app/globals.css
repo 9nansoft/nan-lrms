@@ -342,6 +342,12 @@
 .kk-pin__status--unknown {
   background: #94a3b8;
 }
+/* BLOCKED — sync suspended (authenticity probe failed or admin purged).
+ * Orange so it reads as "needs attention" without being mistaken for the
+ * red OFFLINE state (tunnel down) or green ONLINE state (sync healthy). */
+.kk-pin__status--blocked {
+  background: #f97316;
+}
 @keyframes kk-pin-pulse {
   0% {
     opacity: 0.55;

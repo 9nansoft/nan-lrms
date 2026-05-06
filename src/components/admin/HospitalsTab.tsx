@@ -215,6 +215,34 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
     }
   };
 
+  const handleClearPurge = async (h: AdminHospital) => {
+    if (
+      !confirm(
+        `เปิดใช้งาน Sync ของ ${h.name} (${h.hcode}) อีกครั้ง?\n` +
+          `\n` +
+          `การกดยืนยันจะล้างสถานะระงับฝั่งเซิร์ฟเวอร์เท่านั้น — Sync จริงจะเริ่มทำงานอีกครั้งเมื่อ\n` +
+          `ผู้ใช้จากโรงพยาบาลนี้เปิด KK-LRMS จาก HOSxP (ระบบจะใช้ marketplace_token จากเซสชันใหม่)`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/hospitals/${h.hcode}/clear-purge`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(err?.error ?? 'ดำเนินการไม่สำเร็จ');
+      }
+      await mutate();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -283,18 +311,34 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
                   </span>
                 )}
                 {isHospitalAuthenticityFailure(h) && (
-                  <span
-                    title={describeAuthenticityFailure(h)}
-                    className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-                    style={{
-                      borderColor: '#fecaca',
-                      background: '#fef2f2',
-                      color: '#b91c1c',
-                    }}
-                  >
-                    <AlertTriangle className="h-3 w-3" />
-                    ข้อมูลไม่ผ่านตรวจสอบ
-                  </span>
+                  <>
+                    <span
+                      title={describeAuthenticityFailure(h)}
+                      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      style={{
+                        borderColor: '#fecaca',
+                        background: '#fef2f2',
+                        color: '#b91c1c',
+                      }}
+                    >
+                      <AlertTriangle className="h-3 w-3" />
+                      ข้อมูลไม่ผ่านตรวจสอบ
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleClearPurge(h)}
+                      title="ล้างสถานะระงับ Sync ฝั่งเซิร์ฟเวอร์ — Sync จริงจะเริ่มอีกครั้งเมื่อผู้ใช้จากโรงพยาบาลนี้เปิด KK-LRMS จาก HOSxP"
+                      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide hover:bg-emerald-100"
+                      style={{
+                        borderColor: '#86efac',
+                        background: '#ecfdf5',
+                        color: '#065f46',
+                      }}
+                      disabled={busy}
+                    >
+                      เปิดใช้งาน Sync อีกครั้ง
+                    </button>
+                  </>
                 )}
               </span>
               <span className="font-mono text-[11px]">{h.level}</span>

@@ -87,6 +87,11 @@ export function AdminMapPane({ onSelectHospital }: AdminMapPaneProps = {}) {
         lat: h.lat,
         lon: h.lon,
         counts: { low: 0, medium: 0, high: 0, total: 0 },
+        // Admin tab doesn't gate on sync verdict — it just renders pin
+        // positions. Treat every active hospital as OK so the corner dot
+        // reflects connectionStatus alone.
+        syncStatus: 'OK' as const,
+        syncBlockedReason: null,
       }));
   }, [hospitalsData]);
 
