@@ -316,6 +316,32 @@
       transparent calc(50% + 1.2px)
     );
 }
+/* Connection-status dot anchored to the top-right corner of the pin body.
+ * Sized in calc() relative to the pin so it scales with zoom-driven pin
+ * size. White ring keeps the dot visible against any body color. */
+.kk-pin__status {
+  position: absolute;
+  z-index: 3;
+  width: max(6px, calc(var(--kk-pin-size) * 0.35));
+  height: max(6px, calc(var(--kk-pin-size) * 0.35));
+  border-radius: 50%;
+  /* Place at top-right of the body. The body is centered in the doubled
+   * icon bounds, so offset from center by half the pin size. */
+  top: calc(50% - var(--kk-pin-size) / 2 - 2px);
+  left: calc(50% + var(--kk-pin-size) / 2 - max(6px, calc(var(--kk-pin-size) * 0.35)) + 2px);
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+.kk-pin__status--online {
+  background: #22c55e;
+}
+.kk-pin__status--offline {
+  background: #ef4444;
+}
+.kk-pin__status--unknown {
+  background: #94a3b8;
+}
 @keyframes kk-pin-pulse {
   0% {
     opacity: 0.55;

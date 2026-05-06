@@ -77,21 +77,38 @@ function buildHospitalIcon(params: {
   sizePx: number;
   isHigh: boolean;
   isSelected: boolean;
-  isOnline: boolean;
+  connectionStatus: 'ONLINE' | 'OFFLINE' | 'UNKNOWN';
 }): DivIcon {
-  const { color, sizePx, isHigh, isSelected, isOnline } = params;
+  const { color, sizePx, isHigh, isSelected, connectionStatus } = params;
+  const isOffline = connectionStatus === 'OFFLINE';
   const classes = [
     'kk-pin',
     isHigh ? 'kk-pin--high' : '',
     isSelected ? 'kk-pin--selected' : '',
-    !isOnline ? 'kk-pin--offline' : '',
+    isOffline ? 'kk-pin--offline' : '',
   ]
     .filter(Boolean)
     .join(' ');
+  // Corner status dot — present on every pin so ONLINE / OFFLINE / UNKNOWN
+  // are all distinguishable. Existing offline visual (gray body + red
+  // strikethrough) is preserved alongside the dot.
+  const statusClass =
+    connectionStatus === 'ONLINE'
+      ? 'kk-pin__status--online'
+      : connectionStatus === 'OFFLINE'
+        ? 'kk-pin__status--offline'
+        : 'kk-pin__status--unknown';
+  const statusTitle =
+    connectionStatus === 'ONLINE'
+      ? 'Online'
+      : connectionStatus === 'OFFLINE'
+        ? 'Offline'
+        : 'Unknown';
   const html =
     `<div class="${classes}" style="--kk-pin-color:${color};--kk-pin-size:${sizePx}px">` +
     '<div class="kk-pin__halo"></div>' +
     `<div class="kk-pin__body">${HOSPITAL_CROSS_SVG}</div>` +
+    `<div class="kk-pin__status ${statusClass}" title="${statusTitle}" aria-label="${statusTitle}"></div>` +
     '</div>';
   // Oversize the icon bounds so the halo animation isn't clipped.
   const bound = sizePx * 2;
@@ -283,13 +300,38 @@ export default function ProvinceMapLeaflet({
       );
       const color = riskColor(live, palette);
       const isSel = selected === hcode;
-      const isOnline =
-        live?.connectionStatus === undefined
-          ? true
-          : live.connectionStatus === ConnectionStatusEnum.ONLINE;
+      // Status is tri-state: ONLINE / OFFLINE / UNKNOWN. Anything not
+      // explicitly set falls back to UNKNOWN so a hospital we've never
+      // reached doesn't visually pose as ONLINE.
+      const rawStatus = live?.connectionStatus;
+      const connectionStatus: 'ONLINE' | 'OFFLINE' | 'UNKNOWN' =
+        rawStatus === ConnectionStatusEnum.ONLINE
+          ? 'ONLINE'
+          : rawStatus === ConnectionStatusEnum.OFFLINE
+            ? 'OFFLINE'
+            : 'UNKNOWN';
+      const isOnline = connectionStatus === 'ONLINE';
       const isHigh = !!live && live.counts.high > 0;
-      const icon = buildHospitalIcon({ color, sizePx, isHigh, isSelected: isSel, isOnline });
-      return { hcode, name, coord, level, live, sizePx, color, isSel, isOnline, isHigh, icon };
+      const icon = buildHospitalIcon({
+        color,
+        sizePx,
+        isHigh,
+        isSelected: isSel,
+        connectionStatus,
+      });
+      return {
+        hcode,
+        name,
+        coord,
+        level,
+        live,
+        sizePx,
+        color,
+        isSel,
+        isOnline,
+        isHigh,
+        icon,
+      };
     };
 
     // Single source of truth: the `hospitals` prop (what the caller fetched
