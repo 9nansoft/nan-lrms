@@ -15,7 +15,7 @@ import {
 } from '@/services/journey';
 import { AncRiskLevel } from '@/types/domain';
 import { logger } from '@/lib/logger';
-import { diagnoseCid, describeCidFailure } from '@/lib/cid';
+import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
 import { isoDatesEqual } from '@/lib/dates';
 
 // ─── Webhook payload types ───
@@ -732,8 +732,30 @@ export async function processAncWebhook(
   let created = 0;
   let updated = 0;
   let deleted = 0;
+  let skippedInvalidCidChecksum = 0;
 
   for (const patient of payload.patients) {
+    // Per-row Thai-CID checksum gate. validateAncPayload (called by both
+    // /api/webhooks/patient-data and /api/sync/browser-push) only enforces
+    // 13-digit format; old HOSxP versions can still emit 13-digit-but-fake
+    // CIDs that pass format but fail the official ก.พ. checksum (observed at
+    // hcode 10996: ~148 rows). Mirrors the equivalent guard in
+    // services/sync/anc.ts so both ingestion paths skip the same bad rows
+    // instead of corrupting cidHash → blocking cross-hospital matching.
+    if (patient.action !== 'delete' && !isValidThaiCidChecksum(patient.cid)) {
+      skippedInvalidCidChecksum++;
+      const cidHashPrefix = createHash('sha256')
+        .update(patient.cid ?? '')
+        .digest('hex')
+        .slice(0, 8);
+      logger.warn('anc_webhook_skipped_invalid_cid_checksum', {
+        hospitalId,
+        hcode,
+        hn: patient.hn,
+        cidHashPrefix,
+      });
+      continue;
+    }
     // Compute CID hash for lookup
     const patientCidHash = createHash('sha256').update(patient.cid).digest('hex');
 
@@ -1090,8 +1112,23 @@ export async function processAncWebhook(
     [new Date().toISOString(), hospitalId],
   );
 
+  if (skippedInvalidCidChecksum > 0) {
+    logger.info('anc_webhook_run_summary', {
+      hospitalId,
+      hcode,
+      received: payload.patients.length,
+      created,
+      updated,
+      deleted,
+      skippedInvalidCidChecksum,
+    });
+  }
+
   return {
-    patientsProcessed: payload.patients.length,
+    // Skipped checksum-invalid rows shouldn't count as "processed" — the
+    // Sync Log header reads "Upserted N pregnancies" off this and would
+    // otherwise overstate progress for hospitals like 10996 with bad CIDs.
+    patientsProcessed: payload.patients.length - skippedInvalidCidChecksum,
     created,
     updated,
     deleted,

@@ -18,6 +18,9 @@ import {
   processWebhookPayload,
   processAncWebhook,
   processPartographWebhook,
+  validatePayload,
+  validateAncPayload,
+  validatePartographPayload,
   type WebhookPayload,
   type WebhookAncPayload,
   type WebhookPartographPayload,
@@ -96,8 +99,28 @@ export async function POST(request: NextRequest) {
     } = {};
 
     // Labor — main payload, mirrors webhook 'labor' default route.
-    if (body.labor && Array.isArray(body.labor.patients)) {
-      const patients = body.labor.patients;
+    // Run the same validator that /api/webhooks/patient-data uses so a
+    // malformed CID (12-digit truncation, encrypted-blob leftover from a
+    // missing marketplace_token) never reaches cached_patients with a
+    // junk cidHash that won't match a real patient.
+    const laborValidation = (body.labor && Array.isArray(body.labor.patients))
+      ? validatePayload({
+          hospitalCode: hcode,
+          patients: body.labor.patients,
+          mode: body.labor.mode ?? 'incremental',
+        })
+      : null;
+    if (laborValidation && (!laborValidation.valid || !laborValidation.payload)) {
+      hadWarning = true;
+      await appendSyncStep(hospitalId, runId, {
+        name: 'persist_labor',
+        status: 'error',
+        message: 'Labor payload failed validation; not persisted.',
+        detail: laborValidation.error ?? 'unknown validation error',
+      });
+    }
+    if (laborValidation?.valid && laborValidation.payload) {
+      const patients = laborValidation.payload.patients;
       await appendSyncStep(hospitalId, runId, {
         name: 'persist_labor',
         status: 'running',
@@ -108,11 +131,7 @@ export async function POST(request: NextRequest) {
         const r = await processWebhookPayload(
           db,
           hospitalId,
-          {
-            hospitalCode: hcode,
-            patients,
-            mode: body.labor.mode ?? 'incremental',
-          },
+          laborValidation.payload,
           sseManager,
         );
         result.labor = {
@@ -143,9 +162,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ANC.
-    if (body.anc && Array.isArray(body.anc.patients)) {
-      const patients = body.anc.patients;
+    // ANC. Same validator as /api/webhooks/patient-data — rejects bundles
+    // with malformed CIDs / missing pregNo / etc. before processAncWebhook
+    // creates phantom maternal_journeys.
+    const ancValidation = (body.anc && Array.isArray(body.anc.patients))
+      ? validateAncPayload({ type: 'anc_data', hospitalCode: hcode, patients: body.anc.patients })
+      : null;
+    if (ancValidation && (!ancValidation.valid || !ancValidation.payload)) {
+      hadWarning = true;
+      await appendSyncStep(hospitalId, runId, {
+        name: 'persist_anc',
+        status: 'error',
+        message: 'ANC payload failed validation; not persisted.',
+        detail: ancValidation.error ?? 'unknown validation error',
+      });
+    }
+    if (ancValidation?.valid && ancValidation.payload) {
+      const patients = ancValidation.payload.patients;
       await appendSyncStep(hospitalId, runId, {
         name: 'persist_anc',
         status: 'running',
@@ -156,7 +189,7 @@ export async function POST(request: NextRequest) {
         const r = await processAncWebhook(
           db,
           hospitalId,
-          { type: 'anc_data', hospitalCode: hcode, patients },
+          ancValidation.payload,
           sseManager,
         );
         result.anc = { processed: r.patientsProcessed };
@@ -177,9 +210,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Partograph.
-    if (body.partograph && Array.isArray(body.partograph.observations)) {
-      const observations = body.partograph.observations;
+    // Partograph. Same validator the Pascal-driven route uses.
+    const partographValidation = (body.partograph && Array.isArray(body.partograph.observations))
+      ? validatePartographPayload({
+          type: 'partograph',
+          hospitalCode: hcode,
+          observations: body.partograph.observations,
+        })
+      : null;
+    if (partographValidation && (!partographValidation.valid || !partographValidation.payload)) {
+      hadWarning = true;
+      await appendSyncStep(hospitalId, runId, {
+        name: 'persist_partograph',
+        status: 'error',
+        message: 'Partograph payload failed validation; not persisted.',
+        detail: partographValidation.error ?? 'unknown validation error',
+      });
+    }
+    if (partographValidation?.valid && partographValidation.payload) {
+      const observations = partographValidation.payload.observations;
       await appendSyncStep(hospitalId, runId, {
         name: 'persist_partograph',
         status: 'running',
@@ -190,11 +239,7 @@ export async function POST(request: NextRequest) {
         const r = await processPartographWebhook(
           db,
           hospitalId,
-          {
-            type: 'partograph',
-            hospitalCode: hcode,
-            observations,
-          },
+          partographValidation.payload,
           sseManager,
         );
         result.partograph = {
