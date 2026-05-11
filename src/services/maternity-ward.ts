@@ -287,6 +287,12 @@ function fireAudit(payload: AuditPayload): void {
 // Task 41: insert-or-update a single partograph row. Insert path mints a fresh
 // PK via get_serialnumber; update path strips the PK from the body since BMS
 // /api/rest/{table}/{id} carries it in the URL.
+//
+// ipt_labour_partograph.ipt_labour_id is a NOT NULL FK to ipt_labour. The
+// Delphi parent form binds this column from the in-memory labour record; the
+// browser callers don't always know it (the Add dialog only carries clinical
+// fields), so we resolve it here on the insert path. Callers may still pass
+// `row.ipt_labour_id` to skip the extra SELECT — both paths agree.
 export async function upsertPartograph(
   config: ConnectionConfig,
   userInfo: UserInfo,
@@ -296,8 +302,23 @@ export async function upsertPartograph(
 ): Promise<PartographRow> {
   const isNew = row.ipt_labour_partograph_id === undefined;
   if (isNew) {
+    let iptLabourId = row.ipt_labour_id;
+    if (iptLabourId === undefined || iptLabourId === null) {
+      const labour = await getPatientLabour(config, an);
+      if (!labour) {
+        throw new Error(
+          'ไม่พบบันทึก ipt_labour สำหรับ AN นี้ — กรุณาบันทึกข้อมูลในแท็บ "การคลอด" ก่อน',
+        );
+      }
+      iptLabourId = labour.ipt_labour_id;
+    }
     const id = await mintSerial(config, 'ipt_labour_partograph', 'ipt_labour_partograph_id');
-    const payload = { ...row, ipt_labour_partograph_id: id, an };
+    const payload = {
+      ...row,
+      ipt_labour_partograph_id: id,
+      ipt_labour_id: iptLabourId,
+      an,
+    };
     await restInsert('ipt_labour_partograph', payload, config);
     fireAudit({
       entity: 'ipt_labour_partograph',

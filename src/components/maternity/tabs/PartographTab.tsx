@@ -157,7 +157,18 @@ export function PartographTab({
     if (!config || !userInfo) return;
     setSaving(true);
     try {
-      await upsertPartograph(config, userInfo, an, payload, hcode);
+      // ipt_labour_partograph.ipt_labour_id is NOT NULL. If we already have at
+      // least one observation, every row shares the same labour parent, so we
+      // can forward the id without an extra SELECT. The service falls back to
+      // querying ipt_labour by AN when this is undefined (first observation).
+      const knownLabourId = rows.find(
+        (r) => r.ipt_labour_id !== null && r.ipt_labour_id !== undefined,
+      )?.ipt_labour_id;
+      const merged: Partial<PartographRow> =
+        payload.ipt_labour_id !== undefined || knownLabourId === undefined
+          ? payload
+          : { ...payload, ipt_labour_id: knownLabourId };
+      await upsertPartograph(config, userInfo, an, merged, hcode);
       await mutate();
       closeDialog();
     } finally {
