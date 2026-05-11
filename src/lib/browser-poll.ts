@@ -554,17 +554,21 @@ function sqlString(v: string): string {
   return v.replace(/'/g, "''");
 }
 
-// Identity key for a probe candidate. We index on this so the response
-// set can be matched back to the input tuples in O(1).
-function identityKey(hn: string, fname: string, lname: string): string {
-  return `${hn}|${fname}|${lname}`;
+// Identity key for a probe candidate. Source-prefixed so labour and ANC
+// don't collide when the same patient has both a `patient` row (keyed by
+// HN) and a `person` row (keyed by CID).
+//   labor|<hn>|<fname>|<lname>
+//   anc|<cid>|<fname>|<lname>
+function laborKey(hn: string, fname: string, lname: string): string {
+  return `labor|${hn}|${fname}|${lname}`;
+}
+function ancKey(cid: string, fname: string, lname: string): string {
+  return `anc|${cid}|${fname}|${lname}`;
 }
 
-export interface ProbeCandidate {
-  hn: string;
-  fname: string;
-  lname: string;
-}
+export type ProbeCandidate =
+  | { source: 'labor'; hn: string; fname: string; lname: string }
+  | { source: 'anc'; cid: string; fname: string; lname: string };
 
 export interface BulkProbeResult {
   candidates: number;
@@ -576,16 +580,67 @@ export interface BulkProbeResult {
   errorDetail?: string;
 }
 
-// One bulk SQL: SELECT hn, fname, lname FROM patient WHERE
-//   (hn, fname, lname) IN ((..., ..., ...), ...)
-// Row-value IN is supported by MySQL 5.7+ and PostgreSQL — fits both BMS
-// HOSxP back-ends. We then build the matched-tuple set from the response.
+// Two bulk SQLs (one per source table):
+//   Labor candidates check (hn, fname, lname) against `patient` — internally
+//     consistent because the labour query reads p.fname/p.lname directly.
+//   ANC candidates check (cid, fname, lname) against `person` — the ANC
+//     master query reads pe.fname/pe.lname from `person`, so the round-trip
+//     must hit the same table. The previous single-table probe sent ANC
+//     candidates against `patient`, which gave wrong answers when HOSxP's
+//     two PII tables were anonymised differently (false positives let
+//     anonymised ANC data through; false negatives dropped real patients).
 //
-// Batched to BULK_PROBE_BATCH per query to keep the SQL string size bounded;
-// at ~50 chars/tuple, 200 tuples ≈ 10KB — well under any reasonable HOSxP
-// max_allowed_packet (default 16MB) but conservative enough that a runaway
-// hospital with 500 patients still ships in 3 queries instead of 1 giant.
+// Each query uses row-value IN — MySQL 5.7+ / PostgreSQL — batched to
+// BULK_PROBE_BATCH per call so the SQL string stays under 10–15 KB even
+// for 500-patient hospitals.
 const BULK_PROBE_BATCH = 200;
+
+async function probeOneSource(
+  table: 'patient' | 'person',
+  idColumn: 'hn' | 'cid',
+  candidates: Array<{ idValue: string; fname: string; lname: string; key: string }>,
+  opts: RunOptions,
+): Promise<{ matched: Set<string>; failed?: string }> {
+  const matched = new Set<string>();
+  if (candidates.length === 0) return { matched };
+  try {
+    for (let i = 0; i < candidates.length; i += BULK_PROBE_BATCH) {
+      const batch = candidates.slice(i, i + BULK_PROBE_BATCH);
+      const tuples = batch
+        .map(
+          (c) =>
+            `('${sqlString(c.idValue)}','${sqlString(c.fname)}','${sqlString(c.lname)}')`,
+        )
+        .join(',');
+      const sql =
+        `SELECT ${idColumn}, fname, lname FROM ${table} ` +
+        `WHERE (${idColumn}, fname, lname) IN (${tuples})`;
+      const rows = await runQuery<Record<string, unknown>>(sql, opts);
+      // Match the response rows back to candidate keys via an idValue+name
+      // lookup map — same idValue+fname+lname yields the same identityKey,
+      // so we just rebuild the key in the response row's namespace.
+      const keyByIdValue = new Map<string, string>();
+      for (const c of batch) {
+        keyByIdValue.set(`${c.idValue}|${c.fname}|${c.lname}`, c.key);
+      }
+      for (const row of rows) {
+        const id = strOrNull(row[idColumn]);
+        const fname = strOrNull(row.fname);
+        const lname = strOrNull(row.lname);
+        if (id && fname && lname) {
+          const k = keyByIdValue.get(`${id}|${fname}|${lname}`);
+          if (k) matched.add(k);
+        }
+      }
+    }
+  } catch (err) {
+    return {
+      matched,
+      failed: err instanceof Error ? err.message : String(err),
+    };
+  }
+  return { matched };
+}
 
 async function probeAllPatientsNames(
   candidates: ProbeCandidate[],
@@ -597,36 +652,32 @@ async function probeAllPatientsNames(
   };
   if (candidates.length === 0) return result;
 
-  // Dedupe — multiple patients can theoretically share an (hn,fname,lname)
-  // tuple if HOSxP has duplicate registrations, but it just wastes a slot.
-  const dedup = new Map<string, ProbeCandidate>();
+  // Partition by source table and dedupe per-source.
+  const laborByKey = new Map<string, { idValue: string; fname: string; lname: string; key: string }>();
+  const ancByKey = new Map<string, { idValue: string; fname: string; lname: string; key: string }>();
   for (const c of candidates) {
-    dedup.set(identityKey(c.hn, c.fname, c.lname), c);
+    if (c.source === 'labor') {
+      const key = laborKey(c.hn, c.fname, c.lname);
+      laborByKey.set(key, { idValue: c.hn, fname: c.fname, lname: c.lname, key });
+    } else {
+      const key = ancKey(c.cid, c.fname, c.lname);
+      ancByKey.set(key, { idValue: c.cid, fname: c.fname, lname: c.lname, key });
+    }
   }
-  const uniqueCandidates = [...dedup.values()];
 
   try {
-    for (let i = 0; i < uniqueCandidates.length; i += BULK_PROBE_BATCH) {
-      const batch = uniqueCandidates.slice(i, i + BULK_PROBE_BATCH);
-      const tuples = batch
-        .map(
-          (c) =>
-            `('${sqlString(c.hn)}','${sqlString(c.fname)}','${sqlString(c.lname)}')`,
-        )
-        .join(',');
-      const sql =
-        `SELECT hn, fname, lname FROM patient ` +
-        `WHERE (hn, fname, lname) IN (${tuples})`;
-      const rows = await runQuery<Record<string, unknown>>(sql, opts);
-      for (const row of rows) {
-        const hn = strOrNull(row.hn);
-        const fname = strOrNull(row.fname);
-        const lname = strOrNull(row.lname);
-        if (hn && fname && lname) {
-          result.matched.add(identityKey(hn, fname, lname));
-        }
-      }
+    const [laborRes, ancRes] = await Promise.all([
+      probeOneSource('patient', 'hn', [...laborByKey.values()], opts),
+      probeOneSource('person', 'cid', [...ancByKey.values()], opts),
+    ]);
+    if (laborRes.failed && ancRes.failed) {
+      // Both source probes errored — treat as transient probe failure.
+      result.probeFailed = true;
+      result.errorDetail = `labor: ${laborRes.failed}; anc: ${ancRes.failed}`;
+      return result;
     }
+    for (const k of laborRes.matched) result.matched.add(k);
+    for (const k of ancRes.matched) result.matched.add(k);
   } catch (err) {
     result.probeFailed = true;
     result.errorDetail = err instanceof Error ? err.message : String(err);
@@ -634,10 +685,12 @@ async function probeAllPatientsNames(
   }
 
   if (result.matched.size === 0) {
+    const uniqueCount = laborByKey.size + ancByKey.size;
     result.reason =
-      `Bulk name round-trip returned 0 matches for ${uniqueCandidates.length} ` +
-      `unique (hn, fname, lname) tuples — HOSxP is returning anonymised PII ` +
-      `(likely on old API server build).`;
+      `Bulk name round-trip returned 0 matches for ${uniqueCount} unique ` +
+      `(labor: ${laborByKey.size} hn/fname/lname against \`patient\`, anc: ` +
+      `${ancByKey.size} cid/fname/lname against \`person\`) — HOSxP is ` +
+      `returning anonymised PII (likely on old API server build).`;
   }
   return result;
 }
@@ -708,31 +761,33 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // sets non-empty fake values, so they DO get caught by this gate.
     const candidates: ProbeCandidate[] = [];
     // an → identity-key for labour patients (used to filter the mapped
-    // BrowserLaborPatient list and the partograph observations).
+    // BrowserLaborPatient list and the partograph observations). Keys are
+    // 'labor|<hn>|<fname>|<lname>'.
     const laborKeyByAn = new Map<string, string>();
-    // hn → identity-key for ANC masters. ANC patients with null HN
-    // (community-registered, never in `patient`) are not probeable and
-    // never added here.
-    const ancKeyByHn = new Map<string, string>();
+    // cid → identity-key for ANC masters. Keyed by CID rather than HN
+    // because the ANC name comes from `person` (probed against `person`,
+    // not `patient`), and `person.cid` is the canonical join column.
+    // Patients with null/short CID are not probeable and pass through.
+    const ancKeyByCid = new Map<string, string>();
     for (const row of laborRows) {
       const hn = strOrNull(row.hn);
       const an = strOrNull(row.an);
       const fname = strOrNull(row.fname);
       const lname = strOrNull(row.lname);
       if (hn && fname && lname && an) {
-        const k = identityKey(hn, fname, lname);
-        candidates.push({ hn, fname, lname });
+        const k = laborKey(hn, fname, lname);
+        candidates.push({ source: 'labor', hn, fname, lname });
         laborKeyByAn.set(an, k);
       }
     }
     for (const m of ancMasters) {
-      const hn = strOrNull(m.hn);
+      const cid = strOrNull(m.cid);
       const fname = strOrNull(m.fname);
       const lname = strOrNull(m.lname);
-      if (hn && fname && lname) {
-        const k = identityKey(hn, fname, lname);
-        candidates.push({ hn, fname, lname });
-        ancKeyByHn.set(hn, k);
+      if (cid && fname && lname && /^\d{13}$/.test(cid)) {
+        const k = ancKey(cid, fname, lname);
+        candidates.push({ source: 'anc', cid, fname, lname });
+        ancKeyByCid.set(cid, k);
       }
     }
 
@@ -821,12 +876,13 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
         }
         return true;
       });
-      // ANC: filter by HN → identity key. Patients with null HN (community
-      // ANC, never in `patient`) were never candidates and fall through
-      // untouched.
+      // ANC: filter by CID → identity key. The ANC name was fingerprinted
+      // against the `person` table by CID, so the survivor lookup is also
+      // by CID. Patients with non-13-digit CID weren't probeable and fall
+      // through untouched.
       const ancSurvivors = ancPatients.filter((a) => {
-        if (a.hn == null) return true;
-        const masterKey = ancKeyByHn.get(a.hn);
+        if (!/^\d{13}$/.test(a.cid)) return true;
+        const masterKey = ancKeyByCid.get(a.cid);
         if (masterKey && !matched.has(masterKey)) {
           result.anc.droppedNameUnstable += 1;
           return false;
