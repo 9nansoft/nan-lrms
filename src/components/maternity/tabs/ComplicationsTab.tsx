@@ -317,13 +317,27 @@ export function ComplicationsTab({ an }: { an: string }) {
       );
       return;
     }
+    // ipt_labour_complication.labour_complication_id and labour_stage_id are
+    // both NOT NULL in HOSxP. The picker can leave them blank, which would
+    // surface as a 500 from the BMS tunnel — block here with an actionable
+    // Thai message instead.
+    const complicationId = toNumberOrNull(draft.labour_complication_id);
+    const stageId = toNumberOrNull(draft.labour_stage_id);
+    if (complicationId === null) {
+      setSaveError('กรุณาเลือกภาวะแทรกซ้อนก่อนบันทึก');
+      return;
+    }
+    if (stageId === null) {
+      setSaveError('กรุณาเลือกระยะ (Stage) ก่อนบันทึก');
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
       const payload: Partial<ComplicationRow> = {
-        labour_complication_id: toNumberOrNull(draft.labour_complication_id),
+        labour_complication_id: complicationId,
         complication_note: draft.complication_note || null,
-        labour_stage_id: toNumberOrNull(draft.labour_stage_id),
+        labour_stage_id: stageId,
       };
       if (typeof draft.ipt_labour_complication_id === 'number') {
         payload.ipt_labour_complication_id = draft.ipt_labour_complication_id;

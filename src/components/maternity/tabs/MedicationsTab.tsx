@@ -364,6 +364,7 @@ export function MedicationsTab({ an }: { an: string }) {
   const [initialDrugLabel, setInitialDrugLabel] = useState('');
   const [initialDrugUsage, setInitialDrugUsage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   if (!config) {
     return <div className="p-4 text-slate-500">ไม่พร้อมใช้งาน (ไม่มี BMS session)</div>;
@@ -406,7 +407,14 @@ export function MedicationsTab({ an }: { an: string }) {
   }
   async function save() {
     if (!config || !userInfo) return;
+    // labour_medication.icode is NOT NULL in HOSxP. An empty drug picker
+    // would slip through as '' on the insert and create an unresolvable row.
+    if (!draft.icode || draft.icode.trim() === '') {
+      setSaveError('กรุณาเลือกยาก่อนบันทึก');
+      return;
+    }
     setSaving(true);
+    setSaveError(null);
     try {
       const payload: Partial<LabourMedRow> = {
         icode: draft.icode,
@@ -417,7 +425,12 @@ export function MedicationsTab({ an }: { an: string }) {
       if (typeof draft.labour_medication_id === 'number') {
         payload.labour_medication_id = draft.labour_medication_id;
       }
-      await upsertLabourMedication(config, userInfo, an, payload, hcode);
+      try {
+        await upsertLabourMedication(config, userInfo, an, payload, hcode);
+      } catch (e) {
+        setSaveError(`บันทึกไม่สำเร็จ: ${(e as Error).message}`);
+        return;
+      }
       await mutate();
       setEditingId(null);
       setDraft(EMPTY_DRAFT);
@@ -460,6 +473,15 @@ export function MedicationsTab({ an }: { an: string }) {
           + เพิ่มรายการยา
         </button>
       </div>
+
+      {saveError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 font-mono text-[12px] font-semibold text-rose-700 shadow-sm"
+        >
+          {saveError}
+        </div>
+      )}
 
       {isEmpty ? (
         <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-8 text-center">

@@ -603,12 +603,22 @@ export function InfantTab({ an }: { an: string }) {
         setSaveError(`บันทึก ipt_newborn ไม่สำเร็จ: ${(e as Error).message}`);
         return;
       }
+      // ipt_labour_infant.ipt_labour_id is NOT NULL. Forward it from any
+      // existing infant row for this AN to avoid an extra SELECT in the
+      // service; if none exist yet, the service falls back to getPatientLabour.
+      const knownLabourId = data?.find(
+        (r) => typeof r.ipt_labour_id === 'number',
+      )?.ipt_labour_id as number | undefined;
       try {
         await upsertLabourInfant(
           config,
           userInfo,
           an,
-          { ...fields, ipt_labour_infant_id: draft.ipt_labour_infant_id },
+          {
+            ...fields,
+            ipt_labour_infant_id: draft.ipt_labour_infant_id,
+            ...(knownLabourId !== undefined ? { ipt_labour_id: knownLabourId } : null),
+          },
           hcode,
         );
       } catch (e) {

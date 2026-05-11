@@ -830,6 +830,11 @@ export async function upsertNewborn(
   return row as InfantRow;
 }
 
+// ipt_labour_infant.ipt_labour_id is NOT NULL (FK to ipt_labour). The Delphi
+// infant form binds it from the parent labour record automatically; the
+// browser InfantTab only carries clinical fields, so we resolve the FK here
+// on the insert path. Same shape as upsertPartograph — callers may still pass
+// `row.ipt_labour_id` to skip the extra SELECT.
 export async function upsertLabourInfant(
   config: ConnectionConfig,
   userInfo: UserInfo,
@@ -839,8 +844,18 @@ export async function upsertLabourInfant(
 ): Promise<InfantRow> {
   const isNew = row.ipt_labour_infant_id === undefined;
   if (isNew) {
+    let iptLabourId = row.ipt_labour_id;
+    if (iptLabourId === undefined || iptLabourId === null) {
+      const labour = await getPatientLabour(config, an);
+      if (!labour) {
+        throw new Error(
+          'ไม่พบบันทึก ipt_labour สำหรับ AN นี้ — กรุณาบันทึกข้อมูลในแท็บ "การคลอด" ก่อน',
+        );
+      }
+      iptLabourId = labour.ipt_labour_id;
+    }
     const id = await mintSerial(config, 'ipt_labour_infant', 'ipt_labour_infant_id');
-    const payload = { ...row, ipt_labour_infant_id: id, an };
+    const payload = { ...row, ipt_labour_infant_id: id, ipt_labour_id: iptLabourId, an };
     await restInsert('ipt_labour_infant', payload, config);
     fireAudit({
       entity: 'ipt_labour_infant',
