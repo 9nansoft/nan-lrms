@@ -137,6 +137,13 @@ export interface BrowserPollResult {
   /** Verdict of the name round-trip probe — present whenever a probe ran. */
   authenticity?: { status: 'authentic' | 'name_unstable' | 'no_data' | 'probe_failed'; detail: string };
   error?: string;
+  /**
+   * True when the server returned a permanent rejection (403 — readonly
+   * session, hospital inactive, hospital not registered, etc.). Caller
+   * should STOP polling for the rest of this tab session so Chrome's
+   * network panel doesn't log a red 403 every cycle.
+   */
+  permanentBlock?: boolean;
 }
 
 // ─── SQL queries (MySQL flavour — HOSxP) ────────────────────────────────────
@@ -635,24 +642,31 @@ async function probeAllPatientsNames(
   return result;
 }
 
+/**
+ * POSTs the verdict to /api/sync/browser-authenticity. Returns true when
+ * the server returns a permanent rejection (403) — caller should set
+ * `result.permanentBlock` and stop polling so we don't spam Chrome's
+ * network panel.
+ */
 async function reportAuthenticityVerdict(
   status: 'authentic' | 'name_unstable' | 'no_data',
   reason: string | null,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<{ permanentBlock: boolean }> {
   try {
-    await fetch('/api/sync/browser-authenticity', {
+    const res = await fetch('/api/sync/browser-authenticity', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, reason }),
       signal,
       credentials: 'same-origin',
     });
+    if (res.status === 403) return { permanentBlock: true };
   } catch {
-    // Best-effort: failing to report shouldn't crash the poll cycle. The
-    // worst case is the admin Sync Status tab shows stale state — next
-    // successful cycle will overwrite it.
+    // Network error — transient, not permanent. Best-effort: a flaky
+    // network shouldn't lock the hook out of all future cycles.
   }
+  return { permanentBlock: false };
 }
 
 export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResult> {
@@ -741,7 +755,8 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
           status: 'name_unstable',
           detail: probe.reason ?? 'bulk name probe returned 0 matches',
         };
-        await reportAuthenticityVerdict('name_unstable', probe.reason ?? null, opts.signal);
+        const r = await reportAuthenticityVerdict('name_unstable', probe.reason ?? null, opts.signal);
+        if (r.permanentBlock) result.permanentBlock = true;
         result.error = 'authenticity_failed_name_unstable';
         result.durationMs = Date.now() - startedAt;
         return result;
@@ -753,11 +768,20 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
             `Name round-trip: ${probe.matched.size}/${candidates.length} patients matched` +
             (dropped > 0 ? ` (${dropped} dropped — names do not round-trip).` : '.'),
         };
-        await reportAuthenticityVerdict(
+        const r = await reportAuthenticityVerdict(
           'authentic',
           result.authenticity.detail,
           opts.signal,
         );
+        if (r.permanentBlock) {
+          // /api/sync/browser-authenticity 403'd — the hospital is
+          // inactive or the session can't push. No point continuing to
+          // /api/sync/browser-push for the same reason.
+          result.permanentBlock = true;
+          result.error = 'permanently_blocked';
+          result.durationMs = Date.now() - startedAt;
+          return result;
+        }
       }
     }
 
@@ -849,6 +873,15 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
 
     if (!pushRes.ok) {
       const text = await pushRes.text().catch(() => pushRes.statusText);
+      // 403 is a permanent rejection for this session (readonly,
+      // hospital_inactive, hospital_not_registered) — flag the caller so
+      // it stops polling instead of generating a fresh 403 every cycle.
+      if (pushRes.status === 403) {
+        result.permanentBlock = true;
+        result.error = `permanently_blocked: ${text.slice(0, 200)}`;
+        result.durationMs = Date.now() - startedAt;
+        return result;
+      }
       throw new Error(`browser-push HTTP ${pushRes.status}: ${text.slice(0, 200)}`);
     }
 

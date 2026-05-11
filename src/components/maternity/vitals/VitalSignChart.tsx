@@ -597,10 +597,10 @@ export function VitalSignChart({ observations, admitDate, operationStartDate }: 
     <svg
       data-testid="vital-sign-chart"
       viewBox={`0 0 ${P.W} ${P.H}`}
-      width="100%"
-      height="auto"
       preserveAspectRatio="xMinYMin meet"
-      style={{ background: C.BG, display: 'block' }}
+      // width/height live in style — see PartographForm for the same fix.
+      // React 19 rejects height="auto" as an SVG attribute.
+      style={{ width: '100%', height: 'auto', background: C.BG, display: 'block' }}
     >
       {strips}
     </svg>

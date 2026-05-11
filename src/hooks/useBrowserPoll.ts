@@ -36,6 +36,14 @@ export interface UseBrowserPollState {
   lastResult: BrowserPollResult | null;
   lastError: string | null;
   cycleCount: number;
+  /**
+   * Set to true after the server returns a 403 (readonly session, hospital
+   * inactive, hospital not registered). The hook stops its interval and
+   * refuses further `runNow()` calls for this mount — the rejection is
+   * permanent for the session, so retrying just produces a red 403 in the
+   * browser console every 60 seconds.
+   */
+  permanentlyBlocked: boolean;
 }
 
 export function useBrowserPoll(options: UseBrowserPollOptions = {}): {
@@ -50,6 +58,10 @@ export function useBrowserPoll(options: UseBrowserPollOptions = {}): {
 
   const runningRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // Module-mount-level latch — once flipped, we don't run again. Kept in a
+  // ref (not state) so the interval callback sees the latest value
+  // synchronously without depending on a re-render.
+  const blockedRef = useRef(false);
 
   const [state, setState] = useState<UseBrowserPollState>({
     isReady: false,
@@ -58,6 +70,7 @@ export function useBrowserPoll(options: UseBrowserPollOptions = {}): {
     lastResult: null,
     lastError: null,
     cycleCount: 0,
+    permanentlyBlocked: false,
   });
 
   // Skip-conditions: read-only viewers, provider-id sessions (no HOSxP
@@ -73,6 +86,7 @@ export function useBrowserPoll(options: UseBrowserPollOptions = {}): {
 
   const runNow = useCallback(async (): Promise<BrowserPollResult | null> => {
     if (skip || !config) return null;
+    if (blockedRef.current) return null;
     if (runningRef.current) return null;
     runningRef.current = true;
 
@@ -87,6 +101,9 @@ export function useBrowserPoll(options: UseBrowserPollOptions = {}): {
         marketplaceToken,
         signal: controller.signal,
       });
+      if (result.permanentBlock) {
+        blockedRef.current = true;
+      }
       setState((prev) => ({
         ...prev,
         isRunning: false,
@@ -94,6 +111,7 @@ export function useBrowserPoll(options: UseBrowserPollOptions = {}): {
         lastResult: result,
         lastError: result.error ?? null,
         cycleCount: prev.cycleCount + 1,
+        permanentlyBlocked: prev.permanentlyBlocked || Boolean(result.permanentBlock),
       }));
       return result;
     } catch (err) {
@@ -118,23 +136,29 @@ export function useBrowserPoll(options: UseBrowserPollOptions = {}): {
   }, [skip]);
 
   // Fire-and-interval — first cycle on the next tick after gating clears,
-  // then every `intervalMs` afterwards. AbortController torn down on unmount
-  // so a navigation away from / mid-cycle doesn't leak fetches.
+  // then every `intervalMs` afterwards. The interval tears itself down
+  // when blockedRef latches true (permanent server rejection) so we don't
+  // spam Chrome's network panel with a fresh red 403 every cycle.
   useEffect(() => {
     if (skip || !autoStart) return;
     let cancelled = false;
+    let id: ReturnType<typeof setInterval> | null = null;
 
     const tick = async () => {
       if (cancelled) return;
       await runNow();
+      if (blockedRef.current && id !== null) {
+        clearInterval(id);
+        id = null;
+      }
     };
 
     void tick();
-    const id = setInterval(() => void tick(), intervalMs);
+    id = setInterval(() => void tick(), intervalMs);
 
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (id !== null) clearInterval(id);
       abortRef.current?.abort();
       abortRef.current = null;
     };

@@ -980,10 +980,12 @@ export function PartographForm({
     <svg
       data-testid="partograph-form"
       viewBox={`0 0 ${P.W} ${P.H}`}
-      width="100%"
-      height="auto"
       preserveAspectRatio="xMinYMin meet"
-      style={{ background: C.BG, display: 'block' }}
+      // width/height live in style — React 19 rejects height="auto" as an
+      // SVG attribute (the attribute requires a length). CSS `height: auto`
+      // produces the same aspect-ratio-preserving auto-size given the
+      // viewBox above.
+      style={{ width: '100%', height: 'auto', background: C.BG, display: 'block' }}
     >
       {emit}
     </svg>
