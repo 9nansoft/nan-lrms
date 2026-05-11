@@ -678,10 +678,17 @@ export default function DashboardPage() {
               onSelect={openHospitalDetail}
             />
           </div>
+          {/* Primary hospital list below the GIS map — clicking a row
+              navigates to /hospitals/<hcode>. The select callback still
+              fires so the map marker briefly highlights during the route
+              transition. Other HospitalTable instances on this page (kiosk
+              strip, overview dialog) keep the toggle-select-and-open-modal
+              behaviour. */}
           <HospitalTable
             hospitals={hospitals}
             selected={selectedHospital}
             onSelect={openHospitalDetail}
+            navigateOnClick
           />
         </div>
       </div>

@@ -129,9 +129,10 @@ export interface BrowserPushBody {
 
 export interface BrowserPollResult {
   durationMs: number;
-  labor: { read: number; mapped: number; sent: number };
-  partograph: { read: number; mapped: number; sent: number };
-  anc: { read: number; mapped: number; sent: number };
+  /** `dropped*` = patients filtered out by the per-patient name probe. */
+  labor: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
+  partograph: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
+  anc: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
   pushedToServer: boolean;
   /** Verdict of the name round-trip probe — present whenever a probe ran. */
   authenticity?: { status: 'authentic' | 'name_unstable' | 'no_data' | 'probe_failed'; detail: string };
@@ -223,6 +224,7 @@ const ancMastersSql = (): string => `
          pa.blood_hiv1_result, pa.blood_hiv2_result,
          pt.hn, pt.chwpart, pt.amppart, pt.tmbpart,
          CONCAT(pe.pname, pe.fname, ' ', pe.lname) AS patient_name,
+         pe.pname, pe.fname, pe.lname,
          pe.cid, pe.birthdate AS birthday
     FROM person_anc pa
     INNER JOIN person pe ON pe.person_id = pa.person_id
@@ -520,18 +522,22 @@ async function runQuery<T>(sql: string, opts: RunOptions): Promise<T[]> {
 // Some HOSxP installations run an old API-server build that returns
 // ANONYMISED first/last names while leaving structural fields (HN, CID)
 // stable. The CID-only round-trip on the server-side polling worker missed
-// this because CID still matched itself. The reliable test is to take a
-// real (hn, fname, lname) tuple from the freshly-pulled row and re-query
-// HOSxP for an exact match: anonymised values will never match themselves
-// on the second look-up.
+// this because CID still matched itself. The reliable test is to take each
+// patient's (hn, fname, lname) tuple from the freshly-pulled row and
+// re-query HOSxP — anonymised values will never match themselves on the
+// second look-up.
 //
-// Mandatory gate: if the probe fails, NO data is pushed to the server
-// (labor + partograph + ANC are all skipped) and the verdict is recorded
-// to hospital_bms_config so the admin UI surfaces a BLOCKED state.
-
-type AuthenticityProbeResult =
-  | { ok: true; status: 'authentic'; detail: string }
-  | { ok: false; status: 'name_unstable' | 'no_data' | 'probe_failed'; detail: string };
+// Mandatory per-patient gate: every patient must round-trip before they
+// enter the push payload. Patients whose tuple doesn't round-trip get
+// dropped (the rest still sync). If literally zero patients out of the
+// fingerprintable population round-trip, the whole hospital is flagged
+// as 'name_unstable' on hospital_bms_config so the admin UI surfaces
+// a BLOCKED state.
+//
+// All probes run as ONE bulk SQL — one network round-trip regardless of
+// how many patients are in the batch. The BMS tunnel rate-limits at 15
+// calls/sec/hospital, so the per-patient approach as N independent queries
+// would burn the budget; the bulk shape is essential.
 
 // Inline SQL string escape — HOSxP names occasionally contain apostrophes
 // (e.g. transliterated Western names like O'Connor). Standard SQL escapes
@@ -541,63 +547,92 @@ function sqlString(v: string): string {
   return v.replace(/'/g, "''");
 }
 
-async function probeNameAuthenticity(
-  laborRows: Record<string, unknown>[],
-  opts: RunOptions,
-): Promise<AuthenticityProbeResult> {
-  // Find the first row that has all three identity fields populated. Some
-  // legacy rows have empty patient.fname (registered under HN only); those
-  // aren't useful for the probe — skip them and keep looking up to 10
-  // candidates. If nothing usable exists, return 'no_data' so the caller
-  // can decide whether to push anyway (we choose to skip but not flag).
-  let candidate: { hn: string; fname: string; lname: string } | null = null;
-  for (const row of laborRows.slice(0, 10)) {
-    const hn = strOrNull(row.hn);
-    const fname = strOrNull(row.fname);
-    const lname = strOrNull(row.lname);
-    if (hn && fname && lname) {
-      candidate = { hn, fname, lname };
-      break;
-    }
-  }
-  if (!candidate) {
-    return {
-      ok: false,
-      status: 'no_data',
-      detail: 'No labor row with non-empty (hn, fname, lname) to fingerprint.',
-    };
-  }
+// Identity key for a probe candidate. We index on this so the response
+// set can be matched back to the input tuples in O(1).
+function identityKey(hn: string, fname: string, lname: string): string {
+  return `${hn}|${fname}|${lname}`;
+}
 
-  const sql =
-    `SELECT COUNT(*) AS c FROM patient ` +
-    `WHERE hn = '${sqlString(candidate.hn)}' ` +
-    `AND fname = '${sqlString(candidate.fname)}' ` +
-    `AND lname = '${sqlString(candidate.lname)}'`;
+export interface ProbeCandidate {
+  hn: string;
+  fname: string;
+  lname: string;
+}
+
+export interface BulkProbeResult {
+  candidates: number;
+  matched: Set<string>;
+  /** Failure mode when matched.size === 0 and candidates > 0. */
+  reason?: string;
+  /** True when the probe query itself errored — caller should soft-fail. */
+  probeFailed?: boolean;
+  errorDetail?: string;
+}
+
+// One bulk SQL: SELECT hn, fname, lname FROM patient WHERE
+//   (hn, fname, lname) IN ((..., ..., ...), ...)
+// Row-value IN is supported by MySQL 5.7+ and PostgreSQL — fits both BMS
+// HOSxP back-ends. We then build the matched-tuple set from the response.
+//
+// Batched to BULK_PROBE_BATCH per query to keep the SQL string size bounded;
+// at ~50 chars/tuple, 200 tuples ≈ 10KB — well under any reasonable HOSxP
+// max_allowed_packet (default 16MB) but conservative enough that a runaway
+// hospital with 500 patients still ships in 3 queries instead of 1 giant.
+const BULK_PROBE_BATCH = 200;
+
+async function probeAllPatientsNames(
+  candidates: ProbeCandidate[],
+  opts: RunOptions,
+): Promise<BulkProbeResult> {
+  const result: BulkProbeResult = {
+    candidates: candidates.length,
+    matched: new Set<string>(),
+  };
+  if (candidates.length === 0) return result;
+
+  // Dedupe — multiple patients can theoretically share an (hn,fname,lname)
+  // tuple if HOSxP has duplicate registrations, but it just wastes a slot.
+  const dedup = new Map<string, ProbeCandidate>();
+  for (const c of candidates) {
+    dedup.set(identityKey(c.hn, c.fname, c.lname), c);
+  }
+  const uniqueCandidates = [...dedup.values()];
 
   try {
-    const rows = await runQuery<Record<string, unknown>>(sql, opts);
-    const count = intOrNull(rows[0]?.c) ?? 0;
-    if (count >= 1) {
-      return {
-        ok: true,
-        status: 'authentic',
-        detail: `Round-trip on hn=${candidate.hn} matched (count=${count}).`,
-      };
+    for (let i = 0; i < uniqueCandidates.length; i += BULK_PROBE_BATCH) {
+      const batch = uniqueCandidates.slice(i, i + BULK_PROBE_BATCH);
+      const tuples = batch
+        .map(
+          (c) =>
+            `('${sqlString(c.hn)}','${sqlString(c.fname)}','${sqlString(c.lname)}')`,
+        )
+        .join(',');
+      const sql =
+        `SELECT hn, fname, lname FROM patient ` +
+        `WHERE (hn, fname, lname) IN (${tuples})`;
+      const rows = await runQuery<Record<string, unknown>>(sql, opts);
+      for (const row of rows) {
+        const hn = strOrNull(row.hn);
+        const fname = strOrNull(row.fname);
+        const lname = strOrNull(row.lname);
+        if (hn && fname && lname) {
+          result.matched.add(identityKey(hn, fname, lname));
+        }
+      }
     }
-    return {
-      ok: false,
-      status: 'name_unstable',
-      detail:
-        `Round-trip on hn=${candidate.hn} returned 0 rows — HOSxP is returning ` +
-        `anonymised fname/lname (likely on old API server build).`,
-    };
   } catch (err) {
-    return {
-      ok: false,
-      status: 'probe_failed',
-      detail: err instanceof Error ? err.message : String(err),
-    };
+    result.probeFailed = true;
+    result.errorDetail = err instanceof Error ? err.message : String(err);
+    return result;
   }
+
+  if (result.matched.size === 0) {
+    result.reason =
+      `Bulk name round-trip returned 0 matches for ${uniqueCandidates.length} ` +
+      `unique (hn, fname, lname) tuples — HOSxP is returning anonymised PII ` +
+      `(likely on old API server build).`;
+  }
+  return result;
 }
 
 async function reportAuthenticityVerdict(
@@ -624,9 +659,9 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
   const startedAt = Date.now();
   const result: BrowserPollResult = {
     durationMs: 0,
-    labor: { read: 0, mapped: 0, sent: 0 },
-    partograph: { read: 0, mapped: 0, sent: 0 },
-    anc: { read: 0, mapped: 0, sent: 0 },
+    labor: { read: 0, mapped: 0, sent: 0, droppedNameUnstable: 0 },
+    partograph: { read: 0, mapped: 0, sent: 0, droppedNameUnstable: 0 },
+    anc: { read: 0, mapped: 0, sent: 0, droppedNameUnstable: 0 },
     pushedToServer: false,
   };
 
@@ -646,30 +681,83 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     result.partograph.read = partRows.length;
     result.anc.read = ancMasters.length;
 
-    // ─── Mandatory authenticity gate ──────────────────────────────────────
-    // Name round-trip probe on a real labor row. If HOSxP is returning
-    // anonymised PII (old API-server builds), the second look-up returns
-    // zero matches → record `name_unstable` server-side and abort the
-    // push so junk data never reaches cached_patients / maternal_journeys.
-    // Skipped when there's nothing to fingerprint (laborRows.length === 0);
-    // in that case we don't have any data to push anyway.
-    if (laborRows.length > 0) {
-      const probe = await probeNameAuthenticity(laborRows, opts);
-      result.authenticity = { status: probe.status, detail: probe.detail };
-      if (!probe.ok && probe.status === 'name_unstable') {
-        await reportAuthenticityVerdict('name_unstable', probe.detail, opts.signal);
-        result.error = `authenticity_failed_${probe.status}`;
+    // ─── Per-patient name authenticity gate ───────────────────────────────
+    // Collect every fingerprintable (hn, fname, lname) candidate from
+    // labour and ANC masters, then run ONE bulk SQL that asks HOSxP which
+    // tuples round-trip. Patients whose tuple isn't in the match set are
+    // filtered out of the push payload (their AN-linked partograph rows
+    // too); the rest sync normally.
+    //
+    // Patients with empty fname OR lname can't be probed — we let them
+    // through unverified (the row is incomplete anyway, anonymisation
+    // would have filled fields, not emptied them). HOSxP's anonymisation
+    // sets non-empty fake values, so they DO get caught by this gate.
+    const candidates: ProbeCandidate[] = [];
+    // an → identity-key for labour patients (used to filter the mapped
+    // BrowserLaborPatient list and the partograph observations).
+    const laborKeyByAn = new Map<string, string>();
+    // hn → identity-key for ANC masters. ANC patients with null HN
+    // (community-registered, never in `patient`) are not probeable and
+    // never added here.
+    const ancKeyByHn = new Map<string, string>();
+    for (const row of laborRows) {
+      const hn = strOrNull(row.hn);
+      const an = strOrNull(row.an);
+      const fname = strOrNull(row.fname);
+      const lname = strOrNull(row.lname);
+      if (hn && fname && lname && an) {
+        const k = identityKey(hn, fname, lname);
+        candidates.push({ hn, fname, lname });
+        laborKeyByAn.set(an, k);
+      }
+    }
+    for (const m of ancMasters) {
+      const hn = strOrNull(m.hn);
+      const fname = strOrNull(m.fname);
+      const lname = strOrNull(m.lname);
+      if (hn && fname && lname) {
+        const k = identityKey(hn, fname, lname);
+        candidates.push({ hn, fname, lname });
+        ancKeyByHn.set(hn, k);
+      }
+    }
+
+    let matched = new Set<string>();
+    if (candidates.length > 0) {
+      const probe = await probeAllPatientsNames(candidates, opts);
+      matched = probe.matched;
+      if (probe.probeFailed) {
+        // Transient probe error (network/timeout) — soft-fail: trust the
+        // pull this cycle, don't flag the hospital, don't filter. A flaky
+        // probe shouldn't lock a hospital out.
+        result.authenticity = {
+          status: 'probe_failed',
+          detail: probe.errorDetail ?? 'unknown probe error',
+        };
+      } else if (probe.matched.size === 0) {
+        // Hard failure: not a single patient round-tripped. Treat as
+        // hospital-wide anonymisation. Record verdict + abort push.
+        result.authenticity = {
+          status: 'name_unstable',
+          detail: probe.reason ?? 'bulk name probe returned 0 matches',
+        };
+        await reportAuthenticityVerdict('name_unstable', probe.reason ?? null, opts.signal);
+        result.error = 'authenticity_failed_name_unstable';
         result.durationMs = Date.now() - startedAt;
         return result;
-      }
-      // probe_failed (network/timeout) is a transient soft-failure — we
-      // proceed with the push so a flaky probe doesn't block legitimate
-      // syncs. The verdict is NOT reported to the server in this case so
-      // the admin UI doesn't surface a false BLOCKED state.
-      if (probe.ok) {
-        // Best-effort write so admins see "authentic · <reason>" on Sync
-        // Status, and any previous `name_unstable` verdict gets cleared.
-        await reportAuthenticityVerdict('authentic', probe.detail, opts.signal);
+      } else {
+        const dropped = candidates.length - probe.matched.size;
+        result.authenticity = {
+          status: 'authentic',
+          detail:
+            `Name round-trip: ${probe.matched.size}/${candidates.length} patients matched` +
+            (dropped > 0 ? ` (${dropped} dropped — names do not round-trip).` : '.'),
+        };
+        await reportAuthenticityVerdict(
+          'authentic',
+          result.authenticity.detail,
+          opts.signal,
+        );
       }
     }
 
@@ -684,6 +772,53 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     result.labor.mapped = laborPatients.length;
     result.partograph.mapped = partographs.length;
     result.anc.mapped = ancPatients.length;
+
+    // ─── Apply the per-patient filter ─────────────────────────────────────
+    // Anyone who was probeable AND failed the round-trip is dropped here.
+    // Patients with empty fname/lname (non-probeable) flow through.
+    if (candidates.length > 0 && result.authenticity?.status === 'authentic') {
+      const laborSurvivors: BrowserLaborPatient[] = [];
+      const droppedAns = new Set<string>();
+      for (const p of laborPatients) {
+        const k = laborKeyByAn.get(p.an);
+        if (k && !matched.has(k)) {
+          result.labor.droppedNameUnstable += 1;
+          droppedAns.add(p.an);
+          continue;
+        }
+        laborSurvivors.push(p);
+      }
+      // Drop partograph observations whose AN belonged to a failed labour
+      // patient — keeping them would leave orphan severity rows.
+      const partSurvivors = partographs.filter((o) => {
+        if (droppedAns.has(o.an)) {
+          result.partograph.droppedNameUnstable += 1;
+          return false;
+        }
+        return true;
+      });
+      // ANC: filter by HN → identity key. Patients with null HN (community
+      // ANC, never in `patient`) were never candidates and fall through
+      // untouched.
+      const ancSurvivors = ancPatients.filter((a) => {
+        if (a.hn == null) return true;
+        const masterKey = ancKeyByHn.get(a.hn);
+        if (masterKey && !matched.has(masterKey)) {
+          result.anc.droppedNameUnstable += 1;
+          return false;
+        }
+        return true;
+      });
+      laborPatients.length = 0;
+      laborPatients.push(...laborSurvivors);
+      partographs.length = 0;
+      partographs.push(...partSurvivors);
+      ancPatients.length = 0;
+      ancPatients.push(...ancSurvivors);
+      result.labor.mapped = laborPatients.length;
+      result.partograph.mapped = partographs.length;
+      result.anc.mapped = ancPatients.length;
+    }
 
     // Skip the POST entirely when there's nothing to send — keeps the Sync
     // Log clean for hospitals with no active patients (would otherwise

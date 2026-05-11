@@ -15,6 +15,15 @@ interface HospitalTableProps {
   hospitals: DashboardHospital[];
   selected?: string | null;
   onSelect?: (hcode: string | null) => void;
+  /**
+   * When true, clicking a row navigates to `/hospitals/<hcode>` regardless
+   * of whether `onSelect` is provided. Used by the dashboard's primary
+   * hospital list (below the GIS map) where the operator's expectation is
+   * "row click → that hospital's full page". `onSelect` is still invoked
+   * before navigation so any map-marker highlight stays in sync during
+   * the brief moment before the route transitions.
+   */
+  navigateOnClick?: boolean;
   variant?: 'light' | 'kiosk';
 }
 
@@ -33,7 +42,13 @@ function severityRank(h: DashboardHospital): number {
   return h.counts.high * 100 + h.counts.medium * 10 + h.counts.low;
 }
 
-export function HospitalTable({ hospitals, selected, onSelect, variant = 'light' }: HospitalTableProps) {
+export function HospitalTable({
+  hospitals,
+  selected,
+  onSelect,
+  navigateOnClick = false,
+  variant = 'light',
+}: HospitalTableProps) {
   const router = useRouter();
   const [sortKey, setSortKey] = useState<SortKey>('severity');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -93,8 +108,20 @@ export function HospitalTable({ hospitals, selected, onSelect, variant = 'light'
   };
 
   const handleRowClick = (h: DashboardHospital) => {
-    if (onSelect) onSelect(h.hcode === selected ? null : h.hcode);
-    else router.push(`/hospitals/${h.hcode}`);
+    if (navigateOnClick) {
+      // Navigation mode — fire onSelect (if any) so a sibling map marker
+      // can highlight during the brief moment before the route changes,
+      // then route to the hospital's full detail page.
+      if (onSelect) onSelect(h.hcode);
+      router.push(`/hospitals/${h.hcode}`);
+      return;
+    }
+    if (onSelect) {
+      // Toggle-select: re-clicking the active row clears it.
+      onSelect(h.hcode === selected ? null : h.hcode);
+    } else {
+      router.push(`/hospitals/${h.hcode}`);
+    }
   };
 
   const isKiosk = variant === 'kiosk';
