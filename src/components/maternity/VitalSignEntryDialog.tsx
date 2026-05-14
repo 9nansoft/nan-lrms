@@ -16,6 +16,7 @@ import {
 import type { NurseNoteRow } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
 import { ChipRow, type ChipTone } from './shared/DraggableChips';
+import { BeDateInput, BeTimeInput } from './shared/BeDateTimeInputs';
 
 type Mode = 'add' | 'edit';
 
@@ -552,21 +553,19 @@ function Field({
           className={cn(inputCls, 'h-auto py-1 leading-snug')}
         />
       ) : type === 'date' ? (
-        <input
+        <BeDateInput
           id={inputId}
           aria-label={name}
-          type="date"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
           className={inputCls}
         />
       ) : type === 'time' ? (
-        <input
+        <BeTimeInput
           id={inputId}
           aria-label={name}
-          type="time"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
           className={inputCls}
         />
       ) : (

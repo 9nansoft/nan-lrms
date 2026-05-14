@@ -26,6 +26,11 @@ import {
 } from '@/services/maternity-ward';
 import type { LaborRecord, LabourRecord, PartographRow } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
+import {
+  BeDateInput,
+  BeTimeInput,
+  _isoToBE,
+} from '@/components/maternity/shared/BeDateTimeInputs';
 
 // ─── Draft state ──────────────────────────────────────────────────────────
 
@@ -193,7 +198,8 @@ function Field({
   const numericCls = type === 'number' ? 'font-semibold tabular-nums' : '';
 
   if (readOnly) {
-    const display = value === '' || value === undefined || value === null ? '—' : value;
+    const formatted = type === 'date' ? _isoToBE(value) : value;
+    const display = formatted === '' || formatted === undefined || formatted === null ? '—' : formatted;
     return (
       <div className="flex flex-col gap-1">
         <span className="flex items-baseline gap-2 text-[13px] font-semibold text-slate-800">
@@ -218,14 +224,30 @@ function Field({
         <span className="truncate">{label}</span>
         {hint && <span className="text-[11px] font-normal text-slate-500">{hint}</span>}
       </label>
-      <input
-        type={type === 'number' ? 'text' : type}
-        inputMode={type === 'number' ? 'numeric' : undefined}
-        aria-label={ariaLabel ?? label}
-        value={value}
-        onChange={(e) => onChange?.(e.target.value)}
-        className={cn(inputCls, numericCls)}
-      />
+      {type === 'date' ? (
+        <BeDateInput
+          aria-label={ariaLabel ?? label}
+          value={value}
+          onChange={(v) => onChange?.(v)}
+          className={inputCls}
+        />
+      ) : type === 'time' ? (
+        <BeTimeInput
+          aria-label={ariaLabel ?? label}
+          value={value}
+          onChange={(v) => onChange?.(v)}
+          className={cn(inputCls, 'tabular-nums font-semibold')}
+        />
+      ) : (
+        <input
+          type={type === 'number' ? 'text' : type}
+          inputMode={type === 'number' ? 'numeric' : undefined}
+          aria-label={ariaLabel ?? label}
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
+          className={cn(inputCls, numericCls)}
+        />
+      )}
     </div>
   );
 }

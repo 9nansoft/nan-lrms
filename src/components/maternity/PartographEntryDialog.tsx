@@ -17,6 +17,7 @@ import {
 import type { PartographRow } from '@/types/maternity-ward';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { ChipRow, type ChipTone } from './shared/DraggableChips';
+import { BeDateTimeInput } from './shared/BeDateTimeInputs';
 
 type Mode = 'add' | 'edit';
 
@@ -689,12 +690,11 @@ function Field({
           className={cn(inputCls, 'h-auto py-1 leading-snug')}
         />
       ) : type === 'datetime' ? (
-        <input
+        <BeDateTimeInput
           id={inputId}
           aria-label={name}
-          type="datetime-local"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
           className={inputCls}
         />
       ) : (

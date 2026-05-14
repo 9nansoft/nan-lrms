@@ -39,6 +39,10 @@ import {
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 import type { ReferOutRow } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
+import {
+  BeDateInput,
+  BeTimeInput,
+} from '@/components/maternity/shared/BeDateTimeInputs';
 import { LookupAutocomplete, type LookupItem } from './shared/LookupAutocomplete';
 
 interface DraftState {
@@ -414,22 +418,19 @@ export function ReferOutDialog({
             </div>
             <div className="flex flex-col gap-1">
               <FormLabel required>วันที่ส่งต่อ</FormLabel>
-              <input
-                type="date"
-                value={draft.refer_date}
-                onChange={(e) => setF('refer_date', e.target.value)}
+              <BeDateInput
                 aria-label="refer_date"
+                value={draft.refer_date}
+                onChange={(v) => setF('refer_date', v)}
                 className={cn(inputCls, 'tabular-nums')}
               />
             </div>
             <div className="flex flex-col gap-1">
               <FormLabel required>เวลาส่งต่อ</FormLabel>
-              <input
-                type="time"
-                step="1"
-                value={draft.refer_time.slice(0, 5)}
-                onChange={(e) => setF('refer_time', e.target.value)}
+              <BeTimeInput
                 aria-label="refer_time"
+                value={draft.refer_time.slice(0, 5)}
+                onChange={(v) => setF('refer_time', v)}
                 className={cn(inputCls, 'tabular-nums font-semibold')}
               />
             </div>

@@ -46,6 +46,10 @@ import {
 } from '@/services/maternity-ward';
 import type { BedOccupancy } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
+import {
+  BeDateInput,
+  BeTimeInput,
+} from '@/components/maternity/shared/BeDateTimeInputs';
 import { ReferOutDialog } from '../ReferOutDialog';
 import { LookupAutocomplete, type LookupItem } from '../shared/LookupAutocomplete';
 
@@ -612,26 +616,22 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex flex-col gap-1">
             <FormLabel required={draft.confirm_discharge === 'Y'}>วันที่จำหน่าย</FormLabel>
-            <input
-              type="date"
-              value={draft.dchdate}
-              onChange={(e) => setDraft((d) => ({ ...d, dchdate: e.target.value }))}
+            {/* min/max are now enforced inside save() — the BE date input
+                converts BE strings to ISO on commit, so the native browser
+                min/max attribute no longer applies. */}
+            <BeDateInput
               aria-label="dchdate"
-              // HOSxP cxDBDateEdit1: MaxDate = today, MinDate = regdate. Browser
-              // honors min/max for native validation; we also guard in save().
-              min={occupant.regdate ? occupant.regdate.slice(0, 10) : undefined}
-              max={todayIso()}
+              value={draft.dchdate}
+              onChange={(v) => setDraft((d) => ({ ...d, dchdate: v }))}
               className={cn(inputCls, 'tabular-nums')}
             />
           </div>
           <div className="flex flex-col gap-1">
             <FormLabel required={draft.confirm_discharge === 'Y'}>เวลาจำหน่าย</FormLabel>
-            <input
-              type="time"
-              step="1"
-              value={draft.dchtime}
-              onChange={(e) => setDraft((d) => ({ ...d, dchtime: e.target.value }))}
+            <BeTimeInput
               aria-label="dchtime"
+              value={draft.dchtime}
+              onChange={(v) => setDraft((d) => ({ ...d, dchtime: v }))}
               className={cn(inputCls, 'tabular-nums font-semibold')}
             />
           </div>

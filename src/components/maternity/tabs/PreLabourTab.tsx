@@ -25,6 +25,11 @@ import {
 } from '@/services/maternity-ward';
 import type { LabourRecord, PregnancyRecord } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
+import {
+  BeDateInput,
+  BeTimeInput,
+  _isoToBE,
+} from '@/components/maternity/shared/BeDateTimeInputs';
 
 interface DraftState {
   // ipt_pregnancy
@@ -99,7 +104,7 @@ interface FieldProps {
   ariaLabel?: string;
   value: string;
   onChange?: (v: string) => void;
-  type?: 'text' | 'date' | 'number';
+  type?: 'text' | 'date' | 'time' | 'number';
   hint?: string;
   readOnly?: boolean;
   options?: ReadonlyArray<{ value: string; label: string }>;
@@ -117,7 +122,8 @@ function Field({
   // getByLabelText() does NOT (matches the existing test expectations and
   // keeps the visual tighter when not editing).
   if (readOnly) {
-    const display = value === '' || value === undefined || value === null ? '—' : value;
+    const formatted = type === 'date' ? _isoToBE(value) : value;
+    const display = formatted === '' || formatted === undefined || formatted === null ? '—' : formatted;
     return (
       <div className="flex flex-col gap-1">
         <span className="flex items-baseline gap-2 text-[13px] font-semibold text-slate-800">
@@ -155,6 +161,20 @@ function Field({
             </option>
           ))}
         </select>
+      ) : type === 'date' ? (
+        <BeDateInput
+          aria-label={ariaLabel ?? label}
+          value={value}
+          onChange={(v) => onChange?.(v)}
+          className={inputCls}
+        />
+      ) : type === 'time' ? (
+        <BeTimeInput
+          aria-label={ariaLabel ?? label}
+          value={value}
+          onChange={(v) => onChange?.(v)}
+          className={cn(inputCls, 'tabular-nums font-semibold')}
+        />
       ) : (
         <input
           type={type === 'number' ? 'text' : type}

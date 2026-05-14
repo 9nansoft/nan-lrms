@@ -35,6 +35,10 @@ import {
 import type { InfantRow } from '@/types/maternity-ward';
 import { cn } from '@/lib/utils';
 import {
+  BeDateInput,
+  BeTimeInput,
+} from '@/components/maternity/shared/BeDateTimeInputs';
+import {
   ChipRow,
   SimpleChipRow,
   type ChipOption,
@@ -206,6 +210,23 @@ interface InlineInputProps {
   width?: string;
 }
 function InlineInput({ ariaLabel, value, onChange, placeholder, type = 'text', width }: InlineInputProps) {
+  const baseCls = cn(
+    'h-10 rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20',
+    width ?? 'w-full',
+  );
+  if (type === 'date') {
+    return <BeDateInput aria-label={ariaLabel} value={value} onChange={onChange} className={baseCls} />;
+  }
+  if (type === 'time') {
+    return (
+      <BeTimeInput
+        aria-label={ariaLabel}
+        value={value}
+        onChange={onChange}
+        className={cn(baseCls, 'font-semibold tabular-nums')}
+      />
+    );
+  }
   return (
     <input
       type={type === 'number' ? 'text' : type}
@@ -214,11 +235,7 @@ function InlineInput({ ariaLabel, value, onChange, placeholder, type = 'text', w
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       aria-label={ariaLabel}
-      className={cn(
-        'h-10 rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20',
-        width ?? 'w-full',
-        type === 'number' && 'font-semibold tabular-nums',
-      )}
+      className={cn(baseCls, type === 'number' && 'font-semibold tabular-nums')}
     />
   );
 }
