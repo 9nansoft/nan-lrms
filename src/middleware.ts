@@ -1,7 +1,16 @@
 // T090: Next.js middleware — route protection with NextAuth
 // T108: Security headers middleware
-import { auth } from '@/lib/auth';
+//
+// Edge-runtime constraint: this file is bundled for the Edge, which has no
+// Node `crypto`/DB/fs. We import the Edge-safe `authConfig` directly and build
+// our own `auth()` instance here, so the full Node-side `@/lib/auth` (with
+// Credentials providers, DB-backed hospital-access-guard, ProviderID session
+// store, sync services) never reaches this bundle.
+import NextAuth from 'next-auth';
+import { authConfig } from '@/lib/auth.config';
 import { NextResponse } from 'next/server';
+
+const { auth } = NextAuth(authConfig);
 
 // /hospital-maternity-ward is gated by NextAuth (existing redirect) +
 // BmsSessionContext at the page level (no middleware-level userType check).

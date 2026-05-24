@@ -1,6 +1,10 @@
-// T085: NextAuth.js v5 configuration with BMS Session auth
+// T085: NextAuth.js v5 — full Node-side config. Extends the Edge-safe
+// `auth.config.ts` with the Credentials providers (which call into DB-backed
+// `assertHospitalAccess` + the in-memory ProviderID pending-session store).
+// The middleware must NOT import this file — it imports `auth.config` only.
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
+import { authConfig } from '@/lib/auth.config';
 import { mapPositionToRole, validateBmsSession } from '@/lib/auth-utils';
 import { assertHospitalAccess } from '@/lib/hospital-access-guard';
 import { logger } from '@/lib/logger';
@@ -14,6 +18,7 @@ export { mapPositionToRole, validateBmsSession } from '@/lib/auth-utils';
 export type { BmsUserIdentity } from '@/lib/auth-utils';
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  ...authConfig,
   providers: [
     Credentials({
       name: 'BMS Session',
@@ -170,67 +175,4 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
     }),
   ],
-  callbacks: {
-    jwt({ token, user }) {
-      if (user) {
-        token.userCid = user.userCid;
-        token.role = user.role;
-        token.hospitalCode = user.hospitalCode;
-        token.hospitalName = user.hospitalName;
-        token.tunnelUrl = user.tunnelUrl;
-        token.databaseType = user.databaseType;
-        token.authProvider = user.authProvider;
-        token.accessMode = user.accessMode;
-        token.providerId = user.providerId;
-        token.providerCidHash = user.providerCidHash;
-        token.providerOrgHcode = user.providerOrgHcode;
-        token.providerScopes = user.providerScopes;
-      }
-      return token;
-    },
-    session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.sub ?? '';
-        session.user.userCid = token.userCid;
-        session.user.role = token.role;
-        session.user.hospitalCode = token.hospitalCode;
-        session.user.hospitalName = token.hospitalName;
-        session.user.tunnelUrl = token.tunnelUrl;
-        session.user.databaseType = token.databaseType;
-        session.user.authProvider = token.authProvider;
-        session.user.accessMode = token.accessMode;
-        session.user.providerId = token.providerId;
-        session.user.providerCidHash = token.providerCidHash;
-        session.user.providerOrgHcode = token.providerOrgHcode;
-        session.user.providerScopes = token.providerScopes;
-      }
-      return session;
-    },
-  },
-  pages: {
-    signIn: '/login',
-  },
-  session: {
-    strategy: 'jwt',
-    maxAge: 8 * 60 * 60, // 8 hours
-  },
-  // SameSite=None + Secure required so the session cookie travels when KK-LRMS
-  // is embedded as an iframe inside HOSxP / marketplace / partner portals
-  // (cross-origin). In dev over http://localhost we fall back to Lax because
-  // browsers reject Secure cookies on plain HTTP.
-  useSecureCookies: process.env.NODE_ENV === 'production',
-  cookies: {
-    sessionToken: {
-      name:
-        process.env.NODE_ENV === 'production'
-          ? '__Secure-authjs.session-token'
-          : 'authjs.session-token',
-      options: {
-        httpOnly: true,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        path: '/',
-        secure: process.env.NODE_ENV === 'production',
-      },
-    },
-  },
 });
