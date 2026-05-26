@@ -15,8 +15,11 @@ const { auth } = NextAuth(authConfig);
 // /hospital-maternity-ward is gated by NextAuth (existing redirect) +
 // BmsSessionContext at the page level (no middleware-level userType check).
 
-// Public paths that don't require authentication
-const PUBLIC_PATHS = ['/login', '/provider/complete', '/about', '/api/auth', '/api/health', '/api/webhooks', '/api/referrals/check'];
+// Public paths that don't require authentication.
+// /deck is the MOPH executive briefing deck (no PHI, presentation assets only).
+// Public so the briefing room laptop can open it directly via URL without
+// requiring a BMS session.
+const PUBLIC_PATHS = ['/login', '/provider/complete', '/about', '/deck', '/api/auth', '/api/health', '/api/webhooks', '/api/referrals/check'];
 const STATIC_PATHS = ['/_next', '/favicon.ico'];
 const READONLY_BLOCKED_API_PREFIXES = [
   '/api/admin',
