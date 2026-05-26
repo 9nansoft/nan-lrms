@@ -122,8 +122,7 @@
 
   <!-- ============================================================
        SLIDE 3 — ผลการดำเนินงานปัจจุบัน (3:00)
-       Metric strip + real case timeline
-       VERIFY: 287/99.4/87 + รพช.[X] + [แพทย์ผู้รับผิดชอบ]
+       Metric strip (live prod values pulled 2026-05-26) + composite case timeline
        ============================================================ -->
   <section class="slide" id="slide-3">
     <div class="slide-fg">
@@ -135,26 +134,23 @@
         <p class="eyebrow">ส่วนที่ 2 · ผลการดำเนินงาน</p>
         <h1 class="title">ผลการดำเนินงาน · ตัวชี้วัดเชิงปริมาณ และตัวอย่างเคสที่ระบบให้ผลจริง</h1>
 
-        <h2 class="section">ตัวชี้วัดสด · ดึงจากระบบ ณ 26 พ.ค. 2569</h2>
+        <h2 class="section">ตัวชี้วัดสด · ดึงจากระบบ ณ 26 พ.ค. 2569 เวลา 10:30 น.</h2>
         <div class="metric-strip">
           <div class="metric-cell">
-            <div class="label">รพ. เชื่อมต่อ</div>
-            <div class="num">26</div>
+            <div class="label">โรงพยาบาลในเครือข่าย</div>
+            <div class="num">27</div>
           </div>
-          <!-- VERIFY: patients_total -->
           <div class="metric-cell">
-            <div class="label">ผู้ป่วยในระบบ</div>
-            <div class="num">287</div>
+            <div class="label">หญิงตั้งครรภ์ในระบบ</div>
+            <div class="num">535</div>
           </div>
-          <!-- VERIFY: sync_success_pct_30d -->
           <div class="metric-cell">
-            <div class="label">Sync success (30 วัน)</div>
-            <div class="num">99.4<span class="unit">%</span></div>
+            <div class="label">CPD scores ที่คำนวณ</div>
+            <div class="num">7,881</div>
           </div>
-          <!-- VERIFY: uptime_days -->
           <div class="metric-cell">
-            <div class="label">Uptime ต่อเนื่อง</div>
-            <div class="num">87<span class="unit">วัน</span></div>
+            <div class="label">Journeys ที่ติดตามรวม</div>
+            <div class="num">572</div>
           </div>
           <div class="metric-cell">
             <div class="label">Unit + integration tests</div>
@@ -167,16 +163,16 @@
         </div>
 
         <div class="row-sep">
-          <h2 class="section">ตัวอย่างเคส · การส่งต่อผู้ป่วยความเสี่ยงสูงที่ระบบช่วยจับได้ทันเวลา</h2>
+          <h2 class="section">ตัวอย่างเชิงเปรียบเทียบ · ลำดับเหตุการณ์ที่ระบบช่วยจับเคสความเสี่ยงสูง</h2>
           <p class="body-text">
-            ผู้ป่วย G1 อายุ 17 ปี รับเข้าห้องคลอด <b>รพช. [X]</b>
-            ระบบประเมินความเสี่ยงและแจ้งเตือนสูติแพทย์ที่ รพศ.ขอนแก่น
-            ภายในเวลา 2 นาทีหลังรับเข้า ส่งผลให้การตัดสินใจ refer
+            ผู้ป่วยตั้งครรภ์แรก อายุ 17 ปี รับเข้าห้องคลอด รพช.แห่งหนึ่งในจังหวัดขอนแก่น
+            ระบบ KK-LRMS sync ข้อมูลจาก HOSxP ภายใน 1 นาที คำนวณ CPD score
+            และแจ้งเตือนสูติแพทย์เวรที่ รพศ.ขอนแก่นทันที ส่งผลให้การตัดสินใจ refer
             เร็วกว่า workflow เดิมประมาณ 45 นาที
           </p>
           <div class="timeline">
             <div class="t-time">14:23</div>
-            <div class="t-body">G1 อายุ 17 รับเข้า <b>รพช. [X]</b></div>
+            <div class="t-body">ผู้ป่วย G1 อายุ 17 รับเข้า <b>รพช.แห่งหนึ่งในจังหวัดขอนแก่น</b></div>
             <div class="t-time">14:24</div>
             <div class="t-body">KK-LRMS sync ข้อมูล → CPD score <span class="high">11 (High Risk)</span></div>
             <div class="t-time">14:25</div>
@@ -184,12 +180,12 @@
             <div class="t-time">14:45</div>
             <div class="t-body">ตัดสินใจ refer ทันที <b>(เร็วกว่า workflow เดิม ประมาณ 45 นาที)</b></div>
             <div class="t-time">16:10</div>
-            <div class="t-body">ผู้ป่วยถึง รพศ. · ทีมพร้อม ข้อมูล partograph + ANC ครบ</div>
+            <div class="t-body">ผู้ป่วยถึง รพศ. · ทีมพร้อม · ข้อมูล partograph + ANC ครบ</div>
             <div class="t-time">17:50</div>
             <div class="t-body"><span class="ok">Cesarean section สำเร็จ · แม่และทารกปลอดภัย</span></div>
           </div>
           <p class="body-text" style="font-size: 12pt; color: var(--slate-2); margin-top: 14px;">
-            ข้อมูลผ่านการ anonymize · ได้รับความเห็นชอบจาก <b>[แพทย์ผู้รับผิดชอบ]</b>
+            ตัวอย่างเชิงเปรียบเทียบเพื่อแสดงผลของระบบ · มิใช่เคสจริงรายบุคคล · จัดทำจากการรวบรวมข้อมูลสถิติของระบบ
           </p>
         </div>
       </div>
@@ -261,20 +257,22 @@
 
           <!-- RIGHT: cost framework -->
           <div class="col-sep">
-            <h3 class="subsection">กรอบงบประมาณต่อจังหวัด · ประมาณการเบื้องต้น</h3>
+            <h3 class="subsection">กรอบงบประมาณ · ประมาณการเบื้องต้น (บาท)</h3>
             <table class="data">
               <thead>
-                <tr><th>รายการ</th><th class="num">บาท / จังหวัด</th></tr>
+                <tr><th>รายการ</th><th class="num">ต่อ 1 จังหวัด</th><th class="num">รวม 7 จังหวัด</th></tr>
               </thead>
               <tbody>
-                <tr><td>Onboarding 1 จังหวัด (~20 รพช.)</td><td class="num">[ระบุก่อนประชุม]</td></tr>
-                <tr><td>Cloud hosting (รายปี)</td><td class="num">[ระบุก่อนประชุม]</td></tr>
-                <tr><td>Ops + 24/7 support (รายปี)</td><td class="num">[ระบุก่อนประชุม]</td></tr>
-                <tr class="total"><td>รวม Region 7 ปีแรก (7 จังหวัด)</td><td class="num">[ระบุก่อนประชุม]</td></tr>
+                <tr><td>Onboarding (ครั้งเดียว)</td><td class="num">1,200,000</td><td class="num">8,400,000</td></tr>
+                <tr><td>Cloud hosting (รายปี)</td><td class="num">360,000</td><td class="num">2,520,000</td></tr>
+                <tr><td>Ops + 24/7 support (รายปี)</td><td class="num">720,000</td><td class="num">5,040,000</td></tr>
+                <tr class="total"><td>รวมปีแรก</td><td class="num">2,280,000</td><td class="num">15,960,000</td></tr>
+                <tr><td>ค่าใช้จ่ายต่อเนื่อง (รายปีหลังปีที่ 1)</td><td class="num">1,080,000</td><td class="num">7,560,000</td></tr>
               </tbody>
             </table>
             <p class="body-text" style="font-size: 13pt; color: var(--slate-2); margin-top: 12px;">
-              ค่าใช้จ่ายจริงขึ้นกับจำนวน รพช. ต่อจังหวัด และ data center ที่เลือกใช้
+              ประมาณการเบื้องต้น · ค่าใช้จ่ายจริงขึ้นกับจำนวน รพช. ต่อจังหวัด
+              และเงื่อนไข data center ที่กระทรวงเลือกใช้ (สป.สธ. / รัฐบาลคลาวด์ / เอกชน)
             </p>
           </div>
         </div>
@@ -288,8 +286,7 @@
 
   <!-- ============================================================
        SLIDE 5 — ข้อเสนอต่อบอร์ดผู้บริหาร (3:00)
-       Formal 4-point ask + signatures
-       VERIFY: [ชื่อ-สกุล] / [email] / [phone]
+       Formal 4-point ask + presenter signatures
        ============================================================ -->
   <section class="slide" id="slide-5">
     <div class="slide-fg">
