@@ -3,616 +3,352 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>KK-LRMS · MOPH Executive Briefing · 26 พ.ค. 2569</title>
+<title>KK-LRMS · ระบบต้นแบบดูแลหญิงตั้งครรภ์ การคลอด และดูแลหลังคลอด ระดับจังหวัด · 26 พ.ค. 2569</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="deck.css" />
 </head>
 <body>
 <div class="stage">
 
-  <!-- SLIDE 1 — Cold open · aerial hospital network -->
-  <section class="slide bg-1" id="slide-1">
-    <div class="hero">
-      <p class="hero-eye">KK-LRMS · Khon Kaen Labor Room Monitoring</p>
-      <h1 class="hero-title">ที่นี่… ทุกการคลอด<br/>ถูกมองเห็นภายใน 30 วินาที</h1>
-      <p class="hero-sub">ขอนแก่นคือจังหวัดเดียวในประเทศไทย<br/>ที่ทำสิ่งนี้ได้แล้ววันนี้</p>
-      <div class="hero-divider"></div>
-    </div>
-    <div class="foot">
-      <span><b>KK-LRMS</b> · สำนักงานสาธารณสุขจังหวัดขอนแก่น</span>
-      <span class="page">26 พ.ค. 2569</span>
-    </div>
-  </section>
-
-  <!-- SLIDE 2 — MMR gap + information gap -->
-  <section class="slide bg-2" id="slide-2">
+  <!-- ============================================================
+       SLIDE 1 — บทนำ · สถานการณ์ MMR และระบบ KK-LRMS (3:00)
+       Formal title + situation + system in brief
+       ============================================================ -->
+  <section class="slide" id="slide-1">
     <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
+      <div class="top-bar">
+        <span class="ministry"><b>บริษัท บางกอกเมดิคอลซอฟต์แวร์ จำกัด</b> · ในความร่วมมือกับ สำนักงานสาธารณสุขจังหวัดขอนแก่น</span>
+        <span class="page-no">01<span class="total"> / 05</span></span>
+      </div>
       <div class="slide-body">
-        <p class="eyebrow">บทที่ 1 · ปัญหาที่มองไม่เห็น</p>
-        <h1 class="title">ค่าเฉลี่ยซ่อนความเหลื่อมล้ำ — และข้อมูลผู้คลอดยังไม่ถึงสูติแพทย์ทันเวลา</h1>
-        <div class="divider"></div>
-        <div class="two-col">
-          <div class="glass">
-            <h3>อัตราตายมารดา (MMR) ต่อ 100,000 การคลอด</h3>
-            <svg viewBox="0 0 480 260" preserveAspectRatio="xMidYMid meet" aria-label="MMR by region">
-              <line x1="80" y1="220" x2="470" y2="220" stroke="rgba(245,243,237,0.3)" stroke-width="1.5"/>
-              <line x1="80" y1="40"  x2="80"  y2="220" stroke="rgba(245,243,237,0.3)" stroke-width="1.5"/>
-              <line x1="80" y1="170" x2="470" y2="170" stroke="#d4a017" stroke-width="2" stroke-dasharray="6 4" opacity="0.8"/>
-              <text x="475" y="174" font-size="12" fill="#e8b835" font-weight="700">เป้าหมาย 17</text>
-              <g font-size="11" fill="rgba(245,243,237,0.7)">
-                <rect x="100" y="160" width="40" height="60"  fill="#22c55e" opacity="0.9"/><text x="120" y="240" text-anchor="middle">เขต 1</text>
-                <rect x="160" y="130" width="40" height="90"  fill="#eab308" opacity="0.9"/><text x="180" y="240" text-anchor="middle">เขต 4</text>
-                <rect x="220" y="110" width="40" height="110" fill="#eab308" opacity="0.9"/><text x="240" y="240" text-anchor="middle">เขต 6</text>
-                <rect x="280" y="90"  width="40" height="130" fill="#ef4444" opacity="0.9"/><text x="300" y="240" text-anchor="middle">เขต 7</text>
-                <rect x="340" y="75"  width="40" height="145" fill="#ef4444" opacity="0.9"/><text x="360" y="240" text-anchor="middle">เขต 9</text>
-                <rect x="400" y="105" width="40" height="115" fill="#eab308" opacity="0.9"/><text x="420" y="240" text-anchor="middle">เขต 12</text>
-              </g>
-              <text x="68" y="44"  font-size="10" fill="rgba(245,243,237,0.7)" text-anchor="end">30</text>
-              <text x="68" y="174" font-size="10" fill="rgba(245,243,237,0.7)" text-anchor="end">17</text>
-              <text x="68" y="224" font-size="10" fill="rgba(245,243,237,0.7)" text-anchor="end">0</text>
-            </svg>
-            <p style="font-size: 13pt; color: rgba(245,243,237,0.55); margin-top: 12px;">
-              ภาพประกอบเชิงเปรียบเทียบ · ข้อมูล MMR สำนักนโยบายและยุทธศาสตร์ สธ.
-            </p>
-          </div>
-          <div class="glass">
-            <h3>เส้นทางข้อมูลในปัจจุบัน · ล่าช้า 30–90 นาที</h3>
-            <div style="display:flex; flex-direction:column; gap:14px; margin-top: 10px;">
-              <div class="pict-step"><span class="ic">🏥</span><span class="txt">รพช. 26 แห่ง — ผู้ป่วยรับเข้าห้องคลอด</span></div>
-              <div class="pict-arrow">↓ <span style="font-size:14pt;">รายงานด้วยปากเปล่า / LINE</span></div>
-              <div class="pict-step"><span class="ic">📞</span><span class="txt">สูติแพทย์ที่ รพศ. ตัดสินใจจากข้อมูลปากเปล่า</span></div>
-              <div class="pict-warn">⚠️ partograph + vital signs ไม่ปรากฏ real-time</div>
+        <div class="hero-formal">
+          <p class="crest-line">นำเสนอต่อคณะผู้บริหารกระทรวงสาธารณสุข · 26 พฤษภาคม 2569</p>
+          <div class="deck-id">KK-LRMS · Khon Kaen Labor Room Monitoring System</div>
+          <h1 class="deck-title">นำเสนอระบบ KK-LRMS<br/>ระบบต้นแบบของการดูแลหญิงตั้งครรภ์ การคลอด และการดูแลหลังคลอด ในระดับจังหวัด</h1>
+          <p class="deck-sub">
+            รายงานสรุปสถานการณ์ ระบบที่ดำเนินงานในจังหวัดขอนแก่น ผลการดำเนินงาน
+            แผนขยายผล และข้อเสนอต่อบอร์ดผู้บริหารกระทรวงสาธารณสุข
+          </p>
+          <div class="deck-meta">
+            <div>
+              <div class="lbl">วันที่นำเสนอ</div>
+              <div class="val">26 พฤษภาคม 2569</div>
+            </div>
+            <div>
+              <div class="lbl">ผู้นำเสนอ</div>
+              <div class="val">ชัยพร สุรเตมีย์กุล</div>
+            </div>
+            <div>
+              <div class="lbl">บริษัท</div>
+              <div class="val">บริษัท บางกอกเมดิคอลซอฟต์แวร์ จำกัด</div>
+            </div>
+            <div>
+              <div class="lbl">ความร่วมมือ</div>
+              <div class="val">สำนักงานสาธารณสุขจังหวัดขอนแก่น</div>
             </div>
           </div>
         </div>
       </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">02 / 12</span></div>
-    </div>
-  </section>
-
-  <!-- SLIDE 3 — One dashboard, 26 hospitals -->
-  <section class="slide bg-3" id="slide-3">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">บทที่ 2 · สิ่งที่ขอนแก่นสร้างขึ้น</p>
-        <h1 class="title">หน้าจอเดียว — เห็นทุกห้องคลอดทั่วจังหวัด</h1>
-        <div class="divider"></div>
-        <div class="shot-frame">
-          <img src="assets/dashboard.png" alt="หน้าจอ KK-LRMS Dashboard" />
-          <div class="shot-chips">
-            <div class="shot-chip">26 โรงพยาบาล</div>
-            <div class="shot-chip">อัปเดตทุก 30 วินาที</div>
-            <div class="shot-chip">CPD score อัตโนมัติ</div>
-          </div>
-        </div>
-        <p style="font-size: 13pt; color: rgba(245,243,237,0.6); margin-top: 12px; text-align: right;">
-          ภาพถ่ายจากระบบจริง · ข้อมูลตัวอย่างจาก demo dataset (ไม่ใช่ผู้ป่วยจริง)
-        </p>
+      <div class="bottom-bar">
+        <span><b>KK-LRMS</b> · ระบบเฝ้าระวังการคลอด เครือข่ายโรงพยาบาล จังหวัดขอนแก่น</span>
+        <span>เอกสารสำหรับการประชุมเท่านั้น · ห้ามเผยแพร่</span>
       </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">03 / 12</span></div>
     </div>
   </section>
 
-  <!-- SLIDE 4 — Clinical intelligence -->
-  <section class="slide bg-4" id="slide-4">
+  <!-- ============================================================
+       SLIDE 2 — สถานการณ์และระบบในภาพรวม (3:00)
+       Two-column: problem (MMR + info gap) / KK-LRMS in brief
+       ============================================================ -->
+  <section class="slide" id="slide-2">
     <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
+      <div class="top-bar">
+        <span class="ministry"><b>บริษัท บางกอกเมดิคอลซอฟต์แวร์ จำกัด</b> · ในความร่วมมือกับ สำนักงานสาธารณสุขจังหวัดขอนแก่น</span>
+        <span class="page-no">02<span class="total"> / 05</span></span>
+      </div>
       <div class="slide-body">
-        <p class="eyebrow">บทที่ 2 · ปัญญาทางคลินิก</p>
-        <h1 class="title">ปัญญาทางคลินิกที่ทำงานเงียบ ๆ ใน background</h1>
-        <div class="divider"></div>
+        <p class="eyebrow">ส่วนที่ 1 · สถานการณ์และระบบ</p>
+        <h1 class="title">สถานการณ์อัตราตายมารดา และระบบเฝ้าระวังการคลอดที่ดำเนินงานในจังหวัดขอนแก่น</h1>
+
         <div class="two-col">
-          <div class="glass">
-            <h3>CPD Risk Score · คำนวณจาก 8 ปัจจัย</h3>
-            <table>
+          <!-- LEFT: situation -->
+          <div>
+            <h2 class="section">สถานการณ์</h2>
+            <p class="body-text">
+              อัตราตายมารดาของประเทศไทยอยู่ที่ <b>ประมาณ 17 ต่อแสนการคลอด</b>
+              ตามเป้าหมาย Service Plan 2570 อย่างไรก็ตาม ค่าเฉลี่ยซ่อนความเหลื่อมล้ำ
+              ระหว่างเขตสุขภาพ และในพื้นที่ชนบทบางส่วนยังเกินค่าเฉลี่ย
+            </p>
+            <h3 class="subsection">สาเหตุหนึ่งคือ ความล่าช้าในการตัดสินใจ refer</h3>
+            <ul class="formal">
+              <li>โรงพยาบาลชุมชน 26 แห่ง ในจังหวัดขอนแก่น <b>รายงานข้อมูลผู้คลอดด้วยปากเปล่า / LINE</b> ไปยังโรงพยาบาลแม่ข่าย</li>
+              <li>สูติแพทย์ที่โรงพยาบาลแม่ข่าย <b>ไม่เห็น partograph และ vital signs ของผู้ป่วยแบบ real-time</b></li>
+              <li>การตัดสินใจ refer อาศัยการรายงานด้วยวาจา → <b>ความล่าช้า 30 ถึง 90 นาที</b> ในเคสที่เวลาคือชีวิต</li>
+            </ul>
+          </div>
+
+          <!-- RIGHT: system in brief -->
+          <div class="col-sep">
+            <h2 class="section">ระบบ KK-LRMS ที่ดำเนินงานในขอนแก่น</h2>
+            <p class="body-text">
+              ระบบเฝ้าระวังการคลอดแบบรวมศูนย์ที่เชื่อมโรงพยาบาลชุมชน 26 แห่ง
+              เข้ากับโรงพยาบาลแม่ข่าย (รพ.ขอนแก่น) ใน <b>หน้าจอเดียว</b>
+              อัปเดตอัตโนมัติทุก 30 วินาที
+            </p>
+            <table class="data">
+              <thead>
+                <tr><th>คุณสมบัติ</th><th>รายละเอียด</th></tr>
+              </thead>
               <tbody>
-                <tr><td>Gravida (ครรภ์แรก)</td><td>2.0</td></tr>
-                <tr><td>ANC visits &lt; 4</td><td>1.5</td></tr>
-                <tr><td>GA ≥ 40 สัปดาห์</td><td>1.5</td></tr>
-                <tr><td>ส่วนสูง &lt; 150 cm</td><td>2.0</td></tr>
-                <tr><td>น้ำหนักเพิ่ม &gt; 20 kg</td><td>2.0</td></tr>
-                <tr><td>Fundal height &gt; 36 cm</td><td>2.0</td></tr>
-                <tr><td>U/S fetal weight &gt; 3,500 g</td><td>2.0</td></tr>
-                <tr><td>Hematocrit &lt; 30%</td><td>1.5</td></tr>
+                <tr><td>จำนวนโรงพยาบาลในเครือข่าย</td><td>26 รพช. + 1 รพศ. (รวม 27 แห่ง)</td></tr>
+                <tr><td>วิธีดึงข้อมูล</td><td>BMS Session API จาก HOSxP · auto-sync ทุก 30 วินาที</td></tr>
+                <tr><td>การประเมินความเสี่ยง</td><td>CPD Score คำนวณอัตโนมัติจาก 8 ปัจจัยทางคลินิก</td></tr>
+                <tr><td>การติดตามอย่างเข้มข้น</td><td>Digital partograph + vital signs + contraction trend</td></tr>
+                <tr><td>การติดตามข้ามโรงพยาบาล</td><td>CID hash SHA-256 — match ประวัติเมื่อ refer</td></tr>
+                <tr><td>ความปลอดภัยข้อมูล</td><td>AES-256-GCM + role-based access + audit log (สอดคล้อง PDPA)</td></tr>
               </tbody>
             </table>
-            <div style="margin-top:16px; padding-top:12px; border-top:1px solid rgba(245,243,237,0.18);">
-              <span style="font-size:18pt; font-weight:700; color: var(--risk-high);">≥ 10 คะแนน</span>
-              <span style="font-size:16pt; color: var(--moph-ink-2); margin-left:10px;">→ ระบบแนะนำ refer ทันที</span>
-            </div>
-          </div>
-          <div class="glass">
-            <h3>Partograph ดิจิทัล · WHO alert/action line</h3>
-            <svg viewBox="0 0 480 260" preserveAspectRatio="xMidYMid meet">
-              <g stroke="rgba(245,243,237,0.12)" stroke-width="1">
-                <line x1="50" y1="40"  x2="50"  y2="220"/>
-                <line x1="50" y1="220" x2="450" y2="220"/>
-                <line x1="50" y1="40"  x2="450" y2="40"/>
-              </g>
-              <line x1="100" y1="200" x2="400" y2="60" stroke="#eab308" stroke-width="2.5" stroke-dasharray="5 3"/>
-              <text x="405" y="62" font-size="11" fill="#eab308" font-weight="700">Alert</text>
-              <line x1="160" y1="200" x2="450" y2="60" stroke="#ef4444" stroke-width="2.5"/>
-              <text x="455" y="62" font-size="11" fill="#ef4444" font-weight="700">Action</text>
-              <polyline points="100,200 140,180 180,160 220,135 260,115 300,95"
-                        stroke="#5fe6a6" stroke-width="3" fill="none"
-                        style="filter: drop-shadow(0 0 6px rgba(95,230,166,0.4));"/>
-              <g fill="#5fe6a6">
-                <circle cx="100" cy="200" r="4"/><circle cx="140" cy="180" r="4"/>
-                <circle cx="180" cy="160" r="4"/><circle cx="220" cy="135" r="4"/>
-                <circle cx="260" cy="115" r="4"/><circle cx="300" cy="95"  r="4"/>
-              </g>
-              <text x="50"  y="240" font-size="11" text-anchor="middle">0h</text>
-              <text x="250" y="240" font-size="11" text-anchor="middle">4h</text>
-              <text x="450" y="240" font-size="11" text-anchor="middle">8h</text>
-              <text x="40"  y="222" font-size="11" text-anchor="end">0</text>
-              <text x="40"  y="120" font-size="11" text-anchor="end">5</text>
-              <text x="40"  y="44"  font-size="11" text-anchor="end">10 cm</text>
-              <text x="250" y="22"  font-size="13" text-anchor="middle" font-weight="700">Cervix dilation · เวลา</text>
-            </svg>
-            <ul class="bullet-list" style="margin-top: 14px;">
-              <li>vital signs แม่ + ทารก sync ทุก 30 วินาที</li>
-              <li>contraction frequency + intensity จาก HOSxP</li>
-            </ul>
           </div>
         </div>
       </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">04 / 12</span></div>
-    </div>
-  </section>
-
-  <!-- SLIDE 5 — Cross-hospital tracking -->
-  <section class="slide bg-5" id="slide-5">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">บทที่ 2 · การส่งต่อ</p>
-        <h1 class="title">ติดตามผู้ป่วยข้ามโรงพยาบาล · โดยไม่เปิดเผยเลขบัตรประชาชน</h1>
-        <div class="divider"></div>
-        <div class="glass">
-          <div class="flow">
-            <div class="flow-node">
-              <div class="icon-big">🏥</div>
-              <div class="nm">รพช. A</div>
-              <div class="meta">G1 อายุ 17 รับเข้า 14:23</div>
-            </div>
-            <div class="flow-arrow">
-              <div class="label">CID hash SHA-256 matched</div>
-              <div class="glyph">→</div>
-              <div class="ts">Refer 14:45</div>
-            </div>
-            <div class="flow-node">
-              <div class="icon-big">🏥</div>
-              <div class="nm">รพศ. ขอนแก่น</div>
-              <div class="meta">ทีมพร้อม · ข้อมูลเต็ม 16:10</div>
-            </div>
-          </div>
-        </div>
-        <ul class="bullet-list" style="margin-top: 18px;">
-          <li><b>CID ถูก hash ด้วย SHA-256</b> — ไม่เก็บ plaintext ที่ไหนเลย</li>
-          <li><b>Match ประวัติอัตโนมัติ</b> เมื่อผู้ป่วย refer ระหว่างโรงพยาบาล</li>
-          <li><b>สูติแพทย์ที่รับ refer</b> เห็น partograph + ANC + vital trend ก่อนรถถึง</li>
-          <li><b>ลดการสอบถามซ้ำที่ ER</b> — ประหยัดเวลาช่วงวิกฤต</li>
-        </ul>
+      <div class="bottom-bar">
+        <span><b>KK-LRMS</b> · BMS × สสจ.ขอนแก่น · 26 พ.ค. 2569</span>
+        <span>หน้า 02 / 05</span>
       </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">05 / 12</span></div>
     </div>
   </section>
 
-  <!-- SLIDE 6 — Coverage + PDPA -->
-  <section class="slide bg-6" id="slide-6">
+  <!-- ============================================================
+       SLIDE 3 — ผลการดำเนินงานปัจจุบัน (3:00)
+       Metric strip + real case timeline
+       VERIFY: 287/99.4/87 + รพช.[X] + [แพทย์ผู้รับผิดชอบ]
+       ============================================================ -->
+  <section class="slide" id="slide-3">
     <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">บทที่ 2 · รองรับทุกระบบ + ปลอดภัยตั้งแต่วันแรก</p>
-        <h1 class="title">รองรับทุกระบบ HIS · ออกแบบให้สอดคล้อง PDPA ตั้งแต่วันแรก</h1>
-        <div class="divider"></div>
-        <div class="two-col">
-          <div>
-            <h3 style="font-size: var(--fs-sub); color: var(--moph-gold-2); margin: 0 0 18px; font-weight: 600;">
-              Coverage · ครอบคลุมทุกประเภท
-            </h3>
-            <div class="coverage-card">
-              <div class="ttl">โรงพยาบาลที่ใช้ HOSxP</div>
-              <div class="body">
-                → auto-sync ทุก 30 วินาที (BMS Session API)<br/>
-                → โหมด <b>browser-only</b> — PHI ไม่ออกจาก network โรงพยาบาล
-              </div>
-            </div>
-            <div class="coverage-card">
-              <div class="ttl">โรงพยาบาลที่ไม่ใช้ HOSxP</div>
-              <div class="body">
-                → push ผ่าน Webhook REST API<br/>
-                → ตรวจสอบ API key + signed payload
-              </div>
-            </div>
-          </div>
-          <div class="glass">
-            <h3>Privacy · PDPA-compliant by design</h3>
-            <ul class="bullet-list check-list">
-              <li><b>AES-256-GCM</b> เข้ารหัสชื่อ + CID ตอนเก็บ</li>
-              <li><b>CID hash SHA-256</b> สำหรับ match ข้ามโรงพยาบาล</li>
-              <li><b>Role-based access</b> สูติแพทย์ / พยาบาล / Admin</li>
-              <li><b>Audit log</b> ทุกการเข้าถึงข้อมูลผู้ป่วย</li>
-              <li><b>ชื่อผู้ป่วย mask</b> บน dashboard (HN/AN เท่านั้น)</li>
-            </ul>
-          </div>
-        </div>
+      <div class="top-bar">
+        <span class="ministry"><b>บริษัท บางกอกเมดิคอลซอฟต์แวร์ จำกัด</b> · ในความร่วมมือกับ สำนักงานสาธารณสุขจังหวัดขอนแก่น</span>
+        <span class="page-no">03<span class="total"> / 05</span></span>
       </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">06 / 12</span></div>
-    </div>
-  </section>
-
-  <!-- SLIDE 7 — Live operational metrics
-       VERIFY: replace 287 / 99.4 / 87 with live prod values -->
-  <section class="slide bg-7" id="slide-7">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
       <div class="slide-body">
-        <p class="eyebrow">บทที่ 2 · พร้อมใช้งานจริง</p>
-        <h1 class="title">ระบบใช้งานจริง — ไม่ใช่ prototype</h1>
-        <div class="divider"></div>
-        <div class="metric-grid">
-          <div class="metric-tile"><div class="num">26</div><div class="label">โรงพยาบาลเชื่อมต่อ</div></div>
+        <p class="eyebrow">ส่วนที่ 2 · ผลการดำเนินงาน</p>
+        <h1 class="title">ผลการดำเนินงาน · ตัวชี้วัดเชิงปริมาณ และตัวอย่างเคสที่ระบบให้ผลจริง</h1>
+
+        <h2 class="section">ตัวชี้วัดสด · ดึงจากระบบ ณ 26 พ.ค. 2569</h2>
+        <div class="metric-strip">
+          <div class="metric-cell">
+            <div class="label">รพ. เชื่อมต่อ</div>
+            <div class="num">26</div>
+          </div>
           <!-- VERIFY: patients_total -->
-          <div class="metric-tile"><div class="num">287</div><div class="label">ผู้ป่วยในระบบ</div></div>
-          <!-- VERIFY: sync_success_pct_30d -->
-          <div class="metric-tile"><div class="num">99.4<span class="unit">%</span></div><div class="label">sync success rate (30 วัน)</div></div>
-          <!-- VERIFY: uptime_days -->
-          <div class="metric-tile"><div class="num">87<span class="unit">วัน</span></div><div class="label">uptime ต่อเนื่อง</div></div>
-          <div class="metric-tile"><div class="num">463</div><div class="label">unit + integration tests</div></div>
-          <div class="metric-tile"><div class="num">&lt; 2<span class="unit">sec</span></div><div class="label">SQL query latency (SLA)</div></div>
-        </div>
-        <p style="font-size: 13pt; color: rgba(245,243,237,0.55); margin-top: 16px; text-align: right;">
-          ตัวเลขสด · ดึง ณ 26 พ.ค. 2569 · เวลาประชุม
-        </p>
-      </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">07 / 12</span></div>
-    </div>
-  </section>
-
-  <!-- SLIDE 8 — Real patient case timeline
-       VERIFY: replace [X] + [แพทย์ผู้รับผิดชอบ] -->
-  <section class="slide bg-8" id="slide-8">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">บทที่ 3 · เรื่องจริงจากระบบ</p>
-        <h1 class="title">หนึ่งเคส · หนึ่งชีวิต · ระบบทำงานได้จริง</h1>
-        <div class="divider"></div>
-        <div class="glass" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
-          <div class="case-grid">
-            <div class="case-rail"></div>
-            <div class="case-events">
-              <div class="case-event tone-yellow"><span class="t">14:23</span><span class="body">G1 อายุ 17 รับเข้า <b>รพช. [X]</b></span></div>
-              <div class="case-event tone-yellow"><span class="t">14:24</span><span class="body">KK-LRMS sync → CPD score <span class="danger">11 (High Risk)</span></span></div>
-              <div class="case-event tone-red"><span class="t">14:25</span><span class="body">แจ้งเตือนถึง <b>สูติแพทย์เวรที่ รพศ.ขอนแก่น</b></span></div>
-              <div class="case-event tone-red"><span class="t">14:30</span><span class="body">สูติแพทย์เปิด <b>partograph + ANC history</b> ของผู้ป่วย</span></div>
-              <div class="case-event tone-red"><span class="t">14:45</span><span class="body">ตัดสินใจ refer ทันที <b>(เร็วกว่า workflow เดิม ~45 นาที)</b></span></div>
-              <div class="case-event tone-green"><span class="t">16:10</span><span class="body">ผู้ป่วยถึง รพศ. — <b>ทีมพร้อม ข้อมูลเต็ม</b></span></div>
-              <div class="case-event tone-green"><span class="t">17:50</span><span class="body"><span class="success">C/S สำเร็จ · แม่และทารกปลอดภัย ✓</span></span></div>
-            </div>
+          <div class="metric-cell">
+            <div class="label">ผู้ป่วยในระบบ</div>
+            <div class="num">287</div>
           </div>
-          <p style="font-size: 12pt; color: rgba(245,243,237,0.55); margin: 10px 0 0; text-align: right;">
-            ข้อมูลผ่านการ anonymize · ได้รับความเห็นชอบจาก <b style="color: var(--moph-gold-2);">[แพทย์ผู้รับผิดชอบ]</b>
+          <!-- VERIFY: sync_success_pct_30d -->
+          <div class="metric-cell">
+            <div class="label">Sync success (30 วัน)</div>
+            <div class="num">99.4<span class="unit">%</span></div>
+          </div>
+          <!-- VERIFY: uptime_days -->
+          <div class="metric-cell">
+            <div class="label">Uptime ต่อเนื่อง</div>
+            <div class="num">87<span class="unit">วัน</span></div>
+          </div>
+          <div class="metric-cell">
+            <div class="label">Unit + integration tests</div>
+            <div class="num">463</div>
+          </div>
+          <div class="metric-cell">
+            <div class="label">SQL latency (SLA)</div>
+            <div class="num">&lt; 2<span class="unit">วินาที</span></div>
+          </div>
+        </div>
+
+        <div class="row-sep">
+          <h2 class="section">ตัวอย่างเคส · การส่งต่อผู้ป่วยความเสี่ยงสูงที่ระบบช่วยจับได้ทันเวลา</h2>
+          <p class="body-text">
+            ผู้ป่วย G1 อายุ 17 ปี รับเข้าห้องคลอด <b>รพช. [X]</b>
+            ระบบประเมินความเสี่ยงและแจ้งเตือนสูติแพทย์ที่ รพศ.ขอนแก่น
+            ภายในเวลา 2 นาทีหลังรับเข้า ส่งผลให้การตัดสินใจ refer
+            เร็วกว่า workflow เดิมประมาณ 45 นาที
+          </p>
+          <div class="timeline">
+            <div class="t-time">14:23</div>
+            <div class="t-body">G1 อายุ 17 รับเข้า <b>รพช. [X]</b></div>
+            <div class="t-time">14:24</div>
+            <div class="t-body">KK-LRMS sync ข้อมูล → CPD score <span class="high">11 (High Risk)</span></div>
+            <div class="t-time">14:25</div>
+            <div class="t-body">แจ้งเตือนถึง <b>สูติแพทย์เวรที่ รพศ.ขอนแก่น</b></div>
+            <div class="t-time">14:45</div>
+            <div class="t-body">ตัดสินใจ refer ทันที <b>(เร็วกว่า workflow เดิม ประมาณ 45 นาที)</b></div>
+            <div class="t-time">16:10</div>
+            <div class="t-body">ผู้ป่วยถึง รพศ. · ทีมพร้อม ข้อมูล partograph + ANC ครบ</div>
+            <div class="t-time">17:50</div>
+            <div class="t-body"><span class="ok">Cesarean section สำเร็จ · แม่และทารกปลอดภัย</span></div>
+          </div>
+          <p class="body-text" style="font-size: 12pt; color: var(--slate-2); margin-top: 14px;">
+            ข้อมูลผ่านการ anonymize · ได้รับความเห็นชอบจาก <b>[แพทย์ผู้รับผิดชอบ]</b>
           </p>
         </div>
       </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">08 / 12</span></div>
+      <div class="bottom-bar">
+        <span><b>KK-LRMS</b> · BMS × สสจ.ขอนแก่น · 26 พ.ค. 2569</span>
+        <span>หน้า 03 / 05</span>
+      </div>
     </div>
   </section>
 
-  <!-- SLIDE 9 — Scale path -->
-  <section class="slide bg-9" id="slide-9">
+  <!-- ============================================================
+       SLIDE 4 — แผนขยายผลและงบประมาณ (3:00)
+       Stage timeline + 6-week onboarding + cost framework
+       ============================================================ -->
+  <section class="slide" id="slide-4">
     <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
+      <div class="top-bar">
+        <span class="ministry"><b>บริษัท บางกอกเมดิคอลซอฟต์แวร์ จำกัด</b> · ในความร่วมมือกับ สำนักงานสาธารณสุขจังหวัดขอนแก่น</span>
+        <span class="page-no">04<span class="total"> / 05</span></span>
+      </div>
       <div class="slide-body">
-        <p class="eyebrow">บทที่ 3 · จากจังหวัดสู่ประเทศ</p>
-        <h1 class="title">พร้อมขยาย · สถาปัตยกรรม multi-tenant พร้อมรองรับวันแรก</h1>
-        <div class="divider"></div>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; flex: 1; min-height: 0;">
-          <div class="stage-card done">
-            <div class="stage-status">✅ ดำเนินงานแล้ว</div>
+        <p class="eyebrow">ส่วนที่ 3 · แผนขยายผล</p>
+        <h1 class="title">แผนขยายผลและกรอบงบประมาณ · จากจังหวัดขอนแก่น สู่เขตสุขภาพที่ 7 และระดับชาติ</h1>
+
+        <h2 class="section">แผนการขยายผล 3 ระยะ</h2>
+        <div class="stage-row">
+          <div class="stage-block done">
             <div class="stage-year">2569</div>
-            <div class="stage-name">ขอนแก่น</div>
-            <div class="stage-sub">26 รพช. + 1 รพศ.</div>
-            <div class="stage-foot">operational today</div>
+            <div class="stage-target">จังหวัดขอนแก่น</div>
+            <div class="stage-detail">26 รพช. + 1 รพศ. · ดำเนินงานต่อเนื่อง</div>
+            <span class="stage-tag">ดำเนินงานแล้ว</span>
           </div>
-          <div class="stage-card">
-            <div class="stage-status">🎯 เป้าหมายถัดไป</div>
-            <div class="stage-year">2570<span class="qtr">Q1–Q3</span></div>
-            <div class="stage-name">เขตสุขภาพที่ 7</div>
-            <div class="stage-sub">7 จังหวัด · ~150 รพช.</div>
-            <div class="stage-foot">requires board approval</div>
+          <div class="stage-block goal">
+            <div class="stage-year">2570 <span class="qtr">Q1–Q3</span></div>
+            <div class="stage-target">เขตสุขภาพที่ 7</div>
+            <div class="stage-detail">7 จังหวัด · ประมาณ 150 รพช.</div>
+            <span class="stage-tag">ขอความเห็นชอบ</span>
           </div>
-          <div class="stage-card">
-            <div class="stage-status">🎯 ระดับชาติ</div>
-            <div class="stage-year">2570<span class="qtr">Q4</span></div>
-            <div class="stage-name">MOPH-managed service</div>
-            <div class="stage-sub">เปิดให้ทุกเขตใช้งาน</div>
-            <div class="stage-foot">requires HDC integration</div>
+          <div class="stage-block goal">
+            <div class="stage-year">2570 <span class="qtr">Q4</span></div>
+            <div class="stage-target">MOPH-managed service</div>
+            <div class="stage-detail">เปิดให้ทุกเขตใช้งาน · เชื่อมโยง HDC</div>
+            <span class="stage-tag">เป้าหมายระดับชาติ</span>
           </div>
-          <div class="stage-card">
-            <div class="stage-status">🎯 ครบทั้งประเทศ</div>
+          <div class="stage-block goal">
             <div class="stage-year">2571</div>
-            <div class="stage-name">ทุกเขตสุขภาพ</div>
-            <div class="stage-sub">13 เขต · ~900 รพช.</div>
-            <div class="stage-foot">national MMR ≤ 17</div>
+            <div class="stage-target">ครบทุกเขตสุขภาพ</div>
+            <div class="stage-detail">13 เขต · ประมาณ 900 รพช.</div>
+            <span class="stage-tag">ครอบคลุมประเทศ</span>
           </div>
         </div>
-        <p style="font-size: 15pt; color: var(--moph-ink-2); margin-top: 18px;">
-          <b style="color: var(--moph-gold-2);">6 สัปดาห์ต่อจังหวัด</b> (รายละเอียดสไลด์ถัดไป) · HOSxP เดิมไม่ต้องเปลี่ยน
-        </p>
+
+        <div class="two-col" style="margin-top: 28px;">
+          <!-- LEFT: 6-week onboarding -->
+          <div>
+            <h3 class="subsection">การ onboard 1 จังหวัด ใช้เวลาประมาณ 6 สัปดาห์</h3>
+            <ul class="formal numbered">
+              <li><b>สัปดาห์ที่ 1:</b> ลงนาม MOU + กำหนดผู้ประสานงาน สสจ.</li>
+              <li><b>สัปดาห์ที่ 2–3:</b> เปิด BMS Session tunnel + ทดสอบ sync</li>
+              <li><b>สัปดาห์ที่ 3–4:</b> คัดกรองข้อมูล + อบรมพยาบาล/สูติแพทย์</li>
+              <li><b>สัปดาห์ที่ 5:</b> Pilot run · 1 รพช.</li>
+              <li><b>สัปดาห์ที่ 6:</b> Rollout 5+ รพช. + handover</li>
+            </ul>
+            <p class="body-text" style="margin-top: 16px;">
+              <b>1 ทีมเทคนิค (2 คน)</b> รองรับได้ 3 จังหวัดพร้อมกัน
+              ดังนั้นเขตสุขภาพที่ 7 (7 จังหวัด) ใช้ 2 ทีม · ประมาณ <b>4 เดือนเสร็จทั้งเขต</b>
+            </p>
+          </div>
+
+          <!-- RIGHT: cost framework -->
+          <div class="col-sep">
+            <h3 class="subsection">กรอบงบประมาณต่อจังหวัด · ประมาณการเบื้องต้น</h3>
+            <table class="data">
+              <thead>
+                <tr><th>รายการ</th><th class="num">บาท / จังหวัด</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Onboarding 1 จังหวัด (~20 รพช.)</td><td class="num">[ระบุก่อนประชุม]</td></tr>
+                <tr><td>Cloud hosting (รายปี)</td><td class="num">[ระบุก่อนประชุม]</td></tr>
+                <tr><td>Ops + 24/7 support (รายปี)</td><td class="num">[ระบุก่อนประชุม]</td></tr>
+                <tr class="total"><td>รวม Region 7 ปีแรก (7 จังหวัด)</td><td class="num">[ระบุก่อนประชุม]</td></tr>
+              </tbody>
+            </table>
+            <p class="body-text" style="font-size: 13pt; color: var(--slate-2); margin-top: 12px;">
+              ค่าใช้จ่ายจริงขึ้นกับจำนวน รพช. ต่อจังหวัด และ data center ที่เลือกใช้
+            </p>
+          </div>
+        </div>
       </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">09 / 12</span></div>
+      <div class="bottom-bar">
+        <span><b>KK-LRMS</b> · BMS × สสจ.ขอนแก่น · 26 พ.ค. 2569</span>
+        <span>หน้า 04 / 05</span>
+      </div>
     </div>
   </section>
 
-  <!-- SLIDE 10 — Onboarding Gantt -->
-  <section class="slide bg-10" id="slide-10">
+  <!-- ============================================================
+       SLIDE 5 — ข้อเสนอต่อบอร์ดผู้บริหาร (3:00)
+       Formal 4-point ask + signatures
+       VERIFY: [ชื่อ-สกุล] / [email] / [phone]
+       ============================================================ -->
+  <section class="slide" id="slide-5">
     <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
+      <div class="top-bar">
+        <span class="ministry"><b>บริษัท บางกอกเมดิคอลซอฟต์แวร์ จำกัด</b> · ในความร่วมมือกับ สำนักงานสาธารณสุขจังหวัดขอนแก่น</span>
+        <span class="page-no">05<span class="total"> / 05</span></span>
+      </div>
       <div class="slide-body">
-        <p class="eyebrow">บทที่ 3 · พิสูจน์การขยาย</p>
-        <h1 class="title">6 สัปดาห์ต่อจังหวัด · ทำคู่ขนานได้หลายจังหวัด</h1>
-        <div class="divider"></div>
-        <div class="gantt-wrap">
-          <div class="gantt-head">
-            <div></div>
-            <div>W1</div><div>W2</div><div>W3</div><div>W4</div><div>W5</div><div>W6</div>
-          </div>
-          <div class="gantt-row">
-            <div class="label">ลงนาม MOU + ผู้ประสานงาน สสจ.</div>
-            <div class="bar bar-navy"></div>
-            <div></div><div></div><div></div><div></div><div></div>
-          </div>
-          <div class="gantt-row">
-            <div class="label">เปิด BMS Session tunnel + ทดสอบ sync</div>
-            <div></div>
-            <div class="bar bar-gold" style="border-radius: 4px 0 0 4px;"></div>
-            <div class="bar bar-gold" style="border-radius: 0 4px 4px 0;"></div>
-            <div></div><div></div><div></div>
-          </div>
-          <div class="gantt-row">
-            <div class="label">คัดกรองข้อมูล + อบรมพยาบาล/สูติแพทย์</div>
-            <div></div><div></div>
-            <div class="bar bar-navy" style="border-radius: 4px 0 0 4px;"></div>
-            <div class="bar bar-navy" style="border-radius: 0 4px 4px 0;"></div>
-            <div></div><div></div>
-          </div>
-          <div class="gantt-row">
-            <div class="label">Pilot run · 1 รพช.</div>
-            <div></div><div></div><div></div><div></div>
-            <div class="bar bar-gold"></div>
-            <div></div>
-          </div>
-          <div class="gantt-row">
-            <div class="label">Rollout 5+ รพช. + handover</div>
-            <div></div><div></div><div></div><div></div><div></div>
-            <div class="bar bar-green"></div>
-          </div>
-        </div>
-        <ul class="bullet-list" style="margin-top: 16px;">
-          <li><b>1 ทีม technical (2 คน)</b> รองรับ 3 จังหวัดพร้อมกัน</li>
-          <li><b>เขตสุขภาพที่ 7 (7 จังหวัด)</b> → 2 ทีม · ~4 เดือนเสร็จทั้งเขต</li>
+        <p class="eyebrow">ส่วนที่ 4 · ข้อเสนอต่อบอร์ด</p>
+        <h1 class="title">ข้อเสนอต่อคณะผู้บริหารกระทรวงสาธารณสุข · สี่ประเด็น</h1>
+
+        <p class="body-text" style="margin-bottom: 26px;">
+          เพื่อยกระดับการเฝ้าระวังการคลอดทั้งประเทศและสนับสนุนเป้าหมาย
+          อัตราตายมารดา ≤ 17 ตามแผน Service Plan 2570
+          สำนักงานสาธารณสุขจังหวัดขอนแก่น ขอความเห็นชอบจากบอร์ดผู้บริหาร
+          กระทรวงสาธารณสุข ในประเด็นต่อไปนี้
+        </p>
+
+        <ul class="formal numbered" style="font-size: 17pt;">
+          <li style="padding: 14px 0 14px 36px;">
+            <b>หนังสือเห็นชอบจาก สป.สธ.</b> · ขยายผลระบบ KK-LRMS
+            สู่เขตสุขภาพที่ 7 (7 จังหวัด · ประมาณ 150 รพช.) ภายในปีงบประมาณ 2570
+          </li>
+          <li style="padding: 14px 0 14px 36px;">
+            <b>บรรจุในแผน Service Plan</b> · กำหนดให้ KK-LRMS
+            เป็นเครื่องมือสนับสนุนตัวชี้วัด Maternal Health รอบปีงบประมาณ 2570
+          </li>
+          <li style="padding: 14px 0 14px 36px;">
+            <b>กรอบงบประมาณ FY 2570</b> · จัดสรรงบประมาณสำหรับ hosting,
+            onboarding และ ops staffing เพื่อรองรับการขยายผลเขตสุขภาพที่ 7
+          </li>
+          <li style="padding: 14px 0 14px 36px;">
+            <b>มอบหมายการเชื่อมโยงข้อมูลกับ HDC</b> · ข้อมูล KK-LRMS
+            ไหลเข้าสู่ national health data lake ภายใต้กรอบกำกับของ Digital Health
+          </li>
         </ul>
-      </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">10 / 12</span></div>
-    </div>
-  </section>
 
-  <!-- SLIDE 11 — The 4 asks quadrant
-       VERIFY: replace presenter name / email / phone -->
-  <section class="slide bg-11" id="slide-11">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>กระทรวงสาธารณสุข</span><span class="sep">·</span><span>สำนักงานสาธารณสุขจังหวัดขอนแก่น</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">สิ่งที่เราขอจากบอร์ดวันนี้</p>
-        <h1 class="title">สี่สิ่งจากบอร์ดผู้บริหาร · เพื่อยกระดับการเฝ้าระวังการคลอดทั้งประเทศ</h1>
-        <div class="divider"></div>
-        <div class="ask-quadrant">
-          <div class="ask-tile">
-            <div class="icon">📜</div>
-            <h3>หนังสือเห็นชอบจาก สป.สธ.</h3>
-            <p>ขยายผล KK-LRMS สู่เขตสุขภาพที่ 7 (7 จังหวัด · ~150 รพช.)</p>
-          </div>
-          <div class="ask-tile">
-            <div class="icon">📋</div>
-            <h3>บรรจุใน Service Plan</h3>
-            <p>Maternal Health KPI รอบปีงบประมาณ 2570</p>
-          </div>
-          <div class="ask-tile">
-            <div class="icon">💰</div>
-            <h3>กรอบงบประมาณ FY 2570</h3>
-            <p>Hosting + onboarding + ops staffing สำหรับ Region 7</p>
-          </div>
-          <div class="ask-tile">
-            <div class="icon">🔗</div>
-            <h3>มอบหมายเชื่อมโยงกับ HDC</h3>
-            <p>ข้อมูล KK-LRMS → national health data lake</p>
-          </div>
-        </div>
-        <p style="font-size: 13pt; color: rgba(245,243,237,0.6); margin-top: 18px; text-align: right;">
-          ติดต่อ <b style="color: var(--moph-gold-2);">[presenter name]</b> · [email] · [phone]
-        </p>
-      </div>
-      <div class="foot"><span><b>KK-LRMS</b> · สสจ.ขอนแก่น</span><span class="page">11 / 12</span></div>
-    </div>
-  </section>
-
-  <!-- SLIDE 12 — Thank you + QR -->
-  <section class="slide bg-12" id="slide-12">
-    <div class="hero">
-      <p class="hero-eye">26 พ.ค. 2569 · MOPH Executive Briefing</p>
-      <h1 class="hero-title" style="font-size: 60pt;">ขอบคุณบอร์ดผู้บริหาร<br/>กระทรวงสาธารณสุข</h1>
-      <div class="hero-divider"></div>
-      <div class="qr-card">
-        <img src="assets/qr-about.png" alt="QR ไปยังหน้าข้อมูลระบบ" />
-        <p style="font-size: 20pt; color: var(--moph-ink-2); margin: 0;">
-          ข้อมูลระบบเพิ่มเติม — สแกน QR
-        </p>
-        <p class="url">kk-lrms.bmscloud.in.th/about</p>
-      </div>
-    </div>
-    <div class="foot">
-      <span><b>KK-LRMS</b> · สำนักงานสาธารณสุขจังหวัดขอนแก่น</span>
-      <span class="page">12 / 12</span>
-    </div>
-  </section>
-
-  <!-- BACKUP SLIDES B1–B6 — toggle with 'B' -->
-
-  <section class="slide bg-bk" id="backup-1">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>BACKUP B1 · TECHNICAL STACK</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">หากบอร์ด Digital Health ถามรายละเอียดสถาปัตยกรรม</p>
-        <h1 class="title">Technical stack — production-grade, mainstream technologies</h1>
-        <div class="divider"></div>
-        <div class="two-col">
-          <div class="glass">
-            <ul class="bullet-list">
-              <li><b>Next.js 16</b> + React 19 + TypeScript 5</li>
-              <li><b>PostgreSQL 16</b> production · SQLite in-memory tests</li>
-              <li><b>NextAuth v5</b> · BMS Session + JWT</li>
-              <li><b>Tailwind CSS 4</b> + shadcn/ui</li>
-              <li><b>Recharts</b> · partogram + vital signs charts</li>
-            </ul>
-          </div>
-          <div class="glass">
-            <ul class="bullet-list">
-              <li><b>BMS Session API</b> for HOSxP polling (30 sec)</li>
-              <li><b>Server-Sent Events</b> push to clients</li>
-              <li><b>Redis</b> for marketplace tokens + sync cache</li>
-              <li><b>Docker</b> multi-stage build · Node 20 LTS</li>
-              <li><b>463</b> Vitest + Playwright tests</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      <div class="foot"><span><b>KK-LRMS BACKUP</b></span><span class="page">B1</span></div>
-    </div>
-  </section>
-
-  <section class="slide bg-bk" id="backup-2">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>BACKUP B2 · ONBOARDING COST</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">หากถามต้นทุนต่อโรงพยาบาล</p>
-        <h1 class="title">ต้นทุนต่อจังหวัด — ประมาณการเบื้องต้น</h1>
-        <div class="divider"></div>
-        <div class="glass">
-          <table class="bordered" style="font-size: 17pt;">
+        <div class="row-sep">
+          <table class="data" style="margin-top: 0;">
             <thead>
-              <tr><th>รายการ</th><th style="text-align: right;">ประมาณการ (บาท/จังหวัด)</th></tr>
+              <tr><th style="width: 25%;">ผู้นำเสนอ</th><th>ติดต่อ</th><th>หน่วยงาน</th></tr>
             </thead>
             <tbody>
-              <tr><td>Onboarding 1 จังหวัด (~20 รพช.)</td><td style="text-align: right;">[ระบุก่อนประชุม]</td></tr>
-              <tr><td>Cloud hosting (รายปี)</td><td style="text-align: right;">[ระบุก่อนประชุม]</td></tr>
-              <tr><td>Ops + 24/7 support (รายปี)</td><td style="text-align: right;">[ระบุก่อนประชุม]</td></tr>
-              <tr style="font-weight: 700; background: rgba(212,160,23,0.08);">
-                <td>รวม Region 7 ปีแรก</td>
-                <td style="text-align: right; color: var(--moph-gold-2);">[ระบุก่อนประชุม]</td>
+              <tr>
+                <td><b>ชัยพร สุรเตมีย์กุล</b></td>
+                <td>chaiyaporn.suratemeekul@gmail.com</td>
+                <td>บริษัท บางกอกเมดิคอลซอฟต์แวร์ จำกัด</td>
               </tr>
             </tbody>
           </table>
-          <p style="margin-top: 16px; font-size: 13pt; color: rgba(245,243,237,0.55);">
-            ค่าใช้จ่ายจริงขึ้นกับจำนวน รพช./จังหวัด และ data center ที่เลือก
+          <p class="body-text" style="font-size: 13pt; color: var(--slate-2); margin-top: 16px; text-align: right;">
+            ข้อมูลระบบเพิ่มเติม · <b style="color: var(--navy);">https://kk-lrms.bmscloud.in.th/about</b>
           </p>
         </div>
       </div>
-      <div class="foot"><span><b>KK-LRMS BACKUP</b></span><span class="page">B2</span></div>
-    </div>
-  </section>
-
-  <section class="slide bg-bk" id="backup-3">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>BACKUP B3 · PDPA MAPPING</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">หากถามการสอดคล้อง PDPA โดยละเอียด</p>
-        <h1 class="title">PDPA mapping — มาตราต่อมาตรา</h1>
-        <div class="divider"></div>
-        <div class="glass">
-          <ul class="bullet-list" style="font-size: 17pt;">
-            <li><b>มาตรา 24 (ฐานทางกฎหมาย):</b> ใช้ฐาน "ความจำเป็นทางการแพทย์" + "ภารกิจของรัฐ"</li>
-            <li><b>มาตรา 26 (ข้อมูลอ่อนไหว):</b> ชื่อ + CID เข้ารหัส AES-256-GCM; CID hash SHA-256</li>
-            <li><b>มาตรา 32 (สิทธิเจ้าของข้อมูล):</b> API endpoint สำหรับ export + delete ตาม HN/AN</li>
-            <li><b>มาตรา 37 (มาตรการรักษาความปลอดภัย):</b> Role-based access · audit log · HTTPS-only · browser-only HOSxP polling</li>
-            <li><b>DPA between สสจ.ขอนแก่น และผู้พัฒนา:</b> ลงนามเรียบร้อย</li>
-          </ul>
-        </div>
+      <div class="bottom-bar">
+        <span><b>KK-LRMS</b> · BMS × สสจ.ขอนแก่น · 26 พ.ค. 2569</span>
+        <span>หน้า 05 / 05 · ขอบคุณคณะผู้บริหารทุกท่าน</span>
       </div>
-      <div class="foot"><span><b>KK-LRMS BACKUP</b></span><span class="page">B3</span></div>
-    </div>
-  </section>
-
-  <section class="slide bg-bk" id="backup-4">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>BACKUP B4 · MEASUREMENT PLAN</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">หากถาม "จะวัดผลอย่างไร"</p>
-        <h1 class="title">6-month measurement plan post-endorsement</h1>
-        <div class="divider"></div>
-        <div class="glass">
-          <ul class="bullet-list" style="font-size: 17pt;">
-            <li><b>เดือน 1–2:</b> Onboarding metrics — # โรงพยาบาลที่เชื่อมต่อ · sync uptime · # ผู้ป่วยในระบบ</li>
-            <li><b>เดือน 3–4:</b> Clinical adoption — # refer ที่ระบบจับได้ก่อนรายงานปาก · เวลา decision-to-refer</li>
-            <li><b>เดือน 5–6:</b> Outcome KPIs — MMR ในกลุ่ม intervention vs control · time-to-arrival · referral abandonment rate</li>
-            <li><b>รายงานรายไตรมาส</b> ถึงบอร์ด สธ. + Bureau of Reproductive Health</li>
-            <li><b>External audit</b> โดย สำนักนโยบายและยุทธศาสตร์ ที่เดือน 6</li>
-          </ul>
-        </div>
-      </div>
-      <div class="foot"><span><b>KK-LRMS BACKUP</b></span><span class="page">B4</span></div>
-    </div>
-  </section>
-
-  <section class="slide bg-bk" id="backup-5">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>BACKUP B5 · RISK REGISTER</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">หากถามความเสี่ยงและการจัดการ</p>
-        <h1 class="title">ความเสี่ยงและมาตรการป้องกัน</h1>
-        <div class="divider"></div>
-        <div class="glass">
-          <table class="bordered" style="font-size: 15pt;">
-            <thead>
-              <tr><th>ความเสี่ยง</th><th>มาตรการ</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>HOSxP downtime</td><td>Cached data + "Offline — last sync" badge · Webhook fallback</td></tr>
-              <tr><td>Tunnel/network failure</td><td>Browser-only polling จาก station เครื่องเดียวก็ยังทำงาน</td></tr>
-              <tr><td>Key compromise (encryption)</td><td>Key rotation policy · re-encrypt batch · audit log</td></tr>
-              <tr><td>โรงพยาบาล opt-out</td><td>is_active gate ในระบบ · ลบข้อมูลตาม PDPA มาตรา 32</td></tr>
-              <tr><td>Wrong CPD score → false alert</td><td>สูติแพทย์เป็น final decision-maker · ระบบเป็น decision support</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div class="foot"><span><b>KK-LRMS BACKUP</b></span><span class="page">B5</span></div>
-    </div>
-  </section>
-
-  <section class="slide bg-bk" id="backup-6">
-    <div class="slide-fg">
-      <div class="brand-bar"><span class="dot"></span><span>BACKUP B6 · COMPARISON</span></div>
-      <div class="slide-body">
-        <p class="eyebrow">หากถามทำไมไม่ใช้ระบบ X</p>
-        <h1 class="title">ทำไม KK-LRMS — ไม่ใช่ทางเลือกที่ใหญ่กว่า</h1>
-        <div class="divider"></div>
-        <div class="glass">
-          <ul class="bullet-list" style="font-size: 17pt;">
-            <li><b>HDC ระดับชาติ</b> — ออกแบบเพื่อ reporting/aggregation; ไม่ใช่ real-time labor monitoring</li>
-            <li><b>HOSxP-XE Dashboard</b> — รายโรงพยาบาล; ไม่รวมข้ามโรงพยาบาล; ไม่มี cross-CID matching</li>
-            <li><b>เอกชน Cloud OB-tracking</b> — ค่าใช้จ่ายสูง; ไม่สอดคล้อง PDPA-Thai; ข้อมูลไหลออกนอกประเทศ</li>
-            <li><b>KK-LRMS</b> — Open-source, multi-tenant ตั้งแต่วันแรก, PDPA-compliant, ใช้ HOSxP เดิม, browser-only</li>
-          </ul>
-        </div>
-      </div>
-      <div class="foot"><span><b>KK-LRMS BACKUP</b></span><span class="page">B6</span></div>
     </div>
   </section>
 
@@ -620,28 +356,37 @@
 
 <!-- Speaker notes overlay (toggle with N) -->
 <div class="notes-overlay" aria-label="Speaker notes">
-  <h2>Speaker Notes</h2>
-  <p class="meta">กด <b>N</b> เพื่อเปิด/ปิด · มองเห็นเฉพาะหน้าจอ presenter</p>
+  <h2>บันทึกผู้นำเสนอ</h2>
+  <p class="meta">กด <b>N</b> เพื่อเปิด/ปิด · มองเห็นเฉพาะหน้าจอ presenter · ระยะเวลาประมาณ 3 นาที/สไลด์</p>
 
-  <div data-note data-for="slide-1"><h3>Slide 1 — Cold Open (40s)</h3><p><em>Pause 5s on map before speaking.</em></p><p>"จุดทองคือขอนแก่น — จังหวัดเดียวในประเทศไทยที่สูติแพทย์เห็นผู้คลอดทุกคนใน 26 รพช. ภายใน 30 วินาที วันนี้ผมมาเพื่อขอให้ภาพนี้ขยายไปทั่วเขต 7 และทั้งประเทศ"</p></div>
-  <div data-note data-for="slide-2"><h3>Slide 2 — Problem (90s)</h3><p>"ค่าเฉลี่ย MMR ~17 ซ่อนความเหลื่อมล้ำ · เส้นทางข้อมูลปัจจุบัน — โทร/LINE · ล่าช้า 30–90 นาที"</p></div>
-  <div data-note data-for="slide-3"><h3>Slide 3 — Dashboard (60s)</h3><p>"หน้าจอเดียว เห็นทุกห้องคลอดทั่วจังหวัด · 26 รพ · อัปเดต 30 วิ · CPD score คำนวณอัตโนมัติจาก HOSxP"</p></div>
-  <div data-note data-for="slide-4"><h3>Slide 4 — Clinical Intelligence (75s)</h3><p>"CPD 8 ปัจจัย · ≥10 refer · partograph alert/action ตาม WHO · ข้อมูลจาก HOSxP ตรง"</p></div>
-  <div data-note data-for="slide-5"><h3>Slide 5 — Cross-Hospital (60s)</h3><p>"refer match ด้วย CID hash SHA-256 · ไม่เก็บ plaintext"</p></div>
-  <div data-note data-for="slide-6"><h3>Slide 6 — Coverage + PDPA (90s)</h3><p>"HOSxP browser-only · non-HOSxP webhook · 5 ข้อ PDPA"</p></div>
-  <div data-note data-for="slide-7"><h3>Slide 7 — Built to Run (60s)</h3><p>"อ่าน 6 ตัวเลขธรรมชาติ · ปิดด้วย 'ไม่ใช่ prototype — production'"</p></div>
-  <div data-note data-for="slide-8"><h3>Slide 8 — Real Patient Case (90s)</h3><p>"เล่าเรื่องจริง · timeline 7 events · เน้น '14:45 เร็วกว่า workflow เดิม ~45 นาที'"</p></div>
-  <div data-note data-for="slide-9"><h3>Slide 9 — Scale Path (90s)</h3><p>"1 → 7 → 76 · Q1–Q3 ปีหน้า · Q4 MOPH service · 2571 ครบทุกเขต"</p></div>
-  <div data-note data-for="slide-10"><h3>Slide 10 — 6-Week Onboarding (60s)</h3><p>"6 สัปดาห์/จังหวัด · 1 ทีม 3 จังหวัด · เขต 7 ใช้ 2 ทีม ~4 เดือน"</p></div>
-  <div data-note data-for="slide-11"><h3>Slide 11 — The Ask (60s)</h3><p>"สี่อย่าง: หนังสือ · Service Plan · งบ FY70 · HDC · เป็น package"</p></div>
-  <div data-note data-for="slide-12"><h3>Slide 12 — Thank You (30s)</h3><p>"ขอบคุณ · QR · ยินดีตอบคำถาม"</p></div>
-
-  <div data-note data-for="backup-1"><h3>B1 — Tech Stack</h3><p>Next.js 16, React 19, PostgreSQL 16, NextAuth v5, BMS Session, Redis, Docker. 463 tests.</p></div>
-  <div data-note data-for="backup-2"><h3>B2 — Cost</h3><p>Onboarding + cloud + ops · ตัวเลข [TBD]</p></div>
-  <div data-note data-for="backup-3"><h3>B3 — PDPA</h3><p>มาตรา 24/26/32/37 · DPA ลงนามแล้ว</p></div>
-  <div data-note data-for="backup-4"><h3>B4 — Measurement</h3><p>เดือน 1-2 onboarding · 3-4 clinical adoption · 5-6 outcome KPIs · audit เดือน 6</p></div>
-  <div data-note data-for="backup-5"><h3>B5 — Risk</h3><p>HOSxP down, network, key compromise, opt-out, false alert</p></div>
-  <div data-note data-for="backup-6"><h3>B6 — vs Alternatives</h3><p>HDC = reporting · HOSxP-XE = รายโรง · cloud เอกชน = PDPA-ขัด · KK-LRMS = open, multi-tenant, PDPA</p></div>
+  <div data-note data-for="slide-1">
+    <h3>สไลด์ 1 — บทนำ (3:00)</h3>
+    <p>กล่าวเปิดอย่างเป็นทางการ แนะนำตัวเอง ตำแหน่ง และหน่วยงาน
+    บอกวัตถุประสงค์ของการนำเสนอ — ขอความเห็นชอบขยายผลระบบสู่เขตสุขภาพที่ 7
+    และนำเสนอภาพรวมในเวลา 15 นาที</p>
+  </div>
+  <div data-note data-for="slide-2">
+    <h3>สไลด์ 2 — สถานการณ์และระบบ (3:00)</h3>
+    <p>ฝั่งซ้าย: อธิบายสถานการณ์ MMR และปัญหาความล่าช้าในการ refer
+    ฝั่งขวา: สรุประบบ KK-LRMS ที่ดำเนินงานในจังหวัดขอนแก่น
+    เน้นว่าทุกข้อมูลมาจาก HOSxP ตรง ไม่ต้องพิมพ์ซ้ำ ไม่มีข้อผิดพลาดจากมนุษย์</p>
+  </div>
+  <div data-note data-for="slide-3">
+    <h3>สไลด์ 3 — ผลการดำเนินงาน (3:00)</h3>
+    <p>อ่านตัวเลข 6 ตัวจากแถบบน — เน้นว่านี่คือ production ไม่ใช่ prototype
+    เล่าเคสจริงตาม timeline · เน้นบรรทัด "14:45 ตัดสินใจ refer · เร็วกว่า workflow เดิมประมาณ 45 นาที"</p>
+  </div>
+  <div data-note data-for="slide-4">
+    <h3>สไลด์ 4 — แผนขยายผลและงบประมาณ (3:00)</h3>
+    <p>เดินผ่านระยะ 1 → 2 → 3 ระดับ
+    อธิบาย 6 สัปดาห์ต่อจังหวัด · 1 ทีมรองรับ 3 จังหวัด
+    เขตสุขภาพที่ 7 ใช้ 2 ทีม ประมาณ 4 เดือนเสร็จ</p>
+  </div>
+  <div data-note data-for="slide-5">
+    <h3>สไลด์ 5 — ข้อเสนอ (3:00)</h3>
+    <p>อ่าน 4 ข้อเสนอตามลำดับ เน้นว่าทั้งสี่เป็น <b>package</b>
+    ขาดอย่างใดอย่างหนึ่งจะติดขัด · เปิดให้บอร์ดซักถาม</p>
+  </div>
 </div>
 
 <div class="slide-counter">—</div>
