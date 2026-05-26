@@ -68,6 +68,32 @@ interface LaborResponse {
 
 type TabKey = 'labor' | 'anc';
 
+// Response shape for /api/hospitals/[hcode]/incoming-pregnancies
+interface IncomingTermPregnancyItem {
+  id: string;
+  hn: string;
+  name: string;
+  age: number;
+  gravida: number;
+  para: number;
+  gaWeeks: number | null;
+  efwG: number | null;
+  edc: string | null;
+  ancRiskLevel: string;
+  ancVisitCount: number;
+  fromHcode: string;
+  fromHospitalName: string;
+  daysToEdc: number | null;
+  triggers: Array<'GA' | 'FW' | 'RISK'>;
+}
+interface IncomingPregnanciesResponse {
+  hubHcode: string;
+  minGaWeeks: number;
+  count: number;
+  byTrigger: { ga: number; fw: number; risk: number };
+  items: IncomingTermPregnancyItem[];
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 const RULE_BY_ID = new Map(ANC_RISK_RULES.map((r) => [r.id, r]));
@@ -164,7 +190,7 @@ function ConcernChip({ label, warn }: { label: string; warn?: boolean }) {
 }
 
 interface KpiProps {
-  group: 'LABOR' | 'ANC';
+  group: 'LABOR' | 'ANC' | 'REFER-IN';
   label: string;
   value: string;
   unit?: string;
@@ -989,6 +1015,14 @@ export default function HospitalConsolePage({
     `/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=200`,
     { refreshInterval: 60000 },
   );
+  // Pregnancies elsewhere whose capability rules say they'll be referred
+  // here for delivery. Only meaningful for hub hospitals (spokes return 0).
+  const { data: incomingData } = useSWR<IncomingPregnanciesResponse>(
+    `/api/hospitals/${hcode}/incoming-pregnancies?min_ga=34`,
+    { refreshInterval: 60000 },
+  );
+  const incomingCount = incomingData?.count ?? 0;
+  const incomingItems = useMemo(() => incomingData?.items ?? [], [incomingData?.items]);
 
   const hospital = laborData?.hospital;
   const hospitalName = hospital?.name ?? `รหัส ${hcode}`;
@@ -1150,11 +1184,11 @@ export default function HospitalConsolePage({
         </div>
       </div>
 
-      {/* KPI strip — 6 cells, 3 LABOR + 3 ANC */}
+      {/* KPI strip — 7 cells: 3 LABOR + 3 ANC + 1 REFER-IN (hub-only signal) */}
       <div
         className="grid bg-white"
         style={{
-          gridTemplateColumns: 'repeat(6, 1fr)',
+          gridTemplateColumns: 'repeat(7, 1fr)',
           borderBottom: '1px solid var(--rule-strong)',
         }}
       >
@@ -1206,7 +1240,113 @@ export default function HospitalConsolePage({
           valueColor={ancOverdue > 0 ? '#92660b' : undefined}
           sub={`ขาดนัด ${ancOverdue} · ครบกำหนด 7 วัน ${ancDueWeek}`}
         />
+        <KpiCell
+          group="REFER-IN"
+          label="GA ≥ 34w · จะส่งต่อมา"
+          value={String(incomingCount)}
+          unit="ราย"
+          valueColor={incomingCount > 0 ? 'var(--accent-navy)' : undefined}
+          sub={
+            incomingCount > 0
+              ? `GA ${incomingData?.byTrigger.ga ?? 0} · FW ${incomingData?.byTrigger.fw ?? 0} · risk ${incomingData?.byTrigger.risk ?? 0}`
+              : 'ไม่มีรายชื่อในขณะนี้'
+          }
+        />
       </div>
+
+      {/* REFER-IN PIPELINE — pregnancies at spokes that will be sent here.
+          Hidden on spoke hospitals (count === 0). Compact table; full drill
+          on click → patient detail. */}
+      {incomingCount > 0 && (
+        <div className="bg-white" style={{ borderBottom: '1px solid var(--rule-strong)' }}>
+          <div
+            className="flex items-baseline justify-between border-b px-5 py-2"
+            style={{ borderColor: 'var(--accent-navy)' }}
+          >
+            <div className="font-mono text-[12px] tracking-[0.1em] text-[var(--ink-navy)]">
+              <span className="mr-1.5 text-[var(--ink-navy-muted)]">02</span>
+              ผู้คลอดที่จะส่งต่อมา · GA ≥ {incomingData?.minGaWeeks ?? 34} สัปดาห์
+            </div>
+            <div className="font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
+              {incomingCount} ราย · {incomingItems.length === incomingCount ? 'ทั้งหมด' : `แสดง ${incomingItems.length}`}
+            </div>
+          </div>
+          <div className="overflow-x-auto" style={{ maxHeight: 320 }}>
+            <table className="w-full border-collapse text-[13px]">
+              <thead className="sticky top-0 bg-[var(--surface-cool)] text-[var(--ink-navy-muted)]">
+                <tr>
+                  <th className="px-5 py-1.5 text-left font-mono text-[10px] uppercase tracking-[0.1em]">HN</th>
+                  <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-[0.1em]">ชื่อ</th>
+                  <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-[0.1em]">อายุ</th>
+                  <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-[0.1em]">G/P</th>
+                  <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-[0.1em]">GA</th>
+                  <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-[0.1em]">EFW</th>
+                  <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-[0.1em]">EDC / วันที่เหลือ</th>
+                  <th className="px-3 py-1.5 text-center font-mono text-[10px] uppercase tracking-[0.1em]">ANC</th>
+                  <th className="px-3 py-1.5 text-center font-mono text-[10px] uppercase tracking-[0.1em]">เหตุผล</th>
+                  <th className="px-5 py-1.5 text-left font-mono text-[10px] uppercase tracking-[0.1em]">จาก</th>
+                </tr>
+              </thead>
+              <tbody>
+                {incomingItems.map((p) => {
+                  const edcTone =
+                    p.daysToEdc != null && p.daysToEdc < 0
+                      ? 'var(--risk-high)'
+                      : p.daysToEdc != null && p.daysToEdc <= 7
+                        ? '#92660b'
+                        : 'var(--ink-navy)';
+                  const riskTier = ancTier(p.ancRiskLevel);
+                  return (
+                    <tr
+                      key={p.id}
+                      className="cursor-pointer border-t hover:bg-[var(--surface-cool)]"
+                      style={{ borderColor: 'var(--rule-hair)' }}
+                      onClick={() => router.push(`/pregnancies/${p.id}`)}
+                    >
+                      <td className="px-5 py-1.5 font-mono text-[12px] tabular-nums text-[var(--ink-navy)]">{p.hn}</td>
+                      <td className="px-3 py-1.5 text-[var(--ink-navy)]">{maskName(p.name)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums">{p.age}</td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums">{p.gravida}/{p.para}</td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums">
+                        {p.gaWeeks != null ? `${p.gaWeeks}w` : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-[var(--ink-navy-dim)]">
+                        {p.efwG != null ? `${p.efwG}g` : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums" style={{ color: edcTone }}>
+                        {p.edc ? p.edc.slice(0, 10) : '—'}
+                        {p.daysToEdc != null && (
+                          <span className="ml-1.5 text-[10px] text-[var(--ink-navy-muted)]">
+                            ({p.daysToEdc < 0 ? `เลย ${Math.abs(p.daysToEdc)}` : `${p.daysToEdc}`}d)
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-center">
+                        <span
+                          className="inline-block border px-1.5 py-0.5 font-mono text-[10px]"
+                          style={{
+                            color: tierColor(riskTier),
+                            borderColor: tierColor(riskTier),
+                          }}
+                        >
+                          {p.ancRiskLevel}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-center font-mono text-[10px] text-[var(--ink-navy-dim)]">
+                        {p.triggers.join('+') || '—'}
+                      </td>
+                      <td className="px-5 py-1.5 text-[12px] text-[var(--ink-navy-dim)]">
+                        <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">[{p.fromHcode}]</span>{' '}
+                        {p.fromHospitalName}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div

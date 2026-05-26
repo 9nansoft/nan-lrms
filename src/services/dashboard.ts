@@ -26,6 +26,9 @@ import type {
 import type { ConnectionStatus, HospitalLevel } from '@/types/domain';
 import { decryptSafe } from '@/lib/encryption';
 import { SYNC_FAILURE_STATUSES } from '@/config/sync-status';
+import { getHospitalCapability } from '@/config/hospital-capabilities';
+import { ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
+import { AncRiskLevel } from '@/types/domain';
 
 // Reusable subquery — every cached_*/maternal_journeys aggregate joins this
 // against the relevant hospital_id column to honor the operational
@@ -741,5 +744,183 @@ export async function getTrends(
     newByRisk24h,
     currentShift,
     previousShift,
+  };
+}
+
+// ─── Incoming-term-pregnancy pipeline ─────────────────────────────────────
+//
+// From the hub's perspective: which pregnancies currently held at spoke
+// hospitals will eventually need to deliver here? A spoke must refer up when
+// any of GA / fetal weight / risk-level exceeds its capability tier
+// (see src/config/hospital-capabilities.ts). We resolve the referral chain
+// transitively — a F2-small case that would land at F2-mid first, but
+// F2-mid also can't handle it, ultimately lands at the hub.
+//
+// The Khon Kaen hub (hcode 10670) accepts everything, so once a chain
+// reaches it the journey is "incoming."
+
+export interface IncomingTermPregnancy {
+  id: string;
+  hn: string;
+  name: string;
+  age: number;
+  gravida: number;
+  para: number;
+  gaWeeks: number | null;
+  efwG: number | null;
+  edc: string | null;
+  ancRiskLevel: string;
+  ancVisitCount: number;
+  fromHcode: string;
+  fromHospitalName: string;
+  daysToEdc: number | null;
+  // Whether the refer-up is driven by GA / FW / risk
+  triggers: Array<'GA' | 'FW' | 'RISK'>;
+}
+
+// Walk the referTo chain until we find a hospital that can handle the case
+// (no trigger fires) or we hit a terminal (referTo === null). Returns the
+// hcode of the hospital where the journey will ultimately land.
+function resolveDestinationHcode(
+  spokeHcode: string,
+  gaWeeks: number,
+  efwG: number | null,
+  riskLevel: AncRiskLevel,
+): { destination: string | null; triggersAtSpoke: Array<'GA' | 'FW' | 'RISK'> } {
+  let current = spokeHcode;
+  const triggersAtSpoke: Array<'GA' | 'FW' | 'RISK'> = [];
+  // Cap at 6 hops — config chains are at most 3 deep; cap defends against
+  // accidental cycles if the table is ever edited badly.
+  for (let i = 0; i < 6; i++) {
+    const cap = getHospitalCapability(current);
+    if (!cap) return { destination: null, triggersAtSpoke };
+    const exceedsGa = gaWeeks < cap.minGaWeeks;
+    const exceedsFw = efwG != null && efwG < cap.minFetalWeightG;
+    const exceedsRisk =
+      ANC_RISK_LEVEL_ORDER[riskLevel] > ANC_RISK_LEVEL_ORDER[cap.maxRiskLevel];
+
+    // Record the triggers that fired at the actual spoke (first iteration only)
+    if (i === 0) {
+      if (exceedsGa) triggersAtSpoke.push('GA');
+      if (exceedsFw) triggersAtSpoke.push('FW');
+      if (exceedsRisk) triggersAtSpoke.push('RISK');
+    }
+
+    if (!exceedsGa && !exceedsFw && !exceedsRisk) {
+      return { destination: current, triggersAtSpoke };
+    }
+    if (cap.referTo === null) {
+      // Terminal that still can't handle — clinically a problem, but we
+      // return the terminal as destination so the case is at least visible.
+      return { destination: current, triggersAtSpoke };
+    }
+    current = cap.referTo;
+  }
+  return { destination: current, triggersAtSpoke };
+}
+
+export interface IncomingTermPregnanciesResult {
+  hubHcode: string;
+  minGaWeeks: number;
+  count: number;
+  byTrigger: { ga: number; fw: number; risk: number };
+  items: IncomingTermPregnancy[];
+}
+
+export async function getIncomingTermPregnancies(
+  db: DatabaseAdapter,
+  hubHcode: string,
+  minGaWeeks: number = 34,
+): Promise<IncomingTermPregnanciesResult> {
+  // Pull every active-stage pregnancy from active spokes that's at or past
+  // the threshold. JS filter then applies the capability rules.
+  const rows = await db.query<{
+    id: string;
+    hn: string;
+    name: string;
+    age: number;
+    gravida: number;
+    para: number;
+    ga_weeks: number | null;
+    efw_g: number | null;
+    edc: string | null;
+    anc_risk_level: string;
+    anc_visit_count: number;
+    from_hcode: string;
+    from_name: string;
+  }>(
+    `SELECT
+       mj.id, mj.hn, mj.name, mj.age, mj.gravida, mj.para,
+       mj.ga_weeks, mj.efw_g, mj.edc, mj.anc_risk_level, mj.anc_visit_count,
+       h.hcode AS from_hcode, h.name AS from_name
+     FROM maternal_journeys mj
+     JOIN hospitals h ON h.id = mj.current_hospital_id
+     WHERE mj.care_stage = 'PREGNANCY'
+       AND mj.ga_weeks IS NOT NULL
+       AND mj.ga_weeks >= ?
+       AND h.is_active = true
+       AND h.hcode <> ?`,
+    [minGaWeeks, hubHcode],
+  );
+
+  const items: IncomingTermPregnancy[] = [];
+  let gaCount = 0;
+  let fwCount = 0;
+  let riskCount = 0;
+
+  for (const r of rows) {
+    const ga = r.ga_weeks;
+    if (ga == null) continue;
+    const risk = (r.anc_risk_level as AncRiskLevel) ?? AncRiskLevel.LOW;
+    const { destination, triggersAtSpoke } = resolveDestinationHcode(
+      r.from_hcode,
+      ga,
+      r.efw_g,
+      risk,
+    );
+    if (destination !== hubHcode) continue;
+    if (triggersAtSpoke.length === 0) continue;
+
+    const daysToEdc = r.edc
+      ? Math.round((new Date(r.edc).getTime() - Date.now()) / 86400000)
+      : null;
+
+    items.push({
+      id: r.id,
+      hn: r.hn,
+      name: decryptSafe(r.name),
+      age: r.age,
+      gravida: r.gravida,
+      para: r.para,
+      gaWeeks: ga,
+      efwG: r.efw_g,
+      edc: r.edc,
+      ancRiskLevel: r.anc_risk_level,
+      ancVisitCount: r.anc_visit_count,
+      fromHcode: r.from_hcode,
+      fromHospitalName: r.from_name,
+      daysToEdc,
+      triggers: triggersAtSpoke,
+    });
+
+    if (triggersAtSpoke.includes('GA')) gaCount++;
+    if (triggersAtSpoke.includes('FW')) fwCount++;
+    if (triggersAtSpoke.includes('RISK')) riskCount++;
+  }
+
+  // Most urgent first — EDC soonest. Nulls at the end.
+  items.sort((a, b) => {
+    if (a.daysToEdc == null && b.daysToEdc == null) return 0;
+    if (a.daysToEdc == null) return 1;
+    if (b.daysToEdc == null) return -1;
+    return a.daysToEdc - b.daysToEdc;
+  });
+
+  return {
+    hubHcode,
+    minGaWeeks,
+    count: items.length,
+    byTrigger: { ga: gaCount, fw: fwCount, risk: riskCount },
+    items,
   };
 }
