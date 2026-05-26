@@ -24,6 +24,17 @@ export async function GET(request: NextRequest) {
       countSql += ` AND mj.care_stage = ?`;
       dataSql += ` AND mj.care_stage = ?`;
       params.push(stage);
+      // Freshness gates — see hospitals/[hcode]/journeys/route.ts for full
+      // rationale. Excludes stale PREGNANCY rows (delivered/lost to follow-up
+      // but never transitioned). EDC 2010–2019 cases were inflating counts.
+      if (stage === 'PREGNANCY') {
+        const freshClause = `
+          AND (mj.ga_weeks IS NULL OR mj.ga_weeks <= 42)
+          AND (mj.edc IS NULL OR mj.edc >= NOW() - INTERVAL '14 days')
+          AND (mj.last_anc_date IS NULL OR mj.last_anc_date >= NOW() - INTERVAL '60 days')`;
+        countSql += freshClause;
+        dataSql += freshClause;
+      }
     }
     if (riskLevel) {
       countSql += ` AND mj.anc_risk_level = ?`;

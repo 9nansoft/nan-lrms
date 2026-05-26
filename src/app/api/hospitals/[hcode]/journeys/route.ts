@@ -40,6 +40,21 @@ export async function GET(
       countSql += ` AND care_stage = ?`;
       dataSql += ` AND mj.care_stage = ?`;
       params2.push(stage);
+      // Freshness gates — only meaningful for PREGNANCY stage. Excludes
+      // historical rows that were migrated/loaded with care_stage='PREGNANCY'
+      // but whose owners already delivered (or were lost to follow-up):
+      //   - ga_weeks > 42 is biologically impossible (post-term)
+      //   - EDC more than 14 days past = effectively delivered
+      //   - last ANC visit > 60 days ago = lost to follow-up at this hospital
+      // Without these, the ANC tab showed pregnancies with EDC from 2010–2019.
+      if (stage === 'PREGNANCY') {
+        const freshClause = `
+          AND (mj.ga_weeks IS NULL OR mj.ga_weeks <= 42)
+          AND (mj.edc IS NULL OR mj.edc >= NOW() - INTERVAL '14 days')
+          AND (mj.last_anc_date IS NULL OR mj.last_anc_date >= NOW() - INTERVAL '60 days')`;
+        countSql += freshClause;
+        dataSql += freshClause;
+      }
     }
     if (riskLevel) {
       countSql += ` AND anc_risk_level = ?`;

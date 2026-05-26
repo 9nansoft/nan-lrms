@@ -864,6 +864,23 @@ export async function getIncomingTermPregnancies(
     from_hcode: string;
     from_name: string;
   }>(
+    // Freshness gates — exclude stale "PREGNANCY" rows whose owners
+    // already delivered, miscarried, or were lost to follow-up but whose
+    // care_stage was never transitioned (a known HOSxP-feed hygiene issue).
+    //
+    //   1. ga_weeks BETWEEN minGa AND 42 — anything >42 is biologically
+    //      impossible (post-term + already delivered).
+    //   2. edc IS NULL OR edc >= NOW() - INTERVAL '14 days' — past-EDC
+    //      pregnancies that are >14 days overdue are effectively complete;
+    //      a 14-day grace covers normal late-delivery cases.
+    //   3. last_anc_date IS NULL OR last_anc_date >= NOW() - INTERVAL '60 days'
+    //      — an ANC visit gap of 60+ days indicates the patient is no
+    //      longer being followed at this hospital (delivered elsewhere,
+    //      transferred, or abandoned care).
+    //
+    // Without these gates the hub view showed pregnancies with EDC dates
+    // from 2010–2019 — clearly historical migrated data where the journey
+    // row was never closed out.
     `SELECT
        mj.id, mj.hn, mj.name, mj.age, mj.gravida, mj.para,
        mj.ga_weeks, mj.efw_g, mj.edc, mj.anc_risk_level, mj.anc_visit_count,
@@ -873,6 +890,9 @@ export async function getIncomingTermPregnancies(
      WHERE mj.care_stage = 'PREGNANCY'
        AND mj.ga_weeks IS NOT NULL
        AND mj.ga_weeks >= ?
+       AND mj.ga_weeks <= 42
+       AND (mj.edc IS NULL OR mj.edc >= NOW() - INTERVAL '14 days')
+       AND (mj.last_anc_date IS NULL OR mj.last_anc_date >= NOW() - INTERVAL '60 days')
        AND h.is_active = true
        AND h.hcode <> ?`,
     [minGaWeeks, hubHcode],
