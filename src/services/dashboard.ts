@@ -95,7 +95,7 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
        ORDER BY cs.calculated_at DESC LIMIT 1) as risk_level,
       COUNT(cp.id) as count
     FROM hospitals h
-    LEFT JOIN cached_patients cp ON cp.hospital_id = h.id AND cp.labor_status = 'ACTIVE' AND cp.admit_date >= NOW() - INTERVAL '5 days'
+    LEFT JOIN cached_patients cp ON cp.hospital_id = h.id AND cp.labor_status = 'ACTIVE'
     WHERE h.is_active = true
     GROUP BY h.id, h.hcode, risk_level
   `);
@@ -254,7 +254,7 @@ export async function getHighRiskPatients(
         ORDER BY cs2.calculated_at DESC LIMIT 1
       )
     INNER JOIN hospitals h ON h.id = cp.hospital_id
-    WHERE cp.labor_status = 'ACTIVE' AND cp.admit_date >= NOW() - INTERVAL '5 days'
+    WHERE cp.labor_status = 'ACTIVE'
       AND cs.risk_level IN ('HIGH', 'MEDIUM')
       AND h.is_active = true
     ORDER BY cs.score DESC
@@ -331,14 +331,6 @@ export async function getHospitalPatientList(
   if (status !== 'all') {
     whereClause += ' AND cp.labor_status = ?';
     params.push(status.toUpperCase());
-    // Freshness gate for ACTIVE — normal labor is < 24h, prolonged < 72h,
-    // so anything older than 5 days is almost certainly a patient who
-    // delivered/discharged but whose row was never closed by the HOSxP feed.
-    // The LABOR WARD tab on /hospitals/[hcode] was showing patients
-    // admitted 13–14 days ago because of this.
-    if (status.toUpperCase() === 'ACTIVE') {
-      whereClause += " AND cp.admit_date >= NOW() - INTERVAL '5 days'";
-    }
   }
 
   if (dateFrom) {
@@ -429,7 +421,7 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
      FROM cached_patients cp
      JOIN cpd_scores cs ON cs.patient_id = cp.id
        AND cs.id = (SELECT cs2.id FROM cpd_scores cs2 WHERE cs2.patient_id = cp.id ORDER BY cs2.calculated_at DESC LIMIT 1)
-     WHERE cp.labor_status = 'ACTIVE' AND cp.admit_date >= NOW() - INTERVAL '5 days'
+     WHERE cp.labor_status = 'ACTIVE'
        AND cp.hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
      GROUP BY cs.risk_level`,
   );

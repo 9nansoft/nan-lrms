@@ -409,6 +409,9 @@ export interface PollHospitalStats {
   activePatientsSynced: number;
   partographRowsRead: number;
   partographRowsUpserted: number;
+  // Count of cached_patients rows auto-closed from ACTIVE to DISCHARGED
+  // this cycle because HOSxP no longer returned them (confirm_discharge=Y).
+  dischargedClosedOut?: number;
   anc: AncSyncStats;
 }
 
@@ -1069,6 +1072,61 @@ export async function pollHospital(
         fromHcode,
         toHcode: hcode,
         an: transfer.toAn,
+      });
+    }
+
+    // ─── Auto-discharge: close out ACTIVE patients HOSxP no longer returns ──
+    // The HOSxP labor query (hosxp-queries.ts) filters by
+    // `i.confirm_discharge = 'N'` — when a patient is discharged in HOSxP
+    // they stop being returned. Without this diff step, our local cache
+    // leaves them as labor_status='ACTIVE' forever, causing stale rows in
+    // the LABOR WARD tab on /hospitals/[hcode] (admit dates 13+ days old).
+    //
+    // We exclude ANs already marked TRANSFERRED in the previous block so
+    // cross-hospital transfers aren't mis-labeled as discharged.
+    const currentAns = new Set(patients.map((p) => p.an));
+    const transferredAns = new Set(
+      transfers.filter((t) => t.fromHospitalId === hospitalId).map((t) => t.fromAn),
+    );
+    const dischargedAns = existingAns.filter(
+      (an) => !currentAns.has(an) && !transferredAns.has(an),
+    );
+    if (dischargedAns.length > 0) {
+      emitStep(options, {
+        name: 'auto_discharge',
+        status: 'running',
+        message: `Closing out ${dischargedAns.length} patients no longer returned by HOSxP (confirm_discharge=Y upstream).`,
+        counts: { discharged: dischargedAns.length },
+      });
+      const now = new Date().toISOString();
+      // Per-row UPDATE — volume per cycle is small (typically <10).
+      // Guards on labor_status='ACTIVE' so we never overwrite a row that
+      // a parallel cycle just transitioned to DELIVERED/TRANSFERRED.
+      for (const an of dischargedAns) {
+        await db.execute(
+          `UPDATE cached_patients
+             SET labor_status = 'DISCHARGED', updated_at = ?
+           WHERE hospital_id = ? AND an = ? AND labor_status = 'ACTIVE'`,
+          [now, hospitalId, an],
+        );
+        sseManager.broadcast('patient-update', {
+          type: 'patient_discharged',
+          hcode,
+          an,
+        });
+      }
+      stats.dischargedClosedOut = dischargedAns.length;
+      emitStep(options, {
+        name: 'auto_discharge',
+        status: 'success',
+        message: `Closed out ${dischargedAns.length} discharged patients.`,
+        counts: { discharged: dischargedAns.length },
+      });
+    } else {
+      emitStep(options, {
+        name: 'auto_discharge',
+        status: 'success',
+        message: 'No stale ACTIVE patients to close out — cache matches HOSxP.',
       });
     }
 
