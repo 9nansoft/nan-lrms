@@ -52,17 +52,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     if (session.user.accessMode === 'readonly') {
-      return NextResponse.json(
-        { error: 'readonly_session_cannot_push' },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: 'readonly_session_cannot_push' }, { status: 403 });
     }
     hcode = session.user.hospitalCode ?? null;
     if (!hcode) {
-      return NextResponse.json(
-        { error: 'no_hospital_code_in_session' },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: 'no_hospital_code_in_session' }, { status: 400 });
     }
 
     const db = await getDatabase();
@@ -71,16 +65,10 @@ export async function POST(request: NextRequest) {
       [hcode],
     );
     if (rows.length === 0) {
-      return NextResponse.json(
-        { error: 'hospital_not_registered', hcode },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: 'hospital_not_registered', hcode }, { status: 403 });
     }
     if (rows[0].is_active !== true && rows[0].is_active !== 1) {
-      return NextResponse.json(
-        { error: 'hospital_inactive', hcode },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: 'hospital_inactive', hcode }, { status: 403 });
     }
     hospitalId = rows[0].id;
 
@@ -103,35 +91,92 @@ export async function POST(request: NextRequest) {
     // malformed CID (12-digit truncation, encrypted-blob leftover from a
     // missing marketplace_token) never reaches cached_patients with a
     // junk cidHash that won't match a real patient.
-    const laborValidation = (body.labor && Array.isArray(body.labor.patients))
-      ? validatePayload({
-          hospitalCode: hcode,
-          patients: body.labor.patients,
-          mode: body.labor.mode ?? 'incremental',
-        })
-      : null;
-    if (laborValidation && (!laborValidation.valid || !laborValidation.payload)) {
-      hadWarning = true;
-      await appendSyncStep(hospitalId, runId, {
-        name: 'persist_labor',
-        status: 'error',
-        message: 'Labor payload failed validation; not persisted.',
-        detail: laborValidation.error ?? 'unknown validation error',
+    //
+    // Two labor shapes are handled:
+    //   1. Has patients to upsert → validate (CID etc.) then process. The
+    //      authoritative active set (activeAns) rides along so the server can
+    //      reconcile discharges.
+    //   2. No patients but an explicit activeAns set → reconcile-only push.
+    //      The ward emptied (Occupied=0) or every row was dropped by the name
+    //      probe; nothing to upsert, but we must still close out the cached
+    //      ACTIVE patients HOSxP no longer returns (Mantis #9505). validatePayload
+    //      rejects an empty patients array, so we call the processor directly —
+    //      there are no patient fields to validate.
+    const laborBody = body.labor;
+    const laborPatients =
+      laborBody && Array.isArray(laborBody.patients) ? laborBody.patients : null;
+    const laborActiveAns =
+      laborBody && Array.isArray(laborBody.activeAns) ? laborBody.activeAns : undefined;
+
+    if (laborPatients && laborPatients.length > 0) {
+      const laborValidation = validatePayload({
+        hospitalCode: hcode,
+        patients: laborPatients,
+        mode: laborBody?.mode ?? 'incremental',
+        ...(laborActiveAns !== undefined ? { activeAns: laborActiveAns } : {}),
       });
-    }
-    if (laborValidation?.valid && laborValidation.payload) {
-      const patients = laborValidation.payload.patients;
+      if (!laborValidation.valid || !laborValidation.payload) {
+        hadWarning = true;
+        await appendSyncStep(hospitalId, runId, {
+          name: 'persist_labor',
+          status: 'error',
+          message: 'Labor payload failed validation; not persisted.',
+          detail: laborValidation.error ?? 'unknown validation error',
+        });
+      } else {
+        const patients = laborValidation.payload.patients;
+        await appendSyncStep(hospitalId, runId, {
+          name: 'persist_labor',
+          status: 'running',
+          message: `Persisting ${patients.length} active labor rows.`,
+          counts: { rows: patients.length },
+        });
+        try {
+          const r = await processWebhookPayload(
+            db,
+            hospitalId,
+            laborValidation.payload,
+            sseManager,
+          );
+          result.labor = {
+            processed: r.patientsProcessed,
+            newAdmissions: r.newAdmissions,
+            discharges: r.discharges,
+            transfers: r.transfers,
+          };
+          await appendSyncStep(hospitalId, runId, {
+            name: 'persist_labor',
+            status: 'success',
+            message: `Upserted ${r.patientsProcessed} labor rows (${r.newAdmissions} new, ${r.discharges} discharges, ${r.transfers} transfers).`,
+            counts: {
+              processed: r.patientsProcessed,
+              newAdmissions: r.newAdmissions,
+              discharges: r.discharges,
+              transfers: r.transfers,
+            },
+          });
+        } catch (e) {
+          hadWarning = true;
+          await appendSyncStep(hospitalId, runId, {
+            name: 'persist_labor',
+            status: 'error',
+            message: 'Labor persist failed.',
+            detail: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+    } else if (laborActiveAns !== undefined) {
       await appendSyncStep(hospitalId, runId, {
         name: 'persist_labor',
         status: 'running',
-        message: `Persisting ${patients.length} active labor rows.`,
-        counts: { rows: patients.length },
+        message: `Reconciling active labor set (${laborActiveAns.length} active, 0 to upsert).`,
+        counts: { active: laborActiveAns.length },
       });
       try {
         const r = await processWebhookPayload(
           db,
           hospitalId,
-          laborValidation.payload,
+          { hospitalCode: hcode, patients: [], activeAns: laborActiveAns },
           sseManager,
         );
         result.labor = {
@@ -143,20 +188,15 @@ export async function POST(request: NextRequest) {
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_labor',
           status: 'success',
-          message: `Upserted ${r.patientsProcessed} labor rows (${r.newAdmissions} new, ${r.discharges} discharges, ${r.transfers} transfers).`,
-          counts: {
-            processed: r.patientsProcessed,
-            newAdmissions: r.newAdmissions,
-            discharges: r.discharges,
-            transfers: r.transfers,
-          },
+          message: `Closed out ${r.discharges} patient(s) no longer active in HOSxP.`,
+          counts: { discharges: r.discharges },
         });
       } catch (e) {
         hadWarning = true;
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_labor',
           status: 'error',
-          message: 'Labor persist failed.',
+          message: 'Labor reconcile failed.',
           detail: e instanceof Error ? e.message : String(e),
         });
       }
@@ -165,9 +205,10 @@ export async function POST(request: NextRequest) {
     // ANC. Same validator as /api/webhooks/patient-data — rejects bundles
     // with malformed CIDs / missing pregNo / etc. before processAncWebhook
     // creates phantom maternal_journeys.
-    const ancValidation = (body.anc && Array.isArray(body.anc.patients))
-      ? validateAncPayload({ type: 'anc_data', hospitalCode: hcode, patients: body.anc.patients })
-      : null;
+    const ancValidation =
+      body.anc && Array.isArray(body.anc.patients)
+        ? validateAncPayload({ type: 'anc_data', hospitalCode: hcode, patients: body.anc.patients })
+        : null;
     if (ancValidation && (!ancValidation.valid || !ancValidation.payload)) {
       hadWarning = true;
       await appendSyncStep(hospitalId, runId, {
@@ -186,12 +227,7 @@ export async function POST(request: NextRequest) {
         counts: { pregnancies: patients.length },
       });
       try {
-        const r = await processAncWebhook(
-          db,
-          hospitalId,
-          ancValidation.payload,
-          sseManager,
-        );
+        const r = await processAncWebhook(db, hospitalId, ancValidation.payload, sseManager);
         result.anc = { processed: r.patientsProcessed };
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_anc',
@@ -211,13 +247,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Partograph. Same validator the Pascal-driven route uses.
-    const partographValidation = (body.partograph && Array.isArray(body.partograph.observations))
-      ? validatePartographPayload({
-          type: 'partograph',
-          hospitalCode: hcode,
-          observations: body.partograph.observations,
-        })
-      : null;
+    const partographValidation =
+      body.partograph && Array.isArray(body.partograph.observations)
+        ? validatePartographPayload({
+            type: 'partograph',
+            hospitalCode: hcode,
+            observations: body.partograph.observations,
+          })
+        : null;
     if (partographValidation && (!partographValidation.valid || !partographValidation.payload)) {
       hadWarning = true;
       await appendSyncStep(hospitalId, runId, {
@@ -299,9 +336,6 @@ export async function POST(request: NextRequest) {
         error instanceof Error ? error.message : String(error),
       );
     }
-    return NextResponse.json(
-      { error: 'internal_error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'internal_error' }, { status: 500 });
   }
 }
