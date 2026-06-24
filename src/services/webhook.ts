@@ -3,7 +3,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { createHash, randomBytes } from 'crypto';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
-import { upsertCachedPatients, detectChanges, detectTransfers, markPatientsDelivered, calculateAndStoreCpdScores } from '@/services/sync';
+import {
+  upsertCachedPatients,
+  detectChanges,
+  detectTransfers,
+  markPatientsDelivered,
+  calculateAndStoreCpdScores,
+} from '@/services/sync';
 import type { SyncPatientData } from '@/services/sync';
 import { upsertPartographObservations, type PartographRow } from '@/services/sync/partograph';
 import { SseManager } from '@/lib/sse';
@@ -24,7 +30,7 @@ export interface WebhookPatientPayload {
   hn: string;
   an: string;
   name: string;
-  cid: string;           // เลขบัตรประชาชน 13 หลัก (required for cross-hospital matching)
+  cid: string; // เลขบัตรประชาชน 13 หลัก (required for cross-hospital matching)
   age: number;
   // Obstetric formula G_P_A_L. Sender SHOULD include all four when known so
   // the UI can render the full pill ("G3 P2 A0 L2") instead of just G.
@@ -32,9 +38,9 @@ export interface WebhookPatientPayload {
   para?: number | null;
   abortion?: number | null;
   living_children?: number | null;
-  preg_no?: number | null;          // current pregnancy number (ครรภ์ที่ X)
+  preg_no?: number | null; // current pregnancy number (ครรภ์ที่ X)
   ga_weeks?: number | null;
-  ga_day?: number | null;           // GA day-of-week precision: 38⁺⁴ → ga_weeks=38, ga_day=4
+  ga_day?: number | null; // GA day-of-week precision: 38⁺⁴ → ga_weeks=38, ga_day=4
   anc_count?: number | null;
   admit_date: string; // ISO 8601
   height_cm?: number | null;
@@ -53,7 +59,7 @@ export interface WebhookPatientPayload {
   // Cervical exam at admission — drives transfer/triage decisions.
   cervical_open_cm_admit?: number | null;
   effacement_pct_admit?: number | null;
-  station_admit?: string | null;    // free-form (-3 / -2 / -1 / 0 / +1 / etc)
+  station_admit?: string | null; // free-form (-3 / -2 / -1 / 0 / +1 / etc)
   labor_status?: string; // ACTIVE (default), DELIVERED
   action?: 'upsert' | 'delete'; // default: 'upsert'
 }
@@ -64,6 +70,12 @@ export interface WebhookPayload {
   hospitalCode: string; // Must match API key's hospital
   patients: WebhookPatientPayload[];
   mode?: WebhookMode; // default: 'incremental'
+  // Optional authoritative complete active-AN set for discharge reconciliation.
+  // When present, any cached ACTIVE patient whose AN is absent is closed out.
+  // The browser push sends this because its `patients` upsert list may be
+  // filtered (name-authenticity probe) or capped at 100 and so cannot double
+  // as the active set. Takes precedence over mode-based discharge.
+  activeAns?: string[];
 }
 
 export interface WebhookResult {
@@ -102,7 +114,7 @@ export interface WebhookAncVisit {
   presentation?: string | null;
   engagement?: string | null;
   // WHO 2016 data elements (L2) — all optional.
-  urineProtein?: string | null;                  // '-', 'trace', '+', '++', '+++'
+  urineProtein?: string | null; // '-', 'trace', '+', '++', '+++'
   urineGlucose?: string | null;
   hbGDl?: number | null;
   hctPct?: number | null;
@@ -125,25 +137,25 @@ export interface WebhookAncVisit {
 }
 
 export interface WebhookAncPatient {
-  hn: string | null;  // null for community ANC patients not registered in hospital patient table
+  hn: string | null; // null for community ANC patients not registered in hospital patient table
   name: string;
-  cid: string;            // เลขบัตรประชาชน 13 หลัก (required for cross-hospital matching)
+  cid: string; // เลขบัตรประชาชน 13 หลัก (required for cross-hospital matching)
   birthday: string;
   pregNo: number;
   lmp?: string;
   edc?: string;
   riskLevel?: string;
-  changwatCode?: string;        // จังหวัด 2-digit (e.g. "40" = ขอนแก่น)
-  amphurCode?: string;          // อำเภอ 2-digit
-  tambonCode?: string;          // ตำบล 2-digit
+  changwatCode?: string; // จังหวัด 2-digit (e.g. "40" = ขอนแก่น)
+  amphurCode?: string; // อำเภอ 2-digit
+  tambonCode?: string; // ตำบล 2-digit
   visits?: WebhookAncVisit[];
   // WHO 2016 journey-level data (L2).
-  bloodGroup?: string | null;    // A / B / AB / O
-  rhFactor?: string | null;      // POS / NEG
-  hbsagResult?: string | null;   // POS / NEG / PENDING
+  bloodGroup?: string | null; // A / B / AB / O
+  rhFactor?: string | null; // POS / NEG
+  hbsagResult?: string | null; // POS / NEG / PENDING
   vdrlResult?: string | null;
   hivResult?: string | null;
-  ogttResult?: string | null;    // NORMAL / ABNORMAL / PENDING
+  ogttResult?: string | null; // NORMAL / ABNORMAL / PENDING
   termBirths?: number | null;
   pretermBirths?: number | null;
   abortions?: number | null;
@@ -154,13 +166,7 @@ export interface WebhookAncPatient {
   mcvFl?: number | null;
   dcipResult?: 'POS' | 'NEG' | 'PENDING' | null;
   hbEResult?: 'POS' | 'NEG' | 'PENDING' | null;
-  thalassemiaType?:
-    | 'HB_H'
-    | 'BETA_THAL_MAJOR'
-    | 'BETA_THAL_HB_E'
-    | 'TRAIT'
-    | 'NORMAL'
-    | null;
+  thalassemiaType?: 'HB_H' | 'BETA_THAL_MAJOR' | 'BETA_THAL_HB_E' | 'TRAIT' | 'NORMAL' | null;
   cervicalScreenType?: 'PAP' | 'HPV' | 'NONE' | null;
   cervicalScreenResult?: 'NORMAL' | 'ABNORMAL' | 'PENDING' | null;
   cervicalScreenDate?: string | null;
@@ -181,12 +187,7 @@ export interface WebhookAncPatient {
   teratogenExposure?: boolean | null;
   congenitalInfection?: boolean | null;
   gdmRiskFactors?: Array<
-    | 'bmi_over_30'
-    | 'first_degree_dm'
-    | 'pcos'
-    | 'prior_macrosomia'
-    | 'steroid_use'
-    | 'prior_igm'
+    'bmi_over_30' | 'first_degree_dm' | 'pcos' | 'prior_macrosomia' | 'steroid_use' | 'prior_igm'
   > | null;
 }
 
@@ -208,33 +209,33 @@ export interface WebhookAncResult {
 // CREATE — sent by sending hospital (รพ.ต้นทาง)
 export interface WebhookReferralCreatePayload {
   type: 'referral';
-  hospitalCode: string;          // sender's HCODE (matches API key)
-  referralId: string;            // sender's referral ID (compound key)
-  hn: string;                    // patient HN at sending hospital
-  cid: string;                   // national ID (เลขบัตรประชาชน) — same across all hospitals
-  name: string;                  // patient name (auto-encrypted)
-  toHospitalCode: string;        // destination hospital HCODE
-  reason: string;                // referral reason
-  diagnosisCode?: string;        // ICD-10 code
-  urgencyLevel?: string;         // ROUTINE | URGENT | EMERGENCY (default: ROUTINE)
-  changwatCode?: string;         // จังหวัด 2-digit (patient address for GIS)
-  amphurCode?: string;           // อำเภอ 2-digit
-  tambonCode?: string;           // ตำบล 2-digit
+  hospitalCode: string; // sender's HCODE (matches API key)
+  referralId: string; // sender's referral ID (compound key)
+  hn: string; // patient HN at sending hospital
+  cid: string; // national ID (เลขบัตรประชาชน) — same across all hospitals
+  name: string; // patient name (auto-encrypted)
+  toHospitalCode: string; // destination hospital HCODE
+  reason: string; // referral reason
+  diagnosisCode?: string; // ICD-10 code
+  urgencyLevel?: string; // ROUTINE | URGENT | EMERGENCY (default: ROUTINE)
+  changwatCode?: string; // จังหวัด 2-digit (patient address for GIS)
+  amphurCode?: string; // อำเภอ 2-digit
+  tambonCode?: string; // ตำบล 2-digit
   action?: 'upsert' | 'delete'; // default: 'upsert'
 }
 
 // UPDATE — sent by receiving hospital (รพ.ปลายทาง)
 export interface WebhookReferralUpdatePayload {
   type: 'referral_update';
-  hospitalCode: string;          // who is sending this update (matches API key)
-  referralId: string;            // original referral ID
-  fromHospitalCode: string;      // sending hospital HCODE (compound key)
-  status: string;                // ACCEPTED | IN_TRANSIT | ARRIVED | REJECTED
-  reason?: string;               // reason for status change
-  rejectionReason?: string;      // reason for rejection (REJECTED only)
-  transportMode?: string;        // ambulance, self, etc. (IN_TRANSIT only)
-  arrivedAt?: string;            // arrival datetime ISO 8601 (ARRIVED only)
-  action?: 'update' | 'delete';  // default: 'update'
+  hospitalCode: string; // who is sending this update (matches API key)
+  referralId: string; // original referral ID
+  fromHospitalCode: string; // sending hospital HCODE (compound key)
+  status: string; // ACCEPTED | IN_TRANSIT | ARRIVED | REJECTED
+  reason?: string; // reason for status change
+  rejectionReason?: string; // reason for rejection (REJECTED only)
+  transportMode?: string; // ambulance, self, etc. (IN_TRANSIT only)
+  arrivedAt?: string; // arrival datetime ISO 8601 (ARRIVED only)
+  action?: 'update' | 'delete'; // default: 'update'
 }
 
 export type WebhookReferralPayload = WebhookReferralCreatePayload | WebhookReferralUpdatePayload;
@@ -315,17 +316,17 @@ export async function validateApiKey(
     id: string;
     hospital_id: string;
   }>(
-    "SELECT id, hospital_id FROM webhook_api_keys WHERE key_hash = ? AND is_active = true AND revoked_at IS NULL",
+    'SELECT id, hospital_id FROM webhook_api_keys WHERE key_hash = ? AND is_active = true AND revoked_at IS NULL',
     [keyHash],
   );
 
   if (rows.length === 0) return null;
 
   // Update last_used_at
-  await db.execute(
-    'UPDATE webhook_api_keys SET last_used_at = ? WHERE id = ?',
-    [new Date().toISOString(), rows[0].id],
-  );
+  await db.execute('UPDATE webhook_api_keys SET last_used_at = ? WHERE id = ?', [
+    new Date().toISOString(),
+    rows[0].id,
+  ]);
 
   return { hospitalId: rows[0].hospital_id, keyId: rows[0].id };
 }
@@ -350,42 +351,46 @@ export async function createApiKey(
   return { id, rawKey, keyPrefix };
 }
 
-export async function revokeApiKey(
-  db: DatabaseAdapter,
-  keyId: string,
-): Promise<boolean> {
+export async function revokeApiKey(db: DatabaseAdapter, keyId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  await db.execute(
-    'UPDATE webhook_api_keys SET is_active = false, revoked_at = ? WHERE id = ?',
-    [now, keyId],
-  );
+  await db.execute('UPDATE webhook_api_keys SET is_active = false, revoked_at = ? WHERE id = ?', [
+    now,
+    keyId,
+  ]);
   return true;
 }
 
 export async function listApiKeys(
   db: DatabaseAdapter,
   hospitalId?: string,
-): Promise<Array<{
-  id: string;
-  hospitalId: string;
-  hcode: string;
-  hospitalName: string;
-  keyPrefix: string;
-  label: string;
-  isActive: boolean;
-  lastUsedAt: string | null;
-  createdAt: string;
-  revokedAt: string | null;
-}>> {
-  const whereClause = hospitalId
-    ? 'WHERE wak.hospital_id = ?'
-    : '';
+): Promise<
+  Array<{
+    id: string;
+    hospitalId: string;
+    hcode: string;
+    hospitalName: string;
+    keyPrefix: string;
+    label: string;
+    isActive: boolean;
+    lastUsedAt: string | null;
+    createdAt: string;
+    revokedAt: string | null;
+  }>
+> {
+  const whereClause = hospitalId ? 'WHERE wak.hospital_id = ?' : '';
   const params = hospitalId ? [hospitalId] : [];
 
   const rows = await db.query<{
-    id: string; hospital_id: string; hcode: string; hospital_name: string;
-    key_prefix: string; label: string; is_active: number; last_used_at: string | null;
-    created_at: string; revoked_at: string | null;
+    id: string;
+    hospital_id: string;
+    hcode: string;
+    hospital_name: string;
+    key_prefix: string;
+    label: string;
+    is_active: number;
+    last_used_at: string | null;
+    created_at: string;
+    revoked_at: string | null;
   }>(
     `SELECT wak.id, wak.hospital_id, h.hcode, h.name as hospital_name,
             wak.key_prefix, wak.label, wak.is_active, wak.last_used_at,
@@ -442,17 +447,21 @@ export function validatePayload(body: unknown): {
     const p = obj.patients[i] as Record<string, unknown>;
     if (!p.hn || typeof p.hn !== 'string') errors.push(`patients[${i}].hn is required (string)`);
     if (!p.an || typeof p.an !== 'string') errors.push(`patients[${i}].an is required (string)`);
-    if (!p.name || typeof p.name !== 'string') errors.push(`patients[${i}].name is required (string)`);
+    if (!p.name || typeof p.name !== 'string')
+      errors.push(`patients[${i}].name is required (string)`);
     const cidCheck = diagnoseCid(p.cid);
     if (!cidCheck.ok) {
       errors.push(`patients[${i}].cid ${describeCidFailure(cidCheck.failure)}`);
     }
-    if (p.age == null || typeof p.age !== 'number') errors.push(`patients[${i}].age is required (number)`);
+    if (p.age == null || typeof p.age !== 'number')
+      errors.push(`patients[${i}].age is required (number)`);
     if (!p.admit_date || typeof p.admit_date !== 'string') {
       errors.push(`patients[${i}].admit_date is required (ISO 8601 string)`);
     } else if (Number.isNaN(new Date(p.admit_date).getTime())) {
       // Reject "not-a-date" or "2026-13-45" before they reach the DB layer.
-      errors.push(`patients[${i}].admit_date must be a valid ISO 8601 string (got "${p.admit_date}")`);
+      errors.push(
+        `patients[${i}].admit_date must be a valid ISO 8601 string (got "${p.admit_date}")`,
+      );
     }
   }
 
@@ -463,6 +472,13 @@ export function validatePayload(body: unknown): {
   // Validate mode field if provided
   if (obj.mode !== undefined && obj.mode !== 'incremental' && obj.mode !== 'full_snapshot') {
     return { valid: false, error: '"mode" must be "incremental" or "full_snapshot"' };
+  }
+
+  // Validate activeAns if provided — must be an array of strings (AN values).
+  if (obj.activeAns !== undefined) {
+    if (!Array.isArray(obj.activeAns) || obj.activeAns.some((a) => typeof a !== 'string')) {
+      return { valid: false, error: '"activeAns" must be an array of strings' };
+    }
   }
 
   return { valid: true, payload: obj as unknown as WebhookPayload };
@@ -495,7 +511,8 @@ export function validateAncPayload(body: unknown): {
   const errors: string[] = [];
   for (let i = 0; i < obj.patients.length; i++) {
     const p = obj.patients[i] as Record<string, unknown>;
-    if (!p.name || typeof p.name !== 'string') errors.push(`patients[${i}].name is required (string)`);
+    if (!p.name || typeof p.name !== 'string')
+      errors.push(`patients[${i}].name is required (string)`);
     const cidCheck = diagnoseCid(p.cid);
     if (!cidCheck.ok) {
       errors.push(`patients[${i}].cid ${describeCidFailure(cidCheck.failure)}`);
@@ -519,7 +536,9 @@ export function validateAncPayload(body: unknown): {
 // checks that `cid` is a non-empty string; this elevates it to the same
 // 13-digit standard the labor + ANC paths enforce, so an old client can't
 // poison the cross-hospital cidHash by posting a malformed referral.
-export function validateReferralCid(value: unknown): { ok: true; cid: string } | { ok: false; message: string } {
+export function validateReferralCid(
+  value: unknown,
+): { ok: true; cid: string } | { ok: false; message: string } {
   const result = diagnoseCid(value);
   if (result.ok) return { ok: true, cid: result.cid };
   return { ok: false, message: `cid ${describeCidFailure(result.failure)}` };
@@ -561,10 +580,10 @@ export async function processWebhookPayload(
       `DELETE FROM cached_vital_signs WHERE patient_id IN (SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?)`,
       [hospitalId, p.an],
     );
-    await db.execute(
-      `DELETE FROM cached_patients WHERE hospital_id = ? AND an = ?`,
-      [hospitalId, p.an],
-    );
+    await db.execute(`DELETE FROM cached_patients WHERE hospital_id = ? AND an = ?`, [
+      hospitalId,
+      p.an,
+    ]);
     deletedCount++;
   }
 
@@ -573,9 +592,7 @@ export async function processWebhookPayload(
   const patients: SyncPatientData[] = toUpsert.map((p) => {
     const encryptedName = encrypt(p.name, encryptionKey);
     const encryptedCid = p.cid ? encrypt(p.cid, encryptionKey) : null;
-    const cidHash = p.cid
-      ? createHash('sha256').update(p.cid).digest('hex')
-      : null;
+    const cidHash = p.cid ? createHash('sha256').update(p.cid).digest('hex') : null;
 
     return {
       hn: p.hn,
@@ -650,10 +667,9 @@ export async function processWebhookPayload(
       [new Date().toISOString(), transfer.fromHospitalId, transfer.fromAn],
     );
 
-    const fromRows = await db.query<{ hcode: string }>(
-      'SELECT hcode FROM hospitals WHERE id = ?',
-      [transfer.fromHospitalId],
-    );
+    const fromRows = await db.query<{ hcode: string }>('SELECT hcode FROM hospitals WHERE id = ?', [
+      transfer.fromHospitalId,
+    ]);
     sseManager.broadcast('patient-update', {
       type: 'patient_transfer',
       fromHcode: fromRows[0]?.hcode ?? '',
@@ -675,18 +691,82 @@ export async function processWebhookPayload(
     });
   }
 
-  // full_snapshot mode: patients NOT in the payload are discharged
+  // Reconcile discharges: close out cached ACTIVE patients the source's
+  // authoritative active set no longer contains. Two ways a caller declares it:
+  //   • activeAns — explicit complete AN list. The browser push uses this
+  //     because its `patients` upsert list may be filtered (name-authenticity
+  //     probe) or capped at 100, so it cannot double as the active set.
+  //   • mode === 'full_snapshot' — the `patients` array IS the complete set
+  //     (non-HOSxP webhook senders).
+  // Incremental pushes with no activeAns reconcile nothing (legacy behavior).
+  // markPatientsDelivered guards on labor_status='ACTIVE', so TRANSFERRED and
+  // already-closed rows are never clobbered.
   const mode = payload.mode ?? 'incremental';
+  const authoritativeActiveAns =
+    payload.activeAns !== undefined
+      ? payload.activeAns
+      : mode === 'full_snapshot'
+        ? patients.map((p) => p.an)
+        : null;
   let dischargeCount = 0;
-  if (mode === 'full_snapshot' && changes.discharges.length > 0) {
-    await markPatientsDelivered(db, hospitalId, changes.discharges);
-    dischargeCount = changes.discharges.length;
-    for (const an of changes.discharges) {
-      sseManager.broadcast('patient-update', {
-        type: 'patient_discharged',
-        hcode,
-        an,
-      });
+  if (authoritativeActiveAns !== null) {
+    const activeSet = new Set(authoritativeActiveAns);
+    const toDischarge = existingAns.filter((an) => !activeSet.has(an));
+    if (toDischarge.length > 0) {
+      // Distinguish transfers from deliveries: a reconciled patient whose
+      // cid_hash is ACTIVE at another hospital was transferred out, not
+      // delivered. Mark those TRANSFERRED (matching detectTransfers) so the
+      // sending hospital's board + delivery stats stay correct; close the rest
+      // out as DELIVERED.
+      const phAn = toDischarge.map(() => '?').join(',');
+      const cidRows = await db.query<{ an: string; cid_hash: string | null }>(
+        `SELECT an, cid_hash FROM cached_patients
+          WHERE hospital_id = ? AND an IN (${phAn})`,
+        [hospitalId, ...toDischarge],
+      );
+      const cidHashByAn = new Map(cidRows.map((r) => [r.an, r.cid_hash]));
+      const cidHashes = cidRows.map((r) => r.cid_hash).filter((h): h is string => !!h);
+      let activeElsewhere = new Set<string>();
+      if (cidHashes.length > 0) {
+        const phCid = cidHashes.map(() => '?').join(',');
+        const others = await db.query<{ cid_hash: string }>(
+          `SELECT DISTINCT cid_hash FROM cached_patients
+            WHERE hospital_id <> ? AND labor_status = 'ACTIVE'
+              AND cid_hash IN (${phCid})`,
+          [hospitalId, ...cidHashes],
+        );
+        activeElsewhere = new Set(others.map((r) => r.cid_hash));
+      }
+
+      const transferredOut: string[] = [];
+      const deliveredOut: string[] = [];
+      for (const an of toDischarge) {
+        const ch = cidHashByAn.get(an);
+        if (ch && activeElsewhere.has(ch)) transferredOut.push(an);
+        else deliveredOut.push(an);
+      }
+
+      if (transferredOut.length > 0) {
+        const ts = new Date().toISOString();
+        for (const an of transferredOut) {
+          await db.execute(
+            `UPDATE cached_patients SET labor_status = 'TRANSFERRED', updated_at = ?
+               WHERE hospital_id = ? AND an = ? AND labor_status = 'ACTIVE'`,
+            [ts, hospitalId, an],
+          );
+        }
+      }
+      if (deliveredOut.length > 0) {
+        await markPatientsDelivered(db, hospitalId, deliveredOut);
+        for (const an of deliveredOut) {
+          sseManager.broadcast('patient-update', {
+            type: 'patient_discharged',
+            hcode,
+            an,
+          });
+        }
+      }
+      dischargeCount = toDischarge.length;
     }
   }
 
@@ -761,15 +841,18 @@ export async function processAncWebhook(
 
     // Handle delete action — soft delete by setting care_stage to CANCELLED
     if (patient.action === 'delete') {
-      const existing = await getActiveJourneyByCid(db, patientCidHash)
-        ?? (patient.hn ? await getJourneyByHn(db, patient.hn, hospitalId) : null);
+      const existing =
+        (await getActiveJourneyByCid(db, patientCidHash)) ??
+        (patient.hn ? await getJourneyByHn(db, patient.hn, hospitalId) : null);
       if (existing) {
         // Delete related records first
         await db.execute(`DELETE FROM cached_anc_visits WHERE journey_id = ?`, [existing.id]);
         await db.execute(`DELETE FROM cached_anc_risks WHERE journey_id = ?`, [existing.id]);
         await db.execute(`DELETE FROM cached_newborns WHERE journey_id = ?`, [existing.id]);
         await db.execute(`DELETE FROM cached_referrals WHERE journey_id = ?`, [existing.id]);
-        await db.execute(`UPDATE cached_patients SET journey_id = NULL WHERE journey_id = ?`, [existing.id]);
+        await db.execute(`UPDATE cached_patients SET journey_id = NULL WHERE journey_id = ?`, [
+          existing.id,
+        ]);
         await db.execute(`DELETE FROM maternal_journeys WHERE id = ?`, [existing.id]);
         deleted++;
 
@@ -789,8 +872,9 @@ export async function processAncWebhook(
 
     // Primary lookup by CID (cross-hospital), fallback to HN+hospital (skip if HN is null)
     const patientHn = patient.hn;
-    const existing = await getActiveJourneyByCid(db, cidHash)
-      ?? (patientHn != null ? await getJourneyByHn(db, patientHn, hospitalId) : null);
+    const existing =
+      (await getActiveJourneyByCid(db, cidHash)) ??
+      (patientHn != null ? await getJourneyByHn(db, patientHn, hospitalId) : null);
 
     // Detect if incoming data is a NEW pregnancy vs update to existing.
     // The pg driver returns lmp as a Date (the column is `timestamp with
@@ -799,11 +883,12 @@ export async function processAncWebhook(
     // Date object compared identity — always true — and synthesised a new
     // pregnancy on every cycle. isoDatesEqual normalises both sides to
     // "YYYY-MM-DD" and compares as strings.
-    const isNewPregnancy = existing && (
-      (patient.pregNo > existing.gravida) ||
-      (patient.lmp != null && existing.lmp != null && !isoDatesEqual(patient.lmp, existing.lmp))
-    );
-    const existingIsActive = existing && (existing.careStage === 'PREGNANCY' || existing.careStage === 'LABOR');
+    const isNewPregnancy =
+      existing &&
+      (patient.pregNo > existing.gravida ||
+        (patient.lmp != null && existing.lmp != null && !isoDatesEqual(patient.lmp, existing.lmp)));
+    const existingIsActive =
+      existing && (existing.careStage === 'PREGNANCY' || existing.careStage === 'LABOR');
 
     // Overlapping pregnancy warning: new pregnancy while old one not finished
     if (isNewPregnancy && existingIsActive) {
@@ -840,7 +925,17 @@ export async function processAncWebhook(
       const now = new Date().toISOString();
       await db.execute(
         `UPDATE maternal_journeys SET name = ?, cid = ?, cid_hash = ?, lmp = ?, edc = ?, anc_risk_level = ?, synced_at = ?, updated_at = ? WHERE id = ?`,
-        [encryptedName, encryptedCid, cidHash, patient.lmp ?? existing.lmp, patient.edc ?? existing.edc, patient.riskLevel ?? existing.ancRiskLevel, now, now, existing.id],
+        [
+          encryptedName,
+          encryptedCid,
+          cidHash,
+          patient.lmp ?? existing.lmp,
+          patient.edc ?? existing.edc,
+          patient.riskLevel ?? existing.ancRiskLevel,
+          now,
+          now,
+          existing.id,
+        ],
       );
       journeyId = existing.id;
 
@@ -863,10 +958,14 @@ export async function processAncWebhook(
         await transitionToDelivered(db, existing.id);
       }
       // Create new journey (first pregnancy, or new pregnancy after previous)
-      const age = patient.birthday ? Math.floor((Date.now() - new Date(patient.birthday).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : 0;
+      const age = patient.birthday
+        ? Math.floor(
+            (Date.now() - new Date(patient.birthday).getTime()) / (365.25 * 24 * 60 * 60 * 1000),
+          )
+        : 0;
       const journey = await createJourney(db, {
         hospitalId,
-        hn: patientHn ?? '',  // null for community ANC patients not in hospital patient table
+        hn: patientHn ?? '', // null for community ANC patients not in hospital patient table
         personAncId: null,
         name: encryptedName,
         cid: encryptedCid,
@@ -895,7 +994,13 @@ export async function processAncWebhook(
       const now3 = new Date().toISOString();
       await db.execute(
         `UPDATE maternal_journeys SET changwat_code = ?, amphur_code = ?, tambon_code = ?, updated_at = ? WHERE id = ?`,
-        [patient.changwatCode ?? null, patient.amphurCode ?? null, patient.tambonCode ?? null, now3, journeyId],
+        [
+          patient.changwatCode ?? null,
+          patient.amphurCode ?? null,
+          patient.tambonCode ?? null,
+          now3,
+          journeyId,
+        ],
       );
     }
 
@@ -928,14 +1033,23 @@ export async function processAncWebhook(
             // arrive in the payload of THAT hospital's webhook, so attribute
             // each visit to it. Cross-hospital ANC for referred patients is
             // captured because the receiving hospital's webhook reports it.
-            uuidv4(), journeyId, hospitalId, visit.date, visit.visitNumber,
+            uuidv4(),
+            journeyId,
+            hospitalId,
+            visit.date,
+            visit.visitNumber,
             visit.gaWeeks ?? null,
-            visit.fundalHeightCm ?? null, visit.weightKg ?? null,
-            visit.bpSystolic ?? null, visit.bpDiastolic ?? null,
+            visit.fundalHeightCm ?? null,
+            visit.weightKg ?? null,
+            visit.bpSystolic ?? null,
+            visit.bpDiastolic ?? null,
             visit.fetalHr ?? null,
-            visit.presentation ?? null, visit.engagement ?? null,
-            visit.urineProtein ?? null, visit.urineGlucose ?? null,
-            visit.hbGDl ?? null, visit.hctPct ?? null,
+            visit.presentation ?? null,
+            visit.engagement ?? null,
+            visit.urineProtein ?? null,
+            visit.urineGlucose ?? null,
+            visit.hbGDl ?? null,
+            visit.hctPct ?? null,
             visit.ttDoseNo ?? null,
             // Postgres is strict on boolean columns — must be true/false,
             // not 1/0. SQLite is lenient; we normalize here for both paths.
@@ -954,7 +1068,8 @@ export async function processAncWebhook(
             visit.bppScore ?? null,
             visit.umbilicalDopplerResult ?? null,
             visit.psychosocialScreen ? JSON.stringify(visit.psychosocialScreen) : null,
-            visitNow, visitNow,
+            visitNow,
+            visitNow,
           ],
         );
       }
@@ -988,11 +1103,16 @@ export async function processAncWebhook(
     // Only touches provided fields — COALESCE preserves any prior value so an
     // incremental update doesn't wipe labs recorded earlier.
     const hasJourneyExt =
-      patient.bloodGroup !== undefined || patient.rhFactor !== undefined ||
-      patient.hbsagResult !== undefined || patient.vdrlResult !== undefined ||
-      patient.hivResult !== undefined || patient.ogttResult !== undefined ||
-      patient.termBirths !== undefined || patient.pretermBirths !== undefined ||
-      patient.abortions !== undefined || patient.livingChildren !== undefined ||
+      patient.bloodGroup !== undefined ||
+      patient.rhFactor !== undefined ||
+      patient.hbsagResult !== undefined ||
+      patient.vdrlResult !== undefined ||
+      patient.hivResult !== undefined ||
+      patient.ogttResult !== undefined ||
+      patient.termBirths !== undefined ||
+      patient.pretermBirths !== undefined ||
+      patient.abortions !== undefined ||
+      patient.livingChildren !== undefined ||
       patient.pastMedicalHistory !== undefined;
     if (hasJourneyExt) {
       const nowExt = new Date().toISOString();
@@ -1023,7 +1143,8 @@ export async function processAncWebhook(
           patient.abortions ?? null,
           patient.livingChildren ?? null,
           patient.pastMedicalHistory ?? null,
-          nowExt, journeyId,
+          nowExt,
+          journeyId,
         ],
       );
     }
@@ -1033,18 +1154,29 @@ export async function processAncWebhook(
     // future RTCOG revisions only churn this one. Same COALESCE strategy:
     // an undefined/null field preserves whatever's already there.
     const hasRtcogExt =
-      patient.mcvFl !== undefined || patient.dcipResult !== undefined ||
-      patient.hbEResult !== undefined || patient.thalassemiaType !== undefined ||
-      patient.cervicalScreenType !== undefined || patient.cervicalScreenResult !== undefined ||
+      patient.mcvFl !== undefined ||
+      patient.dcipResult !== undefined ||
+      patient.hbEResult !== undefined ||
+      patient.thalassemiaType !== undefined ||
+      patient.cervicalScreenType !== undefined ||
+      patient.cervicalScreenResult !== undefined ||
       patient.cervicalScreenDate !== undefined ||
-      patient.aneuploidyMethod !== undefined || patient.aneuploidyResult !== undefined ||
-      patient.gbsResult !== undefined || patient.gbsCollectedDate !== undefined ||
-      patient.anatomyScanDate !== undefined || patient.anatomyScanResult !== undefined ||
-      patient.efwG !== undefined || patient.datingMethod !== undefined ||
-      patient.proteinuria24hMg !== undefined || patient.creatinineMgDl !== undefined ||
-      patient.priorPeDvt !== undefined || patient.severeLungDisease !== undefined ||
-      patient.alloimmunizationCde !== undefined || patient.bariatricSurgeryHx !== undefined ||
-      patient.teratogenExposure !== undefined || patient.congenitalInfection !== undefined ||
+      patient.aneuploidyMethod !== undefined ||
+      patient.aneuploidyResult !== undefined ||
+      patient.gbsResult !== undefined ||
+      patient.gbsCollectedDate !== undefined ||
+      patient.anatomyScanDate !== undefined ||
+      patient.anatomyScanResult !== undefined ||
+      patient.efwG !== undefined ||
+      patient.datingMethod !== undefined ||
+      patient.proteinuria24hMg !== undefined ||
+      patient.creatinineMgDl !== undefined ||
+      patient.priorPeDvt !== undefined ||
+      patient.severeLungDisease !== undefined ||
+      patient.alloimmunizationCde !== undefined ||
+      patient.bariatricSurgeryHx !== undefined ||
+      patient.teratogenExposure !== undefined ||
+      patient.congenitalInfection !== undefined ||
       patient.gdmRiskFactors !== undefined;
     if (hasRtcogExt) {
       const nowRt = new Date().toISOString();
@@ -1101,7 +1233,8 @@ export async function processAncWebhook(
           patient.teratogenExposure == null ? null : Boolean(patient.teratogenExposure),
           patient.congenitalInfection == null ? null : Boolean(patient.congenitalInfection),
           patient.gdmRiskFactors ? JSON.stringify(patient.gdmRiskFactors) : null,
-          nowRt, journeyId,
+          nowRt,
+          journeyId,
         ],
       );
     }
@@ -1190,11 +1323,16 @@ export async function processReferralCreate(
   const cidHash = createHash('sha256').update(payload.cid).digest('hex');
 
   // Primary lookup by CID (cross-hospital), fallback to HN+hospital
-  const existingJourney = await getActiveJourneyByCid(db, cidHash)
-    ?? await getJourneyByHn(db, payload.hn, hospitalId);
+  const existingJourney =
+    (await getActiveJourneyByCid(db, cidHash)) ??
+    (await getJourneyByHn(db, payload.hn, hospitalId));
 
   // Also check if patient has active labor data (cached_patients)
-  const laborRecord = await db.query<{ id: string; journey_id: string | null; labor_status: string }>(
+  const laborRecord = await db.query<{
+    id: string;
+    journey_id: string | null;
+    labor_status: string;
+  }>(
     `SELECT id, journey_id, labor_status FROM cached_patients WHERE cid_hash = ? AND labor_status = 'ACTIVE' ORDER BY created_at DESC LIMIT 1`,
     [cidHash],
   );
@@ -1229,7 +1367,20 @@ export async function processReferralCreate(
     await db.execute(
       `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, registered_at, stage_changed_at, synced_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 'PREGNANCY', ?, ?, ?, ?, ?)`,
-      [journeyId, hospitalId, hospitalId, payload.hn, encryptedName, encryptedCid, cidHash, now, now, now, now, now],
+      [
+        journeyId,
+        hospitalId,
+        hospitalId,
+        payload.hn,
+        encryptedName,
+        encryptedCid,
+        cidHash,
+        now,
+        now,
+        now,
+        now,
+        now,
+      ],
     );
   }
 
@@ -1259,7 +1410,13 @@ export async function processReferralCreate(
     const nowLoc = new Date().toISOString();
     await db.execute(
       `UPDATE maternal_journeys SET changwat_code = ?, amphur_code = ?, tambon_code = ?, updated_at = ? WHERE id = ?`,
-      [payload.changwatCode ?? null, payload.amphurCode ?? null, payload.tambonCode ?? null, nowLoc, journeyId],
+      [
+        payload.changwatCode ?? null,
+        payload.amphurCode ?? null,
+        payload.tambonCode ?? null,
+        nowLoc,
+        journeyId,
+      ],
     );
   }
 
@@ -1285,7 +1442,19 @@ export async function processReferralCreate(
     await db.execute(
       `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id, status, reason, diagnosis_code, urgency_level, initiated_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'INITIATED', ?, ?, ?, ?, ?, ?)`,
-      [id, journeyId, payload.referralId, hospitalId, toHospital.id, payload.reason, payload.diagnosisCode ?? null, urgency, now, now, now],
+      [
+        id,
+        journeyId,
+        payload.referralId,
+        hospitalId,
+        toHospital.id,
+        payload.reason,
+        payload.diagnosisCode ?? null,
+        urgency,
+        now,
+        now,
+        now,
+      ],
     );
   }
 
@@ -1321,9 +1490,14 @@ export async function processReferralUpdate(
       `SELECT to_hospital_id FROM cached_referrals WHERE from_hospital_id = ? AND refer_number = ?`,
       [fromHospital.id, payload.referralId],
     );
-    const toHcode = delRows.length > 0
-      ? (await db.query<{ hcode: string }>('SELECT hcode FROM hospitals WHERE id = ?', [delRows[0].to_hospital_id]))[0]?.hcode ?? ''
-      : '';
+    const toHcode =
+      delRows.length > 0
+        ? ((
+            await db.query<{ hcode: string }>('SELECT hcode FROM hospitals WHERE id = ?', [
+              delRows[0].to_hospital_id,
+            ])
+          )[0]?.hcode ?? '')
+        : '';
 
     await db.execute(
       `DELETE FROM cached_referrals WHERE from_hospital_id = ? AND refer_number = ?`,
@@ -1348,7 +1522,9 @@ export async function processReferralUpdate(
   );
 
   if (existing.length === 0) {
-    throw new Error(`ไม่พบใบส่งต่อ referralId "${payload.referralId}" จาก HCODE "${payload.fromHospitalCode}"`);
+    throw new Error(
+      `ไม่พบใบส่งต่อ referralId "${payload.referralId}" จาก HCODE "${payload.fromHospitalCode}"`,
+    );
   }
 
   const referralRow = existing[0];

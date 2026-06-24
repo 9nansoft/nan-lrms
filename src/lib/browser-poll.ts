@@ -122,7 +122,14 @@ interface BrowserAncPatient {
 }
 
 export interface BrowserPushBody {
-  labor?: { patients: BrowserLaborPatient[]; mode?: 'incremental' | 'full_snapshot' };
+  labor?: {
+    patients: BrowserLaborPatient[];
+    mode?: 'incremental' | 'full_snapshot';
+    // Authoritative complete active-AN set for discharge reconciliation. May be
+    // present with an empty `patients` list (ward emptied / all rows dropped by
+    // the name probe) — the server closes out cached ACTIVE rows absent from it.
+    activeAns?: string[];
+  };
   anc?: { patients: BrowserAncPatient[] };
   partograph?: { observations: BrowserPartographObservation[] };
 }
@@ -135,7 +142,10 @@ export interface BrowserPollResult {
   anc: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
   pushedToServer: boolean;
   /** Verdict of the name round-trip probe — present whenever a probe ran. */
-  authenticity?: { status: 'authentic' | 'name_unstable' | 'no_data' | 'probe_failed'; detail: string };
+  authenticity?: {
+    status: 'authentic' | 'name_unstable' | 'no_data' | 'probe_failed';
+    detail: string;
+  };
   error?: string;
   /**
    * True when the server returned a permanent rejection (403 — readonly
@@ -214,9 +224,7 @@ const SQL_PARTOGRAPH = `
 // browser-poll matches what server-side polling used to pull.
 function ancActiveWhere(): string {
   const today = new Date();
-  const postpartumCutoff = new Date(today.getTime() - 45 * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
+  const postpartumCutoff = new Date(today.getTime() - 45 * 86_400_000).toISOString().slice(0, 10);
   const lmpCutoff = new Date(today.getTime() - 330 * 86_400_000).toISOString().slice(0, 10);
   return `(COALESCE(pa.discharge, 'N') <> 'Y'
       AND pa.labor_status_id = 1
@@ -318,11 +326,13 @@ function pickLatest(r1: unknown, r2: unknown): string | null {
 function deriveAncRisk(itemIds: number[]): string {
   let max = 0;
   for (const id of itemIds) {
-    const lvl =
-      [15, 16, 17, 18].includes(id) ? 3
-      : [4, 6, 10, 12, 13, 14].includes(id) ? 2
-      : [1, 2, 3, 5, 7, 8, 9, 11].includes(id) ? 1
-      : 1;
+    const lvl = [15, 16, 17, 18].includes(id)
+      ? 3
+      : [4, 6, 10, 12, 13, 14].includes(id)
+        ? 2
+        : [1, 2, 3, 5, 7, 8, 9, 11].includes(id)
+          ? 1
+          : 1;
     if (lvl > max) max = lvl;
   }
   if (max === 3) return 'HR3';
@@ -459,29 +469,31 @@ function mapAncBundle(
     const ancId = String(m.person_anc_id ?? '');
     const items = classByAnc.get(ancId) ?? [];
 
-    const visitRows = (visitsByAnc.get(ancId) ?? []).map((v) => {
-      const date = strOrNull(v.anc_service_date);
-      const visitNumber = intOrNull(v.anc_service_number);
-      if (!date || visitNumber == null) return null;
-      const visit: BrowserAncVisit = { date, visitNumber };
-      const ga = intOrNull(v.pa_week);
-      if (ga != null) visit.gaWeeks = ga;
-      const w = numOrNull(v.bw);
-      if (w != null) visit.weightKg = w;
-      const bps = intOrNull(v.bps);
-      if (bps != null) visit.bpSystolic = bps;
-      const bpd = intOrNull(v.bpd);
-      if (bpd != null) visit.bpDiastolic = bpd;
-      const fhr = intOrNull(v.baby_fetal_heart_sound);
-      if (fhr != null) visit.fetalHr = fhr;
-      visit.hctPct = parseLabFloat(strOrNull(v.hct_result));
-      visit.hbGDl = parseLabFloat(strOrNull(v.hb_result));
-      visit.urineProtein = strOrNull(v.albumin);
-      visit.urineGlucose = strOrNull(v.sugar);
-      visit.presentation = strOrNull(v.presentation_name);
-      visit.engagement = strOrNull(v.engagement_name);
-      return visit;
-    }).filter((x): x is BrowserAncVisit => x !== null);
+    const visitRows = (visitsByAnc.get(ancId) ?? [])
+      .map((v) => {
+        const date = strOrNull(v.anc_service_date);
+        const visitNumber = intOrNull(v.anc_service_number);
+        if (!date || visitNumber == null) return null;
+        const visit: BrowserAncVisit = { date, visitNumber };
+        const ga = intOrNull(v.pa_week);
+        if (ga != null) visit.gaWeeks = ga;
+        const w = numOrNull(v.bw);
+        if (w != null) visit.weightKg = w;
+        const bps = intOrNull(v.bps);
+        if (bps != null) visit.bpSystolic = bps;
+        const bpd = intOrNull(v.bpd);
+        if (bpd != null) visit.bpDiastolic = bpd;
+        const fhr = intOrNull(v.baby_fetal_heart_sound);
+        if (fhr != null) visit.fetalHr = fhr;
+        visit.hctPct = parseLabFloat(strOrNull(v.hct_result));
+        visit.hbGDl = parseLabFloat(strOrNull(v.hb_result));
+        visit.urineProtein = strOrNull(v.albumin);
+        visit.urineGlucose = strOrNull(v.sugar);
+        visit.presentation = strOrNull(v.presentation_name);
+        visit.engagement = strOrNull(v.engagement_name);
+        return visit;
+      })
+      .filter((x): x is BrowserAncVisit => x !== null);
 
     const patient: BrowserAncPatient = {
       hn: strOrNull(m.hn),
@@ -521,7 +533,12 @@ async function runQuery<T>(sql: string, opts: RunOptions): Promise<T[]> {
   if (opts.signal?.aborted) {
     throw new DOMException('aborted', 'AbortError');
   }
-  const res: SqlApiResponse<T> = await executeSql<T>(sql, opts.config, undefined, opts.marketplaceToken);
+  const res: SqlApiResponse<T> = await executeSql<T>(
+    sql,
+    opts.config,
+    undefined,
+    opts.marketplaceToken,
+  );
   return Array.isArray(res.data) ? res.data : [];
 }
 
@@ -608,10 +625,7 @@ async function probeOneSource(
     for (let i = 0; i < candidates.length; i += BULK_PROBE_BATCH) {
       const batch = candidates.slice(i, i + BULK_PROBE_BATCH);
       const tuples = batch
-        .map(
-          (c) =>
-            `('${sqlString(c.idValue)}','${sqlString(c.fname)}','${sqlString(c.lname)}')`,
-        )
+        .map((c) => `('${sqlString(c.idValue)}','${sqlString(c.fname)}','${sqlString(c.lname)}')`)
         .join(',');
       const sql =
         `SELECT ${idColumn}, fname, lname FROM ${table} ` +
@@ -654,8 +668,14 @@ async function probeAllPatientsNames(
   if (candidates.length === 0) return result;
 
   // Partition by source table and dedupe per-source.
-  const laborByKey = new Map<string, { idValue: string; fname: string; lname: string; key: string }>();
-  const ancByKey = new Map<string, { idValue: string; fname: string; lname: string; key: string }>();
+  const laborByKey = new Map<
+    string,
+    { idValue: string; fname: string; lname: string; key: string }
+  >();
+  const ancByKey = new Map<
+    string,
+    { idValue: string; fname: string; lname: string; key: string }
+  >();
   for (const c of candidates) {
     if (c.source === 'labor') {
       const key = laborKey(c.hn, c.fname, c.lname);
@@ -722,6 +742,54 @@ async function reportAuthenticityVerdict(
   }
   return { permanentBlock: false };
 }
+
+// ─── Labor push decision (pure, unit-tested) ────────────────────────────────
+//
+// The browser must declare HOSxP's authoritative active-AN set so the server
+// can close out cached ACTIVE patients HOSxP no longer returns — including the
+// "ward just emptied" case (Occupied=0, Mantis #9505). But it must NOT POST a
+// redundant reconciliation on every 30s tick for a perpetually-empty ward
+// (keeps the Sync Log clean). This computes the edge-triggered decision: POST
+// when there is something to upsert OR the active set changed since the last
+// successful push; otherwise skip.
+
+export interface LaborPushDecision {
+  skip: boolean;
+  activeKey: string;
+  labor?: { patients: BrowserLaborPatient[]; mode: 'incremental'; activeAns: string[] };
+}
+
+export function decideLaborPush(args: {
+  laborPatients: BrowserLaborPatient[];
+  laborActiveAns: string[];
+  hasPartograph: boolean;
+  hasAnc: boolean;
+  lastPushedActiveKey: string | null;
+}): LaborPushDecision {
+  const { laborPatients, laborActiveAns, hasPartograph, hasAnc, lastPushedActiveKey } = args;
+  const activeKey = [...laborActiveAns].sort().join('\n');
+  const nothingToUpsert = laborPatients.length === 0 && !hasPartograph && !hasAnc;
+  const activeSetChanged = activeKey !== lastPushedActiveKey;
+
+  if (nothingToUpsert && !activeSetChanged) {
+    return { skip: true, activeKey };
+  }
+
+  // Attach labor reconciliation when there are rows to upsert OR the active set
+  // changed (e.g. the ward emptied/shrank — the server must hear about it so it
+  // can discharge the stragglers). When labor is empty and unchanged we omit it
+  // (the POST is only happening for partograph/anc).
+  const labor =
+    laborPatients.length > 0 || activeSetChanged
+      ? { patients: laborPatients, mode: 'incremental' as const, activeAns: laborActiveAns }
+      : undefined;
+
+  return { skip: false, activeKey, labor };
+}
+
+// Per-tab: the active-AN signature we last successfully pushed. A tab's session
+// is bound to a single hospital, so one module-level value is sufficient.
+let lastPushedActiveKey: string | null = null;
 
 export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResult> {
   const startedAt = Date.now();
@@ -811,7 +879,11 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
           status: 'name_unstable',
           detail: probe.reason ?? 'bulk name probe returned 0 matches',
         };
-        const r = await reportAuthenticityVerdict('name_unstable', probe.reason ?? null, opts.signal);
+        const r = await reportAuthenticityVerdict(
+          'name_unstable',
+          probe.reason ?? null,
+          opts.signal,
+        );
         if (r.permanentBlock) result.permanentBlock = true;
         result.error = 'authenticity_failed_name_unstable';
         result.durationMs = Date.now() - startedAt;
@@ -901,22 +973,35 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       result.anc.mapped = ancPatients.length;
     }
 
-    // Skip the POST entirely when there's nothing to send — keeps the Sync
-    // Log clean for hospitals with no active patients (would otherwise
-    // record a "0 rows / 0 rows" run on every browser tick).
-    if (laborPatients.length === 0 && partographs.length === 0 && ancPatients.length === 0) {
+    // Authoritative active-AN set for discharge reconciliation. Built from the
+    // RAW labor rows (every admission HOSxP returned this cycle) — NOT from
+    // `laborPatients`, which the name-authenticity probe may have filtered, so a
+    // dropped-but-still-admitted patient is never missing from it. Reaching here
+    // means all five queries SUCCEEDED (runQuery → executeSql throws on failure
+    // and the Promise.all rejects), so an empty set genuinely means an empty
+    // ward — safe to reconcile/discharge against.
+    const laborActiveAns = laborRows
+      .map((r) => strOrNull(r.an))
+      .filter((an): an is string => an !== null);
+
+    const decision = decideLaborPush({
+      laborPatients,
+      laborActiveAns,
+      hasPartograph: partographs.length > 0,
+      hasAnc: ancPatients.length > 0,
+      lastPushedActiveKey,
+    });
+
+    // Skip the POST when there's nothing to upsert AND the active set is
+    // unchanged — keeps the Sync Log clean for perpetually-empty wards while
+    // still firing a reconciliation when the ward empties/shrinks (Mantis #9505).
+    if (decision.skip) {
       result.durationMs = Date.now() - startedAt;
       return result;
     }
 
     const body: BrowserPushBody = {};
-    if (laborPatients.length > 0) {
-      // 'incremental' — server-side full_snapshot semantics rely on a single
-      // payload covering every active patient at the hospital. The browser
-      // poll is per-user and per-tab, so several tabs may push partial views;
-      // incremental upserts are the safe default.
-      body.labor = { patients: laborPatients, mode: 'incremental' };
-    }
+    if (decision.labor) body.labor = decision.labor;
     if (partographs.length > 0) body.partograph = { observations: partographs };
     if (ancPatients.length > 0) body.anc = { patients: ancPatients };
 
@@ -942,14 +1027,19 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       throw new Error(`browser-push HTTP ${pushRes.status}: ${text.slice(0, 200)}`);
     }
 
-    const pushed = (await pushRes.json().catch(() => null)) as
-      | { labor?: { processed: number }; anc?: { processed: number }; partograph?: { accepted: number } }
-      | null;
+    const pushed = (await pushRes.json().catch(() => null)) as {
+      labor?: { processed: number };
+      anc?: { processed: number };
+      partograph?: { accepted: number };
+    } | null;
 
     result.labor.sent = pushed?.labor?.processed ?? laborPatients.length;
     result.anc.sent = pushed?.anc?.processed ?? ancPatients.length;
     result.partograph.sent = pushed?.partograph?.accepted ?? partographs.length;
     result.pushedToServer = true;
+    // Remember the active set we just reconciled so a perpetually-empty ward
+    // doesn't re-POST an identical reconciliation every tick.
+    lastPushedActiveKey = decision.activeKey;
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
   }
