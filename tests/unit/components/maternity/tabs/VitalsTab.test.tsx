@@ -16,14 +16,32 @@ vi.mock('@/services/maternity-ward', () => ({
   upsertNurseNote: vi.fn(),
   deleteNurseNote: vi.fn(),
 }));
+// The Vitals "กราฟ" sub-tab (default) now renders a server-rendered PNG fetched
+// via getIpdVitalSignChart. Override just that export so no real network call
+// fires; keep the rest of the client module intact for any transitive imports.
+vi.mock('@/lib/bms-browser-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/bms-browser-client')>();
+  return { ...actual, getIpdVitalSignChart: vi.fn() };
+});
 import { useBmsSession } from '@/hooks/useBmsSession';
 import { getPatientNurseNotes, upsertNurseNote, deleteNurseNote } from '@/services/maternity-ward';
+import { getIpdVitalSignChart } from '@/lib/bms-browser-client';
 import { VitalsTab } from '@/components/maternity/tabs/VitalsTab';
 
 const mockBmsSession = useBmsSession as unknown as ReturnType<typeof vi.fn>;
 const mockGet = getPatientNurseNotes as unknown as ReturnType<typeof vi.fn>;
 const mockUpsert = upsertNurseNote as unknown as ReturnType<typeof vi.fn>;
 const mockDelete = deleteNurseNote as unknown as ReturnType<typeof vi.fn>;
+const mockChart = getIpdVitalSignChart as unknown as ReturnType<typeof vi.fn>;
+
+// jsdom does not implement object-URL APIs; the chart turns its PNG blob into
+// one for <img src>. Stub them so the success path renders deterministically.
+URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+URL.revokeObjectURL = vi.fn();
+
+function pngBlob() {
+  return new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+}
 const cfg = { apiUrl: 'https://t.example/api', bearerToken: 'B', appIdentifier: 'X' };
 const userInfo = { loginname: 'n1', fullname: 'N', hospcode: '10670' };
 const wrapper = ({ children }: { children: ReactNode }) => (
@@ -84,6 +102,15 @@ beforeEach(() => {
   mockGet.mockReset();
   mockUpsert.mockReset();
   mockDelete.mockReset();
+  // Default: chart reports "no data" (a returned failure, not a throw) so the
+  // default กราฟ tab in unrelated tests renders a stable panel without a real
+  // fetch and without SWR retrying. Chart-specific tests override this.
+  mockChart.mockReset();
+  mockChart.mockResolvedValue({
+    ok: false,
+    messageCode: 500,
+    message: 'ยังไม่มีข้อมูลสัญญาณชีพสำหรับผู้ป่วยรายนี้',
+  });
 });
 
 describe('VitalsTab — basics', () => {
@@ -142,76 +169,48 @@ describe('VitalsTab — sub-tabs + Add button', () => {
   });
 });
 
-describe('VitalsTab — chart view', () => {
-  it('chart renders combined Temp+Pulse panel + RR + BP strips, all sharing one day-grouped header', async () => {
-    mockBmsSession.mockReturnValue({ config: cfg, userInfo });
+describe('VitalsTab — chart view (server-rendered PNG)', () => {
+  it('renders the chart <img> once the PNG loads', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg, userInfo, marketplaceToken: 'MKT' });
     mockGet.mockResolvedValue([makeRow()]);
+    mockChart.mockResolvedValue({ ok: true, blob: pngBlob() });
     render(<VitalsTab an="AN1" />, { wrapper });
-    await waitFor(() => expect(screen.getByTestId('vital-sign-chart')).toBeInTheDocument());
-    // HOSxP merges Temperature and Pulse onto one chart with dual Y axes.
-    expect(screen.getByTestId('vs-panel-temp-pulse')).toBeInTheDocument();
-    expect(screen.getByTestId('vs-panel-rr')).toBeInTheDocument();
-    expect(screen.getByTestId('vs-panel-bp')).toBeInTheDocument();
-    // The Date / Admit day / Op day / Time header sits above everything and
-    // its day columns line up vertically across all panels below.
-    expect(screen.getByTestId('vs-day-header')).toBeInTheDocument();
-    // 37 °C reference line on the Temp scale (the red line in HOSxP).
-    expect(screen.getByTestId('vs-temp-ref-37')).toBeInTheDocument();
+    const img = await screen.findByTestId('vital-sign-chart');
+    expect(img.tagName).toBe('IMG');
+    expect(img).toHaveAttribute('src', 'blob:mock-url');
   });
 
-  it('renders the base form even when there are no observations', async () => {
-    mockBmsSession.mockReturnValue({ config: cfg, userInfo });
+  it('fetches the chart for this AN with the session marketplace token', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg, userInfo, marketplaceToken: 'MKT' });
+    mockGet.mockResolvedValue([makeRow()]);
+    mockChart.mockResolvedValue({ ok: true, blob: pngBlob() });
+    render(<VitalsTab an="AN1" />, { wrapper });
+    await screen.findByTestId('vital-sign-chart');
+    // (config, an, chart_type_id default = 2 = chart page 1, marketplaceToken)
+    expect(mockChart).toHaveBeenCalledWith(cfg, 'AN1', 2, 'MKT');
+  });
+
+  it('shows an actionable Thai message (not a crash) when there is no vital data', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg, userInfo, marketplaceToken: null });
     mockGet.mockResolvedValue([]);
+    mockChart.mockResolvedValue({
+      ok: false,
+      messageCode: 500,
+      message: 'ยังไม่มีข้อมูลสัญญาณชีพสำหรับผู้ป่วยรายนี้',
+    });
     render(<VitalsTab an="AN1" />, { wrapper });
-    await waitFor(() => expect(screen.getByTestId('vital-sign-chart')).toBeInTheDocument());
+    const panel = await screen.findByTestId('vital-sign-chart-error');
+    expect(panel).toHaveTextContent(/ยังไม่มีข้อมูลสัญญาณชีพ/);
   });
 
-  it('plots a temperature point per observation on the combined panel', async () => {
-    mockBmsSession.mockReturnValue({ config: cfg, userInfo });
-    mockGet.mockResolvedValue([
-      makeRow({
-        nurse_note_id: 1,
-        note_date: '2026-04-19',
-        note_time: '08:00:00',
-        temperature: 37.2,
-      }),
-      makeRow({
-        nurse_note_id: 2,
-        note_date: '2026-04-19',
-        note_time: '12:00:00',
-        temperature: 37.6,
-      }),
-    ]);
+  it('offers a retry when the chart fetch throws a transport error', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg, userInfo, marketplaceToken: null });
+    mockGet.mockResolvedValue([makeRow()]);
+    mockChart.mockRejectedValue(new Error('ไม่สามารถเชื่อมต่อบริการสร้างกราฟสัญญาณชีพได้'));
     render(<VitalsTab an="AN1" />, { wrapper });
-    const panel = await screen.findByTestId('vs-panel-temp-pulse');
-    expect(panel.querySelectorAll('[data-series="temp"]').length).toBe(2);
-  });
-
-  it('plots a pulse point per observation on the combined panel', async () => {
-    mockBmsSession.mockReturnValue({ config: cfg, userInfo });
-    mockGet.mockResolvedValue([
-      makeRow({ nurse_note_id: 1, note_date: '2026-04-19', note_time: '08:00:00', pulse: 82 }),
-      makeRow({ nurse_note_id: 2, note_date: '2026-04-19', note_time: '12:00:00', pulse: 88 }),
-    ]);
-    render(<VitalsTab an="AN1" />, { wrapper });
-    const panel = await screen.findByTestId('vs-panel-temp-pulse');
-    expect(panel.querySelectorAll('[data-series="pulse"]').length).toBe(2);
-  });
-
-  it('flags temperature ≥38 with an abnormal data point on the Temp series', async () => {
-    mockBmsSession.mockReturnValue({ config: cfg, userInfo });
-    mockGet.mockResolvedValue([makeRow({ nurse_note_id: 1, temperature: 38.7 })]);
-    render(<VitalsTab an="AN1" />, { wrapper });
-    const panel = await screen.findByTestId('vs-panel-temp-pulse');
-    expect(panel.querySelector('[data-series="temp"][data-abnormal="true"]')).not.toBeNull();
-  });
-
-  it('flags pulse <60 or >100 with an abnormal data point on the Pulse series', async () => {
-    mockBmsSession.mockReturnValue({ config: cfg, userInfo });
-    mockGet.mockResolvedValue([makeRow({ nurse_note_id: 1, pulse: 115 })]);
-    render(<VitalsTab an="AN1" />, { wrapper });
-    const panel = await screen.findByTestId('vs-panel-temp-pulse');
-    expect(panel.querySelector('[data-series="pulse"][data-abnormal="true"]')).not.toBeNull();
+    const panel = await screen.findByTestId('vital-sign-chart-error');
+    expect(panel).toHaveTextContent(/ไม่สามารถเชื่อมต่อ/);
+    expect(within(panel).getByRole('button', { name: /ลองใหม่/ })).toBeInTheDocument();
   });
 });
 
