@@ -14,6 +14,23 @@ export const REFERRAL_SLA = {
   emergencyPinHours: 48,
 } as const;
 
+export type ReferralAgeClass = 'fresh' | 'overdue' | 'critical';
+
+/** Apply the SLA to one referral. Only INITIATED referrals age — once the
+ *  destination has responded (ACCEPTED/IN_TRANSIT/ARRIVED/REJECTED) the
+ *  sending side no longer owns the delay. */
+export function classifyReferralAge(
+  initiatedAt: string,
+  status: string,
+  now: Date = new Date(),
+): ReferralAgeClass {
+  if (status !== 'INITIATED') return 'fresh';
+  const hours = (now.getTime() - new Date(initiatedAt).getTime()) / 3600_000;
+  if (hours >= REFERRAL_SLA.criticalAfterHours) return 'critical';
+  if (hours >= REFERRAL_SLA.overdueAfterHours) return 'overdue';
+  return 'fresh';
+}
+
 /** Resolve the SLA thresholds into ISO cutoff instants relative to `now`.
  *  Cutoffs are bound as SQL params so queries stay Postgres/SQLite portable. */
 export function referralSlaCutoffs(now: Date): {

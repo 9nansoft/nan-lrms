@@ -14,6 +14,7 @@ import { LoadingState } from '@/components/shared/LoadingState';
 import { SectionLabel } from '@/components/dashboard/shared';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
+import { ANC_RISK_COLOR, ANC_RISK_LABEL_TH } from '@/config/anc-risk-display';
 import {
   BP_SYS_HIGH,
   BP_SYS_AMBER,
@@ -190,18 +191,7 @@ interface JourneyDetailResponse {
 
 // ─── Labels + thresholds ──────────────────────────────────────────────────
 
-const ANC_RISK_COLOR: Record<string, string> = {
-  LOW: 'var(--risk-low)',
-  HR1: 'var(--risk-medium)',
-  HR2: 'var(--risk-medium)',
-  HR3: 'var(--risk-high)',
-};
-const ANC_RISK_LABEL_TH: Record<string, string> = {
-  LOW: 'ความเสี่ยงต่ำ',
-  HR1: 'ความเสี่ยง ระดับ 1',
-  HR2: 'ความเสี่ยง ระดับ 2',
-  HR3: 'ความเสี่ยงสูง',
-};
+// Shared ANC risk display tokens — see src/config/anc-risk-display.ts.
 const STAGE_LABEL_TH: Record<string, string> = {
   PREGNANCY: 'ฝากครรภ์',
   LABOR: 'ระหว่างคลอด',

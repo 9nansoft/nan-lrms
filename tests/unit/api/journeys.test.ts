@@ -372,10 +372,13 @@ describe('Journey API Logic', () => {
 
       const referral: ReferralListItem = {
         id: refRows[0].id as string,
+        journeyId: refRows[0].journey_id as string,
+        referNumber: (refRows[0].refer_number as string | null) ?? null,
         fromHospital: refRows[0].from_name as string,
         toHospital: refRows[0].to_name as string,
         status: refRows[0].status as string,
         reason: refRows[0].reason as string,
+        diagnosisCode: (refRows[0].diagnosis_code as string | null) ?? null,
         urgencyLevel: refRows[0].urgency_level as string,
         initiatedAt: refRows[0].initiated_at as string,
         arrivedAt: refRows[0].arrived_at as string | null,

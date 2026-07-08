@@ -12,26 +12,22 @@ import { LoadingState } from '@/components/shared/LoadingState';
 import { SectionLabel, RiskBar } from '@/components/dashboard/shared';
 import { cn, formatThaiDate, formatRelativeTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
+import {
+  ANC_RISK_COLOR,
+  ANC_RISK_LABEL_TH,
+  ANC_RISK_FALLBACK_COLOR,
+} from '@/config/anc-risk-display';
 import { Baby, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { JourneyListResponse } from '@/types/api';
 
 type AncRisk = 'LOW' | 'HR1' | 'HR2' | 'HR3';
 
-const RISK_COLOR: Record<AncRisk, string> = {
-  LOW: 'var(--risk-low)',
-  HR1: 'var(--risk-medium)',
-  HR2: 'var(--risk-medium)',
-  HR3: 'var(--risk-high)',
-};
-const RISK_LABEL_TH: Record<AncRisk, string> = {
-  LOW: 'ความเสี่ยงต่ำ',
-  HR1: 'ความเสี่ยงระดับ 1',
-  HR2: 'ความเสี่ยงระดับ 2',
-  HR3: 'ความเสี่ยงสูง',
-};
+// Shared ANC risk display tokens — see src/config/anc-risk-display.ts.
+const RISK_COLOR = ANC_RISK_COLOR;
+const RISK_LABEL_TH = ANC_RISK_LABEL_TH;
 
 function RiskChip({ level }: { level: string }) {
-  const color = RISK_COLOR[level as AncRisk] ?? 'var(--ink-navy-muted)';
+  const color = RISK_COLOR[level as AncRisk] ?? ANC_RISK_FALLBACK_COLOR;
   return (
     <span
       data-risk={level}
