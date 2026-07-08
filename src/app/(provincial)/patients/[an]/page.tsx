@@ -18,6 +18,7 @@ import { ContractionTable } from '@/components/patient/ContractionTable';
 import { PrintForm } from '@/components/patient/PrintForm';
 import { HighRiskAlert } from '@/components/shared/HighRiskAlert';
 import { LoadingState } from '@/components/shared/LoadingState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { maskName } from '@/lib/pii-mask';
 import { VitalTrendCharts } from '@/components/charts/VitalTrendCharts';
 import { PartographForm } from '@/components/maternity/partograph/PartographForm';
@@ -38,16 +39,12 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { RiskLevel } from '@/types/domain';
-import { RISK_LEVELS } from '@/config/risk-levels';
+import { RISK_LEVELS, isHighRisk } from '@/config/risk-levels';
 import { SectionLabel } from '@/components/dashboard/shared';
 
 type WorkspaceTab = 'summary' | 'partograph' | 'contractions';
 
-export default function PatientDetailPage({
-  params,
-}: {
-  params: Promise<{ an: string }>;
-}) {
+export default function PatientDetailPage({ params }: { params: Promise<{ an: string }> }) {
   const { an: patientId } = use(params);
   const router = useRouter();
   const mainHeaderRef = useRef<HTMLDivElement>(null);
@@ -57,15 +54,24 @@ export default function PatientDetailPage({
   // from new data anyway, so a per-mount snapshot is fine.
   const [now] = useState<number>(() => Date.now());
 
-  const { patient, cpdScore, journeyContext, vitals, contractions, isLoading, error, mutate } =
-    usePatient(patientId);
-  const { partogram } = usePartogram(patientId);
+  const {
+    patient,
+    cpdScore,
+    journeyContext,
+    vitals,
+    contractions,
+    isLoading,
+    error,
+    vitalsError,
+    contractionsError,
+    mutate,
+    mutateVitals,
+    mutateContractions,
+  } = usePatient(patientId);
+  const { partogram, error: partogramError, mutate: mutatePartogram } = usePartogram(patientId);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('summary');
 
-  useSetBreadcrumbs([
-    { label: 'แดชบอร์ด', href: '/' },
-    { label: `AN ${patientId}` },
-  ]);
+  useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: `AN ${patientId}` }]);
 
   useSSE({
     onPatientUpdate: () => mutate(),
@@ -87,8 +93,7 @@ export default function PatientDetailPage({
       error && typeof error === 'object' && 'status' in error
         ? (error as { status: number }).status
         : null;
-    const apiMessage =
-      error instanceof Error ? error.message : 'ไม่พบข้อมูลผู้คลอด';
+    const apiMessage = error instanceof Error ? error.message : 'ไม่พบข้อมูลผู้คลอด';
     const heading =
       status === 400
         ? 'รูปแบบรหัสผู้คลอดไม่ถูกต้อง'
@@ -101,19 +106,17 @@ export default function PatientDetailPage({
         style={{ color: 'var(--ink-navy-muted)' }}
       >
         <div className="max-w-md text-center">
-          <p className="font-mono text-[13px] font-semibold text-[var(--ink-navy)]">
-            {heading}
-          </p>
-          {error && (
-            <p className="mt-2 font-mono text-[11px] text-red-600">
-              {apiMessage}
-            </p>
-          )}
+          <p className="font-mono text-[13px] font-semibold text-[var(--ink-navy)]">{heading}</p>
+          {error && <p className="mt-2 font-mono text-[11px] text-red-600">{apiMessage}</p>}
           {status === 400 && (
             <p className="mt-2 font-mono text-[11px] text-[var(--ink-navy-dim)]">
-              URL ต้องอยู่ในรูปแบบ <code className="rounded bg-[var(--rule-hair)] px-1">/patients/&lt;hcode&gt;-&lt;an&gt;</code>
+              URL ต้องอยู่ในรูปแบบ{' '}
+              <code className="rounded bg-[var(--rule-hair)] px-1">
+                /patients/&lt;hcode&gt;-&lt;an&gt;
+              </code>
               <br />
-              เช่น <code className="rounded bg-[var(--rule-hair)] px-1">/patients/10670-69000123</code>
+              เช่น{' '}
+              <code className="rounded bg-[var(--rule-hair)] px-1">/patients/10670-69000123</code>
             </p>
           )}
           <button
@@ -131,12 +134,25 @@ export default function PatientDetailPage({
   // Derive current cervix dilation from partogram
   const currentDilationCm = partogram?.entries?.length
     ? [...partogram.entries].sort(
-        (a, b) => new Date(b.measuredAt).getTime() - new Date(a.measuredAt).getTime()
+        (a, b) => new Date(b.measuredAt).getTime() - new Date(a.measuredAt).getTime(),
       )[0].dilationCm
     : null;
 
   // Latest vital timestamp for quick stats
   const latestVitalAt = vitals.length > 0 ? vitals[vitals.length - 1].measuredAt : null;
+
+  // Secondary feeds (vitals / contractions / partograph) load independently of
+  // the main patient detail. When one fails we keep the detail on screen and
+  // surface a non-blocking banner naming the failed feed(s); onRetry revalidates
+  // only those feeds. The partograph tab additionally distinguishes its own
+  // error state (below) from the "no data yet" empty state.
+  const failedFeeds: Array<{ label: string; retry: () => void }> = [
+    { failed: Boolean(vitalsError), label: 'สัญญาณชีพ', retry: mutateVitals },
+    { failed: Boolean(contractionsError), label: 'การหดรัดตัว', retry: mutateContractions },
+    { failed: Boolean(partogramError), label: 'Partograph', retry: mutatePartogram },
+  ]
+    .filter((f) => f.failed)
+    .map(({ label, retry }) => ({ label, retry: () => void retry() }));
 
   return (
     <div
@@ -146,8 +162,9 @@ export default function PatientDetailPage({
         zoom: 1.15,
       }}
     >
-      {/* High Risk Alert Modal */}
-      {cpdScore && cpdScore.score >= 10 && (
+      {/* High Risk Alert Modal — threshold derived from risk-levels config,
+          not a bare literal, so the HIGH boundary lives in one place. */}
+      {cpdScore && isHighRisk(cpdScore.score) && (
         <HighRiskAlert score={cpdScore.score} an={patient.an} />
       )}
 
@@ -158,7 +175,9 @@ export default function PatientDetailPage({
         an={patient.an}
         laborStatus={patient.laborStatus}
         hospitalName={patient.hospital.name}
-        cpdScore={cpdScore ? { score: cpdScore.score, riskLevel: cpdScore.riskLevel as RiskLevel } : null}
+        cpdScore={
+          cpdScore ? { score: cpdScore.score, riskLevel: cpdScore.riskLevel as RiskLevel } : null
+        }
         mainHeaderRef={mainHeaderRef}
       />
 
@@ -178,10 +197,7 @@ export default function PatientDetailPage({
       {/* Section 1: Patient Header — full-bleed navy gradient identity band.
           PatientHeader renders its own inner gradient canvas + padding, so the
           wrapper here is zero-padding / zero-background. */}
-      <div
-        ref={mainHeaderRef}
-        style={{ borderBottom: '1px solid var(--rule-strong)' }}
-      >
+      <div ref={mainHeaderRef} style={{ borderBottom: '1px solid var(--rule-strong)' }}>
         <PatientHeader
           hn={patient.hn}
           an={patient.an}
@@ -192,29 +208,27 @@ export default function PatientDetailPage({
           weightKg={patient.weightKg}
           weightDiffKg={patient.weightDiffKg}
           hospital={patient.hospital}
-          cpdScore={cpdScore ? { score: cpdScore.score, riskLevel: cpdScore.riskLevel as RiskLevel } : null}
+          cpdScore={
+            cpdScore ? { score: cpdScore.score, riskLevel: cpdScore.riskLevel as RiskLevel } : null
+          }
         />
       </div>
 
       {/* Section 2: Referral Recommendation Banner */}
       {cpdScore && cpdScore.riskLevel !== RiskLevel.LOW && (
-        <div
-          className="bg-white"
-          style={{ borderBottom: '1px solid var(--rule-strong)' }}
-        >
+        <div className="bg-white" style={{ borderBottom: '1px solid var(--rule-strong)' }}>
           <ReferralBanner
             score={cpdScore.score}
             riskLevel={cpdScore.riskLevel as RiskLevel}
-            recommendation={cpdScore.recommendation ?? RISK_LEVELS[cpdScore.riskLevel as RiskLevel].action}
+            recommendation={
+              cpdScore.recommendation ?? RISK_LEVELS[cpdScore.riskLevel as RiskLevel].action
+            }
           />
         </div>
       )}
 
       {/* Section 3: Quick Stats Bar — flush white strip */}
-      <div
-        className="bg-white"
-        style={{ borderBottom: '1px solid var(--rule-strong)' }}
-      >
+      <div className="bg-white" style={{ borderBottom: '1px solid var(--rule-strong)' }}>
         <QuickStatsBar
           age={patient.age}
           gravida={patient.gravida}
@@ -235,139 +249,183 @@ export default function PatientDetailPage({
          linked to a maternal journey (woman had prior ANC registration,
          possibly at a different hospital). Compact 4-tile rail with a risk
          ribbon on the left; full ANC visit timeline + labs on /pregnancies. */}
-      {journeyContext && (() => {
-        const riskKey = journeyContext.ancRiskLevel;
-        const riskMeta =
-          riskKey === 'HR3'
-            ? { color: 'var(--risk-high)',   bg: 'color-mix(in srgb, #ef4444 10%, white)', label: 'ความเสี่ยงสูง ระดับ 3' }
-            : riskKey === 'HR2'
-              ? { color: 'var(--risk-medium)', bg: 'color-mix(in srgb, #eab308 10%, white)', label: 'ความเสี่ยง ระดับ 2' }
-              : riskKey === 'HR1'
-                ? { color: 'var(--risk-medium)', bg: 'color-mix(in srgb, #eab308 8%, white)', label: 'ความเสี่ยง ระดับ 1' }
-                : { color: 'var(--risk-low)', bg: 'color-mix(in srgb, #22c55e 6%, white)', label: 'ความเสี่ยงต่ำ' };
-        const fmt = (iso: string | null): string => {
-          if (!iso) return '—';
-          return new Date(iso).toLocaleDateString('th-TH', {
-            timeZone: 'Asia/Bangkok',
-            year: 'numeric', month: 'short', day: 'numeric',
-          });
-        };
-        const daysSinceLastAnc = journeyContext.lastAncDate
-          ? Math.floor((now - new Date(journeyContext.lastAncDate).getTime()) / 86400_000)
-          : null;
-        const ancBelowMin = journeyContext.ancVisitCount < 4;
-        const ancBelowTarget = journeyContext.ancVisitCount < 8 && !ancBelowMin;
-        return (
-          <div
-            className="px-6 py-3"
-            style={{ background: riskMeta.bg, borderBottom: '1px solid var(--rule-strong)' }}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Baby className="h-4 w-4" style={{ color: riskMeta.color }} />
-                <h3 className="text-[14px] font-bold" style={{ color: 'var(--ink-navy)' }}>
-                  ข้อมูลฝากครรภ์ (ANC)
-                </h3>
-                <span
-                  className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
-                  style={{ background: riskMeta.color }}
-                >
-                  {riskKey === 'HR3' && <AlertTriangle className="h-3 w-3" />}
-                  {riskKey ?? 'LOW'} · {riskMeta.label}
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] tracking-[0.08em]"
-                  style={{
-                    borderColor: 'var(--rule-strong)',
-                    color: 'var(--ink-navy-dim)',
-                    background: 'white',
-                  }}
-                >
-                  <Activity className="h-3 w-3" style={{ color: 'var(--accent-navy)' }} />
-                  {journeyContext.careStage}
-                </span>
-              </div>
-              <Link
-                href={`/pregnancies/${journeyContext.journeyId}`}
-                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 font-mono text-[11px] font-bold tracking-[0.06em] text-white transition-colors hover:opacity-90"
-                style={{ background: 'var(--accent-navy)' }}
-              >
-                ดูรายละเอียดการฝากครรภ์ →
-              </Link>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[
-                {
-                  label: 'จำนวนครั้ง ANC',
-                  labelEn: 'ANC VISITS',
-                  value: (
-                    <>
-                      {journeyContext.ancVisitCount}
-                      <span className="ml-1 text-[11px] font-normal text-[var(--ink-navy-muted)]">/ 8</span>
-                    </>
-                  ),
-                  color: ancBelowMin
-                    ? 'var(--risk-high)'
-                    : ancBelowTarget
-                      ? 'var(--risk-medium)'
-                      : 'var(--risk-low)',
-                  note: ancBelowMin ? 'ต่ำกว่ามาตรฐาน' : ancBelowTarget ? 'ยังไม่ครบ' : 'ครบตามเกณฑ์',
-                },
-                {
-                  label: 'ANC ครั้งสุดท้าย',
-                  labelEn: 'LAST VISIT',
-                  value: fmt(journeyContext.lastAncDate),
-                  color:
-                    daysSinceLastAnc != null && daysSinceLastAnc > 28
-                      ? 'var(--risk-high)'
-                      : 'var(--accent-navy)',
-                  note: daysSinceLastAnc != null ? `${daysSinceLastAnc} วันที่แล้ว` : undefined,
-                  textSize: 13 as const,
-                },
-                {
-                  label: 'วันแรกของประจำเดือนครั้งสุดท้าย',
-                  labelEn: 'LMP',
-                  value: fmt(journeyContext.lmp),
-                  color: 'var(--accent-navy)',
-                  textSize: 13 as const,
-                },
-                {
-                  label: 'กำหนดคลอด',
-                  labelEn: 'EDC',
-                  value: fmt(journeyContext.edc),
-                  color: 'var(--accent-navy)',
-                  textSize: 13 as const,
-                },
-              ].map((t) => (
-                <div
-                  key={t.labelEn}
-                  className="rounded-sm border bg-white px-2.5 py-2"
-                  style={{ borderColor: 'var(--rule-strong)', borderLeft: `3px solid ${t.color}` }}
-                >
-                  <div className="font-mono text-[9px] font-semibold uppercase tracking-[0.12em]"
-                       style={{ color: t.color }}>
-                    {t.labelEn}
-                  </div>
-                  <div
-                    className="mt-0.5 font-mono font-bold leading-tight tabular-nums"
+      {journeyContext &&
+        (() => {
+          const riskKey = journeyContext.ancRiskLevel;
+          const riskMeta =
+            riskKey === 'HR3'
+              ? {
+                  color: 'var(--risk-high)',
+                  bg: 'color-mix(in srgb, #ef4444 10%, white)',
+                  label: 'ความเสี่ยงสูง ระดับ 3',
+                }
+              : riskKey === 'HR2'
+                ? {
+                    color: 'var(--risk-medium)',
+                    bg: 'color-mix(in srgb, #eab308 10%, white)',
+                    label: 'ความเสี่ยง ระดับ 2',
+                  }
+                : riskKey === 'HR1'
+                  ? {
+                      color: 'var(--risk-medium)',
+                      bg: 'color-mix(in srgb, #eab308 8%, white)',
+                      label: 'ความเสี่ยง ระดับ 1',
+                    }
+                  : {
+                      color: 'var(--risk-low)',
+                      bg: 'color-mix(in srgb, #22c55e 6%, white)',
+                      label: 'ความเสี่ยงต่ำ',
+                    };
+          const fmt = (iso: string | null): string => {
+            if (!iso) return '—';
+            return new Date(iso).toLocaleDateString('th-TH', {
+              timeZone: 'Asia/Bangkok',
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            });
+          };
+          const daysSinceLastAnc = journeyContext.lastAncDate
+            ? Math.floor((now - new Date(journeyContext.lastAncDate).getTime()) / 86400_000)
+            : null;
+          const ancBelowMin = journeyContext.ancVisitCount < 4;
+          const ancBelowTarget = journeyContext.ancVisitCount < 8 && !ancBelowMin;
+          return (
+            <div
+              className="px-6 py-3"
+              style={{ background: riskMeta.bg, borderBottom: '1px solid var(--rule-strong)' }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Baby className="h-4 w-4" style={{ color: riskMeta.color }} />
+                  <h3 className="text-[14px] font-bold" style={{ color: 'var(--ink-navy)' }}>
+                    ข้อมูลฝากครรภ์ (ANC)
+                  </h3>
+                  <span
+                    className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                    style={{ background: riskMeta.color }}
+                  >
+                    {riskKey === 'HR3' && <AlertTriangle className="h-3 w-3" />}
+                    {riskKey ?? 'LOW'} · {riskMeta.label}
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] tracking-[0.08em]"
                     style={{
-                      color: t.color,
-                      fontSize: t.textSize ? `${t.textSize}px` : '22px',
-                      letterSpacing: '-0.01em',
+                      borderColor: 'var(--rule-strong)',
+                      color: 'var(--ink-navy-dim)',
+                      background: 'white',
                     }}
                   >
-                    {t.value}
-                  </div>
-                  <div className="mt-0.5 font-mono text-[10px] text-[var(--ink-navy-dim)]">
-                    {t.label}
-                    {t.note && <span className="ml-1 text-[var(--ink-navy-muted)]">· {t.note}</span>}
-                  </div>
+                    <Activity className="h-3 w-3" style={{ color: 'var(--accent-navy)' }} />
+                    {journeyContext.careStage}
+                  </span>
                 </div>
-              ))}
+                <Link
+                  href={`/pregnancies/${journeyContext.journeyId}`}
+                  className="inline-flex items-center gap-1 rounded-sm px-2 py-1 font-mono text-[11px] font-bold tracking-[0.06em] text-white transition-colors hover:opacity-90"
+                  style={{ background: 'var(--accent-navy)' }}
+                >
+                  ดูรายละเอียดการฝากครรภ์ →
+                </Link>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {[
+                  {
+                    label: 'จำนวนครั้ง ANC',
+                    labelEn: 'ANC VISITS',
+                    value: (
+                      <>
+                        {journeyContext.ancVisitCount}
+                        <span className="ml-1 text-[11px] font-normal text-[var(--ink-navy-muted)]">
+                          / 8
+                        </span>
+                      </>
+                    ),
+                    color: ancBelowMin
+                      ? 'var(--risk-high)'
+                      : ancBelowTarget
+                        ? 'var(--risk-medium)'
+                        : 'var(--risk-low)',
+                    note: ancBelowMin
+                      ? 'ต่ำกว่ามาตรฐาน'
+                      : ancBelowTarget
+                        ? 'ยังไม่ครบ'
+                        : 'ครบตามเกณฑ์',
+                  },
+                  {
+                    label: 'ANC ครั้งสุดท้าย',
+                    labelEn: 'LAST VISIT',
+                    value: fmt(journeyContext.lastAncDate),
+                    color:
+                      daysSinceLastAnc != null && daysSinceLastAnc > 28
+                        ? 'var(--risk-high)'
+                        : 'var(--accent-navy)',
+                    note: daysSinceLastAnc != null ? `${daysSinceLastAnc} วันที่แล้ว` : undefined,
+                    textSize: 13 as const,
+                  },
+                  {
+                    label: 'วันแรกของประจำเดือนครั้งสุดท้าย',
+                    labelEn: 'LMP',
+                    value: fmt(journeyContext.lmp),
+                    color: 'var(--accent-navy)',
+                    textSize: 13 as const,
+                  },
+                  {
+                    label: 'กำหนดคลอด',
+                    labelEn: 'EDC',
+                    value: fmt(journeyContext.edc),
+                    color: 'var(--accent-navy)',
+                    textSize: 13 as const,
+                  },
+                ].map((t) => (
+                  <div
+                    key={t.labelEn}
+                    className="rounded-sm border bg-white px-2.5 py-2"
+                    style={{
+                      borderColor: 'var(--rule-strong)',
+                      borderLeft: `3px solid ${t.color}`,
+                    }}
+                  >
+                    <div
+                      className="font-mono text-[9px] font-semibold uppercase tracking-[0.12em]"
+                      style={{ color: t.color }}
+                    >
+                      {t.labelEn}
+                    </div>
+                    <div
+                      className="mt-0.5 font-mono font-bold leading-tight tabular-nums"
+                      style={{
+                        color: t.color,
+                        fontSize: t.textSize ? `${t.textSize}px` : '22px',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      {t.value}
+                    </div>
+                    <div className="mt-0.5 font-mono text-[10px] text-[var(--ink-navy-dim)]">
+                      {t.label}
+                      {t.note && (
+                        <span className="ml-1 text-[var(--ink-navy-muted)]">· {t.note}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
+
+      {/* Secondary-feed failure banner — main detail is on screen (we passed
+          the error/!patient guard above), but one or more supporting feeds
+          failed to load. Name them and offer a retry that revalidates only the
+          failed feeds. */}
+      {failedFeeds.length > 0 && (
+        <ErrorState
+          variant="banner"
+          message={`โหลดข้อมูลบางส่วนไม่สำเร็จ: ${failedFeeds.map((f) => f.label).join(' / ')}`}
+          onRetry={() => failedFeeds.forEach((f) => f.retry())}
+        />
+      )}
 
       {/* ─── Tabbed workspace ─────────────────────────────────────────────
           The three-column deep-dive used to stack in one giant scroll which
@@ -483,7 +541,11 @@ export default function PatientDetailPage({
                   พิมพ์
                 </DialogTrigger>
                 <DialogContent className="max-w-4xl">
-                  <PrintForm patient={patient} hospitalName={patient.hospital.name} vitals={vitals} />
+                  <PrintForm
+                    patient={patient}
+                    hospitalName={patient.hospital.name}
+                    vitals={vitals}
+                  />
                   <div className="flex justify-end gap-2">
                     <Button
                       onClick={() => window.print()}
@@ -548,8 +610,8 @@ export default function PatientDetailPage({
                 </div>
               )}
 
-              {activeTab === 'partograph' && (
-                partographState ? (
+              {activeTab === 'partograph' &&
+                (partographState ? (
                   <div className="space-y-4">
                     {partographState.alerts.length > 0 && (
                       <AlertSummaryPanel
@@ -668,6 +730,13 @@ export default function PatientDetailPage({
                       )}
                     </div>
                   </div>
+                ) : partogramError ? (
+                  <ErrorState
+                    variant="page"
+                    message="ไม่สามารถโหลดข้อมูล Partograph ได้"
+                    detail={partogramError instanceof Error ? partogramError.message : undefined}
+                    onRetry={() => void mutatePartogram()}
+                  />
                 ) : (
                   <div
                     className="border p-6 text-center font-mono text-[12px] text-[var(--ink-navy-muted)]"
@@ -675,12 +744,9 @@ export default function PatientDetailPage({
                   >
                     ยังไม่มีข้อมูล Partograph สำหรับผู้คลอดรายนี้
                   </div>
-                )
-              )}
+                ))}
 
-              {activeTab === 'contractions' && (
-                <ContractionTable contractions={contractions} />
-              )}
+              {activeTab === 'contractions' && <ContractionTable contractions={contractions} />}
             </div>
           </>
         );
