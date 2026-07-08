@@ -73,6 +73,22 @@ export default function ReferralsPage() {
     { refreshInterval: 30000 },
   );
 
+  // Hooks must run unconditionally, before the loading/error early returns.
+  const referrals = useMemo(() => data?.referrals ?? [], [data]);
+
+  // Counts across current page
+  const counts = useMemo(() => {
+    const c = { initiated: 0, accepted: 0, inTransit: 0, arrived: 0, rejected: 0 };
+    for (const r of referrals) {
+      if (r.status === 'INITIATED') c.initiated += 1;
+      else if (r.status === 'ACCEPTED') c.accepted += 1;
+      else if (r.status === 'IN_TRANSIT') c.inTransit += 1;
+      else if (r.status === 'ARRIVED') c.arrived += 1;
+      else if (r.status === 'REJECTED') c.rejected += 1;
+    }
+    return c;
+  }, [referrals]);
+
   if (isLoading) {
     return <LoadingState message="กำลังโหลดข้อมูลการส่งต่อ..." />;
   }
@@ -91,21 +107,7 @@ export default function ReferralsPage() {
     );
   }
 
-  const referrals = data?.referrals ?? [];
   const pagination = data?.pagination ?? { total: 0, page: 1, perPage: 20, totalPages: 1 };
-
-  // Counts across current page
-  const counts = useMemo(() => {
-    const c = { initiated: 0, accepted: 0, inTransit: 0, arrived: 0, rejected: 0 };
-    for (const r of referrals) {
-      if (r.status === 'INITIATED') c.initiated += 1;
-      else if (r.status === 'ACCEPTED') c.accepted += 1;
-      else if (r.status === 'IN_TRANSIT') c.inTransit += 1;
-      else if (r.status === 'ARRIVED') c.arrived += 1;
-      else if (r.status === 'REJECTED') c.rejected += 1;
-    }
-    return c;
-  }, [referrals]);
 
   return (
     <div
