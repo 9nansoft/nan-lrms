@@ -1,0 +1,292 @@
+// W3: Journey list/detail service tests — written FIRST (TDD).
+// Covers freshness gates (PREGNANCY-only), q search (HN + decrypted name),
+// DB-wide counts (page-independent), hospital scoping, and detail lookup.
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { SqliteAdapter } from '@/db/sqlite-adapter';
+import { SchemaSync } from '@/db/schema-sync';
+import { ALL_TABLES } from '@/db/tables';
+import { encrypt, generateKey } from '@/lib/encryption';
+import {
+  ANC_MAX_GA_WEEKS,
+  ANC_EDC_MAX_PAST_DAYS,
+  ANC_LAST_VISIT_MAX_AGE_DAYS,
+  ancFreshnessCutoffs,
+} from '@/config/anc-freshness';
+import { listJourneys, listHospitalJourneys, getJourneyDetail } from '@/services/journey-list';
+
+const HOSP_A = 'hosp-a';
+const HOSP_B = 'hosp-b';
+
+function daysAgoIso(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+function daysAheadIso(days: number): string {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+let seq = 0;
+interface JourneySeed {
+  hospitalId?: string;
+  currentHospitalId?: string;
+  hn?: string;
+  name?: string;
+  careStage?: string;
+  ancRiskLevel?: string;
+  gaWeeks?: number | null;
+  edc?: string | null;
+  lastAncDate?: string | null;
+  createdAt?: string;
+}
+
+async function insertJourney(db: SqliteAdapter, seed: JourneySeed = {}): Promise<string> {
+  seq += 1;
+  const id = `j-${seq}`;
+  const hospitalId = seed.hospitalId ?? HOSP_A;
+  const currentHospitalId = seed.currentHospitalId ?? hospitalId;
+  const name = encrypt(seed.name ?? `Patient ${seq}`, process.env.ENCRYPTION_KEY!);
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO maternal_journeys
+       (id, hospital_id, current_hospital_id, hn, person_anc_id, name, cid, cid_hash,
+        age, gravida, para, lmp, edc, care_stage, anc_risk_level, anc_visit_count,
+        last_anc_date, ga_weeks, registered_at, stage_changed_at, synced_at,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      hospitalId,
+      currentHospitalId,
+      seed.hn ?? `HN${String(seq).padStart(4, '0')}`,
+      seq,
+      name,
+      `cid-${seq}`,
+      `hash-${seq}`,
+      28,
+      1,
+      0,
+      null,
+      seed.edc ?? null,
+      seed.careStage ?? 'PREGNANCY',
+      seed.ancRiskLevel ?? 'LOW',
+      0,
+      seed.lastAncDate ?? null,
+      seed.gaWeeks ?? null,
+      now,
+      now,
+      now,
+      seed.createdAt ?? now,
+      now,
+    ],
+  );
+  return id;
+}
+
+describe('anc-freshness config', () => {
+  it('exposes the three documented gate constants', () => {
+    expect(ANC_MAX_GA_WEEKS).toBe(42);
+    expect(ANC_EDC_MAX_PAST_DAYS).toBe(14);
+    expect(ANC_LAST_VISIT_MAX_AGE_DAYS).toBe(60);
+  });
+
+  it('computes cutoffs relative to a supplied clock', () => {
+    const now = new Date('2026-07-08T00:00:00.000Z');
+    const { edcOnOrAfter, lastAncOnOrAfter } = ancFreshnessCutoffs(now);
+    expect(edcOnOrAfter).toBe('2026-06-24T00:00:00.000Z'); // 14 days before
+    expect(lastAncOnOrAfter).toBe('2026-05-09T00:00:00.000Z'); // 60 days before
+  });
+});
+
+describe('journey-list service', () => {
+  let db: SqliteAdapter;
+  let prevKey: string | undefined;
+
+  beforeAll(() => {
+    prevKey = process.env.ENCRYPTION_KEY;
+    process.env.ENCRYPTION_KEY = generateKey();
+  });
+
+  afterAll(() => {
+    if (prevKey === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = prevKey;
+  });
+
+  beforeEach(async () => {
+    seq = 0;
+    db = new SqliteAdapter(':memory:');
+    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    await db.execute(
+      `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
+       VALUES (?, '10670', 'รพ.A', 'A_S', 1, 'ONLINE', datetime('now'), datetime('now'))`,
+      [HOSP_A],
+    );
+    await db.execute(
+      `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
+       VALUES (?, '10671', 'รพ.B', 'F2', 1, 'ONLINE', datetime('now'), datetime('now'))`,
+      [HOSP_B],
+    );
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  describe('freshness gates (PREGNANCY only)', () => {
+    it('excludes post-term / delivered / lost-to-follow-up PREGNANCY rows', async () => {
+      const fresh = await insertJourney(db, {
+        gaWeeks: 30,
+        edc: daysAheadIso(30),
+        lastAncDate: daysAgoIso(3),
+      });
+      await insertJourney(db, { gaWeeks: 45, edc: daysAheadIso(30), lastAncDate: daysAgoIso(3) }); // post-term
+      await insertJourney(db, { gaWeeks: 30, edc: daysAgoIso(400), lastAncDate: daysAgoIso(3) }); // delivered
+      await insertJourney(db, { gaWeeks: 30, edc: daysAheadIso(30), lastAncDate: daysAgoIso(90) }); // LTFU
+
+      const res = await listJourneys(db, { stage: 'PREGNANCY' });
+      const ids = res.journeys.map((j) => j.id);
+      expect(ids).toEqual([fresh]);
+      expect(res.pagination.total).toBe(1);
+    });
+
+    it('treats NULL ga_weeks / edc / last_anc_date as fresh (passes the gate)', async () => {
+      const nulls = await insertJourney(db, { gaWeeks: null, edc: null, lastAncDate: null });
+      const res = await listJourneys(db, { stage: 'PREGNANCY' });
+      expect(res.journeys.map((j) => j.id)).toContain(nulls);
+    });
+
+    it('does NOT apply freshness gates to non-PREGNANCY stages', async () => {
+      const staleLabor = await insertJourney(db, {
+        careStage: 'LABOR',
+        gaWeeks: 45,
+        edc: daysAgoIso(400),
+        lastAncDate: daysAgoIso(400),
+      });
+      const res = await listJourneys(db, { stage: 'LABOR' });
+      expect(res.journeys.map((j) => j.id)).toEqual([staleLabor]);
+    });
+
+    it('applies no freshness gate when stage is omitted', async () => {
+      await insertJourney(db, { careStage: 'PREGNANCY', gaWeeks: 45 });
+      await insertJourney(db, { careStage: 'DELIVERED', gaWeeks: 45 });
+      const res = await listJourneys(db, {});
+      expect(res.pagination.total).toBe(2);
+    });
+  });
+
+  describe('q search', () => {
+    beforeEach(async () => {
+      await insertJourney(db, { hn: 'AAA111', name: 'สมหญิง ใจดี' });
+      await insertJourney(db, { hn: 'BBB222', name: 'Somchai Jaidee' });
+      await insertJourney(db, { hn: 'CCC333', name: 'Malee Rakdee' });
+    });
+
+    it('matches by HN prefix', async () => {
+      const res = await listJourneys(db, { q: 'AAA' });
+      expect(res.journeys.map((j) => j.hn)).toEqual(['AAA111']);
+      expect(res.pagination.total).toBe(1);
+    });
+
+    it('matches by decrypted name, case-insensitively (contains)', async () => {
+      const res = await listJourneys(db, { q: 'somchai' });
+      expect(res.journeys.map((j) => j.hn)).toEqual(['BBB222']);
+      expect(res.journeys[0].name).toBe('Somchai Jaidee');
+    });
+
+    it('matches Thai names by substring', async () => {
+      const res = await listJourneys(db, { q: 'สมหญิง' });
+      expect(res.journeys.map((j) => j.hn)).toEqual(['AAA111']);
+    });
+
+    it('returns nothing when q matches neither HN nor name', async () => {
+      const res = await listJourneys(db, { q: 'zzz-no-match' });
+      expect(res.journeys).toHaveLength(0);
+      expect(res.pagination.total).toBe(0);
+    });
+  });
+
+  describe('counts (DB-wide, page-independent)', () => {
+    it('counts the full stage+freshness set, not just the current page', async () => {
+      for (let i = 0; i < 25; i++) {
+        await insertJourney(db, { ancRiskLevel: 'LOW', gaWeeks: 30 });
+      }
+      await insertJourney(db, { ancRiskLevel: 'HR1', gaWeeks: 30 });
+      await insertJourney(db, { ancRiskLevel: 'HR3', gaWeeks: 30 });
+      // stale row must be excluded from counts too
+      await insertJourney(db, { ancRiskLevel: 'HR3', gaWeeks: 99 });
+
+      const res = await listJourneys(db, { stage: 'PREGNANCY', page: 1, perPage: 20 });
+      expect(res.journeys).toHaveLength(20); // page-bound
+      expect(res.counts).toBeDefined();
+      expect(res.counts!.low).toBe(25); // DB-wide
+      expect(res.counts!.hr1).toBe(1);
+      expect(res.counts!.hr3).toBe(1); // stale HR3 excluded
+      expect(res.counts!.total).toBe(27);
+    });
+
+    it('counts ignore the risk_level filter (KPI shows all levels)', async () => {
+      await insertJourney(db, { ancRiskLevel: 'LOW', gaWeeks: 30 });
+      await insertJourney(db, { ancRiskLevel: 'HR3', gaWeeks: 30 });
+
+      const res = await listJourneys(db, { stage: 'PREGNANCY', riskLevel: 'HR3' });
+      expect(res.journeys.every((j) => j.ancRiskLevel === 'HR3')).toBe(true);
+      expect(res.pagination.total).toBe(1); // list filtered to HR3
+      expect(res.counts!.low).toBe(1); // counts still see LOW
+      expect(res.counts!.hr3).toBe(1);
+      expect(res.counts!.total).toBe(2);
+    });
+
+    it('counts respect an explicit hospital filter', async () => {
+      await insertJourney(db, { currentHospitalId: HOSP_A, ancRiskLevel: 'LOW', gaWeeks: 30 });
+      await insertJourney(db, { currentHospitalId: HOSP_B, ancRiskLevel: 'HR2', gaWeeks: 30 });
+
+      const res = await listJourneys(db, { stage: 'PREGNANCY', hospitalId: HOSP_A });
+      expect(res.counts!.total).toBe(1);
+      expect(res.counts!.low).toBe(1);
+      expect(res.counts!.hr2).toBe(0);
+    });
+  });
+
+  describe('listHospitalJourneys', () => {
+    it('scopes to the hospital by hcode and omits counts', async () => {
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30 });
+      await insertJourney(db, { currentHospitalId: HOSP_B, gaWeeks: 30 });
+
+      const res = await listHospitalJourneys(db, '10670', { stage: 'PREGNANCY' });
+      expect(res).not.toBeNull();
+      expect(res!.journeys).toHaveLength(1);
+      expect(res!.counts).toBeUndefined();
+    });
+
+    it('applies PREGNANCY freshness gates (count query uses a consistent alias)', async () => {
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30 });
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 99 }); // stale
+
+      const res = await listHospitalJourneys(db, '10670', { stage: 'PREGNANCY' });
+      expect(res!.pagination.total).toBe(1);
+      expect(res!.journeys).toHaveLength(1);
+    });
+
+    it('returns null for an unknown hcode', async () => {
+      const res = await listHospitalJourneys(db, '99999', {});
+      expect(res).toBeNull();
+    });
+  });
+
+  describe('getJourneyDetail', () => {
+    it('returns null when the journey does not exist', async () => {
+      const res = await getJourneyDetail(db, 'does-not-exist');
+      expect(res).toBeNull();
+    });
+
+    it('maps journey + empty sub-collections and decrypts the name', async () => {
+      const id = await insertJourney(db, { name: 'Detail Person', gaWeeks: 30 });
+      const res = await getJourneyDetail(db, id);
+      expect(res).not.toBeNull();
+      expect(res!.journey.id).toBe(id);
+      expect(res!.journey.name).toBe('Detail Person');
+      expect(res!.ancVisits).toEqual([]);
+      expect(res!.newborns).toEqual([]);
+      expect(res!.referrals).toEqual([]);
+      expect(res!.latestRisk).toBeNull();
+    });
+  });
+});

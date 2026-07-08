@@ -1,0 +1,488 @@
+// W3: Journey list/detail read service.
+//
+// Centralises the raw SQL + row→DTO mapping that previously lived inline in the
+// journeys route handlers, so the handlers stay thin (parse params → call
+// service → NextResponse). All SQL is parameterised and every user-facing name
+// is passed through decryptSafe at the response boundary.
+import type { DatabaseAdapter } from '@/db/adapter';
+import { decryptSafe } from '@/lib/encryption';
+import { CareStage } from '@/types/domain';
+import { ancFreshnessCutoffs, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
+import type {
+  JourneyListItem,
+  JourneyListResponse,
+  JourneyRiskCounts,
+  JourneyDetailResponse,
+  AncVisitEntry,
+  AncRiskEntry,
+  ReferralListItem,
+  NewbornEntry,
+} from '@/types/api';
+
+export interface JourneyListFilters {
+  stage?: string;
+  riskLevel?: string;
+  /** Filters on current_hospital_id (province-wide endpoint only). */
+  hospitalId?: string;
+  /** Free-text search — HN prefix or decrypted-name contains (case-insensitive). */
+  q?: string;
+  page?: number;
+  perPage?: number;
+}
+
+interface WhereClause {
+  clause: string;
+  params: unknown[];
+}
+
+// ─── Shared predicate builder ─────────────────────────────────────────────
+// Appends the stage / freshness / risk / hospital predicates onto a mandatory
+// leading predicate (`base`). Every reference uses the `mj` alias so the same
+// clause works for the data query, the count query, and the aggregate query.
+function buildJourneyWhere(
+  base: string,
+  baseParams: unknown[],
+  filters: Pick<JourneyListFilters, 'stage' | 'riskLevel' | 'hospitalId'>,
+  now: Date,
+): WhereClause {
+  let clause = base;
+  const params = [...baseParams];
+
+  if (filters.stage) {
+    clause += ` AND mj.care_stage = ?`;
+    params.push(filters.stage);
+    // Freshness gates are only meaningful for the PREGNANCY registry — they
+    // drop rows whose owners already delivered or were lost to follow-up.
+    // Thresholds live in src/config/anc-freshness.ts; cutoffs are resolved in
+    // app code and bound as params so this runs identically on Postgres/SQLite.
+    if (filters.stage === CareStage.PREGNANCY) {
+      const { edcOnOrAfter, lastAncOnOrAfter } = ancFreshnessCutoffs(now);
+      clause += `
+        AND (mj.ga_weeks IS NULL OR mj.ga_weeks <= ?)
+        AND (mj.edc IS NULL OR mj.edc >= ?)
+        AND (mj.last_anc_date IS NULL OR mj.last_anc_date >= ?)`;
+      params.push(ANC_MAX_GA_WEEKS, edcOnOrAfter, lastAncOnOrAfter);
+    }
+  }
+  if (filters.riskLevel) {
+    clause += ` AND mj.anc_risk_level = ?`;
+    params.push(filters.riskLevel);
+  }
+  if (filters.hospitalId) {
+    clause += ` AND mj.current_hospital_id = ?`;
+    params.push(filters.hospitalId);
+  }
+
+  return { clause, params };
+}
+
+const DATA_SELECT = `SELECT mj.*, h.name as hospital_name, h.hcode
+  FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id`;
+const COUNT_SELECT = `SELECT COUNT(*) as total
+  FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id`;
+
+function mapJourneyListItem(r: Record<string, unknown>, decryptedName?: string): JourneyListItem {
+  return {
+    id: r.id as string,
+    hn: r.hn as string,
+    name: decryptedName ?? decryptSafe(r.name as string),
+    age: r.age as number,
+    gravida: r.gravida as number,
+    para: r.para as number,
+    gaWeeks: r.ga_weeks as number | null,
+    lmp: r.lmp as string | null,
+    edc: r.edc as string | null,
+    careStage: r.care_stage as string,
+    ancRiskLevel: r.anc_risk_level as string,
+    ancVisitCount: r.anc_visit_count as number,
+    lastAncDate: r.last_anc_date as string | null,
+    hospitalName: r.hospital_name as string,
+    hcode: r.hcode as string,
+    registeredAt: r.registered_at as string,
+  };
+}
+
+function normalizePaging(filters: JourneyListFilters): { page: number; perPage: number } {
+  const page = filters.page && filters.page > 0 ? filters.page : 1;
+  const perPage = filters.perPage && filters.perPage > 0 ? filters.perPage : 20;
+  return { page, perPage };
+}
+
+// DB-wide totals by ANC risk level over the stage+freshness(+hospital) set.
+// Intentionally excludes the risk_level filter (we break down by it) and the
+// q search, so the KPI strip shows true totals rather than the current view.
+async function computeRiskCounts(
+  db: DatabaseAdapter,
+  base: string,
+  baseParams: unknown[],
+  filters: JourneyListFilters,
+  now: Date,
+): Promise<JourneyRiskCounts> {
+  const { clause, params } = buildJourneyWhere(
+    base,
+    baseParams,
+    { stage: filters.stage, hospitalId: filters.hospitalId },
+    now,
+  );
+  const rows = await db.query<{ anc_risk_level: string; cnt: number }>(
+    `SELECT mj.anc_risk_level, COUNT(*) as cnt
+       FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id
+      WHERE ${clause}
+      GROUP BY mj.anc_risk_level`,
+    params,
+  );
+
+  const counts: JourneyRiskCounts = { low: 0, hr1: 0, hr2: 0, hr3: 0, total: 0 };
+  for (const r of rows) {
+    const cnt = Number(r.cnt) || 0;
+    counts.total += cnt;
+    switch (r.anc_risk_level) {
+      case 'LOW':
+        counts.low = cnt;
+        break;
+      case 'HR1':
+        counts.hr1 = cnt;
+        break;
+      case 'HR2':
+        counts.hr2 = cnt;
+        break;
+      case 'HR3':
+        counts.hr3 = cnt;
+        break;
+    }
+  }
+  return counts;
+}
+
+/**
+ * Province-wide journey list for GET /api/journeys.
+ * Supports stage (+freshness), risk_level, hospital_id, pagination, and a `q`
+ * search. Always returns a DB-wide `counts` breakdown for the KPI strip.
+ */
+export async function listJourneys(
+  db: DatabaseAdapter,
+  filters: JourneyListFilters,
+): Promise<JourneyListResponse> {
+  const { page, perPage } = normalizePaging(filters);
+  const now = new Date();
+  const q = filters.q?.trim();
+
+  const base = '1=1';
+  const baseParams: unknown[] = [];
+  const { clause, params } = buildJourneyWhere(base, baseParams, filters, now);
+
+  let journeys: JourneyListItem[];
+  let total: number;
+
+  if (q) {
+    // Names are encrypted at rest, so the name half of the search cannot run in
+    // SQL. Fetch the full base-filtered set, decrypt, match (HN prefix OR name
+    // contains), then paginate in memory — the match must happen before paging.
+    const rows = await db.query<Record<string, unknown>>(
+      `${DATA_SELECT} WHERE ${clause} ORDER BY mj.created_at DESC`,
+      params,
+    );
+    const qLower = q.toLowerCase();
+    const matched = rows
+      .map((row) => ({ row, name: decryptSafe(row.name as string) }))
+      .filter(
+        ({ row, name }) =>
+          String(row.hn ?? '')
+            .toLowerCase()
+            .startsWith(qLower) || name.toLowerCase().includes(qLower),
+      );
+    total = matched.length;
+    journeys = matched
+      .slice((page - 1) * perPage, page * perPage)
+      .map(({ row, name }) => mapJourneyListItem(row, name));
+  } else {
+    const countRows = await db.query<{ total: number }>(`${COUNT_SELECT} WHERE ${clause}`, params);
+    total = Number(countRows[0]?.total) || 0;
+    const rows = await db.query<Record<string, unknown>>(
+      `${DATA_SELECT} WHERE ${clause} ORDER BY mj.created_at DESC LIMIT ? OFFSET ?`,
+      [...params, perPage, (page - 1) * perPage],
+    );
+    journeys = rows.map((row) => mapJourneyListItem(row));
+  }
+
+  const counts = await computeRiskCounts(db, base, baseParams, filters, now);
+
+  return {
+    journeys,
+    pagination: { total, page, perPage, totalPages: Math.ceil(total / perPage) },
+    counts,
+  };
+}
+
+/**
+ * Per-hospital journey list for GET /api/hospitals/[hcode]/journeys.
+ * Returns null when the hcode is unknown (route maps to 404). Preserves the
+ * existing response shape exactly — no `counts` field.
+ */
+export async function listHospitalJourneys(
+  db: DatabaseAdapter,
+  hcode: string,
+  filters: JourneyListFilters,
+): Promise<JourneyListResponse | null> {
+  const hospitals = await db.query<{ id: string }>(`SELECT id FROM hospitals WHERE hcode = ?`, [
+    hcode,
+  ]);
+  if (hospitals.length === 0) return null;
+  const hospitalId = hospitals[0].id;
+
+  const { page, perPage } = normalizePaging(filters);
+  const now = new Date();
+  const { clause, params } = buildJourneyWhere(
+    'mj.current_hospital_id = ?',
+    [hospitalId],
+    { stage: filters.stage, riskLevel: filters.riskLevel },
+    now,
+  );
+
+  const countRows = await db.query<{ total: number }>(`${COUNT_SELECT} WHERE ${clause}`, params);
+  const total = Number(countRows[0]?.total) || 0;
+
+  const rows = await db.query<Record<string, unknown>>(
+    `${DATA_SELECT} WHERE ${clause} ORDER BY mj.created_at DESC LIMIT ? OFFSET ?`,
+    [...params, perPage, (page - 1) * perPage],
+  );
+  const journeys = rows.map((row) => mapJourneyListItem(row));
+
+  return {
+    journeys,
+    pagination: { total, page, perPage, totalPages: Math.ceil(total / perPage) },
+  };
+}
+
+// ─── Detail helpers ───────────────────────────────────────────────────────
+
+// Tolerant parser — HOSxP / webhook may store this as a JSON string (Postgres)
+// or an already-deserialized array (SQLite json column). Returns null on garbage.
+function parseDangerSigns(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw.filter((s): s is string => typeof s === 'string');
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? parsed.filter((s): s is string => typeof s === 'string')
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+// Generic JSON-or-object passthrough — used for RTCOG additions that store
+// structured data (vaccines_given_json, psychosocial_screen_json, etc).
+function parseJson<T = unknown>(raw: unknown): T | null {
+  if (raw == null) return null;
+  if (typeof raw === 'object') return raw as T;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Full journey detail for GET /api/journeys/[journeyId].
+ * Returns null when the journey is not found (route maps to 404).
+ */
+export async function getJourneyDetail(
+  db: DatabaseAdapter,
+  journeyId: string,
+): Promise<JourneyDetailResponse | null> {
+  // Journey + hospital info + latest known maternal height (labor-side, if the
+  // journey has crossed to a cached_patients record). LEFT JOIN on
+  // current_hospital_id + COALESCE so a stale/NULL current_hospital_id doesn't
+  // 404 the whole detail page; falls back to the registering hospital.
+  const journeyRows = await db.query<Record<string, unknown>>(
+    `SELECT mj.*, h.name as hospital_name, h.hcode,
+            COALESCE(ch.name, h.name) as current_hospital_name,
+            COALESCE(ch.hcode, h.hcode) as current_hcode,
+            (SELECT cp.height_cm FROM cached_patients cp
+               WHERE cp.journey_id = mj.id AND cp.height_cm IS NOT NULL
+               ORDER BY cp.updated_at DESC LIMIT 1) as height_cm
+     FROM maternal_journeys mj
+     JOIN hospitals h ON h.id = mj.hospital_id
+     LEFT JOIN hospitals ch ON ch.id = mj.current_hospital_id
+     WHERE mj.id = ?`,
+    [journeyId],
+  );
+
+  if (journeyRows.length === 0) return null;
+  const r = journeyRows[0];
+
+  // ANC visits — LEFT JOIN hospitals so each visit can show where it happened
+  // (referred patients attend ANC across hospitals). Secondary sort by
+  // visit_number stabilises ties on visit_date.
+  const visitRows = await db.query<Record<string, unknown>>(
+    `SELECT cv.*, vh.name AS visit_hospital_name, vh.hcode AS visit_hcode
+       FROM cached_anc_visits cv
+       LEFT JOIN hospitals vh ON vh.id = cv.hospital_id
+      WHERE cv.journey_id = ?
+      ORDER BY cv.visit_date, cv.visit_number`,
+    [journeyId],
+  );
+  const ancVisits: AncVisitEntry[] = visitRows.map((v) => ({
+    visitDate: v.visit_date as string,
+    visitNumber: v.visit_number as number,
+    hospitalName: (v.visit_hospital_name as string | null) ?? null,
+    hcode: (v.visit_hcode as string | null) ?? null,
+    gaWeeks: v.ga_weeks as number | null,
+    fundalHeightCm: v.fundal_height_cm as number | null,
+    weightKg: v.weight_kg as number | null,
+    bpSystolic: v.bp_systolic as number | null,
+    bpDiastolic: v.bp_diastolic as number | null,
+    fetalHr: v.fetal_hr as number | null,
+    presentation: (v.presentation as string | null) ?? null,
+    engagement: (v.engagement as string | null) ?? null,
+    passQuality: v.pass_quality == null ? null : !!v.pass_quality,
+    urineProtein: (v.urine_protein as string | null) ?? null,
+    urineGlucose: (v.urine_glucose as string | null) ?? null,
+    hbGDl: v.hb_g_dl == null ? null : Number(v.hb_g_dl),
+    hctPct: v.hct_pct == null ? null : Number(v.hct_pct),
+    ttDoseNo: v.tt_dose_no as number | null,
+    ironFolicGiven: v.iron_folic_given == null ? null : !!v.iron_folic_given,
+    calciumGiven: v.calcium_given == null ? null : !!v.calcium_given,
+    dangerSigns: parseDangerSigns(v.danger_signs_json),
+    fetalMovementOk: v.fetal_movement_ok == null ? null : !!v.fetal_movement_ok,
+    vaccinesGiven: parseJson<AncVisitEntry['vaccinesGiven']>(v.vaccines_given_json) ?? null,
+    urineKetone: (v.urine_ketone as string | null) ?? null,
+    urineCultureResult: (v.urine_culture_result as string | null) ?? null,
+    iodineGiven: v.iodine_given == null ? null : !!v.iodine_given,
+    multivitaminGiven: v.multivitamin_given == null ? null : !!v.multivitamin_given,
+    vitaminDIu: (v.vitamin_d_iu as number | null) ?? null,
+    nstResult: (v.nst_result as AncVisitEntry['nstResult']) ?? null,
+    bppScore: (v.bpp_score as number | null) ?? null,
+    umbilicalDopplerResult:
+      (v.umbilical_doppler_result as AncVisitEntry['umbilicalDopplerResult']) ?? null,
+    psychosocialScreen:
+      parseJson<AncVisitEntry['psychosocialScreen']>(v.psychosocial_screen_json) ?? null,
+  }));
+
+  // Latest risk. Tolerant parse — pg returns JSONB already-parsed; SQLite
+  // returns TEXT, on which strict JSON.parse of an array literal throws.
+  const riskRows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM cached_anc_risks WHERE journey_id = ? ORDER BY screened_at DESC LIMIT 1`,
+    [journeyId],
+  );
+  const latestRisk: AncRiskEntry | null =
+    riskRows.length > 0
+      ? {
+          riskLevel: riskRows[0].risk_level as string,
+          triggeredRules: parseJson<string[]>(riskRows[0].triggered_rules) ?? [],
+          screenedAt: riskRows[0].screened_at as string,
+          recommendedFacility: riskRows[0].recommended_facility as string | null,
+        }
+      : null;
+
+  // Referrals with hospital names.
+  const refRows = await db.query<Record<string, unknown>>(
+    `SELECT cr.*, fh.name as from_name, th.name as to_name
+     FROM cached_referrals cr
+     JOIN hospitals fh ON fh.id = cr.from_hospital_id
+     JOIN hospitals th ON th.id = cr.to_hospital_id
+     WHERE cr.journey_id = ?
+     ORDER BY cr.initiated_at DESC`,
+    [journeyId],
+  );
+  const referrals: ReferralListItem[] = refRows.map((ref) => ({
+    id: ref.id as string,
+    fromHospital: ref.from_name as string,
+    toHospital: ref.to_name as string,
+    status: ref.status as string,
+    reason: ref.reason as string,
+    urgencyLevel: ref.urgency_level as string,
+    initiatedAt: ref.initiated_at as string,
+    arrivedAt: ref.arrived_at as string | null,
+  }));
+
+  // Newborns.
+  const nbRows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
+    [journeyId],
+  );
+  const newborns: NewbornEntry[] = nbRows.map((nb) => ({
+    infantNumber: nb.infant_number as number,
+    sex: nb.sex as string | null,
+    birthWeightG: nb.birth_weight_g as number | null,
+    apgar1min: nb.apgar_1min as number | null,
+    apgar5min: nb.apgar_5min as number | null,
+    bornAt: nb.born_at as string,
+  }));
+
+  return {
+    journey: {
+      id: r.id as string,
+      hn: r.hn as string,
+      name: decryptSafe(r.name as string),
+      age: r.age as number,
+      gravida: r.gravida as number,
+      para: r.para as number,
+      gaWeeks: r.ga_weeks as number | null,
+      lmp: r.lmp as string | null,
+      edc: r.edc as string | null,
+      careStage: r.care_stage as string,
+      ancRiskLevel: r.anc_risk_level as string,
+      ancVisitCount: r.anc_visit_count as number,
+      lastAncDate: r.last_anc_date as string | null,
+      hospitalName: r.hospital_name as string,
+      hcode: r.hcode as string,
+      registeredAt: r.registered_at as string,
+      currentHospitalName: r.current_hospital_name as string,
+      currentHcode: r.current_hcode as string,
+      heightCm: r.height_cm as number | null,
+      bloodGroup: (r.blood_group as string | null) ?? null,
+      rhFactor: (r.rh_factor as string | null) ?? null,
+      hbsagResult: (r.hbsag_result as string | null) ?? null,
+      vdrlResult: (r.vdrl_result as string | null) ?? null,
+      hivResult: (r.hiv_result as string | null) ?? null,
+      ogttResult: (r.ogtt_result as string | null) ?? null,
+      termBirths: r.term_births as number | null,
+      pretermBirths: r.preterm_births as number | null,
+      abortions: r.abortions as number | null,
+      livingChildren: r.living_children as number | null,
+      pastMedicalHistory: (r.past_medical_history as string | null) ?? null,
+      mcvFl: r.mcv_fl == null ? null : Number(r.mcv_fl),
+      dcipResult: (r.dcip_result as 'POS' | 'NEG' | 'PENDING' | null) ?? null,
+      hbEResult: (r.hb_e_result as 'POS' | 'NEG' | 'PENDING' | null) ?? null,
+      thalassemiaType:
+        (r.thalassemia_type as
+          'HB_H' | 'BETA_THAL_MAJOR' | 'BETA_THAL_HB_E' | 'TRAIT' | 'NORMAL' | null) ?? null,
+      cervicalScreenType: (r.cervical_screen_type as 'PAP' | 'HPV' | 'NONE' | null) ?? null,
+      cervicalScreenResult:
+        (r.cervical_screen_result as 'NORMAL' | 'ABNORMAL' | 'PENDING' | null) ?? null,
+      cervicalScreenDate: (r.cervical_screen_date as string | null) ?? null,
+      aneuploidyMethod:
+        (r.aneuploidy_method as 'SERUM_T1' | 'QUAD_T2' | 'CFDNA' | 'NONE' | null) ?? null,
+      aneuploidyResult:
+        (r.aneuploidy_result as 'LOW_RISK' | 'HIGH_RISK' | 'PENDING' | null) ?? null,
+      gbsResult: (r.gbs_result as 'POS' | 'NEG' | 'PENDING' | null) ?? null,
+      gbsCollectedDate: (r.gbs_collected_date as string | null) ?? null,
+      anatomyScanDate: (r.anatomy_scan_date as string | null) ?? null,
+      anatomyScanResult:
+        (r.anatomy_scan_result as 'NORMAL' | 'ABNORMAL' | 'PENDING' | null) ?? null,
+      efwG: (r.efw_g as number | null) ?? null,
+      datingMethod: (r.dating_method as 'LMP' | 'US' | 'ART' | null) ?? null,
+      proteinuria24hMg: (r.proteinuria_24h_mg as number | null) ?? null,
+      creatinineMgDl: r.creatinine_mg_dl == null ? null : Number(r.creatinine_mg_dl),
+      priorPeDvt: r.prior_pe_dvt == null ? null : !!r.prior_pe_dvt,
+      severeLungDisease: r.severe_lung_disease == null ? null : !!r.severe_lung_disease,
+      alloimmunizationCde: r.alloimmunization_cde == null ? null : !!r.alloimmunization_cde,
+      bariatricSurgeryHx: r.bariatric_surgery_hx == null ? null : !!r.bariatric_surgery_hx,
+      teratogenExposure: r.teratogen_exposure == null ? null : !!r.teratogen_exposure,
+      congenitalInfection: r.congenital_infection == null ? null : !!r.congenital_infection,
+      gdmRiskFactors: parseJson<string[]>(r.gdm_risk_factors_json) ?? null,
+    },
+    ancVisits,
+    latestRisk,
+    referrals,
+    newborns,
+  };
+}

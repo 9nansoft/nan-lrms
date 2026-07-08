@@ -2,6 +2,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { getHospitalPatientList } from '@/services/dashboard';
+import { auth } from '@/lib/auth';
+import { tryLogAccess } from '@/services/audit';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 
@@ -29,6 +31,17 @@ export async function GET(
       dateFrom,
       dateTo,
     });
+
+    // PDPA access log — fire-and-forget (tryLogAccess never throws).
+    const session = await auth();
+    if (session?.user) {
+      await tryLogAccess(db, {
+        userId: session.user.id,
+        action: 'VIEW_HOSPITAL_PATIENTS',
+        resourceType: 'HOSPITAL',
+        resourceId: hcode,
+      });
+    }
 
     return NextResponse.json(result);
   } catch (error) {

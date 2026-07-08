@@ -193,10 +193,10 @@ export interface PartogramEntry {
 
 export interface PartogramResponse {
   partogram: {
-    startTime: string;                            // unchanged — admit_date
-    entries: PartogramEntry[];                    // EXISTING — back-compat for LaborProgressCard
-    observations: PartographObservationDto[];     // NEW
-    alerts: CdssAlertDto[];                       // NEW
+    startTime: string; // unchanged — admit_date
+    entries: PartogramEntry[]; // EXISTING — back-compat for LaborProgressCard
+    observations: PartographObservationDto[]; // NEW
+    alerts: CdssAlertDto[]; // NEW
     severity: {
       highest: CdssSeverity | null;
       counts: { critical: number; alert: number; warn: number; info: number };
@@ -210,8 +210,18 @@ export interface PartogramResponse {
 // PartographCDSSUnit.pas. See docs/plans/2026-04-19-partograph-support.md.
 export type CdssSeverity = 'INFO' | 'WARN' | 'ALERT' | 'CRITICAL';
 export type CdssSection =
-  | 'FHR' | 'LIQUOR' | 'MOULDING' | 'CERVIX' | 'DESCENT'
-  | 'CONTRACTIONS' | 'OXY' | 'PULSE' | 'BP' | 'TEMP' | 'URINE' | 'TIME';
+  | 'FHR'
+  | 'LIQUOR'
+  | 'MOULDING'
+  | 'CERVIX'
+  | 'DESCENT'
+  | 'CONTRACTIONS'
+  | 'OXY'
+  | 'PULSE'
+  | 'BP'
+  | 'TEMP'
+  | 'URINE'
+  | 'TIME';
 
 export interface CdssAlertDto {
   severity: CdssSeverity;
@@ -363,9 +373,25 @@ export interface JourneyListItem {
   registeredAt: string;
 }
 
+/** DB-wide ANC risk-level breakdown for the journeys KPI strip. */
+export interface JourneyRiskCounts {
+  low: number;
+  hr1: number;
+  hr2: number;
+  hr3: number;
+  total: number;
+}
+
 export interface JourneyListResponse {
   journeys: JourneyListItem[];
   pagination: Pagination;
+  /**
+   * DB-wide totals by ANC risk level over the stage+freshness(+hospital)
+   * filtered set — independent of pagination, the risk_level filter, and the
+   * `q` search. Present on GET /api/journeys so the KPI strip shows true
+   * totals; omitted by the per-hospital journeys endpoint.
+   */
+  counts?: JourneyRiskCounts;
 }
 
 export interface JourneyDetailResponse {
@@ -375,12 +401,12 @@ export interface JourneyDetailResponse {
     /** Latest known maternal height in cm (from linked labor record, if any). */
     heightCm: number | null;
     // WHO 2016 journey-level data (L2). All optional.
-    bloodGroup: string | null;                 // A / B / AB / O
-    rhFactor: string | null;                   // POS / NEG
-    hbsagResult: string | null;                // POS / NEG / PENDING
+    bloodGroup: string | null; // A / B / AB / O
+    rhFactor: string | null; // POS / NEG
+    hbsagResult: string | null; // POS / NEG / PENDING
     vdrlResult: string | null;
     hivResult: string | null;
-    ogttResult: string | null;                 // NORMAL / ABNORMAL / PENDING
+    ogttResult: string | null; // NORMAL / ABNORMAL / PENDING
     termBirths: number | null;
     pretermBirths: number | null;
     abortions: number | null;
@@ -390,13 +416,7 @@ export interface JourneyDetailResponse {
     mcvFl: number | null;
     dcipResult: 'POS' | 'NEG' | 'PENDING' | null;
     hbEResult: 'POS' | 'NEG' | 'PENDING' | null;
-    thalassemiaType:
-      | 'HB_H'
-      | 'BETA_THAL_MAJOR'
-      | 'BETA_THAL_HB_E'
-      | 'TRAIT'
-      | 'NORMAL'
-      | null;
+    thalassemiaType: 'HB_H' | 'BETA_THAL_MAJOR' | 'BETA_THAL_HB_E' | 'TRAIT' | 'NORMAL' | null;
     cervicalScreenType: 'PAP' | 'HPV' | 'NONE' | null;
     cervicalScreenResult: 'NORMAL' | 'ABNORMAL' | 'PENDING' | null;
     cervicalScreenDate: string | null;
@@ -444,15 +464,15 @@ export interface AncVisitEntry {
   /** MoPH MCH quality flag — whether this visit passed quality criteria. */
   passQuality: boolean | null;
   // WHO 2016 ANC data elements (L2) — all optional, per-visit.
-  urineProtein: string | null;                 // '-', 'trace', '+', '++', '+++'
+  urineProtein: string | null; // '-', 'trace', '+', '++', '+++'
   urineGlucose: string | null;
   hbGDl: number | null;
   hctPct: number | null;
-  ttDoseNo: number | null;                     // tetanus toxoid dose number at this visit (0-5)
+  ttDoseNo: number | null; // tetanus toxoid dose number at this visit (0-5)
   ironFolicGiven: boolean | null;
   calciumGiven: boolean | null;
-  dangerSigns: string[] | null;                // e.g. ['bleeding','severe_headache','reduced_fm']
-  fetalMovementOk: boolean | null;             // T3 only
+  dangerSigns: string[] | null; // e.g. ['bleeding','severe_headache','reduced_fm']
+  fetalMovementOk: boolean | null; // T3 only
   // RTCOG OB 66-029 (2566) additions — per-visit.
   vaccinesGiven: Array<{
     type: 'TT' | 'DT' | 'TDAP' | 'INFLUENZA' | 'COVID';
