@@ -9,6 +9,7 @@ import useSWR, { useSWRConfig } from 'swr';
 import { Globe, Save, CheckCircle2, ListPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingState } from '@/components/shared/LoadingState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { BulkAddHospitalsDialog } from './BulkAddHospitalsDialog';
 
 interface ProvinceRow {
@@ -21,12 +22,16 @@ interface ConfigResponse {
 }
 
 export function ActiveProvinceTab() {
-  const { data: provincesData, isLoading: pLoading } = useSWR<{ provinces: ProvinceRow[] }>(
-    '/api/admin/provinces',
-  );
+  const {
+    data: provincesData,
+    isLoading: pLoading,
+    error: provincesError,
+    mutate: mutateProvinces,
+  } = useSWR<{ provinces: ProvinceRow[] }>('/api/admin/provinces');
   const {
     data: configData,
     isLoading: cLoading,
+    error: configError,
     mutate,
   } = useSWR<ConfigResponse>('/api/admin/config');
 
@@ -45,6 +50,8 @@ export function ActiveProvinceTab() {
   if (pLoading || cLoading) {
     return <LoadingState message="กำลังโหลดรายการจังหวัด..." />;
   }
+
+  const loadError = provincesError || configError;
 
   const provinces = provincesData?.provinces ?? [];
   const currentCode = configData?.config?.active_province_code ?? '';
@@ -76,21 +83,26 @@ export function ActiveProvinceTab() {
 
   return (
     <div className="space-y-4">
+      {loadError ? (
+        <ErrorState
+          variant="banner"
+          message="โหลดรายการจังหวัด/การตั้งค่าไม่สำเร็จ — ตรวจสอบการเชื่อมต่อแล้วลองใหม่"
+          onRetry={() => {
+            void mutateProvinces();
+            void mutate();
+          }}
+        />
+      ) : null}
+
       <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
         ACTIVE PROVINCE · {provinces.length} choices
       </div>
 
-      <div
-        className="border bg-white p-4"
-        style={{ borderColor: 'var(--rule-strong)' }}
-      >
+      <div className="border bg-white p-4" style={{ borderColor: 'var(--rule-strong)' }}>
         <div className="flex items-start gap-3">
           <Globe className="h-5 w-5" style={{ color: 'var(--accent-navy)' }} />
           <div className="flex-1">
-            <h3
-              className="text-sm font-semibold"
-              style={{ color: 'var(--ink-navy)' }}
-            >
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--ink-navy)' }}>
               จังหวัดหลักของระบบ
             </h3>
             <p className="mt-0.5 text-[12px] leading-snug text-[var(--ink-navy-dim)]">
@@ -126,12 +138,14 @@ export function ActiveProvinceTab() {
             </div>
 
             {currentProvince ? (
-              <div className="mt-3 inline-flex items-center gap-1.5 border px-2 py-1 font-mono text-[11px]"
+              <div
+                className="mt-3 inline-flex items-center gap-1.5 border px-2 py-1 font-mono text-[11px]"
                 style={{
                   borderColor: 'var(--rule-strong)',
                   background: 'var(--accent-navy-soft)',
                   color: 'var(--accent-navy)',
-                }}>
+                }}
+              >
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 กำลังใช้งาน: {currentProvince.name} · {currentProvince.code}
               </div>
@@ -149,10 +163,7 @@ export function ActiveProvinceTab() {
       {/* Bulk-add shortcut — spares admins from opening the Hospitals tab and
           adding one-by-one when bringing a brand new province online. */}
       {currentProvince ? (
-        <div
-          className="border bg-white p-4"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
+        <div className="border bg-white p-4" style={{ borderColor: 'var(--rule-strong)' }}>
           <div className="flex items-start gap-3">
             <ListPlus className="h-5 w-5" style={{ color: 'var(--accent-navy)' }} />
             <div className="flex-1">
@@ -160,8 +171,9 @@ export function ActiveProvinceTab() {
                 เพิ่มหลายโรงพยาบาลพร้อมกัน
               </h3>
               <p className="mt-0.5 text-[12px] leading-snug text-[var(--ink-navy-dim)]">
-                เลือกโรงพยาบาลในจังหวัด{currentProvince.name}จากทะเบียน MOPH แล้วเพิ่มเข้าระบบในครั้งเดียว
-                — ระบบจะตั้งค่า LEVEL และ service_type เริ่มต้นให้อัตโนมัติ
+                เลือกโรงพยาบาลในจังหวัด{currentProvince.name}จากทะเบียน MOPH
+                แล้วเพิ่มเข้าระบบในครั้งเดียว — ระบบจะตั้งค่า LEVEL และ service_type
+                เริ่มต้นให้อัตโนมัติ
               </p>
               <div className="mt-3">
                 <Button onClick={() => setBulkOpen(true)} className="gap-1.5">

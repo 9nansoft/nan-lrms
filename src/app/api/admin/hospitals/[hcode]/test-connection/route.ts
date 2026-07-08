@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { requireAdmin } from '@/lib/admin-guard';
 import { BmsSessionClient } from '@/lib/bms-session';
 import { getQuery, CHECK_TABLES, DATABASE_VERSION } from '@/config/hosxp-queries';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
@@ -12,6 +13,9 @@ export async function POST(
   { params }: { params: Promise<{ hcode: string }> },
 ) {
   try {
+    const guard = await requireAdmin();
+    if (guard instanceof NextResponse) return guard;
+
     await ensureInit();
     const { hcode } = await params;
     const db = await getDatabase();
@@ -30,10 +34,7 @@ export async function POST(
     );
 
     if (configs.length === 0) {
-      return NextResponse.json(
-        { error: 'No BMS config found for this hospital' },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: 'No BMS config found for this hospital' }, { status: 404 });
     }
 
     const config = configs[0];
