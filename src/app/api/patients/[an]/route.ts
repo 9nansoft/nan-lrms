@@ -4,6 +4,7 @@ import { getDatabase } from '@/db/connection';
 import { decrypt, getEncryptionKey } from '@/lib/encryption';
 import { auth } from '@/lib/auth';
 import { tryLogAccess } from '@/services/audit';
+import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
 import { logger } from '@/lib/logger';
@@ -28,7 +29,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     const session = await auth();
     if (session?.user) {
       await tryLogAccess(db, {
-        userId: session.user.id,
+        ...auditActorFromSession(session),
         action: 'VIEW_PATIENT',
         resourceType: 'PATIENT',
         resourceId: an,

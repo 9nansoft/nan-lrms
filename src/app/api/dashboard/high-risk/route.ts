@@ -4,6 +4,7 @@ import { getDatabase } from '@/db/connection';
 import { getHighRiskPatients } from '@/services/dashboard';
 import { auth } from '@/lib/auth';
 import { tryLogAccess } from '@/services/audit';
+import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 
@@ -16,7 +17,7 @@ export async function GET() {
     const session = await auth();
     if (session?.user) {
       await tryLogAccess(db, {
-        userId: session.user.id,
+        ...auditActorFromSession(session),
         action: 'VIEW_HIGH_RISK_PATIENTS',
         resourceType: 'DASHBOARD',
       });

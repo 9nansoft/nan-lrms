@@ -73,6 +73,35 @@ describe('Audit Service', () => {
     expect(parsed.reason).toBe('routine check');
   });
 
+  it('records the actor identity snapshot (name/role/hospital) inline', async () => {
+    // A BMS-session actor: user_id is the session id (no matching users row),
+    // which must now be accepted (no FK) and the human-readable identity stored
+    // inline for the PDPA audit trail.
+    await logAccess(db, {
+      userId: 'bms-session-xyz',
+      userName: 'นาง ทดสอบ ระบบ',
+      userRole: 'NURSE',
+      hospitalCode: '10670',
+      action: 'VIEW_PATIENT',
+      resourceType: 'PATIENT',
+      resourceId: 'AN123',
+    });
+
+    const rows = await db.query<{
+      user_id: string;
+      user_name: string;
+      user_role: string;
+      hospital_code: string;
+    }>('SELECT user_id, user_name, user_role, hospital_code FROM audit_logs');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      user_id: 'bms-session-xyz',
+      user_name: 'นาง ทดสอบ ระบบ',
+      user_role: 'NURSE',
+      hospital_code: '10670',
+    });
+  });
+
   it('validates required fields', async () => {
     await expect(
       logAccess(db, {

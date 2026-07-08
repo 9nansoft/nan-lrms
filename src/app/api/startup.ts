@@ -1,6 +1,7 @@
 // T059: Startup sequence — DB init, schema sync, seed, start polling
 import { getDatabase, closeDatabase, getDriverType, isSqliteEnabled } from '@/db/connection';
 import { SchemaSync } from '@/db/schema-sync';
+import { migrateAuditLogsActor } from '@/db/migrations/audit-logs-actor';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { SseManager } from '@/lib/sse';
@@ -30,6 +31,12 @@ export async function initializeApp(): Promise<void> {
     // 2. Sync schema
     await SchemaSync.sync(db, ALL_TABLES, driver);
     logger.info('schema_synced', { tableCount: ALL_TABLES.length });
+
+    // 2a. One-shot idempotent migration: drop the legacy audit_logs → users(id)
+    // FK + NOT NULL on user_id. SchemaSync only ADD COLUMNs, so this ALTER can't
+    // live in the table definition. Without it every audit write for a
+    // BMS-session actor keeps failing audit_logs_user_id_fkey.
+    await migrateAuditLogsActor(db, driver);
 
     // 2b. One-shot idempotent backfill for cached_anc_visits.hospital_id —
     // the column was added after data already existed; populate from the

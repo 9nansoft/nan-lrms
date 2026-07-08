@@ -1,9 +1,15 @@
 // T049: GET /api/dashboard — province dashboard summary
 import { NextResponse } from 'next/server';
 import { getDatabase } from '@/db/connection';
-import { getProvinceDashboard, getStageKPIs, getDashboardAlerts, getTrends } from '@/services/dashboard';
+import {
+  getProvinceDashboard,
+  getStageKPIs,
+  getDashboardAlerts,
+  getTrends,
+} from '@/services/dashboard';
 import { auth } from '@/lib/auth';
 import { tryLogAccess } from '@/services/audit';
+import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { cacheGetJson, cacheSetJson } from '@/lib/cache';
@@ -30,7 +36,7 @@ export async function GET() {
     const session = await auth();
     if (session?.user) {
       await tryLogAccess(db, {
-        userId: session.user.id,
+        ...auditActorFromSession(session),
         action: 'VIEW_DASHBOARD',
         resourceType: 'DASHBOARD',
       });
@@ -39,7 +45,10 @@ export async function GET() {
     if (DASHBOARD_CACHE_ENABLED) {
       const cached = await cacheGetJson<DashboardApiPayload>(DASHBOARD_CACHE_KEY);
       if (cached) {
-        return NextResponse.json({ ...cached, cache: { hit: true, ttlSeconds: DASHBOARD_CACHE_TTL_SECONDS } });
+        return NextResponse.json({
+          ...cached,
+          cache: { hit: true, ttlSeconds: DASHBOARD_CACHE_TTL_SECONDS },
+        });
       }
     }
 
@@ -53,7 +62,10 @@ export async function GET() {
     if (DASHBOARD_CACHE_ENABLED) {
       await cacheSetJson(DASHBOARD_CACHE_KEY, payload, DASHBOARD_CACHE_TTL_SECONDS);
     }
-    return NextResponse.json({ ...payload, cache: { hit: false, ttlSeconds: DASHBOARD_CACHE_TTL_SECONDS } });
+    return NextResponse.json({
+      ...payload,
+      cache: { hit: false, ttlSeconds: DASHBOARD_CACHE_TTL_SECONDS },
+    });
   } catch (error) {
     logger.error('dashboard_api_failed', { error });
     return NextResponse.json(

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { auth } from '@/lib/auth';
 import { tryLogAccess } from '@/services/audit';
+import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { listJourneys } from '@/services/journey-list';
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
     const session = await auth();
     if (session?.user) {
       await tryLogAccess(db, {
-        userId: session.user.id,
+        ...auditActorFromSession(session),
         action: 'VIEW_JOURNEY_LIST',
         resourceType: 'JOURNEY_LIST',
       });
