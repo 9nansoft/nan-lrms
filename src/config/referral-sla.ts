@@ -14,6 +14,15 @@ export const REFERRAL_SLA = {
   emergencyPinHours: 48,
 } as const;
 
+/** Auto-arrive reconciliation (see referral.ts autoArriveReferrals):
+ *  hospitals rarely send explicit status webhooks, so INITIATED referrals
+ *  whose patient journey is now owned by the destination hospital are
+ *  inferred to have arrived. Disable here if arrivals must only ever be
+ *  confirmed explicitly. */
+export const REFERRAL_AUTO_ARRIVE = {
+  enabled: true,
+} as const;
+
 export type ReferralAgeClass = 'fresh' | 'overdue' | 'critical';
 
 /** Apply the SLA to one referral. Only INITIATED referrals age — once the

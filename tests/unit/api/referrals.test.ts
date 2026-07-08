@@ -11,6 +11,7 @@ import {
   markInTransit,
   confirmArrival,
   getPendingReferrals,
+  autoArriveReferrals,
 } from '@/services/referral';
 import { UrgencyLevel, ReferralStatus } from '@/types/domain';
 
@@ -467,5 +468,108 @@ describe('Dashboard Referrals — GET /api/dashboard/referrals', () => {
     expect(byStatus['REJECTED']).toBe(1);
     expect(byStatus['ARRIVED']).toBe(1);
     expect(byStatus['INITIATED']).toBe(1);
+  });
+});
+
+describe('autoArriveReferrals — arrival inferred from journey ownership', () => {
+  let db: SqliteAdapter;
+
+  beforeEach(async () => {
+    db = new SqliteAdapter(':memory:');
+    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  async function moveJourneyTo(journeyId: string, hospitalId: string, at: Date) {
+    await db.execute(
+      `UPDATE maternal_journeys SET current_hospital_id = ?, updated_at = ? WHERE id = ?`,
+      [hospitalId, at.toISOString(), journeyId],
+    );
+  }
+
+  it('marks an INITIATED referral ARRIVED when the journey moved to the destination after initiation', async () => {
+    const { hospAId, hospBId, journeyId } = await seedFixtures(db);
+    const ref = await initiateReferral(db, {
+      journeyId,
+      fromHospitalId: hospAId,
+      toHospitalId: hospBId,
+      reason: 'ส่งต่อ ANC เสี่ยงสูง',
+      urgencyLevel: UrgencyLevel.URGENT,
+    });
+    const evidenceAt = new Date(Date.now() + 60_000);
+    await moveJourneyTo(journeyId, hospBId, evidenceAt);
+
+    const arrivedCount = await autoArriveReferrals(db);
+
+    expect(arrivedCount).toBe(1);
+    const rows = await db.query<{ status: string; arrived_at: string }>(
+      `SELECT status, arrived_at FROM cached_referrals WHERE id = ?`,
+      [ref.id],
+    );
+    expect(rows[0].status).toBe('ARRIVED');
+    // Arrival evidence time = the journey's ownership-change timestamp.
+    expect(new Date(rows[0].arrived_at).toISOString()).toBe(evidenceAt.toISOString());
+  });
+
+  it('leaves referrals alone while the journey still sits at the origin hospital', async () => {
+    const { hospAId, hospBId, journeyId } = await seedFixtures(db);
+    const ref = await initiateReferral(db, {
+      journeyId,
+      fromHospitalId: hospAId,
+      toHospitalId: hospBId,
+      reason: 'ยังไม่เดินทาง',
+      urgencyLevel: UrgencyLevel.ROUTINE,
+    });
+
+    const arrivedCount = await autoArriveReferrals(db);
+
+    expect(arrivedCount).toBe(0);
+    const rows = await db.query<{ status: string }>(
+      `SELECT status FROM cached_referrals WHERE id = ?`,
+      [ref.id],
+    );
+    expect(rows[0].status).toBe('INITIATED');
+  });
+
+  it('ignores journey updates that predate the referral (stale evidence)', async () => {
+    const { hospAId, hospBId, journeyId } = await seedFixtures(db);
+    // Journey happens to already point at hospital B, but was last updated
+    // BEFORE the referral existed — that is not arrival evidence.
+    await moveJourneyTo(journeyId, hospBId, new Date(Date.now() - 3600_000));
+    const ref = await initiateReferral(db, {
+      journeyId,
+      fromHospitalId: hospAId,
+      toHospitalId: hospBId,
+      reason: 'หลักฐานเก่า',
+      urgencyLevel: UrgencyLevel.ROUTINE,
+    });
+
+    const arrivedCount = await autoArriveReferrals(db);
+
+    expect(arrivedCount).toBe(0);
+    const rows = await db.query<{ status: string }>(
+      `SELECT status FROM cached_referrals WHERE id = ?`,
+      [ref.id],
+    );
+    expect(rows[0].status).toBe('INITIATED');
+  });
+
+  it('is a no-op when disabled via options', async () => {
+    const { hospAId, hospBId, journeyId } = await seedFixtures(db);
+    await initiateReferral(db, {
+      journeyId,
+      fromHospitalId: hospAId,
+      toHospitalId: hospBId,
+      reason: 'ปิดการทำงานอัตโนมัติ',
+      urgencyLevel: UrgencyLevel.ROUTINE,
+    });
+    await moveJourneyTo(journeyId, hospBId, new Date(Date.now() + 60_000));
+
+    const arrivedCount = await autoArriveReferrals(db, { enabled: false });
+
+    expect(arrivedCount).toBe(0);
   });
 });

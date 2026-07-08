@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { ReferralStatus, UrgencyLevel } from '@/types/domain';
 import type { CachedReferral } from '@/types/domain';
+import { REFERRAL_AUTO_ARRIVE } from '@/config/referral-sla';
 
 export interface InitiateReferralInput {
   journeyId: string;
@@ -105,6 +106,52 @@ export async function confirmArrival(
   );
 
   return referral;
+}
+
+/**
+ * Infer arrivals for INITIATED referrals from journey ownership.
+ *
+ * Production reality: HOSxP refer-out sync creates referrals as INITIATED
+ * and hospitals rarely drive the accept/transit/arrive webhooks, so the
+ * lifecycle never advances even after the patient demonstrably arrived.
+ * Conservative evidence rule — all must hold:
+ *   1. referral is still INITIATED
+ *   2. the journey's current_hospital_id equals the referral destination
+ *   3. the journey was updated AFTER the referral was initiated
+ * arrived_at is set to the journey's ownership-change timestamp, not now(),
+ * so the recorded arrival reflects the evidence. Gated by
+ * REFERRAL_AUTO_ARRIVE.enabled in src/config/referral-sla.ts.
+ *
+ * Returns the number of referrals transitioned.
+ */
+export async function autoArriveReferrals(
+  db: DatabaseAdapter,
+  options: { enabled?: boolean } = {},
+): Promise<number> {
+  const enabled = options.enabled ?? REFERRAL_AUTO_ARRIVE.enabled;
+  if (!enabled) return 0;
+
+  const candidates = await db.query<{ id: string; evidence_at: string }>(
+    `SELECT cr.id, mj.updated_at as evidence_at
+       FROM cached_referrals cr
+       JOIN maternal_journeys mj ON mj.id = cr.journey_id
+      WHERE cr.status = 'INITIATED'
+        AND mj.current_hospital_id = cr.to_hospital_id
+        AND mj.updated_at > cr.initiated_at`,
+    [],
+  );
+
+  const now = new Date().toISOString();
+  for (const c of candidates) {
+    // Guard on status so a parallel explicit confirmArrival/reject wins.
+    await db.execute(
+      `UPDATE cached_referrals
+          SET status = ?, arrived_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'INITIATED'`,
+      [ReferralStatus.ARRIVED, c.evidence_at, now, c.id],
+    );
+  }
+  return candidates.length;
 }
 
 export async function getPendingReferrals(

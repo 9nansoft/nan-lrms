@@ -15,6 +15,7 @@ import {
   type SyncPatientData,
 } from './patient';
 import { upsertPartographObservations, type PartographRow } from './partograph';
+import { autoArriveReferrals } from '@/services/referral';
 import { calculateAndStoreCpdScores } from './cpd-persist';
 import { syncAncData } from './anc';
 import { logger } from '@/lib/logger';
@@ -1109,6 +1110,21 @@ export async function pollHospital(
         name: 'auto_discharge',
         status: 'success',
         message: 'No stale ACTIVE patients to close out — cache matches HOSxP.',
+      });
+    }
+
+    // ─── Auto-arrive: infer referral arrivals from journey ownership ─────
+    // Hospitals rarely drive the accept/transit/arrive endpoints, so
+    // INITIATED referrals whose patient journey is now owned by the
+    // destination hospital are reconciled to ARRIVED. Evidence rule and
+    // config gate live in src/config/referral-sla.ts / services/referral.ts.
+    const autoArrived = await autoArriveReferrals(db);
+    if (autoArrived > 0) {
+      emitStep(options, {
+        name: 'auto_arrive_referrals',
+        status: 'success',
+        message: `Reconciled ${autoArrived} referral(s) to ARRIVED based on journey ownership evidence.`,
+        counts: { arrived: autoArrived },
       });
     }
 
