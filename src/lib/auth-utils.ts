@@ -52,7 +52,8 @@ async function fetchRealBmsIdentity(sessionId: string): Promise<BmsUserIdentity 
       userCid: userInfo.user_cid ?? '',
       role: mapPositionToRole(userInfo.position ?? ''),
       hospitalCode: hcode,
-      hospitalName: userInfo.location && userInfo.location !== 'server' ? userInfo.location : `รพ.${hcode}`,
+      hospitalName:
+        userInfo.location && userInfo.location !== 'server' ? userInfo.location : `รพ.${hcode}`,
       tunnelUrl: userInfo.bms_url ?? '',
       databaseType: (userInfo.bms_database_type ?? 'postgresql').toLowerCase(),
       jwt: data.result.auth_key ?? '',
@@ -67,7 +68,14 @@ export async function validateBmsSession(
   sessionId: string,
   _tunnelUrl: string,
 ): Promise<BmsUserIdentity | null> {
-  const devBypass = process.env.DEV_AUTH_BYPASS === 'true';
+  // DEV_AUTH_BYPASS is dev-only: it forces role ADMIN and, when BMS is
+  // unreachable, grants a hardcoded identity to ANY session id — so it must
+  // be inert in production builds even if the flag leaks into a prod .env.
+  const bypassFlag = process.env.DEV_AUTH_BYPASS === 'true';
+  const devBypass = bypassFlag && process.env.NODE_ENV !== 'production';
+  if (bypassFlag && !devBypass) {
+    logger.warn('auth_dev_bypass_ignored_in_production');
+  }
 
   // Always try the real BMS session first so the navbar reflects the session's
   // actual hospital (hcode, name, tunnel). Under DEV_AUTH_BYPASS we still call
