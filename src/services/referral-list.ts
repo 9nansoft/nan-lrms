@@ -12,6 +12,7 @@ import { bangkokStartOfToday } from '@/lib/bangkok-time';
 import { referralSlaCutoffs } from '@/config/referral-sla';
 import type {
   ProvincialReferralListItem,
+  ReferralDetail,
   ReferralListResponse,
   ReferralOpsCounts,
   ReferralStatusCounts,
@@ -209,6 +210,45 @@ async function computeOpsCounts(db: DatabaseAdapter, now: Date): Promise<Referra
     emergencyActive: Number(r.emergency_active) || 0,
     highRisk: Number(r.high_risk) || 0,
     overdue: Number(r.overdue) || 0,
+  };
+}
+
+/**
+ * Single referral with every lifecycle milestone for the detail dialog.
+ * Returns null when the id is unknown (route maps to 404).
+ */
+export async function getReferralDetail(
+  db: DatabaseAdapter,
+  id: string,
+): Promise<ReferralDetail | null> {
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT cr.*,
+        fh.name as from_hospital_name,
+        th.name as to_hospital_name,
+        ah.name as alt_hospital_name,
+        mj.name as patient_name,
+        mj.hn as patient_hn,
+        mj.ga_weeks as patient_ga_weeks,
+        mj.anc_risk_level as patient_anc_risk_level
+      FROM cached_referrals cr
+      LEFT JOIN hospitals fh ON fh.id = cr.from_hospital_id
+      LEFT JOIN hospitals th ON th.id = cr.to_hospital_id
+      LEFT JOIN hospitals ah ON ah.id = cr.suggested_alternative_id
+      LEFT JOIN maternal_journeys mj ON mj.id = cr.journey_id
+      WHERE cr.id = ?`,
+    [id],
+  );
+  const r = rows[0];
+  if (!r) return null;
+
+  return {
+    ...mapReferralListItem(r),
+    rejectionReason: (r.rejection_reason as string | null) ?? null,
+    transportMode: (r.transport_mode as string | null) ?? null,
+    acceptedAt: (r.accepted_at as string | null) ?? null,
+    departedAt: (r.departed_at as string | null) ?? null,
+    rejectedAt: (r.rejected_at as string | null) ?? null,
+    suggestedAlternativeHospital: (r.alt_hospital_name as string | null) ?? null,
   };
 }
 

@@ -2,9 +2,9 @@
 // KPI strips must come from the API's DB-wide counts (never the visible page),
 // patient identity must render masked, and INITIATED rows must show SLA aging.
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { SWRConfig } from 'swr';
-import type { ReferralListResponse } from '@/types/api';
+import type { ReferralDetailResponse, ReferralListResponse } from '@/types/api';
 import { classifyReferralAge, REFERRAL_SLA } from '@/config/referral-sla';
 import ReferralsPage from '@/app/(provincial)/referrals/page';
 
@@ -77,8 +77,24 @@ function makeFixture(): ReferralListResponse {
   };
 }
 
+function makeDetailResponse(data: ReferralListResponse): ReferralDetailResponse {
+  return {
+    referral: {
+      ...data.referrals[0],
+      rejectionReason: null,
+      transportMode: null,
+      acceptedAt: null,
+      departedAt: null,
+      rejectedAt: null,
+      suggestedAlternativeHospital: null,
+    },
+  };
+}
+
 function renderPage(data: ReferralListResponse = makeFixture()) {
-  const fetcher = vi.fn(async () => data);
+  const fetcher = vi.fn(async (url: string) =>
+    url.includes('/list?') ? data : makeDetailResponse(data),
+  );
   const utils = render(
     <SWRConfig value={{ fetcher, provider: () => new Map(), dedupingInterval: 0 }}>
       <ReferralsPage />
@@ -164,6 +180,17 @@ describe('ReferralsPage — referral rows', () => {
 
     const freshRow = screen.getByTestId('referral-row-ref-routine');
     expect(freshRow.getAttribute('data-age')).toBe('fresh');
+  });
+});
+
+describe('ReferralsPage — detail dialog', () => {
+  it('opens the referral detail dialog when a row is clicked', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('referral-row-ref-emergency'));
+
+    expect(await screen.findByText('รายละเอียดการส่งต่อ')).toBeInTheDocument();
+    expect(await screen.findByText(/ดูประวัติผู้ป่วย/)).toBeInTheDocument();
   });
 });
 

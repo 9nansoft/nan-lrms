@@ -16,72 +16,16 @@ import { cn, formatThaiDate, formatThaiTime } from '@/lib/utils';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { maskName } from '@/lib/pii-mask';
 import { classifyReferralAge, type ReferralAgeClass } from '@/config/referral-sla';
-import { ANC_RISK_COLOR, ANC_RISK_FALLBACK_COLOR } from '@/config/anc-risk-display';
+import {
+  AgeChip,
+  Pill,
+  RiskChip,
+  STATUS_META,
+  URGENCY_META,
+} from '@/components/referrals/chips';
+import { ReferralDetailDialog } from '@/components/referrals/ReferralDetailDialog';
 import { ArrowRightLeft, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import type { ProvincialReferralListItem, ReferralListResponse } from '@/types/api';
-
-interface StatusMeta {
-  color: string;
-  label: string;
-}
-
-const STATUS_META: Record<string, StatusMeta> = {
-  INITIATED: { color: 'var(--ink-navy-dim)', label: 'รอดำเนินการ' },
-  ACCEPTED: { color: 'var(--risk-low)', label: 'ตอบรับ' },
-  IN_TRANSIT: { color: 'var(--risk-medium)', label: 'กำลังเดินทาง' },
-  ARRIVED: { color: 'var(--accent-navy)', label: 'ถึงแล้ว' },
-  REJECTED: { color: 'var(--risk-high)', label: 'ปฏิเสธ' },
-};
-
-const URGENCY_META: Record<string, StatusMeta> = {
-  ROUTINE: { color: 'var(--ink-navy-muted)', label: 'ปกติ' },
-  URGENT: { color: 'var(--risk-medium)', label: 'เร่งด่วน' },
-  EMERGENCY: { color: 'var(--risk-high)', label: 'ฉุกเฉิน' },
-};
-
-const AGE_META: Record<Exclude<ReferralAgeClass, 'fresh'>, StatusMeta> = {
-  overdue: { color: 'var(--risk-medium)', label: 'ค้าง' },
-  critical: { color: 'var(--risk-high)', label: 'ค้าง' },
-};
-
-function Pill({ meta, fallback }: { meta: StatusMeta | undefined; fallback: string }) {
-  const m = meta ?? { color: 'var(--ink-navy-muted)', label: fallback };
-  return (
-    <span
-      className="inline-block border px-1.5 py-0.5 text-center font-mono text-[10px] font-semibold tracking-[0.06em]"
-      style={{ color: m.color, borderColor: m.color, background: 'transparent' }}
-    >
-      {m.label}
-    </span>
-  );
-}
-
-function RiskChip({ level }: { level: string }) {
-  const color = ANC_RISK_COLOR[level] ?? ANC_RISK_FALLBACK_COLOR;
-  return (
-    <span
-      data-risk={level}
-      className="inline-block border px-1 py-px font-mono text-[10px] font-semibold tracking-[0.04em]"
-      style={{ color, borderColor: color, background: 'transparent' }}
-    >
-      {level}
-    </span>
-  );
-}
-
-/** Aging chip for INITIATED rows past SLA — "ค้าง 3 วัน" in amber/red. */
-function AgeChip({ age, initiatedAt }: { age: ReferralAgeClass; initiatedAt: string }) {
-  if (age === 'fresh') return null;
-  const m = AGE_META[age];
-  return (
-    <span
-      className="inline-block border px-1 py-px font-mono text-[10px] font-semibold tracking-[0.04em]"
-      style={{ color: m.color, borderColor: m.color }}
-    >
-      {m.label} {formatRelativeAge(initiatedAt, 'th')}
-    </span>
-  );
-}
 
 const URGENCY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'ALL' },
@@ -122,6 +66,7 @@ export default function ReferralsPage() {
   // server matches refer number contains, HN prefix, or decrypted name).
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [selectedReferralId, setSelectedReferralId] = useState<string | null>(null);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -498,7 +443,13 @@ export default function ReferralsPage() {
               {referrals.length === 0 ? (
                 <EmptyState hasActiveFilters={hasActiveFilters} onClear={clearFilters} />
               ) : (
-                referrals.map((r) => <ReferralRow key={r.id} referral={r} />)
+                referrals.map((r) => (
+                  <ReferralRow
+                    key={r.id}
+                    referral={r}
+                    onSelect={() => setSelectedReferralId(r.id)}
+                  />
+                ))
               )}
             </div>
           </div>
@@ -512,9 +463,20 @@ export default function ReferralsPage() {
           {referrals.length === 0 ? (
             <EmptyState hasActiveFilters={hasActiveFilters} onClear={clearFilters} />
           ) : (
-            referrals.map((r) => <ReferralCard key={r.id} referral={r} />)
+            referrals.map((r) => (
+              <ReferralCard
+                key={r.id}
+                referral={r}
+                onSelect={() => setSelectedReferralId(r.id)}
+              />
+            ))
           )}
         </div>
+
+        <ReferralDetailDialog
+          referralId={selectedReferralId}
+          onClose={() => setSelectedReferralId(null)}
+        />
 
         {/* Pagination */}
         {pagination.totalPages > 1 && (
@@ -655,7 +617,13 @@ function InitiatedCell({
   );
 }
 
-function ReferralRow({ referral }: { referral: ProvincialReferralListItem }) {
+function ReferralRow({
+  referral,
+  onSelect,
+}: {
+  referral: ProvincialReferralListItem;
+  onSelect: () => void;
+}) {
   const age = classifyReferralAge(referral.initiatedAt, referral.status);
   const emergency = referral.urgencyLevel === 'EMERGENCY';
   return (
@@ -663,7 +631,16 @@ function ReferralRow({ referral }: { referral: ProvincialReferralListItem }) {
       data-testid={`referral-row-${referral.id}`}
       data-urgency={referral.urgencyLevel}
       data-age={age}
-      className="grid items-center gap-2 border-b px-3 py-2 transition-colors hover:bg-[var(--accent-navy-soft)]"
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className="grid cursor-pointer items-center gap-2 border-b px-3 py-2 transition-colors hover:bg-[var(--accent-navy-soft)] focus:outline-none focus-visible:bg-[var(--accent-navy-soft)]"
       style={{
         gridTemplateColumns: GRID_COLUMNS,
         borderColor: 'var(--rule-hair)',
@@ -696,12 +673,27 @@ function ReferralRow({ referral }: { referral: ProvincialReferralListItem }) {
   );
 }
 
-function ReferralCard({ referral }: { referral: ProvincialReferralListItem }) {
+function ReferralCard({
+  referral,
+  onSelect,
+}: {
+  referral: ProvincialReferralListItem;
+  onSelect: () => void;
+}) {
   const age = classifyReferralAge(referral.initiatedAt, referral.status);
   const emergency = referral.urgencyLevel === 'EMERGENCY';
   return (
     <div
-      className="border-b px-3 py-2.5"
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className="cursor-pointer border-b px-3 py-2.5 transition-colors hover:bg-[var(--accent-navy-soft)] focus:outline-none focus-visible:bg-[var(--accent-navy-soft)]"
       style={{
         borderColor: 'var(--rule-hair)',
         borderLeft: `3px solid ${emergency ? 'var(--risk-high)' : 'transparent'}`,

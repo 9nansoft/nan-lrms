@@ -7,8 +7,10 @@ import { SqliteAdapter } from '@/db/sqlite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables/index';
 import { v4 as uuidv4 } from 'uuid';
-import { listReferrals } from '@/services/referral-list';
+import { listReferrals, getReferralDetail } from '@/services/referral-list';
 import { REFERRAL_SLA } from '@/config/referral-sla';
+import { initiateReferral, acceptReferral, markInTransit, confirmArrival, rejectReferral } from '@/services/referral';
+import { UrgencyLevel } from '@/types/domain';
 
 interface SeededHospitals {
   hospAId: string;
@@ -498,5 +500,86 @@ describe('listReferrals — patient context, filters, ordering, ops counts', () 
       highRisk: 1,
       overdue: 1,
     });
+  });
+});
+
+describe('getReferralDetail — full referral with milestones and patient context', () => {
+  let db: SqliteAdapter;
+  let hosp: SeededHospitals;
+
+  beforeEach(async () => {
+    db = new SqliteAdapter(':memory:');
+    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    hosp = await seedHospitals(db);
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO users (id, bms_user_name, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      ['doctor-007', 'doctor-007', 'NURSE', 1, now, now],
+    );
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  it('returns milestone timestamps, transport mode, and patient context after a full lifecycle', async () => {
+    const journeyId = await seedJourney(db, hosp.hospAId, {
+      name: 'นาง สายฝน อุ่นเรือน',
+      hn: 'HN001234',
+      gaWeeks: 38,
+      ancRiskLevel: 'HR3',
+    });
+    const ref = await initiateReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospAId,
+      toHospitalId: hosp.hospBId,
+      reason: 'Fetal distress',
+      diagnosisCode: 'O68.0',
+      urgencyLevel: UrgencyLevel.EMERGENCY,
+    });
+    await acceptReferral(db, ref.id, 'doctor-007');
+    await markInTransit(db, ref.id, 'AMBULANCE');
+    await confirmArrival(db, ref.id, 'AN-B-9999');
+
+    const detail = await getReferralDetail(db, ref.id);
+
+    expect(detail).not.toBeNull();
+    expect(detail!.status).toBe('ARRIVED');
+    expect(detail!.fromHospital).toBe('รพ.ต้นทาง');
+    expect(detail!.toHospital).toBe('รพ.ปลายทาง');
+    expect(detail!.patientName).toBe('นาง สายฝน อุ่นเรือน');
+    expect(detail!.hn).toBe('HN001234');
+    expect(detail!.gaWeeks).toBe(38);
+    expect(detail!.ancRiskLevel).toBe('HR3');
+    expect(detail!.diagnosisCode).toBe('O68.0');
+    expect(detail!.transportMode).toBe('AMBULANCE');
+    expect(detail!.acceptedAt).not.toBeNull();
+    expect(detail!.departedAt).not.toBeNull();
+    expect(detail!.arrivedAt).not.toBeNull();
+    expect(detail!.rejectedAt).toBeNull();
+    expect(detail!.rejectionReason).toBeNull();
+  });
+
+  it('returns rejection reason and suggested alternative hospital name for rejected referrals', async () => {
+    const journeyId = await seedJourney(db, hosp.hospAId);
+    const ref = await initiateReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospAId,
+      toHospitalId: hosp.hospBId,
+      reason: 'Emergency delivery',
+      urgencyLevel: UrgencyLevel.EMERGENCY,
+    });
+    await rejectReferral(db, ref.id, 'ICU เต็ม', hosp.hospCId);
+
+    const detail = await getReferralDetail(db, ref.id);
+
+    expect(detail!.status).toBe('REJECTED');
+    expect(detail!.rejectionReason).toBe('ICU เต็ม');
+    expect(detail!.rejectedAt).not.toBeNull();
+    expect(detail!.suggestedAlternativeHospital).toBe('รพ.ทางเลือก');
+  });
+
+  it('returns null for an unknown referral id', async () => {
+    expect(await getReferralDetail(db, 'no-such-id')).toBeNull();
   });
 });

@@ -617,12 +617,18 @@ export interface ReferralListResponse {
   opsCounts: ReferralOpsCounts;
 }
 
+/** Full referral for the detail dialog — list row fields plus every
+ *  lifecycle milestone and the rejection context. */
+export type ReferralDetail = ProvincialReferralListItem & {
+  rejectionReason: string | null;
+  transportMode: string | null;
+  acceptedAt: string | null;
+  departedAt: string | null;
+  rejectedAt: string | null;
+  /** Name of the hospital suggested as an alternative on rejection. */
+  suggestedAlternativeHospital: string | null;
+};
+
 export interface ReferralDetailResponse {
-  referral: ReferralListItem & {
-    rejectionReason: string | null;
-    transportMode: string | null;
-    acceptedAt: string | null;
-    departedAt: string | null;
-    rejectedAt: string | null;
-  };
+  referral: ReferralDetail;
 }
