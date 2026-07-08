@@ -16,13 +16,7 @@ import { cn, formatThaiDate, formatThaiTime } from '@/lib/utils';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { maskName } from '@/lib/pii-mask';
 import { classifyReferralAge, type ReferralAgeClass } from '@/config/referral-sla';
-import {
-  AgeChip,
-  Pill,
-  RiskChip,
-  STATUS_META,
-  URGENCY_META,
-} from '@/components/referrals/chips';
+import { AgeChip, Pill, RiskChip, STATUS_META, URGENCY_META } from '@/components/referrals/chips';
 import { ReferralDetailDialog } from '@/components/referrals/ReferralDetailDialog';
 import { ArrowRightLeft, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import type {
@@ -90,7 +84,15 @@ export default function ReferralsPage() {
     if (overdueOnly) params.set('overdue', '1');
     if (debouncedQuery) params.set('q', debouncedQuery);
     return params.toString();
-  }, [page, statusFilter, urgencyFilter, rangeFilter, toHospitalFilter, overdueOnly, debouncedQuery]);
+  }, [
+    page,
+    statusFilter,
+    urgencyFilter,
+    rangeFilter,
+    toHospitalFilter,
+    overdueOnly,
+    debouncedQuery,
+  ]);
 
   const { data, isLoading, error, mutate } = useSWR<ReferralListResponse>(
     `/api/dashboard/referrals/list?${queryParams}`,
@@ -105,10 +107,9 @@ export default function ReferralsPage() {
 
   // Aggregate view (corridors, 7-day volume, destination options) — changes
   // slowly, so it refreshes at half the list cadence.
-  const { data: insights } = useSWR<ReferralInsightsResponse>(
-    '/api/dashboard/referrals/insights',
-    { refreshInterval: 60000 },
-  );
+  const { data: insights } = useSWR<ReferralInsightsResponse>('/api/dashboard/referrals/insights', {
+    refreshInterval: 60000,
+  });
 
   const referrals = useMemo(() => data?.referrals ?? [], [data]);
   const statusCounts = data?.statusCounts ?? EMPTY_STATUS_COUNTS;
@@ -390,8 +391,7 @@ export default function ReferralsPage() {
                       className="w-full"
                       style={{
                         height: `${Math.max(2, (d.count / max) * 44)}px`,
-                        background:
-                          d.count > 0 ? 'var(--accent-navy)' : 'var(--surface-cool)',
+                        background: d.count > 0 ? 'var(--accent-navy)' : 'var(--surface-cool)',
                       }}
                     />
                     <span className="font-mono text-[9px] tabular-nums text-[var(--ink-navy-muted)]">
@@ -580,11 +580,7 @@ export default function ReferralsPage() {
             <EmptyState hasActiveFilters={hasActiveFilters} onClear={clearFilters} />
           ) : (
             referrals.map((r) => (
-              <ReferralCard
-                key={r.id}
-                referral={r}
-                onSelect={() => setSelectedReferralId(r.id)}
-              />
+              <ReferralCard key={r.id} referral={r} onSelect={() => setSelectedReferralId(r.id)} />
             ))
           )}
         </div>
@@ -781,7 +777,10 @@ function ReferralRow({
       <div className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
         {referral.diagnosisCode ?? '—'}
       </div>
-      <div className="truncate text-[12px] text-[var(--ink-navy-dim)]" title={referral.reason ?? ''}>
+      <div
+        className="truncate text-[12px] text-[var(--ink-navy-dim)]"
+        title={referral.reason ?? ''}
+      >
         {referral.reason ?? '—'}
       </div>
       <InitiatedCell referral={referral} age={age} />

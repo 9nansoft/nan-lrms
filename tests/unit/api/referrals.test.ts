@@ -38,11 +38,38 @@ async function seedFixtures(db: SqliteAdapter) {
   await db.execute(
     `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [journeyId, hospAId, hospAId, '12345', 'Test Patient', 'enc_cid_test', 'cidhash_test', 30, 1, 0, 'PREGNANCY', 'HR3', 0, now, now, now, now, now],
+    [
+      journeyId,
+      hospAId,
+      hospAId,
+      '12345',
+      'Test Patient',
+      'enc_cid_test',
+      'cidhash_test',
+      30,
+      1,
+      0,
+      'PREGNANCY',
+      'HR3',
+      0,
+      now,
+      now,
+      now,
+      now,
+      now,
+    ],
   );
 
   // Seed users for accepted_by FK
-  for (const userId of ['doctor-007', 'ob-gyn-B', 'doctor-X', 'doctor-Y', 'doctor-Z', 'nurse-001', 'midwife-A']) {
+  for (const userId of [
+    'doctor-007',
+    'ob-gyn-B',
+    'doctor-X',
+    'doctor-Y',
+    'doctor-Z',
+    'nurse-001',
+    'midwife-A',
+  ]) {
     await db.execute(
       `INSERT INTO users (id, bms_user_name, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
       [userId, userId, 'NURSE', 1, now, now],
@@ -58,7 +85,26 @@ async function seedExtraJourney(db: SqliteAdapter, hospitalId: string): Promise<
   await db.execute(
     `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, hospitalId, hospitalId, `HN-${id.slice(0,8)}`, 'Extra Patient', 'enc_cid_extra', 'cidhash_extra', 28, 1, 0, 'PREGNANCY', 'LOW', 0, now, now, now, now, now],
+    [
+      id,
+      hospitalId,
+      hospitalId,
+      `HN-${id.slice(0, 8)}`,
+      'Extra Patient',
+      'enc_cid_extra',
+      'cidhash_extra',
+      28,
+      1,
+      0,
+      'PREGNANCY',
+      'LOW',
+      0,
+      now,
+      now,
+      now,
+      now,
+      now,
+    ],
   );
   return id;
 }

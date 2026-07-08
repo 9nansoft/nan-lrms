@@ -9,7 +9,13 @@ import { ALL_TABLES } from '@/db/tables/index';
 import { v4 as uuidv4 } from 'uuid';
 import { listReferrals, getReferralDetail, getReferralInsights } from '@/services/referral-list';
 import { REFERRAL_SLA } from '@/config/referral-sla';
-import { initiateReferral, acceptReferral, markInTransit, confirmArrival, rejectReferral } from '@/services/referral';
+import {
+  initiateReferral,
+  acceptReferral,
+  markInTransit,
+  confirmArrival,
+  rejectReferral,
+} from '@/services/referral';
 import { UrgencyLevel } from '@/types/domain';
 
 interface SeededHospitals {
@@ -355,7 +361,10 @@ describe('listReferrals — patient context, filters, ordering, ops counts', () 
 
   it('q matches refer number contains, HN prefix, or patient name contains', async () => {
     const j1 = await seedJourney(db, hosp.hospAId, { name: 'นาง สายฝน อุ่นเรือน', hn: 'HN777001' });
-    const j2 = await seedJourney(db, hosp.hospAId, { name: 'น.ส. จันทร์เพ็ญ ดีงาม', hn: 'HN888002' });
+    const j2 = await seedJourney(db, hosp.hospAId, {
+      name: 'น.ส. จันทร์เพ็ญ ดีงาม',
+      hn: 'HN888002',
+    });
     await seedReferral(db, {
       journeyId: j1,
       fromHospitalId: hosp.hospAId,

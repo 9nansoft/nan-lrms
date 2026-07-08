@@ -25,7 +25,20 @@ export async function initiateReferral(
   await db.execute(
     `INSERT INTO cached_referrals (id, journey_id, from_hospital_id, to_hospital_id, status, reason, diagnosis_code, urgency_level, initiated_at, initiated_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, input.journeyId, input.fromHospitalId, input.toHospitalId, ReferralStatus.INITIATED, input.reason, input.diagnosisCode ?? null, input.urgencyLevel, now, input.initiatedBy ?? null, now, now],
+    [
+      id,
+      input.journeyId,
+      input.fromHospitalId,
+      input.toHospitalId,
+      ReferralStatus.INITIATED,
+      input.reason,
+      input.diagnosisCode ?? null,
+      input.urgencyLevel,
+      now,
+      input.initiatedBy ?? null,
+      now,
+      now,
+    ],
   );
 
   return getReferralById(db, id);

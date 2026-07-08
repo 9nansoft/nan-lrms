@@ -7,7 +7,13 @@ import { createJourney } from '@/services/journey';
 import { getJourneyById } from '@/services/journey';
 import { AncRiskLevel } from '@/types/domain';
 import { v4 as uuidv4 } from 'uuid';
-import type { JourneyListItem, AncVisitEntry, AncRiskEntry, ReferralListItem, NewbornEntry } from '@/types/api';
+import type {
+  JourneyListItem,
+  AncVisitEntry,
+  AncRiskEntry,
+  ReferralListItem,
+  NewbornEntry,
+} from '@/types/api';
 
 describe('Journey API Logic', () => {
   let db: SqliteAdapter;
@@ -106,24 +112,35 @@ describe('Journey API Logic', () => {
 
     it('filters by stage', async () => {
       await createJourney(db, {
-        hospitalId, hn: 'HN-P1', personAncId: 1,
-        name: 'P1', cid: 'enc_test_007', cidHash: 'testhash00000000000000000000000000000000000000000000000000000007',
-        age: 25, gravida: 1, para: 0,
-        lmp: '2025-06-01', edc: '2026-03-08',
+        hospitalId,
+        hn: 'HN-P1',
+        personAncId: 1,
+        name: 'P1',
+        cid: 'enc_test_007',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000007',
+        age: 25,
+        gravida: 1,
+        para: 0,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
         ancRiskLevel: AncRiskLevel.LOW,
       });
       const j2 = await createJourney(db, {
-        hospitalId, hn: 'HN-P2', personAncId: 2,
-        name: 'P2', cid: 'enc_test_008', cidHash: 'testhash00000000000000000000000000000000000000000000000000000008',
-        age: 30, gravida: 2, para: 1,
-        lmp: '2025-07-01', edc: '2026-04-07',
+        hospitalId,
+        hn: 'HN-P2',
+        personAncId: 2,
+        name: 'P2',
+        cid: 'enc_test_008',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000008',
+        age: 30,
+        gravida: 2,
+        para: 1,
+        lmp: '2025-07-01',
+        edc: '2026-04-07',
         ancRiskLevel: AncRiskLevel.HR1,
       });
       // Transition j2 to LABOR
-      await db.execute(
-        `UPDATE maternal_journeys SET care_stage = 'LABOR' WHERE id = ?`,
-        [j2.id],
-      );
+      await db.execute(`UPDATE maternal_journeys SET care_stage = 'LABOR' WHERE id = ?`, [j2.id]);
 
       const rows = await db.query<Record<string, unknown>>(
         `SELECT mj.*, h.name as hospital_name, h.hcode FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id WHERE 1=1 AND mj.care_stage = ? ORDER BY mj.created_at DESC LIMIT ? OFFSET ?`,
@@ -135,17 +152,31 @@ describe('Journey API Logic', () => {
 
     it('filters by risk level', async () => {
       await createJourney(db, {
-        hospitalId, hn: 'HN-LOW', personAncId: 1,
-        name: 'Low', cid: 'enc_test_009', cidHash: 'testhash00000000000000000000000000000000000000000000000000000009',
-        age: 25, gravida: 1, para: 0,
-        lmp: '2025-06-01', edc: '2026-03-08',
+        hospitalId,
+        hn: 'HN-LOW',
+        personAncId: 1,
+        name: 'Low',
+        cid: 'enc_test_009',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000009',
+        age: 25,
+        gravida: 1,
+        para: 0,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
         ancRiskLevel: AncRiskLevel.LOW,
       });
       await createJourney(db, {
-        hospitalId, hn: 'HN-HR3', personAncId: 2,
-        name: 'HR3', cid: 'enc_test_010', cidHash: 'testhash00000000000000000000000000000000000000000000000000000010',
-        age: 35, gravida: 4, para: 3,
-        lmp: '2025-07-01', edc: '2026-04-07',
+        hospitalId,
+        hn: 'HN-HR3',
+        personAncId: 2,
+        name: 'HR3',
+        cid: 'enc_test_010',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000010',
+        age: 35,
+        gravida: 4,
+        para: 3,
+        lmp: '2025-07-01',
+        edc: '2026-04-07',
         ancRiskLevel: AncRiskLevel.HR3,
       });
 
@@ -161,10 +192,17 @@ describe('Journey API Logic', () => {
       // Create 3 journeys
       for (let i = 1; i <= 3; i++) {
         await createJourney(db, {
-          hospitalId, hn: `HN-PG${i}`, personAncId: i,
-          name: `Patient ${i}`, cid: 'enc_test_011', cidHash: 'testhash00000000000000000000000000000000000000000000000000000011',
-          age: 25 + i, gravida: i, para: 0,
-          lmp: '2025-06-01', edc: '2026-03-08',
+          hospitalId,
+          hn: `HN-PG${i}`,
+          personAncId: i,
+          name: `Patient ${i}`,
+          cid: 'enc_test_011',
+          cidHash: 'testhash00000000000000000000000000000000000000000000000000000011',
+          age: 25 + i,
+          gravida: i,
+          para: 0,
+          lmp: '2025-06-01',
+          edc: '2026-03-08',
           ancRiskLevel: AncRiskLevel.LOW,
         });
       }
@@ -240,10 +278,17 @@ describe('Journey API Logic', () => {
 
     it('returns ANC visits for a journey', async () => {
       const journey = await createJourney(db, {
-        hospitalId, hn: 'HN-ANC', personAncId: 300,
-        name: 'ANC Patient', cid: 'enc_test_012', cidHash: 'testhash00000000000000000000000000000000000000000000000000000012',
-        age: 26, gravida: 1, para: 0,
-        lmp: '2025-06-01', edc: '2026-03-08',
+        hospitalId,
+        hn: 'HN-ANC',
+        personAncId: 300,
+        name: 'ANC Patient',
+        cid: 'enc_test_012',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000012',
+        age: 26,
+        gravida: 1,
+        para: 0,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
         ancRiskLevel: AncRiskLevel.LOW,
       });
 
@@ -311,10 +356,17 @@ describe('Journey API Logic', () => {
 
     it('returns latest risk for a journey', async () => {
       const journey = await createJourney(db, {
-        hospitalId, hn: 'HN-RSK', personAncId: 400,
-        name: 'Risk Patient', cid: 'enc_test_013', cidHash: 'testhash00000000000000000000000000000000000000000000000000000013',
-        age: 35, gravida: 3, para: 2,
-        lmp: '2025-06-01', edc: '2026-03-08',
+        hospitalId,
+        hn: 'HN-RSK',
+        personAncId: 400,
+        name: 'Risk Patient',
+        cid: 'enc_test_013',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000013',
+        age: 35,
+        gravida: 3,
+        para: 2,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
         ancRiskLevel: AncRiskLevel.HR2,
       });
 
@@ -333,7 +385,7 @@ describe('Journey API Logic', () => {
 
       const latestRisk: AncRiskEntry = {
         riskLevel: riskRows[0].risk_level as string,
-        triggeredRules: JSON.parse(riskRows[0].triggered_rules as string || '[]'),
+        triggeredRules: JSON.parse((riskRows[0].triggered_rules as string) || '[]'),
         screenedAt: riskRows[0].screened_at as string,
         recommendedFacility: riskRows[0].recommended_facility as string | null,
       };
@@ -345,10 +397,17 @@ describe('Journey API Logic', () => {
 
     it('returns referrals with hospital names', async () => {
       const journey = await createJourney(db, {
-        hospitalId, hn: 'HN-REF', personAncId: 500,
-        name: 'Referral Patient', cid: 'enc_test_014', cidHash: 'testhash00000000000000000000000000000000000000000000000000000014',
-        age: 28, gravida: 1, para: 0,
-        lmp: '2025-06-01', edc: '2026-03-08',
+        hospitalId,
+        hn: 'HN-REF',
+        personAncId: 500,
+        name: 'Referral Patient',
+        cid: 'enc_test_014',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000014',
+        age: 28,
+        gravida: 1,
+        para: 0,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
         ancRiskLevel: AncRiskLevel.HR3,
       });
 
@@ -392,10 +451,17 @@ describe('Journey API Logic', () => {
 
     it('returns newborns for a journey', async () => {
       const journey = await createJourney(db, {
-        hospitalId, hn: 'HN-NB', personAncId: 600,
-        name: 'Newborn Patient', cid: 'enc_test_015', cidHash: 'testhash00000000000000000000000000000000000000000000000000000015',
-        age: 30, gravida: 2, para: 1,
-        lmp: '2025-06-01', edc: '2026-03-08',
+        hospitalId,
+        hn: 'HN-NB',
+        personAncId: 600,
+        name: 'Newborn Patient',
+        cid: 'enc_test_015',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000015',
+        age: 30,
+        gravida: 2,
+        para: 1,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
         ancRiskLevel: AncRiskLevel.LOW,
       });
 
@@ -437,10 +503,17 @@ describe('Journey API Logic', () => {
 
     it('returns journey by id', async () => {
       const created = await createJourney(db, {
-        hospitalId, hn: 'HN-BY-ID', personAncId: 700,
-        name: 'ById Patient', cid: 'enc_test_016', cidHash: 'testhash00000000000000000000000000000000000000000000000000000016',
-        age: 27, gravida: 1, para: 0,
-        lmp: '2025-06-01', edc: '2026-03-08',
+        hospitalId,
+        hn: 'HN-BY-ID',
+        personAncId: 700,
+        name: 'ById Patient',
+        cid: 'enc_test_016',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000016',
+        age: 27,
+        gravida: 1,
+        para: 0,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
         ancRiskLevel: AncRiskLevel.HR1,
       });
 
@@ -455,25 +528,38 @@ describe('Journey API Logic', () => {
   describe('Hospital journeys query', () => {
     it('returns journeys filtered by hospital hcode', async () => {
       await createJourney(db, {
-        hospitalId, hn: 'HN-H1', personAncId: 800,
-        name: 'Hosp1 Patient', cid: 'enc_test_017', cidHash: 'testhash00000000000000000000000000000000000000000000000000000017',
-        age: 25, gravida: 1, para: 0,
-        lmp: '2025-06-01', edc: '2026-03-08',
+        hospitalId,
+        hn: 'HN-H1',
+        personAncId: 800,
+        name: 'Hosp1 Patient',
+        cid: 'enc_test_017',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000017',
+        age: 25,
+        gravida: 1,
+        para: 0,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
         ancRiskLevel: AncRiskLevel.LOW,
       });
       await createJourney(db, {
-        hospitalId: hospital2Id, hn: 'HN-H2', personAncId: 801,
-        name: 'Hosp2 Patient', cid: 'enc_test_018', cidHash: 'testhash00000000000000000000000000000000000000000000000000000018',
-        age: 28, gravida: 2, para: 1,
-        lmp: '2025-07-01', edc: '2026-04-07',
+        hospitalId: hospital2Id,
+        hn: 'HN-H2',
+        personAncId: 801,
+        name: 'Hosp2 Patient',
+        cid: 'enc_test_018',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000018',
+        age: 28,
+        gravida: 2,
+        para: 1,
+        lmp: '2025-07-01',
+        edc: '2026-04-07',
         ancRiskLevel: AncRiskLevel.HR2,
       });
 
       // Look up hospital by hcode
-      const hospitals = await db.query<{ id: string }>(
-        `SELECT id FROM hospitals WHERE hcode = ?`,
-        ['10670'],
-      );
+      const hospitals = await db.query<{ id: string }>(`SELECT id FROM hospitals WHERE hcode = ?`, [
+        '10670',
+      ]);
       expect(hospitals).toHaveLength(1);
 
       const rows = await db.query<Record<string, unknown>>(
@@ -485,10 +571,9 @@ describe('Journey API Logic', () => {
     });
 
     it('returns empty for non-existent hospital hcode', async () => {
-      const hospitals = await db.query<{ id: string }>(
-        `SELECT id FROM hospitals WHERE hcode = ?`,
-        ['99999'],
-      );
+      const hospitals = await db.query<{ id: string }>(`SELECT id FROM hospitals WHERE hcode = ?`, [
+        '99999',
+      ]);
       expect(hospitals).toHaveLength(0);
     });
   });

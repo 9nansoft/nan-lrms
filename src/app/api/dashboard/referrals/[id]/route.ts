@@ -7,10 +7,7 @@ import { logger } from '@/lib/logger';
 import { getReferralDetail } from '@/services/referral-list';
 import type { ReferralDetailResponse } from '@/types/api';
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     await ensureInit();
     const db = await getDatabase();

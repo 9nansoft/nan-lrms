@@ -366,10 +366,7 @@ export async function listReferrals(
       .slice((page - 1) * perPage, page * perPage)
       .map(({ row, name }) => mapReferralListItem(row, name));
   } else {
-    const countRows = await db.query<{ total: number }>(
-      `${COUNT_SELECT} WHERE ${clause}`,
-      params,
-    );
+    const countRows = await db.query<{ total: number }>(`${COUNT_SELECT} WHERE ${clause}`, params);
     total = Number(countRows[0]?.total) || 0;
     const rows = await db.query<Record<string, unknown>>(
       `${DATA_SELECT} WHERE ${clause} ${ORDER_BY} LIMIT ? OFFSET ?`,

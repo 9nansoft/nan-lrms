@@ -156,11 +156,7 @@ export async function recordAuthenticityVerdict(
 const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 type AuthenticityFailureStatus =
-  | 'cid_unstable'
-  | 'hn_unstable'
-  | 'cid_invalid_checksum'
-  | 'no_id_field'
-  | 'probe_failed';
+  'cid_unstable' | 'hn_unstable' | 'cid_invalid_checksum' | 'no_id_field' | 'probe_failed';
 
 class HospitalDataUnauthenticError extends Error {
   status: AuthenticityFailureStatus;
