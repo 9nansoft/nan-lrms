@@ -1,5 +1,5 @@
 // T059: Startup sequence — DB init, schema sync, seed, start polling
-import { getDatabase, closeDatabase, isSqliteEnabled } from '@/db/connection';
+import { getDatabase, closeDatabase, getDriverType, isSqliteEnabled } from '@/db/connection';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
@@ -8,7 +8,9 @@ import { stopPolling } from '@/services/sync';
 import { logger } from '@/lib/logger';
 
 // HMR- and bundle-safe init flag (pair with ensure-init.ts singleton).
-interface InitFlag { done: boolean }
+interface InitFlag {
+  done: boolean;
+}
 const _global = global as unknown as { __initFlag?: InitFlag };
 const _flag: InitFlag = _global.__initFlag ?? { done: false };
 if (!_global.__initFlag) _global.__initFlag = _flag;
@@ -22,11 +24,11 @@ export async function initializeApp(): Promise<void> {
 
     // 1. Connect to database
     const db = await getDatabase();
-    const driver = isSqliteEnabled() ? 'sqlite' : 'postgresql';
+    const driver = getDriverType();
     logger.info('database_connected', { driver });
 
     // 2. Sync schema
-    await SchemaSync.sync(db, ALL_TABLES, driver as 'sqlite' | 'postgresql');
+    await SchemaSync.sync(db, ALL_TABLES, driver);
     logger.info('schema_synced', { tableCount: ALL_TABLES.length });
 
     // 2b. One-shot idempotent backfill for cached_anc_visits.hospital_id —
@@ -54,7 +56,11 @@ export async function initializeApp(): Promise<void> {
     logger.info('seeders_completed', {});
 
     // 4. Seed demo data in dev mode with SQLite (opt-in via SEED_DEMO_DATA=true)
-    if (isSqliteEnabled() && process.env.NODE_ENV !== 'test' && process.env.SEED_DEMO_DATA === 'true') {
+    if (
+      isSqliteEnabled() &&
+      process.env.NODE_ENV !== 'test' &&
+      process.env.SEED_DEMO_DATA === 'true'
+    ) {
       const { seedDemoData } = await import('@/db/seeds/demo-seeder');
       await seedDemoData(db);
     }

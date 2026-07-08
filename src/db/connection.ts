@@ -30,6 +30,16 @@ export function isPgliteEnabled(): boolean {
   return process.env.USE_PGLITE === 'true';
 }
 
+// Schema dialect for whichever adapter getDatabase() will pick. Must mirror
+// its precedence: PGlite is a real Postgres engine, so it needs the
+// postgresql dialect even when NODE_ENV=test or USE_SQLITE would otherwise
+// force sqlite — a sqlite-dialect schema (boolean -> INTEGER) inside PGlite
+// makes every boolean bind fail with `invalid input syntax for type integer`.
+export function getDriverType(): 'sqlite' | 'postgresql' {
+  if (isPgliteEnabled()) return 'postgresql';
+  return isSqliteEnabled() ? 'sqlite' : 'postgresql';
+}
+
 export async function getDatabase(): Promise<DatabaseAdapter> {
   if (_singleton.instance) return _singleton.instance;
 
@@ -43,7 +53,8 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
     }
   } else if (isSqliteEnabled()) {
     const { SqliteAdapter } = await import('./sqlite-adapter');
-    const path = process.env.NODE_ENV === 'test' ? ':memory:' : (process.env.SQLITE_PATH ?? 'dev.sqlite');
+    const path =
+      process.env.NODE_ENV === 'test' ? ':memory:' : (process.env.SQLITE_PATH ?? 'dev.sqlite');
     _singleton.instance = new SqliteAdapter(path);
     if (process.env.NODE_ENV !== 'test') {
       logger.info('sqlite_connected', { path });
