@@ -554,6 +554,77 @@ export async function getIpdVitalSignChart(
 }
 
 /**
+ * Fast-fail timeout for a patient photo. A face thumbnail is a non-critical
+ * decoration, so we don't want a slow/hung blob read to stall the ward view.
+ */
+export const PATIENT_PHOTO_TIMEOUT_MS = 15_000;
+
+/**
+ * Result of {@link getPatientPhoto}. A patient photo is decorative, so every
+ * failure mode (missing row, NULL blob, auth, network) collapses to a single
+ * `{ ok: false, status }` that callers render as a neutral placeholder —
+ * `status` is the HTTP status (or 0 for a network/timeout failure).
+ */
+export type PatientPhotoResponse = { ok: true; blob: Blob } | { ok: false; status: number };
+
+export interface PatientPhotoOptions {
+  /** Requested pixel width. Server only resizes JPEG-encoded blobs (spec §3). */
+  width?: number;
+  /** Requested pixel height. */
+  height?: number;
+  marketplaceToken?: string | null;
+}
+
+/**
+ * Fetch a patient's face photo from HOSxP's REST BLOB endpoint, keyed by HN.
+ *
+ * Hits `GET /api/rest/patient_image/{hn}?field=image&responseType=jpg[&width&height]`
+ * (composite PK `hn,image_name`; discovery keys on `hn` and returns the first
+ * row, so a specific `image_name` can't be selected here — that's the
+ * `patient_photo` route's job). `responseType`/`width`/`height` only apply to
+ * JPEG-encoded blobs; non-JPEG blobs come back at their original size.
+ *
+ * Never throws: a photo is optional, so a missing row (404), a non-BLOB field
+ * (400), an auth failure (401), or a network error all resolve to
+ * `{ ok: false, status }` so the caller shows a placeholder rather than an
+ * error.
+ */
+export async function getPatientPhoto(
+  config: ConnectionConfig,
+  hn: string,
+  options: PatientPhotoOptions = {},
+): Promise<PatientPhotoResponse> {
+  const { width, height, marketplaceToken } = options;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PATIENT_PHOTO_TIMEOUT_MS);
+  try {
+    const params = new URLSearchParams({ field: 'image', responseType: 'jpg' });
+    if (width && width > 0) params.set('width', String(Math.round(width)));
+    if (height && height > 0) params.set('height', String(Math.round(height)));
+    const mkt = resolveMarketplaceToken(marketplaceToken);
+    // GET has no body, so the token rides the query string (matches restDelete).
+    if (mkt) params.set('marketplace-token', mkt);
+
+    const url = `${config.apiUrl}/api/rest/patient_image/${encodeURIComponent(hn)}?${params.toString()}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${config.bearerToken}` },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return { ok: false, status: response.status };
+    }
+    return { ok: true, blob: await response.blob() };
+  } catch {
+    // Network error or timeout — degrade quietly to the placeholder.
+    return { ok: false, status: 0 };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
  * Extract a human-readable error message from a non-OK REST response.
  * Tries JSON body first (Message/message/errors), then plain text, then statusText.
  */

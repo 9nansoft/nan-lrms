@@ -24,12 +24,10 @@ import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { useState } from 'react';
 
 import { BedTileFull } from './BedTileFull';
-import {
-  decideBedMoveAction,
-  type BedMoveDecision,
-} from './decideBedMoveAction';
+import { decideBedMoveAction, type BedMoveDecision } from './decideBedMoveAction';
 import { BedMoveReasonModal } from './BedMoveReasonModal';
 import type { BedSlot, BedOccupancyFull } from '@/types/maternity-ward';
+import type { ConnectionConfig } from '@/types/bms-browser';
 
 export interface BedMovePayload {
   an: string;
@@ -64,6 +62,9 @@ export interface WardLayoutViewFullProps {
    * can surface a Thai-language toast. Defaults to console.warn when unset.
    */
   onMoveRejected?: (reason: 'locked' | 'occupied' | 'no-op') => void;
+  /** Active BMS connection — forwarded to each tile to enable patient photos. */
+  config?: ConnectionConfig | null;
+  marketplaceToken?: string | null;
 }
 
 interface RoomGroup {
@@ -114,13 +115,22 @@ interface DraggableBedTileProps {
   occupant: BedOccupancyFull | null;
   now: number;
   onBedClick?: (an: string) => void;
+  config?: ConnectionConfig | null;
+  marketplaceToken?: string | null;
 }
 
 // Per-bed wrapper that enrols the tile as both droppable (always) and
 // draggable (only when occupied). Empty/locked tiles still need to be
 // droppable so a patient can be dropped onto them; locked drops are rejected
 // in the dispatcher.
-function DraggableBedTile({ bed, occupant, now, onBedClick }: DraggableBedTileProps) {
+function DraggableBedTile({
+  bed,
+  occupant,
+  now,
+  onBedClick,
+  config,
+  marketplaceToken,
+}: DraggableBedTileProps) {
   const id = dragId(bed);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id });
   const draggable = useDraggable({
@@ -153,6 +163,8 @@ function DraggableBedTile({ bed, occupant, now, onBedClick }: DraggableBedTilePr
         occupant={occupant}
         now={now}
         onClick={onBedClick}
+        config={config}
+        marketplaceToken={marketplaceToken}
       />
     </div>
   );
@@ -166,6 +178,8 @@ export function WardLayoutViewFull({
   onBedMove,
   reasons = [],
   onMoveRejected,
+  config,
+  marketplaceToken,
 }: WardLayoutViewFullProps) {
   const rooms = groupByRoom(beds);
   const occupantByBedno = new Map(occupancy.map((o) => [o.bedno, o] as const));
@@ -280,7 +294,14 @@ export function WardLayoutViewFull({
                   />
                   {`Room ${room.roomno}`}
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.005em', color: '#0F172A' }}>
+                <div
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 700,
+                    letterSpacing: '-0.005em',
+                    color: '#0F172A',
+                  }}
+                >
                   {room.room_name ?? `ห้อง ${room.roomno}`}
                 </div>
                 <div
@@ -310,6 +331,8 @@ export function WardLayoutViewFull({
                     occupant={occupantByBedno.get(b.bedno) ?? null}
                     now={now}
                     onBedClick={onBedClick}
+                    config={config}
+                    marketplaceToken={marketplaceToken}
                   />
                 ))}
               </div>

@@ -84,4 +84,11 @@ describe('BedTileFull', () => {
     fireEvent.click(screen.getByTestId('bed-01'));
     expect(onClick).toHaveBeenCalledWith('AN1');
   });
+
+  it('shows the patient-photo placeholder (no fetch) when rendered without a BMS session', () => {
+    // config is omitted here (as in the ward page before a session is ready),
+    // so PatientPhoto renders its neutral placeholder rather than fetching.
+    render(<BedTileFull bedno="01" bedLock="N" occupant={occupant} now={now} />);
+    expect(screen.getByTestId('patient-photo-placeholder')).toBeInTheDocument();
+  });
 });

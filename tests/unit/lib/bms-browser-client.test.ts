@@ -6,6 +6,7 @@ import {
   executeSql,
   callFunction,
   getIpdVitalSignChart,
+  getPatientPhoto,
   restInsert,
   restUpdate,
   restDelete,
@@ -438,6 +439,77 @@ describe('getIpdVitalSignChart', () => {
   it('throws a Thai connection error on a generic network failure', async () => {
     mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
     await expect(getIpdVitalSignChart(cfg, 'AN1', 2)).rejects.toThrow(/ไม่สามารถเชื่อมต่อ/);
+  });
+});
+
+describe('getPatientPhoto', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    setActiveMarketplaceToken(null);
+  });
+
+  function jpegResponse() {
+    return {
+      ok: true,
+      status: 200,
+      blob: async () => new Blob([new Uint8Array([255, 216, 255])], { type: 'image/jpeg' }),
+    };
+  }
+
+  it('GETs /api/rest/patient_image/{hn} with field/responseType/size params + bearer', async () => {
+    mockFetch.mockResolvedValueOnce(jpegResponse());
+    const r = await getPatientPhoto(cfg, '000123456', { width: 200, height: 200 });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.blob).toBeInstanceOf(Blob);
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain('https://t.example/api/api/rest/patient_image/000123456?');
+    expect(url).toContain('field=image');
+    expect(url).toContain('responseType=jpg');
+    expect(url).toContain('width=200');
+    expect(url).toContain('height=200');
+    const init = mockFetch.mock.calls[0][1];
+    expect(init.method).toBe('GET');
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer BEARER' });
+    expect(init.body).toBeUndefined();
+  });
+
+  it('URL-encodes the HN', async () => {
+    mockFetch.mockResolvedValueOnce(jpegResponse());
+    await getPatientPhoto(cfg, 'HN 42/1', {});
+    expect(mockFetch.mock.calls[0][0]).toContain('/patient_image/HN%2042%2F1?');
+  });
+
+  it('appends the marketplace-token to the query string when provided', async () => {
+    mockFetch.mockResolvedValueOnce(jpegResponse());
+    await getPatientPhoto(cfg, 'HN1', { marketplaceToken: 'MKT-TOKEN' });
+    expect(mockFetch.mock.calls[0][0]).toContain('marketplace-token=MKT-TOKEN');
+  });
+
+  it('falls back to the active marketplace-token singleton', async () => {
+    setActiveMarketplaceToken('SINGLETON');
+    mockFetch.mockResolvedValueOnce(jpegResponse());
+    await getPatientPhoto(cfg, 'HN1', {});
+    expect(mockFetch.mock.calls[0][0]).toContain('marketplace-token=SINGLETON');
+  });
+
+  it('returns ok:false with the HTTP status when there is no photo (404)', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: 'Not Found' });
+    const r = await getPatientPhoto(cfg, 'HN1', {});
+    expect(r).toEqual({ ok: false, status: 404 });
+  });
+
+  it('degrades quietly to ok:false status 0 on a network error (no throw)', async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const r = await getPatientPhoto(cfg, 'HN1', {});
+    expect(r).toEqual({ ok: false, status: 0 });
+  });
+
+  it('omits width/height when not requested', async () => {
+    mockFetch.mockResolvedValueOnce(jpegResponse());
+    await getPatientPhoto(cfg, 'HN1', {});
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).not.toContain('width=');
+    expect(url).not.toContain('height=');
   });
 });
 

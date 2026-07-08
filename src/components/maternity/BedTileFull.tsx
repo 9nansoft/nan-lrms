@@ -19,7 +19,9 @@
 'use client';
 
 import type { BedOccupancyFull } from '@/types/maternity-ward';
+import type { ConnectionConfig } from '@/types/bms-browser';
 import { maskName } from '@/lib/pii-mask';
+import { PatientPhoto } from '@/components/shared/PatientPhoto';
 
 export interface BedTileFullProps {
   bedno: string;
@@ -31,6 +33,11 @@ export interface BedTileFullProps {
    *  under react-hooks/purity. */
   now: number;
   onClick?: (an: string) => void;
+  /** Active BMS connection — enables the patient face photo (fetched by HN).
+   *  Optional so the tile still renders (with a placeholder) in tests/contexts
+   *  without a live session. */
+  config?: ConnectionConfig | null;
+  marketplaceToken?: string | null;
 }
 
 // Categorical clinical colors — kept as constants so the JSX inline `style`
@@ -52,16 +59,21 @@ const C = {
   warn: '#D97706',
   crit: '#DC2626',
   // Categorical
-  cVitals: '#0891B2',  cVitalsBg: '#ECFEFF',
-  cLabour: '#4338CA',  cLabourBg: '#EEF2FF',
-  cCont:   '#7C3AED',  cContBg:   '#F5F3FF',
-  cFhr:    '#E11D48',  cFhrBg:    '#FFF1F2',
-  cInterv: '#059669',  cIntervBg: '#ECFDF5',
+  cVitals: '#0891B2',
+  cVitalsBg: '#ECFEFF',
+  cLabour: '#4338CA',
+  cLabourBg: '#EEF2FF',
+  cCont: '#7C3AED',
+  cContBg: '#F5F3FF',
+  cFhr: '#E11D48',
+  cFhrBg: '#FFF1F2',
+  cInterv: '#059669',
+  cIntervBg: '#ECFDF5',
   // Status pill fill
   pActive: '#059669',
   pLatent: '#2563EB',
-  pTrans:  '#D97706',
-  pCrit:   '#DC2626',
+  pTrans: '#D97706',
+  pCrit: '#DC2626',
 } as const;
 
 const FONT_SANS = "'Sarabun', system-ui, -apple-system, sans-serif";
@@ -363,7 +375,15 @@ const compactValueStyle: React.CSSProperties = {
 
 // ─── main component ───────────────────────────────────────────────────────
 
-export function BedTileFull({ bedno, bedLock, occupant, now, onClick }: BedTileFullProps) {
+export function BedTileFull({
+  bedno,
+  bedLock,
+  occupant,
+  now,
+  onClick,
+  config,
+  marketplaceToken,
+}: BedTileFullProps) {
   if (bedLock === 'Y') return <LockedTile bedno={bedno} />;
   if (!occupant) return <EmptyTile bedno={bedno} />;
 
@@ -452,11 +472,29 @@ export function BedTileFull({ bedno, bedLock, occupant, now, onClick }: BedTileF
         }}
       >
         <div>
-          <span style={{ letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, marginRight: 6 }}>AN</span>
+          <span
+            style={{
+              letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              fontWeight: 700,
+              marginRight: 6,
+            }}
+          >
+            AN
+          </span>
           <span style={{ color: C.ink, fontWeight: 700 }}>{occupant.an}</span>
         </div>
         <div>
-          <span style={{ letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, marginRight: 6 }}>HN</span>
+          <span
+            style={{
+              letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              fontWeight: 700,
+              marginRight: 6,
+            }}
+          >
+            HN
+          </span>
           <span style={{ color: C.ink, fontWeight: 700 }}>{occupant.hn}</span>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -520,15 +558,53 @@ export function BedTileFull({ bedno, bedLock, occupant, now, onClick }: BedTileF
       </div>
 
       {/* Name */}
-      <div style={{ padding: '7px 14px 6px', borderBottom: `1px solid ${C.ruleSoft}` }}>
-        <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.2, color: C.ink, marginBottom: 2 }}>
-          {thaiName(occupant)}
-        </div>
-        <div style={{ fontFamily: FONT_MONO, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', color: C.mute }}>
-          {age !== null && <b style={{ color: C.inkSoft, fontWeight: 700 }}>{age}Y</b>}
-          {age !== null && occupant.gravida !== null && <> · </>}
-          {occupant.gravida !== null && <>G{occupant.gravida}</>}
-          {occupant.ga !== null && <> · GA <b style={{ color: C.inkSoft, fontWeight: 700 }}>{occupant.ga}</b></>}
+      <div
+        style={{
+          display: 'flex',
+          gap: 10,
+          alignItems: 'center',
+          padding: '7px 14px 6px',
+          borderBottom: `1px solid ${C.ruleSoft}`,
+        }}
+      >
+        <PatientPhoto
+          hn={occupant.hn}
+          config={config}
+          marketplaceToken={marketplaceToken}
+          name={thaiName(occupant)}
+          size={46}
+        />
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 800,
+              lineHeight: 1.2,
+              color: C.ink,
+              marginBottom: 2,
+            }}
+          >
+            {thaiName(occupant)}
+          </div>
+          <div
+            style={{
+              fontFamily: FONT_MONO,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              color: C.mute,
+            }}
+          >
+            {age !== null && <b style={{ color: C.inkSoft, fontWeight: 700 }}>{age}Y</b>}
+            {age !== null && occupant.gravida !== null && <> · </>}
+            {occupant.gravida !== null && <>G{occupant.gravida}</>}
+            {occupant.ga !== null && (
+              <>
+                {' '}
+                · GA <b style={{ color: C.inkSoft, fontWeight: 700 }}>{occupant.ga}</b>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -578,7 +654,9 @@ export function BedTileFull({ bedno, bedLock, occupant, now, onClick }: BedTileF
       {/* VITALS — from ipd_nurse_note latest */}
       <div style={sectionStyle(C.cVitalsBg, C.cVitals)}>
         <div style={{ ...sectionLabelStyle, color: C.cVitals }}>Vitals</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr repeat(5, 1fr)', gap: '4px 8px' }}>
+        <div
+          style={{ display: 'grid', gridTemplateColumns: '1.35fr repeat(5, 1fr)', gap: '4px 8px' }}
+        >
           <div>
             <div style={{ ...dataKeyStyle, color: C.cVitals }}>BP</div>
             <div style={dataValueStyle}>{fmtBp(occupant.last_bp_sys, occupant.last_bp_dia)}</div>
@@ -638,10 +716,15 @@ export function BedTileFull({ bedno, bedLock, occupant, now, onClick }: BedTileF
                   fontFamily: FONT_MONO,
                   fontSize: 14,
                   fontWeight: 700,
-                  color: cervixFillColor(occupant.last_cervix_cm) === C.cLabour ? C.ink : cervixFillColor(occupant.last_cervix_cm),
+                  color:
+                    cervixFillColor(occupant.last_cervix_cm) === C.cLabour
+                      ? C.ink
+                      : cervixFillColor(occupant.last_cervix_cm),
                 }}
               >
-                {occupant.last_cervix_cm !== null ? String(occupant.last_cervix_cm).padStart(2, '0') : '—'}
+                {occupant.last_cervix_cm !== null
+                  ? String(occupant.last_cervix_cm).padStart(2, '0')
+                  : '—'}
               </span>
             </div>
           </div>
@@ -678,7 +761,9 @@ export function BedTileFull({ bedno, bedLock, occupant, now, onClick }: BedTileF
         </div>
         <div style={sectionStyle(C.cFhrBg, C.cFhr)}>
           <div style={{ ...sectionLabelStyle, color: C.cFhr, textAlign: 'right' }}>FHR · EFM</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}
+          >
             <span
               style={{
                 fontFamily: FONT_MONO,
@@ -715,9 +800,7 @@ export function BedTileFull({ bedno, bedLock, occupant, now, onClick }: BedTileF
           <div>
             <div style={{ ...dataKeyStyle, color: C.cInterv }}>Oxytocin</div>
             <div style={{ ...dataValueStyle, fontSize: 12 }}>
-              {occupant.last_oxytocin_uml !== null
-                ? `${occupant.last_oxytocin_uml} mU/min`
-                : '—'}
+              {occupant.last_oxytocin_uml !== null ? `${occupant.last_oxytocin_uml} mU/min` : '—'}
             </div>
           </div>
           <div>
@@ -747,15 +830,45 @@ export function BedTileFull({ bedno, bedLock, occupant, now, onClick }: BedTileF
         }}
       >
         <div>
-          <span style={{ color: footKeyColor, letterSpacing: '0.18em', textTransform: 'uppercase', marginRight: 4, fontWeight: 600 }}>Admit</span>
+          <span
+            style={{
+              color: footKeyColor,
+              letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              marginRight: 4,
+              fontWeight: 600,
+            }}
+          >
+            Admit
+          </span>
           {(occupant.regtime ?? '').slice(0, 5) || '—'}
         </div>
         <div>
-          <span style={{ color: footKeyColor, letterSpacing: '0.18em', textTransform: 'uppercase', marginRight: 4, fontWeight: 600 }}>Hrs</span>
+          <span
+            style={{
+              color: footKeyColor,
+              letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              marginRight: 4,
+              fontWeight: 600,
+            }}
+          >
+            Hrs
+          </span>
           {fmtHours(occupant.regdate, occupant.regtime, now)}
         </div>
         <div>
-          <span style={{ color: footKeyColor, letterSpacing: '0.18em', textTransform: 'uppercase', marginRight: 4, fontWeight: 600 }}>Last</span>
+          <span
+            style={{
+              color: footKeyColor,
+              letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              marginRight: 4,
+              fontWeight: 600,
+            }}
+          >
+            Last
+          </span>
           {fmtAssessTime(occupant.last_assess_date, occupant.last_assess_time)}
           {occupant.last_assess_staff && ` · ${occupant.last_assess_staff}`}
         </div>

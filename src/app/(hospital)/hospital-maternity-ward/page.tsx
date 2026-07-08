@@ -82,7 +82,7 @@ function AlertBanner({
 }
 
 export default function HospitalMaternityWardPage() {
-  const { isReady, error: sessionError, config, userInfo } = useBmsSession();
+  const { isReady, error: sessionError, config, userInfo, marketplaceToken } = useBmsSession();
   const { state: onboardingState } = useOnboardHosxpWebhook();
   // Provision the polling pipeline alongside the webhook. Without this,
   // a nurse who only ever lands on /hospital-maternity-ward never gets
@@ -571,6 +571,8 @@ export default function HospitalMaternityWardPage() {
           onBedMove={(p) => void handleBedMove(p)}
           onMoveRejected={handleMoveRejected}
           reasons={reasons}
+          config={config}
+          marketplaceToken={marketplaceToken}
         />
       </div>
 
