@@ -115,13 +115,28 @@ describe('DischargeTab CRUD', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'confirm_discharge' }));
   }
 
+  // dchdate/dchtime are BE text inputs (BeDateInput/BeTimeInput) that commit
+  // their parsed ISO/HH:mm value on blur, not on every keystroke. Drive them
+  // the way a nurse does: type the display-format text, then blur to commit.
+  function setDate(display: string) {
+    const el = screen.getByLabelText('dchdate');
+    fireEvent.change(el, { target: { value: display } });
+    fireEvent.blur(el);
+  }
+  function setTime(display: string) {
+    const el = screen.getByLabelText('dchtime');
+    fireEvent.change(el, { target: { value: display } });
+    fireEvent.blur(el);
+  }
+
   it('blocks save when date is empty (Thai validation message)', () => {
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
     flipConfirmToggleOn();
-    // The form now auto-fills today/now on mount as a UX accelerator —
-    // clear them to exercise the empty-input validation path.
-    fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '' } });
+    // The form now auto-fills today/now on mount as a UX accelerator — clear
+    // both (blank text + blur commits '' back to the draft) to exercise the
+    // empty-input validation path.
+    setDate('');
+    setTime('');
     fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
     expect(screen.getByText(/กรุณาระบุวันที่และเวลาจำหน่าย/)).toBeInTheDocument();
     expect(mockDischarge).not.toHaveBeenCalled();
@@ -133,8 +148,9 @@ describe('DischargeTab CRUD', () => {
     mockDischarge.mockResolvedValue(undefined);
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
     flipConfirmToggleOn();
-    fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
-    fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });
+    // BE date 19/4/2569 → ISO 2026-04-19; BeTimeInput normalizes to HH:mm.
+    setDate('19/4/2569');
+    setTime('14:30');
     fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
     expect(window.confirm).toHaveBeenCalled();
     await waitFor(() => expect(mockDischarge).toHaveBeenCalled());
@@ -142,18 +158,17 @@ describe('DischargeTab CRUD', () => {
     // Defaults match real HOSxP master codes (varchar 2). Maternity LR
     // canonical defaults: dchtype '01' (With Approval) + dchstts '04'
     // (Normal Delivery). confirm_discharge='Y' here because the test flipped
-    // the toggle on — matches HOSxP cxDBCheckBox1 semantics.
+    // the toggle on — matches HOSxP cxDBCheckBox1 semantics. dchtime is HH:mm
+    // (minute precision) — the redesign's shared time input drops seconds.
     expect(args).toMatchObject({
       an: 'AN1',
       dchdate: '2026-04-19',
-      dchtime: '14:30:00',
+      dchtime: '14:30',
       dchtype: '01',
       dchstts: '04',
       confirm_discharge: 'Y',
     });
-    await waitFor(() =>
-      expect(screen.getByText(/ดำเนินการจำหน่ายเรียบร้อย/)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/ดำเนินการจำหน่ายเรียบร้อย/)).toBeInTheDocument());
     window.confirm = origConfirm;
   });
 
@@ -179,9 +194,7 @@ describe('DischargeTab CRUD', () => {
     fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
     fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });
     fireEvent.click(screen.getByRole('button', { name: /ยืนยันการจำหน่าย/ }));
-    await waitFor(() =>
-      expect(screen.getByText(/จำหน่ายไม่สำเร็จ.*rest 500/)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/จำหน่ายไม่สำเร็จ.*rest 500/)).toBeInTheDocument());
     window.confirm = origConfirm;
   });
 });
