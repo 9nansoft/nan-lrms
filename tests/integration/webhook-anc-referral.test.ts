@@ -92,7 +92,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'ANC-001',
             name: 'นาง ทดสอบ ฝากครรภ์',
-            cid: '1234567890001',
+            cid: '2345678900017',
             birthday: '1996-01-15',
             pregNo: 1,
             lmp: '2025-08-01',
@@ -135,7 +135,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'ANC-UPD',
             name: 'นาง อัพเดท ความเสี่ยง',
-            cid: '1100700010001',
+            cid: '1007000100018',
             birthday: '1994-06-20',
             pregNo: 2,
             lmp: '2025-07-01',
@@ -162,7 +162,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'ANC-UPD',
             name: 'นาง อัพเดท ความเสี่ยง',
-            cid: '1100700010002',
+            cid: '1007000100026',
             birthday: '1994-06-20',
             pregNo: 2,
             lmp: '2025-07-01',
@@ -195,7 +195,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'ANC-DEL',
             name: 'นาง ลบ ข้อมูล',
-            cid: '1100700010003',
+            cid: '1007000100034',
             birthday: '1998-03-10',
             pregNo: 1,
             riskLevel: 'LOW',
@@ -229,7 +229,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'ANC-DEL',
             name: 'นาง ลบ ข้อมูล',
-            cid: '1100700010004',
+            cid: '1007000100042',
             birthday: '1998-03-10',
             pregNo: 1,
             action: 'delete',
@@ -248,10 +248,9 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(after).toHaveLength(0);
 
       // Related anc visits removed
-      const visits = await db.query(
-        'SELECT id FROM cached_anc_visits WHERE journey_id = ?',
-        [journeyId],
-      );
+      const visits = await db.query('SELECT id FROM cached_anc_visits WHERE journey_id = ?', [
+        journeyId,
+      ]);
       expect(visits).toHaveLength(0);
 
       // SSE broadcast with DELETED stage
@@ -269,7 +268,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'ANC-GHOST',
             name: 'ไม่มีในระบบ',
-            cid: '1100700010005',
+            cid: '1007000100051',
             birthday: '2000-01-01',
             pregNo: 1,
             action: 'delete',
@@ -290,7 +289,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'ANC-M01',
             name: 'นาง แรก คนแรก',
-            cid: '1100700010006',
+            cid: '1007000100069',
             birthday: '1995-05-01',
             pregNo: 1,
             riskLevel: 'LOW',
@@ -298,7 +297,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'ANC-M02',
             name: 'นาง สอง คนสอง',
-            cid: '1100700010007',
+            cid: '1007000100077',
             birthday: '1993-08-15',
             pregNo: 3,
             riskLevel: 'HIGH',
@@ -335,20 +334,24 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'LOC-001',
             name: 'นาง แผนที่ จีไอเอส',
-            cid: '1400100012345',
+            cid: '4001000123459',
             birthday: '1996-06-15',
             pregNo: 1,
             riskLevel: 'LOW',
-            changwatCode: '40',   // ขอนแก่น
-            amphurCode: '01',     // เมืองขอนแก่น
-            tambonCode: '01',     // ในเมือง
+            changwatCode: '40', // ขอนแก่น
+            amphurCode: '01', // เมืองขอนแก่น
+            tambonCode: '01', // ในเมือง
           },
         ],
       };
 
       await processAncWebhook(db, webhookHospitalId, payload, asSse(sseManager));
 
-      const journey = await db.query<{ changwat_code: string | null; amphur_code: string | null; tambon_code: string | null }>(
+      const journey = await db.query<{
+        changwat_code: string | null;
+        amphur_code: string | null;
+        tambon_code: string | null;
+      }>(
         'SELECT changwat_code, amphur_code, tambon_code FROM maternal_journeys WHERE hn = ? AND hospital_id = ?',
         ['LOC-001', webhookHospitalId],
       );
@@ -366,7 +369,7 @@ describe('ANC/Referral Webhook Integration', () => {
           {
             hn: 'LOC-002',
             name: 'นาง ไม่มี ที่อยู่',
-            cid: '1400100099999',
+            cid: '4001000999991',
             birthday: '1998-01-01',
             pregNo: 1,
           },
@@ -375,7 +378,11 @@ describe('ANC/Referral Webhook Integration', () => {
 
       await processAncWebhook(db, webhookHospitalId, payload, asSse(sseManager));
 
-      const journey = await db.query<{ changwat_code: string | null; amphur_code: string | null; tambon_code: string | null }>(
+      const journey = await db.query<{
+        changwat_code: string | null;
+        amphur_code: string | null;
+        tambon_code: string | null;
+      }>(
         'SELECT changwat_code, amphur_code, tambon_code FROM maternal_journeys WHERE hn = ? AND hospital_id = ?',
         ['LOC-002', webhookHospitalId],
       );
@@ -390,7 +397,7 @@ describe('ANC/Referral Webhook Integration', () => {
         hospitalCode: '99902',
         referralId: 'REF-LOC-001',
         hn: 'LOC-003',
-        cid: '1400100077777',
+        cid: '4001000777777',
         name: 'นาง ส่งต่อ มีที่อยู่',
         toHospitalCode: '99903',
         reason: 'ทดสอบ location',
@@ -401,7 +408,11 @@ describe('ANC/Referral Webhook Integration', () => {
 
       await processReferralCreate(db, webhookHospitalId, payload, asSse(sseManager));
 
-      const journey = await db.query<{ changwat_code: string | null; amphur_code: string | null; tambon_code: string | null }>(
+      const journey = await db.query<{
+        changwat_code: string | null;
+        amphur_code: string | null;
+        tambon_code: string | null;
+      }>(
         'SELECT changwat_code, amphur_code, tambon_code FROM maternal_journeys WHERE hn = ? AND hospital_id = ?',
         ['LOC-003', webhookHospitalId],
       );
@@ -415,55 +426,86 @@ describe('ANC/Referral Webhook Integration', () => {
   // ─── Overlapping Pregnancy Detection Tests ───
 
   describe('Scenario 9: Overlapping pregnancy detection', () => {
-    const sameCid = '1400100055555';
+    const sameCid = '4001000555553';
 
     it('same CID + same pregNo updates existing journey (no new creation)', async () => {
       const p1: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99902',
-        patients: [{
-          hn: 'OVR-001', name: 'นาง ซ้ำ ครรภ์เดิม', cid: sameCid,
-          birthday: '1995-01-01', pregNo: 1, lmp: '2025-08-01', riskLevel: 'LOW',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'OVR-001',
+            name: 'นาง ซ้ำ ครรภ์เดิม',
+            cid: sameCid,
+            birthday: '1995-01-01',
+            pregNo: 1,
+            lmp: '2025-08-01',
+            riskLevel: 'LOW',
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, p1, asSse(sseManager));
 
       const p2: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99902',
-        patients: [{
-          hn: 'OVR-001', name: 'นาง ซ้ำ ครรภ์เดิม', cid: sameCid,
-          birthday: '1995-01-01', pregNo: 1, lmp: '2025-08-01', riskLevel: 'HR1',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'OVR-001',
+            name: 'นาง ซ้ำ ครรภ์เดิม',
+            cid: sameCid,
+            birthday: '1995-01-01',
+            pregNo: 1,
+            lmp: '2025-08-01',
+            riskLevel: 'HR1',
+          },
+        ],
       };
       const result = await processAncWebhook(db, webhookHospitalId, p2, asSse(sseManager));
       expect(result.created).toBe(0);
       expect(result.updated).toBe(1);
 
       const { createHash: h } = await import('crypto');
-      const journeys = await db.query(
-        'SELECT id FROM maternal_journeys WHERE cid_hash = ?',
-        [h('sha256').update(sameCid).digest('hex')],
-      );
+      const journeys = await db.query('SELECT id FROM maternal_journeys WHERE cid_hash = ?', [
+        h('sha256').update(sameCid).digest('hex'),
+      ]);
       expect(journeys).toHaveLength(1);
     });
 
     it('same CID + higher pregNo creates new journey with overlap warning', async () => {
-      const cid2 = '1400100066666';
+      const cid2 = '4001000666665';
       const p1: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99902',
-        patients: [{
-          hn: 'OVR-002', name: 'นาง ครรภ์ที่สอง', cid: cid2,
-          birthday: '1993-06-15', pregNo: 1, lmp: '2024-01-01', riskLevel: 'LOW',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'OVR-002',
+            name: 'นาง ครรภ์ที่สอง',
+            cid: cid2,
+            birthday: '1993-06-15',
+            pregNo: 1,
+            lmp: '2024-01-01',
+            riskLevel: 'LOW',
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, p1, asSse(sseManager));
       sseManager.clearEvents();
 
       const p2: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99902',
-        patients: [{
-          hn: 'OVR-002', name: 'นาง ครรภ์ที่สอง', cid: cid2,
-          birthday: '1993-06-15', pregNo: 2, lmp: '2025-09-01', riskLevel: 'LOW',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'OVR-002',
+            name: 'นาง ครรภ์ที่สอง',
+            cid: cid2,
+            birthday: '1993-06-15',
+            pregNo: 2,
+            lmp: '2025-09-01',
+            riskLevel: 'LOW',
+          },
+        ],
       };
       const result = await processAncWebhook(db, webhookHospitalId, p2, asSse(sseManager));
       expect(result.created).toBe(1);
@@ -490,27 +532,45 @@ describe('ANC/Referral Webhook Integration', () => {
     });
 
     it('DELIVERED journey + new pregNo creates new journey WITHOUT overlap warning', async () => {
-      const cid3 = '1400100077770';
+      const cid3 = '4001000777700';
       const p1: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99902',
-        patients: [{
-          hn: 'OVR-003', name: 'นาง คลอดแล้ว', cid: cid3,
-          birthday: '1990-03-10', pregNo: 1, lmp: '2024-06-01', riskLevel: 'LOW',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'OVR-003',
+            name: 'นาง คลอดแล้ว',
+            cid: cid3,
+            birthday: '1990-03-10',
+            pregNo: 1,
+            lmp: '2024-06-01',
+            riskLevel: 'LOW',
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, p1, asSse(sseManager));
 
       const { createHash: h } = await import('crypto');
       const cidHash = h('sha256').update(cid3).digest('hex');
-      await db.execute("UPDATE maternal_journeys SET care_stage = 'DELIVERED' WHERE cid_hash = ?", [cidHash]);
+      await db.execute("UPDATE maternal_journeys SET care_stage = 'DELIVERED' WHERE cid_hash = ?", [
+        cidHash,
+      ]);
       sseManager.clearEvents();
 
       const p2: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99902',
-        patients: [{
-          hn: 'OVR-003', name: 'นาง คลอดแล้ว', cid: cid3,
-          birthday: '1990-03-10', pregNo: 2, lmp: '2025-10-01', riskLevel: 'LOW',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'OVR-003',
+            name: 'นาง คลอดแล้ว',
+            cid: cid3,
+            birthday: '1990-03-10',
+            pregNo: 2,
+            lmp: '2025-10-01',
+            riskLevel: 'LOW',
+          },
+        ],
       };
       const result = await processAncWebhook(db, webhookHospitalId, p2, asSse(sseManager));
       expect(result.created).toBe(1);
@@ -522,23 +582,39 @@ describe('ANC/Referral Webhook Integration', () => {
     });
 
     it('same CID from different hospital updates same journey (cross-hospital)', async () => {
-      const cid4 = '1400100088880';
+      const cid4 = '4001000888803';
       const p1: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99902',
-        patients: [{
-          hn: 'OVR-004A', name: 'นาง ข้ามรพ.', cid: cid4,
-          birthday: '1997-12-01', pregNo: 1, lmp: '2025-07-01', riskLevel: 'LOW',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'OVR-004A',
+            name: 'นาง ข้ามรพ.',
+            cid: cid4,
+            birthday: '1997-12-01',
+            pregNo: 1,
+            lmp: '2025-07-01',
+            riskLevel: 'LOW',
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, p1, asSse(sseManager));
 
       // Hospital B sends same CID, same pregNo → updates same journey
       const p2: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99903',
-        patients: [{
-          hn: 'OVR-004B', name: 'นาง ข้ามรพ.', cid: cid4,
-          birthday: '1997-12-01', pregNo: 1, lmp: '2025-07-01', riskLevel: 'HR2',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99903',
+        patients: [
+          {
+            hn: 'OVR-004B',
+            name: 'นาง ข้ามรพ.',
+            cid: cid4,
+            birthday: '1997-12-01',
+            pregNo: 1,
+            lmp: '2025-07-01',
+            riskLevel: 'HR2',
+          },
+        ],
       };
       const result = await processAncWebhook(db, destHospitalId, p2, asSse(sseManager));
       expect(result.updated).toBe(1);
@@ -561,20 +637,40 @@ describe('ANC/Referral Webhook Integration', () => {
       const payload: WebhookAncPayload = {
         type: 'anc_data',
         hospitalCode: '99902',
-        patients: [{
-          hn: 'VISIT-001',
-          name: 'นาง ตรวจ ครรภ์',
-          cid: '1100700090001',
-          birthday: '1995-03-10',
-          pregNo: 1,
-          lmp: '2025-09-01',
-          edc: '2026-06-08',
-          riskLevel: 'LOW',
-          visits: [
-            { date: '2025-12-01', visitNumber: 1, gaWeeks: 13, fundalHeightCm: 12, weightKg: 52, bpSystolic: 110, bpDiastolic: 70, fetalHr: 150 },
-            { date: '2026-02-01', visitNumber: 2, gaWeeks: 22, fundalHeightCm: 22, weightKg: 55, bpSystolic: 118, bpDiastolic: 75, fetalHr: 145 },
-          ],
-        }],
+        patients: [
+          {
+            hn: 'VISIT-001',
+            name: 'นาง ตรวจ ครรภ์',
+            cid: '1007000900014',
+            birthday: '1995-03-10',
+            pregNo: 1,
+            lmp: '2025-09-01',
+            edc: '2026-06-08',
+            riskLevel: 'LOW',
+            visits: [
+              {
+                date: '2025-12-01',
+                visitNumber: 1,
+                gaWeeks: 13,
+                fundalHeightCm: 12,
+                weightKg: 52,
+                bpSystolic: 110,
+                bpDiastolic: 70,
+                fetalHr: 150,
+              },
+              {
+                date: '2026-02-01',
+                visitNumber: 2,
+                gaWeeks: 22,
+                fundalHeightCm: 22,
+                weightKg: 55,
+                bpSystolic: 118,
+                bpDiastolic: 75,
+                fetalHr: 145,
+              },
+            ],
+          },
+        ],
       };
 
       await processAncWebhook(db, webhookHospitalId, payload, asSse(sseManager));
@@ -585,7 +681,11 @@ describe('ANC/Referral Webhook Integration', () => {
       );
       expect(journey).toHaveLength(1);
 
-      const visits = await db.query<{ visit_number: number; ga_weeks: number; fetal_hr: number | null }>(
+      const visits = await db.query<{
+        visit_number: number;
+        ga_weeks: number;
+        fetal_hr: number | null;
+      }>(
         'SELECT visit_number, ga_weeks, fetal_hr FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date',
         [journey[0].id],
       );
@@ -602,18 +702,20 @@ describe('ANC/Referral Webhook Integration', () => {
       const p1: WebhookAncPayload = {
         type: 'anc_data',
         hospitalCode: '99902',
-        patients: [{
-          hn: 'VISIT-002',
-          name: 'นาง ซ้ำ ส่ง',
-          cid: '1100700090002',
-          birthday: '1993-07-20',
-          pregNo: 1,
-          lmp: '2025-10-01',
-          visits: [
-            { date: '2026-01-10', visitNumber: 1, gaWeeks: 14 },
-            { date: '2026-03-10', visitNumber: 2, gaWeeks: 23 },
-          ],
-        }],
+        patients: [
+          {
+            hn: 'VISIT-002',
+            name: 'นาง ซ้ำ ส่ง',
+            cid: '1007000900022',
+            birthday: '1993-07-20',
+            pregNo: 1,
+            lmp: '2025-10-01',
+            visits: [
+              { date: '2026-01-10', visitNumber: 1, gaWeeks: 14 },
+              { date: '2026-03-10', visitNumber: 2, gaWeeks: 23 },
+            ],
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, p1, asSse(sseManager));
 
@@ -621,19 +723,21 @@ describe('ANC/Referral Webhook Integration', () => {
       const p2: WebhookAncPayload = {
         type: 'anc_data',
         hospitalCode: '99902',
-        patients: [{
-          hn: 'VISIT-002',
-          name: 'นาง ซ้ำ ส่ง',
-          cid: '1100700090002',
-          birthday: '1993-07-20',
-          pregNo: 1,
-          lmp: '2025-10-01',
-          visits: [
-            { date: '2026-01-10', visitNumber: 1, gaWeeks: 14 },
-            { date: '2026-03-10', visitNumber: 2, gaWeeks: 23 },
-            { date: '2026-04-05', visitNumber: 3, gaWeeks: 27 },
-          ],
-        }],
+        patients: [
+          {
+            hn: 'VISIT-002',
+            name: 'นาง ซ้ำ ส่ง',
+            cid: '1007000900022',
+            birthday: '1993-07-20',
+            pregNo: 1,
+            lmp: '2025-10-01',
+            visits: [
+              { date: '2026-01-10', visitNumber: 1, gaWeeks: 14 },
+              { date: '2026-03-10', visitNumber: 2, gaWeeks: 23 },
+              { date: '2026-04-05', visitNumber: 3, gaWeeks: 27 },
+            ],
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, p2, asSse(sseManager));
 
@@ -653,16 +757,16 @@ describe('ANC/Referral Webhook Integration', () => {
       const payload: WebhookAncPayload = {
         type: 'anc_data',
         hospitalCode: '99902',
-        patients: [{
-          hn: 'VISIT-003',
-          name: 'นาง ข้อมูลไม่ครบ ค่าว่าง',
-          cid: '1100700090003',
-          birthday: '2000-01-01',
-          pregNo: 1,
-          visits: [
-            { date: '2026-03-25', visitNumber: 1, gaWeeks: 3 },
-          ],
-        }],
+        patients: [
+          {
+            hn: 'VISIT-003',
+            name: 'นาง ข้อมูลไม่ครบ ค่าว่าง',
+            cid: '1007000900031',
+            birthday: '2000-01-01',
+            pregNo: 1,
+            visits: [{ date: '2026-03-25', visitNumber: 1, gaWeeks: 3 }],
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, payload, asSse(sseManager));
 
@@ -670,10 +774,13 @@ describe('ANC/Referral Webhook Integration', () => {
         'SELECT id FROM maternal_journeys WHERE hn = ? AND hospital_id = ?',
         ['VISIT-003', webhookHospitalId],
       );
-      const visits = await db.query<{ fetal_hr: number | null; weight_kg: number | null; bp_systolic: number | null }>(
-        'SELECT fetal_hr, weight_kg, bp_systolic FROM cached_anc_visits WHERE journey_id = ?',
-        [journey[0].id],
-      );
+      const visits = await db.query<{
+        fetal_hr: number | null;
+        weight_kg: number | null;
+        bp_systolic: number | null;
+      }>('SELECT fetal_hr, weight_kg, bp_systolic FROM cached_anc_visits WHERE journey_id = ?', [
+        journey[0].id,
+      ]);
       expect(visits).toHaveLength(1);
       expect(visits[0].fetal_hr).toBeNull();
       expect(visits[0].weight_kg).toBeNull();
@@ -685,16 +792,16 @@ describe('ANC/Referral Webhook Integration', () => {
       const p1: WebhookAncPayload = {
         type: 'anc_data',
         hospitalCode: '99902',
-        patients: [{
-          hn: 'VISIT-004',
-          name: 'นาง คงข้อมูล เยี่ยม',
-          cid: '1100700090004',
-          birthday: '1998-11-05',
-          pregNo: 1,
-          visits: [
-            { date: '2026-01-15', visitNumber: 1, gaWeeks: 10 },
-          ],
-        }],
+        patients: [
+          {
+            hn: 'VISIT-004',
+            name: 'นาง คงข้อมูล เยี่ยม',
+            cid: '1007000900049',
+            birthday: '1998-11-05',
+            pregNo: 1,
+            visits: [{ date: '2026-01-15', visitNumber: 1, gaWeeks: 10 }],
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, p1, asSse(sseManager));
 
@@ -702,14 +809,16 @@ describe('ANC/Referral Webhook Integration', () => {
       const p2: WebhookAncPayload = {
         type: 'anc_data',
         hospitalCode: '99902',
-        patients: [{
-          hn: 'VISIT-004',
-          name: 'นาง คงข้อมูล เยี่ยม',
-          cid: '1100700090004',
-          birthday: '1998-11-05',
-          pregNo: 1,
-          riskLevel: 'HR1',
-        }],
+        patients: [
+          {
+            hn: 'VISIT-004',
+            name: 'นาง คงข้อมูล เยี่ยม',
+            cid: '1007000900049',
+            birthday: '1998-11-05',
+            pregNo: 1,
+            riskLevel: 'HR1',
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, p2, asSse(sseManager));
 
@@ -735,7 +844,28 @@ describe('ANC/Referral Webhook Integration', () => {
       await db.execute(
         `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, person_anc_id, name, cid, cid_hash, age, gravida, para, lmp, edc, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-        [journeyId, webhookHospitalId, webhookHospitalId, 'REF-HN-001', null, 'Encrypted', 'enc_cid_001', 'a000000000000000000000000000000000000000000000000000000000000001', 28, 1, 0, null, null, 'PREGNANCY', 'LOW', now, now, now, now, now],
+        [
+          journeyId,
+          webhookHospitalId,
+          webhookHospitalId,
+          'REF-HN-001',
+          null,
+          'Encrypted',
+          'enc_cid_001',
+          'a000000000000000000000000000000000000000000000000000000000000001',
+          28,
+          1,
+          0,
+          null,
+          null,
+          'PREGNANCY',
+          'LOW',
+          now,
+          now,
+          now,
+          now,
+          now,
+        ],
       );
 
       const payload: WebhookReferralCreatePayload = {
@@ -743,7 +873,7 @@ describe('ANC/Referral Webhook Integration', () => {
         hospitalCode: '99902',
         referralId: 'REF-2026-0001',
         hn: 'REF-HN-001',
-        cid: '1100500012345',
+        cid: '1005000123458',
         name: 'นาง ทดสอบ ส่งต่อ',
         toHospitalCode: '99903',
         reason: 'Preeclampsia ครรภ์ 34 สัปดาห์',
@@ -756,7 +886,15 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(result.status).toBe('INITIATED');
 
       // Verify referral record with correct from/to hospitals
-      const refs = await db.query<{ refer_number: string; from_hospital_id: string; to_hospital_id: string; status: string; reason: string; urgency_level: string; journey_id: string }>(
+      const refs = await db.query<{
+        refer_number: string;
+        from_hospital_id: string;
+        to_hospital_id: string;
+        status: string;
+        reason: string;
+        urgency_level: string;
+        journey_id: string;
+      }>(
         'SELECT refer_number, from_hospital_id, to_hospital_id, status, reason, urgency_level, journey_id FROM cached_referrals WHERE refer_number = ?',
         ['REF-2026-0001'],
       );
@@ -790,7 +928,7 @@ describe('ANC/Referral Webhook Integration', () => {
         hospitalCode: '99902',
         referralId: 'REF-WALKIN-001',
         hn: 'WALKIN-HN-999',
-        cid: '1100500099999',
+        cid: '1005000999990',
         name: 'นาง ใหม่ มาเอง',
         toHospitalCode: '99903',
         reason: 'ครรภ์ 42 สัปดาห์ ต้องเร่งคลอด',
@@ -823,7 +961,7 @@ describe('ANC/Referral Webhook Integration', () => {
         hospitalCode: '99902',
         referralId: 'REF-UPS-001',
         hn: 'UPS-HN-001',
-        cid: '1100500088888',
+        cid: '1005000888888',
         name: 'นาง ซ้ำ ส่งต่อ',
         toHospitalCode: '99903',
         reason: 'เหตุผลแรก',
@@ -850,20 +988,33 @@ describe('ANC/Referral Webhook Integration', () => {
     it('referral for patient with active ANC record → no warning', async () => {
       // Register ANC first
       const ancPayload: WebhookAncPayload = {
-        type: 'anc_data', hospitalCode: '99902',
-        patients: [{
-          hn: 'MON-001', name: 'นาง มี ANC', cid: '1400200011111',
-          birthday: '1996-01-01', pregNo: 1, lmp: '2025-08-01', riskLevel: 'HR1',
-        }],
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'MON-001',
+            name: 'นาง มี ANC',
+            cid: '4002000111117',
+            birthday: '1996-01-01',
+            pregNo: 1,
+            lmp: '2025-08-01',
+            riskLevel: 'HR1',
+          },
+        ],
       };
       await processAncWebhook(db, webhookHospitalId, ancPayload, asSse(sseManager));
       sseManager.clearEvents();
 
       // Now send referral → should link to existing journey, no warning
       const refPayload: WebhookReferralCreatePayload = {
-        type: 'referral', hospitalCode: '99902', referralId: 'REF-MON-001',
-        hn: 'MON-001', cid: '1400200011111', name: 'นาง มี ANC',
-        toHospitalCode: '99903', reason: 'ส่งต่อ HR1',
+        type: 'referral',
+        hospitalCode: '99902',
+        referralId: 'REF-MON-001',
+        hn: 'MON-001',
+        cid: '4002000111117',
+        name: 'นาง มี ANC',
+        toHospitalCode: '99903',
+        reason: 'ส่งต่อ HR1',
       };
       await processReferralCreate(db, webhookHospitalId, refPayload, asSse(sseManager));
 
@@ -877,9 +1028,14 @@ describe('ANC/Referral Webhook Integration', () => {
       sseManager.clearEvents();
 
       const refPayload: WebhookReferralCreatePayload = {
-        type: 'referral', hospitalCode: '99902', referralId: 'REF-MON-002',
-        hn: 'MON-GHOST', cid: '1400200099999', name: 'นาง ไม่มี ข้อมูล',
-        toHospitalCode: '99903', reason: 'ส่งต่อ ไม่มีข้อมูลในระบบ',
+        type: 'referral',
+        hospitalCode: '99902',
+        referralId: 'REF-MON-002',
+        hn: 'MON-GHOST',
+        cid: '4002000999991',
+        name: 'นาง ไม่มี ข้อมูล',
+        toHospitalCode: '99903',
+        reason: 'ส่งต่อ ไม่มีข้อมูลในระบบ',
       };
       await processReferralCreate(db, webhookHospitalId, refPayload, asSse(sseManager));
 
@@ -895,7 +1051,7 @@ describe('ANC/Referral Webhook Integration', () => {
 
       // Journey still created (for tracking), but needs manual review
       const { createHash: h } = await import('crypto');
-      const cidHash = h('sha256').update('1400200099999').digest('hex');
+      const cidHash = h('sha256').update('4002000999991').digest('hex');
       const journeys = await db.query<{ care_stage: string }>(
         'SELECT care_stage FROM maternal_journeys WHERE cid_hash = ?',
         [cidHash],
@@ -905,7 +1061,7 @@ describe('ANC/Referral Webhook Integration', () => {
 
     it('referral for patient with active labor record → no warning', async () => {
       // Create labor patient directly (not via ANC)
-      const laborCid = '1400200022222';
+      const laborCid = '4002000222229';
       const { createHash: h } = await import('crypto');
       const laborCidHash = h('sha256').update(laborCid).digest('hex');
 
@@ -917,7 +1073,18 @@ describe('ANC/Referral Webhook Integration', () => {
       await db.execute(
         `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, registered_at, stage_changed_at, synced_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, 'Test', 'enc', ?, 28, 1, 0, 'LABOR', ?, ?, ?, ?, ?)`,
-        [journeyId, webhookHospitalId, webhookHospitalId, 'MON-003', laborCidHash, now, now, now, now, now],
+        [
+          journeyId,
+          webhookHospitalId,
+          webhookHospitalId,
+          'MON-003',
+          laborCidHash,
+          now,
+          now,
+          now,
+          now,
+          now,
+        ],
       );
       await db.execute(
         `INSERT INTO cached_patients (id, hospital_id, hn, an, name, cid_hash, age, admit_date, labor_status, journey_id, synced_at, created_at, updated_at)
@@ -928,9 +1095,14 @@ describe('ANC/Referral Webhook Integration', () => {
 
       // Referral for patient with active labor → should find journey, no warning
       const refPayload: WebhookReferralCreatePayload = {
-        type: 'referral', hospitalCode: '99902', referralId: 'REF-MON-003',
-        hn: 'MON-003', cid: laborCid, name: 'นาง มี Labor',
-        toHospitalCode: '99903', reason: 'ส่งต่อ คลอดฉุกเฉิน',
+        type: 'referral',
+        hospitalCode: '99902',
+        referralId: 'REF-MON-003',
+        hn: 'MON-003',
+        cid: laborCid,
+        name: 'นาง มี Labor',
+        toHospitalCode: '99903',
+        reason: 'ส่งต่อ คลอดฉุกเฉิน',
         urgencyLevel: 'EMERGENCY',
       };
       await processReferralCreate(db, webhookHospitalId, refPayload, asSse(sseManager));
@@ -952,12 +1124,44 @@ describe('ANC/Referral Webhook Integration', () => {
       await db.execute(
         `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, person_anc_id, name, cid, cid_hash, age, gravida, para, lmp, edc, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-        [journeyId, webhookHospitalId, webhookHospitalId, hn, null, 'Encrypted', 'enc_cid_002', 'a000000000000000000000000000000000000000000000000000000000000002', 28, 1, 0, null, null, 'PREGNANCY', 'LOW', now, now, now, now, now],
+        [
+          journeyId,
+          webhookHospitalId,
+          webhookHospitalId,
+          hn,
+          null,
+          'Encrypted',
+          'enc_cid_002',
+          'a000000000000000000000000000000000000000000000000000000000000002',
+          28,
+          1,
+          0,
+          null,
+          null,
+          'PREGNANCY',
+          'LOW',
+          now,
+          now,
+          now,
+          now,
+          now,
+        ],
       );
       await db.execute(
         `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id, status, reason, initiated_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), journeyId, referNumber, webhookHospitalId, destHospitalId, status, 'ทดสอบส่งต่อ', now, now, now],
+        [
+          uuidv4(),
+          journeyId,
+          referNumber,
+          webhookHospitalId,
+          destHospitalId,
+          status,
+          'ทดสอบส่งต่อ',
+          now,
+          now,
+          now,
+        ],
       );
       return journeyId;
     }
@@ -968,9 +1172,9 @@ describe('ANC/Referral Webhook Integration', () => {
       // Receiving hospital (99903) sends ACCEPTED
       const payload: WebhookReferralUpdatePayload = {
         type: 'referral_update',
-        hospitalCode: '99903',           // receiver
+        hospitalCode: '99903', // receiver
         referralId: 'REF-001',
-        fromHospitalCode: '99902',       // sender (compound key)
+        fromHospitalCode: '99902', // sender (compound key)
         status: 'ACCEPTED',
         reason: 'เตียง L&D ว่าง รับได้',
       };
@@ -1010,7 +1214,11 @@ describe('ANC/Referral Webhook Integration', () => {
       const result = await processReferralUpdate(db, destHospitalId, payload, asSse(sseManager));
       expect(result.status).toBe('IN_TRANSIT');
 
-      const refs = await db.query<{ status: string; departed_at: string | null; transport_mode: string | null }>(
+      const refs = await db.query<{
+        status: string;
+        departed_at: string | null;
+        transport_mode: string | null;
+      }>(
         'SELECT status, departed_at, transport_mode FROM cached_referrals WHERE refer_number = ?',
         ['REF-002'],
       );
@@ -1057,7 +1265,11 @@ describe('ANC/Referral Webhook Integration', () => {
       const result = await processReferralUpdate(db, destHospitalId, payload, asSse(sseManager));
       expect(result.status).toBe('REJECTED');
 
-      const refs = await db.query<{ status: string; rejection_reason: string | null; rejected_at: string | null }>(
+      const refs = await db.query<{
+        status: string;
+        rejection_reason: string | null;
+        rejected_at: string | null;
+      }>(
         'SELECT status, rejection_reason, rejected_at FROM cached_referrals WHERE refer_number = ?',
         ['REF-004'],
       );
@@ -1088,15 +1300,49 @@ describe('ANC/Referral Webhook Integration', () => {
       await db.execute(
         `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, person_anc_id, name, cid, cid_hash, age, gravida, para, lmp, edc, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-        [journeyId, webhookHospitalId, webhookHospitalId, 'REF-HN-DEL', null, 'Encrypted', 'enc_cid_003', 'a000000000000000000000000000000000000000000000000000000000000003', 25, 1, 0, null, null, 'PREGNANCY', 'LOW', now, now, now, now, now],
+        [
+          journeyId,
+          webhookHospitalId,
+          webhookHospitalId,
+          'REF-HN-DEL',
+          null,
+          'Encrypted',
+          'enc_cid_003',
+          'a000000000000000000000000000000000000000000000000000000000000003',
+          25,
+          1,
+          0,
+          null,
+          null,
+          'PREGNANCY',
+          'LOW',
+          now,
+          now,
+          now,
+          now,
+          now,
+        ],
       );
       await db.execute(
         `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id, status, reason, initiated_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), journeyId, 'REF-DEL-001', webhookHospitalId, destHospitalId, 'INITIATED', 'บันทึกผิด', now, now, now],
+        [
+          uuidv4(),
+          journeyId,
+          'REF-DEL-001',
+          webhookHospitalId,
+          destHospitalId,
+          'INITIATED',
+          'บันทึกผิด',
+          now,
+          now,
+          now,
+        ],
       );
 
-      const before = await db.query('SELECT id FROM cached_referrals WHERE refer_number = ?', ['REF-DEL-001']);
+      const before = await db.query('SELECT id FROM cached_referrals WHERE refer_number = ?', [
+        'REF-DEL-001',
+      ]);
       expect(before).toHaveLength(1);
 
       const payload: WebhookReferralUpdatePayload = {
@@ -1112,7 +1358,9 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(result.referralId).toBe('REF-DEL-001');
       expect(result.status).toBe('DELETED');
 
-      const after = await db.query('SELECT id FROM cached_referrals WHERE refer_number = ?', ['REF-DEL-001']);
+      const after = await db.query('SELECT id FROM cached_referrals WHERE refer_number = ?', [
+        'REF-DEL-001',
+      ]);
       expect(after).toHaveLength(0);
 
       const sse = sseManager.getEventsByType('referral_update');
@@ -1128,12 +1376,44 @@ describe('ANC/Referral Webhook Integration', () => {
       await db.execute(
         `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, person_anc_id, name, cid, cid_hash, age, gravida, para, lmp, edc, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-        [journeyId, webhookHospitalId, webhookHospitalId, 'REF-HN-DEL2', null, 'Encrypted', 'enc_cid_004', 'a000000000000000000000000000000000000000000000000000000000000004', 25, 1, 0, null, null, 'PREGNANCY', 'LOW', now, now, now, now, now],
+        [
+          journeyId,
+          webhookHospitalId,
+          webhookHospitalId,
+          'REF-HN-DEL2',
+          null,
+          'Encrypted',
+          'enc_cid_004',
+          'a000000000000000000000000000000000000000000000000000000000000004',
+          25,
+          1,
+          0,
+          null,
+          null,
+          'PREGNANCY',
+          'LOW',
+          now,
+          now,
+          now,
+          now,
+          now,
+        ],
       );
       await db.execute(
         `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id, status, reason, initiated_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), journeyId, 'REF-DEL-002', webhookHospitalId, destHospitalId, 'INITIATED', 'ส่งผิด', now, now, now],
+        [
+          uuidv4(),
+          journeyId,
+          'REF-DEL-002',
+          webhookHospitalId,
+          destHospitalId,
+          'INITIATED',
+          'ส่งผิด',
+          now,
+          now,
+          now,
+        ],
       );
 
       const payload: WebhookReferralCreatePayload = {
@@ -1141,7 +1421,7 @@ describe('ANC/Referral Webhook Integration', () => {
         hospitalCode: '99902',
         referralId: 'REF-DEL-002',
         hn: 'REF-HN-DEL2',
-        cid: '1100500077777',
+        cid: '1005000777776',
         name: 'นาง ลบ จากต้นทาง',
         toHospitalCode: '99903',
         reason: 'ลบ',
@@ -1151,7 +1431,9 @@ describe('ANC/Referral Webhook Integration', () => {
       const result = await processReferralCreate(db, webhookHospitalId, payload, asSse(sseManager));
       expect(result.status).toBe('DELETED');
 
-      const after = await db.query('SELECT id FROM cached_referrals WHERE refer_number = ?', ['REF-DEL-002']);
+      const after = await db.query('SELECT id FROM cached_referrals WHERE refer_number = ?', [
+        'REF-DEL-002',
+      ]);
       expect(after).toHaveLength(0);
     });
   });
@@ -1168,7 +1450,7 @@ describe('ANC/Referral Webhook Integration', () => {
             hn: 'LBR-DEL',
             an: 'AN-LBR-DEL',
             name: 'นาง คนงาน ลบ',
-            cid: '1100700010012',
+            cid: '1007000100123',
             age: 27,
             gravida: 2,
             ga_weeks: 39,
@@ -1193,10 +1475,7 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(patients).toHaveLength(1);
       const patientId = patients[0].id;
 
-      const cpd = await db.query(
-        'SELECT id FROM cpd_scores WHERE patient_id = ?',
-        [patientId],
-      );
+      const cpd = await db.query('SELECT id FROM cpd_scores WHERE patient_id = ?', [patientId]);
       expect(cpd.length).toBeGreaterThanOrEqual(1);
 
       sseManager.clearEvents();
@@ -1209,7 +1488,7 @@ describe('ANC/Referral Webhook Integration', () => {
             hn: 'LBR-DEL',
             an: 'AN-LBR-DEL',
             name: 'นาง คนงาน ลบ',
-            cid: '1100700010013',
+            cid: '1007000100131',
             age: 27,
             admit_date: '2026-03-20T08:00:00+07:00',
             action: 'delete',
@@ -1217,7 +1496,12 @@ describe('ANC/Referral Webhook Integration', () => {
         ],
       };
 
-      const result = await processWebhookPayload(db, webhookHospitalId, deletePayload, asSse(sseManager));
+      const result = await processWebhookPayload(
+        db,
+        webhookHospitalId,
+        deletePayload,
+        asSse(sseManager),
+      );
 
       expect(result.deleted).toBe(1);
       expect(result.patientsProcessed).toBe(0); // delete action is excluded from upsert count
@@ -1230,17 +1514,15 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(afterPatients).toHaveLength(0);
 
       // CPD scores gone
-      const afterCpd = await db.query(
-        'SELECT id FROM cpd_scores WHERE patient_id = ?',
-        [patientId],
-      );
+      const afterCpd = await db.query('SELECT id FROM cpd_scores WHERE patient_id = ?', [
+        patientId,
+      ]);
       expect(afterCpd).toHaveLength(0);
 
       // Vital signs gone (table exists but should have no rows for this patient)
-      const afterVitals = await db.query(
-        'SELECT id FROM cached_vital_signs WHERE patient_id = ?',
-        [patientId],
-      );
+      const afterVitals = await db.query('SELECT id FROM cached_vital_signs WHERE patient_id = ?', [
+        patientId,
+      ]);
       expect(afterVitals).toHaveLength(0);
     });
 
@@ -1252,7 +1534,7 @@ describe('ANC/Referral Webhook Integration', () => {
             hn: 'LBR-GHOST',
             an: 'AN-GHOST-999',
             name: 'ไม่มี',
-            cid: '1100700010014',
+            cid: '1007000100140',
             age: 25,
             admit_date: '2026-03-20T08:00:00+07:00',
             action: 'delete',
@@ -1260,7 +1542,12 @@ describe('ANC/Referral Webhook Integration', () => {
         ],
       };
 
-      const result = await processWebhookPayload(db, webhookHospitalId, deletePayload, asSse(sseManager));
+      const result = await processWebhookPayload(
+        db,
+        webhookHospitalId,
+        deletePayload,
+        asSse(sseManager),
+      );
       // Still increments deleted counter even if row didn't exist — behavior matches current implementation
       expect(result.deleted).toBeGreaterThanOrEqual(0);
       expect(result.patientsProcessed).toBe(0);

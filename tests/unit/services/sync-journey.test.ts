@@ -4,11 +4,7 @@ import { SqliteAdapter } from '@/db/sqlite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
-import {
-  syncAncData,
-  linkJourneyToLabor,
-  syncNewbornData,
-} from '@/services/sync';
+import { syncAncData, linkJourneyToLabor, syncNewbornData } from '@/services/sync';
 import type {
   HosxpPersonAncRow,
   HosxpAncServiceRow,
@@ -53,7 +49,7 @@ describe('Sync Journey Extension', () => {
           pname: 'นาง',
           fname: 'สมหญิง',
           lname: 'ทดสอบ',
-          cid: '1234567890123',
+          cid: '1234567890121',
           birthday: '1995-06-15',
           preg_no: 2,
           lmp: '2025-06-01',
@@ -105,13 +101,25 @@ describe('Sync Journey Extension', () => {
       const ancClassifying: HosxpAncClassifyingRow[] = [];
 
       const count = await syncAncData(
-        db, hospitalId, ancPatients, ancServices, ancRisks, ancClassifying, ENCRYPTION_KEY,
+        db,
+        hospitalId,
+        ancPatients,
+        ancServices,
+        ancRisks,
+        ancClassifying,
+        ENCRYPTION_KEY,
       );
 
       expect(count).toBe(1);
 
       // Verify journey was created
-      const journeys = await db.query<{ id: string; hn: string; care_stage: string; anc_visit_count: number; gravida: number }>(
+      const journeys = await db.query<{
+        id: string;
+        hn: string;
+        care_stage: string;
+        anc_visit_count: number;
+        gravida: number;
+      }>(
         'SELECT id, hn, care_stage, anc_visit_count, gravida FROM maternal_journeys WHERE hospital_id = ?',
         [hospitalId],
       );
@@ -148,7 +156,7 @@ describe('Sync Journey Extension', () => {
           pname: 'นาง',
           fname: 'ทดสอบ',
           lname: 'ซ้ำ',
-          cid: '9876543210123',
+          cid: '9876543210121',
           birthday: '1990-01-01',
           preg_no: 1,
           lmp: '2025-05-01',
@@ -205,7 +213,13 @@ describe('Sync Journey Extension', () => {
       ];
 
       const count = await syncAncData(
-        db, hospitalId, ancPatients, updatedServices, [], [], ENCRYPTION_KEY,
+        db,
+        hospitalId,
+        ancPatients,
+        updatedServices,
+        [],
+        [],
+        ENCRYPTION_KEY,
       );
       expect(count).toBe(1);
 
@@ -257,11 +271,27 @@ describe('Sync Journey Extension', () => {
       await db.execute(
         `INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
-        [cachedPatientId, hospitalId, 'HN-LINK-001', 'AN-LINK-001', 'test', 28, '2026-03-08', now, now, now],
+        [
+          cachedPatientId,
+          hospitalId,
+          'HN-LINK-001',
+          'AN-LINK-001',
+          'test',
+          28,
+          '2026-03-08',
+          now,
+          now,
+          now,
+        ],
       );
 
       // Link the labor admission to the pregnancy journey
-      const linkedJourneyId = await linkJourneyToLabor(db, hospitalId, 'HN-LINK-001', cachedPatientId);
+      const linkedJourneyId = await linkJourneyToLabor(
+        db,
+        hospitalId,
+        'HN-LINK-001',
+        cachedPatientId,
+      );
 
       expect(linkedJourneyId).toBe(journey.id);
 
@@ -289,7 +319,18 @@ describe('Sync Journey Extension', () => {
       await db.execute(
         `INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
-        [cachedPatientId, hospitalId, 'HN-WALKIN-001', 'AN-WALKIN-001', 'test', 22, '2026-03-08', now, now, now],
+        [
+          cachedPatientId,
+          hospitalId,
+          'HN-WALKIN-001',
+          'AN-WALKIN-001',
+          'test',
+          22,
+          '2026-03-08',
+          now,
+          now,
+          now,
+        ],
       );
 
       // Link should auto-create a journey
@@ -337,10 +378,9 @@ describe('Sync Journey Extension', () => {
       });
 
       // Transition to LABOR first (simulating normal flow)
-      await db.execute(
-        `UPDATE maternal_journeys SET care_stage = 'LABOR' WHERE id = ?`,
-        [journey.id],
-      );
+      await db.execute(`UPDATE maternal_journeys SET care_stage = 'LABOR' WHERE id = ?`, [
+        journey.id,
+      ]);
 
       const infantRows: HosxpLabourInfantRow[] = [
         {
@@ -424,10 +464,9 @@ describe('Sync Journey Extension', () => {
         ancRiskLevel: AncRiskLevel.LOW,
       });
 
-      await db.execute(
-        `UPDATE maternal_journeys SET care_stage = 'LABOR' WHERE id = ?`,
-        [journey.id],
-      );
+      await db.execute(`UPDATE maternal_journeys SET care_stage = 'LABOR' WHERE id = ?`, [
+        journey.id,
+      ]);
 
       const count = await syncNewbornData(db, journey.id, []);
       expect(count).toBe(0);

@@ -207,7 +207,7 @@ describe('Webhook Service', () => {
         ],
       });
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('cid must be exactly 13 digits');
+      expect(result.error).toContain('CID must be exactly 13 digits');
     });
 
     it('rejects CID with more than 13 digits', () => {
@@ -224,7 +224,7 @@ describe('Webhook Service', () => {
         ],
       });
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('cid must be exactly 13 digits');
+      expect(result.error).toContain('CID must be exactly 13 digits');
     });
 
     it('rejects CID containing non-digit characters', () => {
@@ -241,7 +241,7 @@ describe('Webhook Service', () => {
         ],
       });
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('cid must be exactly 13 digits');
+      expect(result.error).toContain('CID must contain only digits');
     });
 
     it('rejects invalid ISO 8601 admit_date', () => {
@@ -286,7 +286,7 @@ describe('Webhook Service', () => {
       expect(result.error).toContain('hn is required');
       expect(result.error).toContain('an is required');
       expect(result.error).toContain('name is required');
-      expect(result.error).toContain('cid is required');
+      expect(result.error).toContain('CID is required');
       expect(result.error).toContain('age is required');
       expect(result.error).toContain('admit_date is required');
     });

@@ -61,10 +61,7 @@ describe('Webhook Route — security boundaries', () => {
   });
 
   // Helper: build a NextRequest the way the route expects
-  function buildRequest(
-    body: unknown,
-    opts: { auth?: string } = {},
-  ): NextRequest {
+  function buildRequest(body: unknown, opts: { auth?: string } = {}): NextRequest {
     return new NextRequest('http://localhost/api/webhooks/patient-data', {
       method: 'POST',
       headers: {
@@ -81,10 +78,16 @@ describe('Webhook Route — security boundaries', () => {
       const req = buildRequest(
         {
           hospitalCode: HOSPITAL_B_HCODE, // sender claims to be hospital B
-          patients: [{
-            hn: 'HN1', an: 'AN1', name: 'Test', cid: '1100500090099',
-            age: 28, admit_date: '2026-03-08T10:00:00+07:00',
-          }],
+          patients: [
+            {
+              hn: 'HN1',
+              an: 'AN1',
+              name: 'Test',
+              cid: '1100500090099',
+              age: 28,
+              admit_date: '2026-03-08T10:00:00+07:00',
+            },
+          ],
         },
         { auth: `Bearer ${keyForHospitalA}` }, // ...but uses hospital A's key
       );
@@ -103,10 +106,16 @@ describe('Webhook Route — security boundaries', () => {
       const req = buildRequest(
         {
           hospitalCode: HOSPITAL_A_HCODE, // matches the key
-          patients: [{
-            hn: 'HN1', an: 'AN1', name: 'Test', cid: '1100500090099',
-            age: 28, admit_date: '2026-03-08T10:00:00+07:00',
-          }],
+          patients: [
+            {
+              hn: 'HN1',
+              an: 'AN1',
+              name: 'Test',
+              cid: '1100500090099',
+              age: 28,
+              admit_date: '2026-03-08T10:00:00+07:00',
+            },
+          ],
         },
         { auth: `Bearer ${keyForHospitalA}` },
       );
@@ -169,10 +178,16 @@ describe('Webhook Route — security boundaries', () => {
       const req = buildRequest(
         {
           hospitalCode: HOSPITAL_A_HCODE,
-          patients: [{
-            hn: 'HN1', an: 'AN1', name: 'Test', cid: '12345', // too short
-            age: 28, admit_date: '2026-03-08T10:00:00+07:00',
-          }],
+          patients: [
+            {
+              hn: 'HN1',
+              an: 'AN1',
+              name: 'Test',
+              cid: '12345', // too short
+              age: 28,
+              admit_date: '2026-03-08T10:00:00+07:00',
+            },
+          ],
         },
         { auth: `Bearer ${keyForHospitalA}` },
       );
@@ -182,7 +197,7 @@ describe('Webhook Route — security boundaries', () => {
 
       expect(res.status).toBe(400);
       expect(body.code).toBe('VALIDATION_FAILED');
-      expect(body.details).toContain('cid must be exactly 13 digits');
+      expect(body.details).toContain('CID must be exactly 13 digits');
     });
   });
 });
