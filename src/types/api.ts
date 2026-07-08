@@ -632,3 +632,19 @@ export type ReferralDetail = ProvincialReferralListItem & {
 export interface ReferralDetailResponse {
   referral: ReferralDetail;
 }
+
+/** Aggregate view for the referral board's insights panel. */
+export interface ReferralInsightsResponse {
+  /** Busiest from→to hospital pairs, descending, capped at 6. */
+  corridors: Array<{
+    fromHospitalId: string;
+    fromHospital: string;
+    toHospitalId: string;
+    toHospital: string;
+    count: number;
+  }>;
+  /** Referral volume per Bangkok day, oldest of the 7 days first. */
+  daily: Array<{ date: string; count: number }>;
+  /** Destination hospitals with counts — feeds the TO filter dropdown. */
+  destinations: Array<{ id: string; name: string; count: number }>;
+}

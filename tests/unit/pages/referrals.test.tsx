@@ -4,7 +4,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { SWRConfig } from 'swr';
-import type { ReferralDetailResponse, ReferralListResponse } from '@/types/api';
+import type {
+  ReferralDetailResponse,
+  ReferralInsightsResponse,
+  ReferralListResponse,
+} from '@/types/api';
 import { classifyReferralAge, REFERRAL_SLA } from '@/config/referral-sla';
 import ReferralsPage from '@/app/(provincial)/referrals/page';
 
@@ -77,6 +81,35 @@ function makeFixture(): ReferralListResponse {
   };
 }
 
+function makeInsights(): ReferralInsightsResponse {
+  return {
+    corridors: [
+      {
+        fromHospitalId: 'h-phon',
+        fromHospital: 'รพ.พล',
+        toHospitalId: 'h-kkh',
+        toHospital: 'รพ.ขอนแก่น',
+        count: 56,
+      },
+      {
+        fromHospitalId: 'h-banphai',
+        fromHospital: 'รพ.บ้านไผ่',
+        toHospitalId: 'h-kkh',
+        toHospital: 'รพ.ขอนแก่น',
+        count: 9,
+      },
+    ],
+    daily: Array.from({ length: 7 }, (_, i) => ({
+      date: `2026-07-0${i + 2}`,
+      count: i + 1,
+    })),
+    destinations: [
+      { id: 'h-kkh', name: 'รพ.ขอนแก่น', count: 56 },
+      { id: 'h-sirindhorn', name: 'รพ.สิรินธร จังหวัดขอนแก่น', count: 13 },
+    ],
+  };
+}
+
 function makeDetailResponse(data: ReferralListResponse): ReferralDetailResponse {
   return {
     referral: {
@@ -92,9 +125,11 @@ function makeDetailResponse(data: ReferralListResponse): ReferralDetailResponse 
 }
 
 function renderPage(data: ReferralListResponse = makeFixture()) {
-  const fetcher = vi.fn(async (url: string) =>
-    url.includes('/list?') ? data : makeDetailResponse(data),
-  );
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes('/list?')) return data;
+    if (url.includes('/insights')) return makeInsights();
+    return makeDetailResponse(data);
+  });
   const utils = render(
     <SWRConfig value={{ fetcher, provider: () => new Map(), dedupingInterval: 0 }}>
       <ReferralsPage />
@@ -180,6 +215,29 @@ describe('ReferralsPage — referral rows', () => {
 
     const freshRow = screen.getByTestId('referral-row-ref-routine');
     expect(freshRow.getAttribute('data-age')).toBe('fresh');
+  });
+});
+
+describe('ReferralsPage — insights panel and destination filter', () => {
+  it('renders the busiest corridors and the 7-day volume chart', async () => {
+    renderPage();
+
+    const corridors = await screen.findByTestId('corridors-panel');
+    expect(within(corridors).getByText(/รพ.พล/)).toBeInTheDocument();
+    expect(within(corridors).getByText('56')).toBeInTheDocument();
+    expect(screen.getByTestId('daily-volume')).toBeInTheDocument();
+  });
+
+  it('lists destination hospitals in the TO filter and applies to_hospital_id', async () => {
+    const { fetcher } = renderPage();
+
+    const select = await screen.findByTestId('filter-to-hospital');
+    expect(within(select).getByText(/รพ.ขอนแก่น \(56\)/)).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'h-kkh' } });
+
+    const urls = fetcher.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes('to_hospital_id=h-kkh'))).toBe(true);
   });
 });
 

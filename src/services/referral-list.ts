@@ -13,6 +13,7 @@ import { referralSlaCutoffs } from '@/config/referral-sla';
 import type {
   ProvincialReferralListItem,
   ReferralDetail,
+  ReferralInsightsResponse,
   ReferralListResponse,
   ReferralOpsCounts,
   ReferralStatusCounts,
@@ -210,6 +211,74 @@ async function computeOpsCounts(db: DatabaseAdapter, now: Date): Promise<Referra
     emergencyActive: Number(r.emergency_active) || 0,
     highRisk: Number(r.high_risk) || 0,
     overdue: Number(r.overdue) || 0,
+  };
+}
+
+const DAY_MS = 24 * 3600_000;
+
+/** Bangkok calendar date (YYYY-MM-DD) for an instant. */
+function bangkokDateString(ms: number): string {
+  return new Date(ms + 7 * 3600_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Aggregates for the board's insights panel: top from→to corridors, 7-day
+ * volume (Bangkok days, bucketed in JS for SQLite/Postgres portability), and
+ * destination hospitals for the TO filter dropdown.
+ */
+export async function getReferralInsights(
+  db: DatabaseAdapter,
+  now: Date = new Date(),
+): Promise<ReferralInsightsResponse> {
+  const corridorRows = await db.query<Record<string, unknown>>(
+    `SELECT cr.from_hospital_id, cr.to_hospital_id,
+        fh.name as from_name, th.name as to_name, COUNT(*) as cnt
+      FROM cached_referrals cr
+      LEFT JOIN hospitals fh ON fh.id = cr.from_hospital_id
+      LEFT JOIN hospitals th ON th.id = cr.to_hospital_id
+      GROUP BY cr.from_hospital_id, cr.to_hospital_id, fh.name, th.name
+      ORDER BY cnt DESC
+      LIMIT 6`,
+    [],
+  );
+
+  const destinationRows = await db.query<Record<string, unknown>>(
+    `SELECT cr.to_hospital_id as id, th.name as name, COUNT(*) as cnt
+      FROM cached_referrals cr
+      LEFT JOIN hospitals th ON th.id = cr.to_hospital_id
+      GROUP BY cr.to_hospital_id, th.name
+      ORDER BY cnt DESC`,
+    [],
+  );
+
+  const windowStart = bangkokStartOfToday(now).getTime() - 6 * DAY_MS;
+  const dailyRows = await db.query<{ initiated_at: string }>(
+    `SELECT cr.initiated_at FROM cached_referrals cr WHERE cr.initiated_at >= ?`,
+    [new Date(windowStart).toISOString()],
+  );
+  const daily = Array.from({ length: 7 }, (_, i) => ({
+    date: bangkokDateString(windowStart + i * DAY_MS),
+    count: 0,
+  }));
+  for (const row of dailyRows) {
+    const idx = Math.floor((new Date(row.initiated_at).getTime() - windowStart) / DAY_MS);
+    if (idx >= 0 && idx < 7) daily[idx].count += 1;
+  }
+
+  return {
+    corridors: corridorRows.map((r) => ({
+      fromHospitalId: r.from_hospital_id as string,
+      fromHospital: (r.from_name as string) ?? 'ไม่ทราบ',
+      toHospitalId: r.to_hospital_id as string,
+      toHospital: (r.to_name as string) ?? 'ไม่ทราบ',
+      count: Number(r.cnt) || 0,
+    })),
+    daily,
+    destinations: destinationRows.map((r) => ({
+      id: r.id as string,
+      name: (r.name as string) ?? 'ไม่ทราบ',
+      count: Number(r.cnt) || 0,
+    })),
   };
 }
 

@@ -7,7 +7,7 @@ import { SqliteAdapter } from '@/db/sqlite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables/index';
 import { v4 as uuidv4 } from 'uuid';
-import { listReferrals, getReferralDetail } from '@/services/referral-list';
+import { listReferrals, getReferralDetail, getReferralInsights } from '@/services/referral-list';
 import { REFERRAL_SLA } from '@/config/referral-sla';
 import { initiateReferral, acceptReferral, markInTransit, confirmArrival, rejectReferral } from '@/services/referral';
 import { UrgencyLevel } from '@/types/domain';
@@ -581,5 +581,116 @@ describe('getReferralDetail — full referral with milestones and patient contex
 
   it('returns null for an unknown referral id', async () => {
     expect(await getReferralDetail(db, 'no-such-id')).toBeNull();
+  });
+});
+
+describe('getReferralInsights — corridors, daily volume, destinations', () => {
+  let db: SqliteAdapter;
+  let hosp: SeededHospitals;
+  let journeyId: string;
+
+  beforeEach(async () => {
+    db = new SqliteAdapter(':memory:');
+    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    hosp = await seedHospitals(db);
+    journeyId = await seedJourney(db, hosp.hospAId);
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  it('aggregates corridors by from→to pair, busiest first', async () => {
+    for (let i = 0; i < 3; i++) {
+      await seedReferral(db, {
+        journeyId,
+        fromHospitalId: hosp.hospAId,
+        toHospitalId: hosp.hospBId,
+        now: NOW,
+      });
+    }
+    for (let i = 0; i < 2; i++) {
+      await seedReferral(db, {
+        journeyId,
+        fromHospitalId: hosp.hospAId,
+        toHospitalId: hosp.hospCId,
+        now: NOW,
+      });
+    }
+    await seedReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospCId,
+      toHospitalId: hosp.hospBId,
+      now: NOW,
+    });
+
+    const insights = await getReferralInsights(db, NOW);
+
+    expect(insights.corridors).toHaveLength(3);
+    expect(insights.corridors[0]).toMatchObject({
+      fromHospital: 'รพ.ต้นทาง',
+      toHospital: 'รพ.ปลายทาง',
+      count: 3,
+    });
+    expect(insights.corridors[1].count).toBe(2);
+  });
+
+  it('buckets the last 7 Bangkok days of volume, oldest first', async () => {
+    await seedReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospAId,
+      toHospitalId: hosp.hospBId,
+      ageHours: 2, // today (16:00 Bangkok)
+      now: NOW,
+    });
+    await seedReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospAId,
+      toHospitalId: hosp.hospBId,
+      ageHours: 24 * 3, // 3 days ago
+      now: NOW,
+    });
+    await seedReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospAId,
+      toHospitalId: hosp.hospBId,
+      ageHours: 24 * 10, // outside the window
+      now: NOW,
+    });
+
+    const insights = await getReferralInsights(db, NOW);
+
+    expect(insights.daily).toHaveLength(7);
+    expect(insights.daily[6]).toEqual({ date: '2026-07-08', count: 1 });
+    expect(insights.daily[3]).toEqual({ date: '2026-07-05', count: 1 });
+    expect(insights.daily.reduce((s, d) => s + d.count, 0)).toBe(2);
+  });
+
+  it('lists destination hospitals with referral counts for the filter dropdown', async () => {
+    await seedReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospAId,
+      toHospitalId: hosp.hospBId,
+      now: NOW,
+    });
+    await seedReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospAId,
+      toHospitalId: hosp.hospBId,
+      now: NOW,
+    });
+    await seedReferral(db, {
+      journeyId,
+      fromHospitalId: hosp.hospBId,
+      toHospitalId: hosp.hospCId,
+      now: NOW,
+    });
+
+    const insights = await getReferralInsights(db, NOW);
+
+    expect(insights.destinations).toEqual([
+      { id: hosp.hospBId, name: 'รพ.ปลายทาง', count: 2 },
+      { id: hosp.hospCId, name: 'รพ.ทางเลือก', count: 1 },
+    ]);
   });
 });

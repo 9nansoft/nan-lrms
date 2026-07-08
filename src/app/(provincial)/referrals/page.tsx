@@ -25,7 +25,11 @@ import {
 } from '@/components/referrals/chips';
 import { ReferralDetailDialog } from '@/components/referrals/ReferralDetailDialog';
 import { ArrowRightLeft, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
-import type { ProvincialReferralListItem, ReferralListResponse } from '@/types/api';
+import type {
+  ProvincialReferralListItem,
+  ReferralInsightsResponse,
+  ReferralListResponse,
+} from '@/types/api';
 
 const URGENCY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'ALL' },
@@ -60,6 +64,7 @@ export default function ReferralsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [urgencyFilter, setUrgencyFilter] = useState('');
   const [rangeFilter, setRangeFilter] = useState('');
+  const [toHospitalFilter, setToHospitalFilter] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [search, setSearch] = useState('');
   // Debounced term actually sent to the server (see pregnancies page — the
@@ -81,10 +86,11 @@ export default function ReferralsPage() {
     if (statusFilter) params.set('status', statusFilter);
     if (urgencyFilter) params.set('urgency', urgencyFilter);
     if (rangeFilter) params.set('range', rangeFilter);
+    if (toHospitalFilter) params.set('to_hospital_id', toHospitalFilter);
     if (overdueOnly) params.set('overdue', '1');
     if (debouncedQuery) params.set('q', debouncedQuery);
     return params.toString();
-  }, [page, statusFilter, urgencyFilter, rangeFilter, overdueOnly, debouncedQuery]);
+  }, [page, statusFilter, urgencyFilter, rangeFilter, toHospitalFilter, overdueOnly, debouncedQuery]);
 
   const { data, isLoading, error, mutate } = useSWR<ReferralListResponse>(
     `/api/dashboard/referrals/list?${queryParams}`,
@@ -97,18 +103,27 @@ export default function ReferralsPage() {
     },
   );
 
+  // Aggregate view (corridors, 7-day volume, destination options) — changes
+  // slowly, so it refreshes at half the list cadence.
+  const { data: insights } = useSWR<ReferralInsightsResponse>(
+    '/api/dashboard/referrals/insights',
+    { refreshInterval: 60000 },
+  );
+
   const referrals = useMemo(() => data?.referrals ?? [], [data]);
   const statusCounts = data?.statusCounts ?? EMPTY_STATUS_COUNTS;
   const opsCounts = data?.opsCounts ?? EMPTY_OPS_COUNTS;
   const pagination = data?.pagination ?? { total: 0, page: 1, perPage: 20, totalPages: 1 };
 
   const hasActiveFilters =
-    Boolean(statusFilter || urgencyFilter || rangeFilter || debouncedQuery) || overdueOnly;
+    Boolean(statusFilter || urgencyFilter || rangeFilter || toHospitalFilter || debouncedQuery) ||
+    overdueOnly;
 
   const clearFilters = () => {
     setStatusFilter('');
     setUrgencyFilter('');
     setRangeFilter('');
+    setToHospitalFilter('');
     setOverdueOnly(false);
     setSearch('');
     setDebouncedQuery('');
@@ -316,10 +331,84 @@ export default function ReferralsPage() {
         })}
       </div>
 
-      {/* 03 — Filters + queue */}
+      {/* 03 — Corridors + 7-day volume */}
+      {insights && (insights.corridors.length > 0 || insights.daily.some((d) => d.count > 0)) && (
+        <div
+          className="grid gap-px bg-[var(--rule-strong)] md:grid-cols-2"
+          style={{ borderBottom: '1px solid var(--rule-strong)' }}
+        >
+          {/* Corridors */}
+          <div className="bg-white px-5 py-3" data-testid="corridors-panel">
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+              REFERRAL CORRIDORS · TOP {insights.corridors.length}
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {insights.corridors.map((c) => {
+                const max = insights.corridors[0]?.count || 1;
+                return (
+                  <div
+                    key={`${c.fromHospitalId}-${c.toHospitalId}`}
+                    className="flex items-center gap-2"
+                  >
+                    <div className="w-[45%] min-w-0 truncate text-[11px] text-[var(--ink-navy-dim)]">
+                      {c.fromHospital}
+                      <span className="mx-1 text-[var(--ink-navy-muted)]">→</span>
+                      <span className="font-medium text-[var(--ink-navy)]">{c.toHospital}</span>
+                    </div>
+                    <div className="h-2 flex-1 bg-[var(--surface-cool)]">
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${Math.max(4, (c.count / max) * 100)}%`,
+                          background: 'var(--accent-navy)',
+                        }}
+                      />
+                    </div>
+                    <div className="w-8 text-right font-mono text-[11px] font-semibold tabular-nums">
+                      {c.count}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 7-day volume */}
+          <div className="bg-white px-5 py-3" data-testid="daily-volume">
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+              VOLUME · LAST 7 DAYS
+            </div>
+            <div className="mt-2 flex h-[72px] items-end gap-1.5">
+              {insights.daily.map((d) => {
+                const max = Math.max(...insights.daily.map((x) => x.count), 1);
+                return (
+                  <div key={d.date} className="flex flex-1 flex-col items-center gap-0.5">
+                    <span className="font-mono text-[10px] tabular-nums text-[var(--ink-navy-dim)]">
+                      {d.count > 0 ? d.count : ''}
+                    </span>
+                    <div
+                      className="w-full"
+                      style={{
+                        height: `${Math.max(2, (d.count / max) * 44)}px`,
+                        background:
+                          d.count > 0 ? 'var(--accent-navy)' : 'var(--surface-cool)',
+                      }}
+                    />
+                    <span className="font-mono text-[9px] tabular-nums text-[var(--ink-navy-muted)]">
+                      {d.date.slice(8, 10)}/{d.date.slice(5, 7)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 04 — Filters + queue */}
       <div className="bg-white px-5 pt-4 pb-5">
         <SectionLabel
-          idx={3}
+          idx={4}
           right={
             <span>
               PAGE {pagination.page}/{pagination.totalPages} · {pagination.total} TOTAL
@@ -405,6 +494,33 @@ export default function ReferralsPage() {
                 </button>
               );
             })}
+          </div>
+
+          {/* Destination hospital */}
+          <div className="flex items-center gap-1">
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
+              TO:
+            </span>
+            <select
+              data-testid="filter-to-hospital"
+              value={toHospitalFilter}
+              onChange={(e) => {
+                setToHospitalFilter(e.target.value);
+                setPage(1);
+              }}
+              className="h-7 max-w-[220px] rounded-sm border bg-white px-1.5 font-mono text-[11px] focus:border-[var(--accent-navy)] focus:outline-none"
+              style={{
+                borderColor: toHospitalFilter ? 'var(--accent-navy)' : 'var(--rule-strong)',
+                color: toHospitalFilter ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
+              }}
+            >
+              <option value="">ทุกโรงพยาบาล</option>
+              {(insights?.destinations ?? []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} ({d.count})
+                </option>
+              ))}
+            </select>
           </div>
 
           {hasActiveFilters && (
