@@ -8,6 +8,7 @@ import { useState, useMemo } from 'react';
 import useSWR from 'swr';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { SectionLabel } from '@/components/dashboard/shared';
 import { cn, formatThaiDate } from '@/lib/utils';
 import { ArrowRightLeft, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -54,10 +55,7 @@ const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 export default function ReferralsPage() {
-  useSetBreadcrumbs([
-    { label: 'แดชบอร์ด', href: '/' },
-    { label: 'ส่งต่อ' },
-  ]);
+  useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ส่งต่อ' }]);
 
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('');
@@ -68,7 +66,7 @@ export default function ReferralsPage() {
     return params.toString();
   }, [page, statusFilter]);
 
-  const { data, isLoading, error } = useSWR<ReferralListResponse>(
+  const { data, isLoading, error, mutate } = useSWR<ReferralListResponse>(
     `/api/dashboard/referrals/list?${queryParams}`,
     { refreshInterval: 30000 },
   );
@@ -95,15 +93,11 @@ export default function ReferralsPage() {
 
   if (error) {
     return (
-      <div
-        className="flex flex-col items-center justify-center py-16 text-center"
-        style={{ color: 'var(--ink-navy-muted)' }}
-      >
-        <ArrowRightLeft className="mb-3 h-10 w-10 opacity-40" />
-        <p className="font-mono text-[11px] text-red-600">
-          เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่
-        </p>
-      </div>
+      <ErrorState
+        message="เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่"
+        detail={error instanceof Error ? error.message : String(error)}
+        onRetry={() => mutate()}
+      />
     );
   }
 
@@ -262,9 +256,7 @@ export default function ReferralsPage() {
                   minHeight: 44,
                 }}
               >
-                <div className="truncate text-[13px] text-[var(--ink-navy)]">
-                  {r.fromHospital}
-                </div>
+                <div className="truncate text-[13px] text-[var(--ink-navy)]">{r.fromHospital}</div>
                 <div className="truncate text-[13px] font-medium text-[var(--ink-navy)]">
                   {r.toHospital}
                 </div>
@@ -274,7 +266,10 @@ export default function ReferralsPage() {
                 <div>
                   <Pill meta={URGENCY_META[r.urgencyLevel]} fallback={r.urgencyLevel} />
                 </div>
-                <div className="truncate text-[12px] text-[var(--ink-navy-dim)]" title={r.reason ?? ''}>
+                <div
+                  className="truncate text-[12px] text-[var(--ink-navy-dim)]"
+                  title={r.reason ?? ''}
+                >
                   {r.reason ?? '—'}
                 </div>
                 <div className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-dim)]">
