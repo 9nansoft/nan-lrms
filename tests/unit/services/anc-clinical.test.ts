@@ -1,0 +1,225 @@
+import { describe, it, expect } from 'vitest';
+import {
+  sevBp,
+  sevFhr,
+  sevHb,
+  nextContactDue,
+  prePregnancyBmi,
+  isLateFirstContact,
+  overdueInvestigations,
+  WHO_CONTACT_WEEKS,
+  WHO_CONTACT_WINDOW_W,
+  BP_SYS_HIGH,
+  BP_DIA_HIGH,
+  FHR_LOW,
+  HB_LOW,
+  HB_SEVERE,
+} from '@/services/anc-clinical';
+
+// These tests pin the clinical rules ported verbatim out of the journey detail
+// page. Expected values are derived from the pre-extraction implementation.
+
+describe('anc-clinical severity bands', () => {
+  describe('sevBp (systolic/diastolic)', () => {
+    it('treats a missing reading as normal', () => {
+      expect(sevBp(null, 80)).toBe('normal');
+      expect(sevBp(120, null)).toBe('normal');
+      expect(sevBp(null, null)).toBe('normal');
+    });
+    it('flags abnormal at/above the high band (>=140 / >=90)', () => {
+      expect(sevBp(140, 80)).toBe('abnormal');
+      expect(sevBp(120, 90)).toBe('abnormal');
+      expect(sevBp(160, 100)).toBe('abnormal');
+    });
+    it('flags borderline in the amber band (130-139 / 85-89)', () => {
+      expect(sevBp(130, 80)).toBe('borderline');
+      expect(sevBp(139, 84)).toBe('borderline');
+      expect(sevBp(120, 85)).toBe('borderline');
+    });
+    it('is normal below the amber band', () => {
+      expect(sevBp(129, 84)).toBe('normal');
+      expect(sevBp(120, 80)).toBe('normal');
+    });
+  });
+
+  describe('sevFhr', () => {
+    it('is normal for a missing reading', () => {
+      expect(sevFhr(null)).toBe('normal');
+    });
+    it('is normal inside 110-160 inclusive', () => {
+      expect(sevFhr(110)).toBe('normal');
+      expect(sevFhr(140)).toBe('normal');
+      expect(sevFhr(160)).toBe('normal');
+    });
+    it('is abnormal outside 110-160', () => {
+      expect(sevFhr(109)).toBe('abnormal');
+      expect(sevFhr(161)).toBe('abnormal');
+      expect(sevFhr(90)).toBe('abnormal');
+    });
+  });
+
+  describe('sevHb', () => {
+    it('is normal for a missing reading', () => {
+      expect(sevHb(null)).toBe('normal');
+    });
+    it('is abnormal below the severe-anemia band (<9)', () => {
+      expect(sevHb(8.9)).toBe('abnormal');
+      expect(sevHb(7)).toBe('abnormal');
+    });
+    it('is borderline in the anemia band (9 to <11)', () => {
+      expect(sevHb(9)).toBe('borderline');
+      expect(sevHb(10.9)).toBe('borderline');
+    });
+    it('is normal at/above 11', () => {
+      expect(sevHb(11)).toBe('normal');
+      expect(sevHb(13)).toBe('normal');
+    });
+  });
+
+  it('exposes the threshold constants used by the trend rows', () => {
+    expect(BP_SYS_HIGH).toBe(140);
+    expect(BP_DIA_HIGH).toBe(90);
+    expect(FHR_LOW).toBe(110);
+    expect(HB_LOW).toBe(11);
+    expect(HB_SEVERE).toBe(9);
+  });
+});
+
+describe('WHO 8-contact schedule', () => {
+  it('uses the WHO 2016 target weeks with a ±1w window', () => {
+    expect(WHO_CONTACT_WEEKS).toEqual([12, 20, 26, 30, 34, 36, 38, 40]);
+    expect(WHO_CONTACT_WINDOW_W).toBe(1);
+  });
+
+  describe('nextContactDue', () => {
+    it('returns null when current GA is unknown', () => {
+      expect(nextContactDue(null, [])).toBeNull();
+    });
+    it('reports the first contact as upcoming before it is due', () => {
+      expect(nextContactDue(8, [])).toEqual({ ga: 12, status: 'upcoming', weeksAway: 4 });
+    });
+    it('skips contacts already attended within the ±1w window', () => {
+      // 27 counts as attending the week-26 contact (|27-26| <= 1).
+      expect(nextContactDue(25, [12, 20, 27])).toEqual({
+        ga: 30,
+        status: 'upcoming',
+        weeksAway: 5,
+      });
+    });
+    it('flags a contact due now when GA is within the window', () => {
+      expect(nextContactDue(25, [12, 20])).toEqual({
+        ga: 26,
+        status: 'due-now',
+        weeksAway: 1,
+      });
+    });
+    it('flags a missed contact as overdue', () => {
+      expect(nextContactDue(30, [12, 20])).toEqual({
+        ga: 26,
+        status: 'overdue',
+        weeksAway: -4,
+      });
+    });
+    it('returns null once every scheduled contact is attended', () => {
+      expect(nextContactDue(41, [12, 20, 26, 30, 34, 36, 38, 40])).toBeNull();
+    });
+  });
+});
+
+describe('prePregnancyBmi', () => {
+  it('computes kg / m^2 rounded to one decimal', () => {
+    expect(prePregnancyBmi(160, 56)).toBe(21.9);
+    expect(prePregnancyBmi(170, 70)).toBe(24.2);
+  });
+  it('returns null when height or weight is missing', () => {
+    expect(prePregnancyBmi(null, 56)).toBeNull();
+    expect(prePregnancyBmi(160, null)).toBeNull();
+  });
+  it('rejects implausible height (<=100cm) and non-positive weight', () => {
+    expect(prePregnancyBmi(100, 56)).toBeNull();
+    expect(prePregnancyBmi(90, 56)).toBeNull();
+    expect(prePregnancyBmi(160, 0)).toBeNull();
+  });
+});
+
+describe('isLateFirstContact', () => {
+  it('is true when the first ANC contact is at/after GA 10w (RTCOG < 10w target)', () => {
+    expect(isLateFirstContact(10)).toBe(true);
+    expect(isLateFirstContact(14)).toBe(true);
+  });
+  it('is false before GA 10w or when unknown', () => {
+    expect(isLateFirstContact(9)).toBe(false);
+    expect(isLateFirstContact(null)).toBe(false);
+  });
+});
+
+describe('overdueInvestigations (RTCOG OB 66-029)', () => {
+  const clear = {
+    gaWeeks: null as number | null,
+    anatomyScanDate: null as string | null,
+    ogttResult: null as string | null,
+    gbsResult: null as string | null,
+    tdapGiven: false,
+    mcvFl: null as number | null,
+    dcipResult: null as string | null,
+    hbEResult: null as string | null,
+  };
+
+  it('reports nothing in early pregnancy with no data', () => {
+    expect(overdueInvestigations({ ...clear, gaWeeks: 10 })).toEqual([]);
+  });
+
+  it('reports nothing when GA is unknown (treated as 0)', () => {
+    expect(overdueInvestigations({ ...clear, gaWeeks: null })).toEqual([]);
+  });
+
+  it('flags a missed thalassemia screen after GA 16', () => {
+    const result = overdueInvestigations({ ...clear, gaWeeks: 20 });
+    expect(result.map((r) => r.key)).toEqual(['thalassemia']);
+    expect(result[0]).toMatchObject({ dueBy: '16w', severity: 'warn' });
+  });
+
+  it('flags every investigation, in order, for a term patient with nothing done', () => {
+    const result = overdueInvestigations({ ...clear, gaWeeks: 38 });
+    expect(result.map((r) => r.key)).toEqual([
+      'anatomy_scan',
+      'ogtt',
+      'gbs',
+      'tdap',
+      'thalassemia',
+    ]);
+  });
+
+  it('suppresses each check once its result/action is present', () => {
+    const result = overdueInvestigations({
+      gaWeeks: 38,
+      anatomyScanDate: '2026-02-01',
+      ogttResult: 'NORMAL',
+      gbsResult: 'NEG',
+      tdapGiven: true,
+      mcvFl: 80,
+      dcipResult: null,
+      hbEResult: null,
+    });
+    expect(result).toEqual([]);
+  });
+
+  it('treats a PENDING OGTT/GBS as still overdue', () => {
+    const ogtt = overdueInvestigations({ ...clear, gaWeeks: 31, ogttResult: 'PENDING' });
+    expect(ogtt.map((r) => r.key)).toContain('ogtt');
+    const gbs = overdueInvestigations({ ...clear, gaWeeks: 37, gbsResult: 'PENDING' });
+    expect(gbs.map((r) => r.key)).toContain('gbs');
+  });
+
+  it('respects the GA boundaries (anatomy >22, ogtt >30, gbs/tdap thresholds)', () => {
+    expect(overdueInvestigations({ ...clear, gaWeeks: 22 }).map((r) => r.key)).not.toContain(
+      'anatomy_scan',
+    );
+    expect(overdueInvestigations({ ...clear, gaWeeks: 23 }).map((r) => r.key)).toContain(
+      'anatomy_scan',
+    );
+    expect(overdueInvestigations({ ...clear, gaWeeks: 36 }).map((r) => r.key)).toContain('tdap');
+    expect(overdueInvestigations({ ...clear, gaWeeks: 36 }).map((r) => r.key)).not.toContain('gbs');
+    expect(overdueInvestigations({ ...clear, gaWeeks: 37 }).map((r) => r.key)).toContain('gbs');
+  });
+});

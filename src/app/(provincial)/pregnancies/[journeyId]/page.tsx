@@ -4,15 +4,35 @@
 // and a WHO 8-contact tracker with next-due recommendation.
 'use client';
 
-import { use } from 'react';
+import { use, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import useSWR from 'swr';
+import { useSSE } from '@/hooks/useSSE';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { SectionLabel } from '@/components/dashboard/shared';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
+import {
+  BP_SYS_HIGH,
+  BP_SYS_AMBER,
+  BP_DIA_HIGH,
+  BP_DIA_AMBER,
+  FHR_LOW,
+  FHR_HIGH,
+  HB_LOW,
+  sevBp,
+  sevFhr,
+  sevHb,
+  nextContactDue,
+  prePregnancyBmi,
+  isLateFirstContact,
+  overdueInvestigations,
+  WHO_CONTACT_WEEKS,
+  WHO_CONTACT_WINDOW_W,
+  type Severity,
+} from '@/services/anc-clinical';
 import {
   ArrowLeft,
   Baby,
@@ -32,6 +52,11 @@ import {
   Syringe,
   ShieldAlert,
 } from 'lucide-react';
+
+// Poll cadence for the detail feed. Single source for both the SWR
+// refreshInterval and the footer "REFRESHING EVERY …s" caption so they can
+// never drift apart. Live SSE updates arrive between polls (see useSSE below).
+const REFRESH_INTERVAL_MS = 60_000;
 
 // ─── Types (shape must match /api/journeys/[journeyId]) ───────────────────
 
@@ -200,37 +225,10 @@ const REFERRAL_STATUS_LABEL: Record<string, string> = {
 };
 const SEX_LABEL_TH: Record<string, string> = { M: 'ชาย', F: 'หญิง' };
 
-// Clinical normal bands (rough — used only for visual hint, not actual CDSS).
-// Three tiers per metric so the UI can render normal/borderline/abnormal
-// instead of a single binary abnormal flag.
-const BP_SYS_HIGH = 140;
-const BP_SYS_AMBER = 130;   // 130-139 = borderline/elevated
-const BP_DIA_HIGH = 90;
-const BP_DIA_AMBER = 85;    // 85-89 = borderline
-const FHR_LOW = 110;
-const FHR_HIGH = 160;
-const HB_LOW = 11;          // anemia
-const HB_SEVERE = 9;        // severe anemia
-
-type Severity = 'normal' | 'borderline' | 'abnormal';
-
-function sevBp(sys: number | null, dia: number | null): Severity {
-  if (sys == null || dia == null) return 'normal';
-  if (sys >= BP_SYS_HIGH || dia >= BP_DIA_HIGH) return 'abnormal';
-  if (sys >= BP_SYS_AMBER || dia >= BP_DIA_AMBER) return 'borderline';
-  return 'normal';
-}
-function sevFhr(v: number | null): Severity {
-  if (v == null) return 'normal';
-  if (v < FHR_LOW || v > FHR_HIGH) return 'abnormal';
-  return 'normal';
-}
-function sevHb(v: number | null): Severity {
-  if (v == null) return 'normal';
-  if (v < HB_SEVERE) return 'abnormal';
-  if (v < HB_LOW) return 'borderline';
-  return 'normal';
-}
+// Vital-sign severity bands, the WHO 8-contact schedule, BMI, and the RTCOG
+// investigation-timing rules live in src/services/anc-clinical.ts (imported
+// above) so this page and any future ANC surface share one source of truth.
+// sevColor/sevBg below are pure presentation (severity → CSS var) and stay here.
 function sevColor(s: Severity): string {
   return s === 'abnormal'
     ? 'var(--risk-high)'
@@ -245,11 +243,6 @@ function sevBg(s: Severity): string {
       ? 'rgba(234, 179, 8, 0.10)'
       : 'transparent';
 }
-
-// WHO 2016 recommended 8-contact ANC schedule — target gestational weeks.
-// First contact < 12w; then 20/26/30/34/36/38/40. See NBK409109.
-const WHO_CONTACT_WEEKS = [12, 20, 26, 30, 34, 36, 38, 40];
-const WHO_CONTACT_WINDOW_W = 1; // ±1w counts as "attended".
 
 // Short labels for baby_position / baby_lead. HOSxP values are inconsistent
 // across sites, so we recognize common codes and fall back to the raw value.
@@ -277,13 +270,13 @@ interface LabFlag {
   color: string;
 }
 const LAB_FLAGS_FROM_RULES: Record<string, LabFlag> = {
-  hr2_rh_negative:  { key: 'rh',   label: 'Rh−',         color: 'var(--risk-medium)' },
-  hr2_hbsag:        { key: 'hbsag',label: 'HBsAg+',      color: 'var(--risk-medium)' },
-  hr2_syphilis:     { key: 'vdrl', label: 'SYPHILIS+',   color: 'var(--risk-high)'   },
-  hr2_hiv:          { key: 'hiv',  label: 'HIV+',        color: 'var(--risk-high)'   },
-  hr2_thalassemia:  { key: 'thal', label: 'THAL DISEASE',color: 'var(--risk-medium)' },
-  hr3_nipt:         { key: 'nipt', label: 'NIPT HIGH',   color: 'var(--risk-high)'   },
-  hr3_anemia:       { key: 'anem', label: 'SEVERE ANEMIA', color: 'var(--risk-high)' },
+  hr2_rh_negative: { key: 'rh', label: 'Rh−', color: 'var(--risk-medium)' },
+  hr2_hbsag: { key: 'hbsag', label: 'HBsAg+', color: 'var(--risk-medium)' },
+  hr2_syphilis: { key: 'vdrl', label: 'SYPHILIS+', color: 'var(--risk-high)' },
+  hr2_hiv: { key: 'hiv', label: 'HIV+', color: 'var(--risk-high)' },
+  hr2_thalassemia: { key: 'thal', label: 'THAL DISEASE', color: 'var(--risk-medium)' },
+  hr3_nipt: { key: 'nipt', label: 'NIPT HIGH', color: 'var(--risk-high)' },
+  hr3_anemia: { key: 'anem', label: 'SEVERE ANEMIA', color: 'var(--risk-high)' },
 };
 
 function formatThai(dateStr: string | null): string {
@@ -393,11 +386,7 @@ function LabResult({
       <span
         className="font-semibold tabular-nums"
         style={{
-          color: v == null
-            ? 'var(--ink-navy-muted)'
-            : abn
-              ? 'var(--risk-high)'
-              : 'var(--ink-navy)',
+          color: v == null ? 'var(--ink-navy-muted)' : abn ? 'var(--risk-high)' : 'var(--ink-navy)',
         }}
       >
         {v ?? '—'}
@@ -470,10 +459,7 @@ function LabTile({
       <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
         {label}
       </div>
-      <div
-        className="font-mono text-[13px] font-bold tabular-nums"
-        style={{ color: palette.fg }}
-      >
+      <div className="font-mono text-[13px] font-bold tabular-nums" style={{ color: palette.fg }}>
         {value ?? '—'}
       </div>
     </div>
@@ -523,21 +509,9 @@ function VaccineTile({
     windowEnd != null &&
     currentGa != null &&
     currentGa > windowEnd;
-  const fg = given
-    ? 'var(--risk-low)'
-    : overdue
-      ? 'var(--risk-high)'
-      : 'var(--ink-navy-muted)';
-  const bg = given
-    ? 'rgba(34, 197, 94, 0.06)'
-    : overdue
-      ? 'rgba(239, 68, 68, 0.08)'
-      : 'white';
-  const accent = given
-    ? 'var(--risk-low)'
-    : overdue
-      ? 'var(--risk-high)'
-      : 'var(--ink-navy-muted)';
+  const fg = given ? 'var(--risk-low)' : overdue ? 'var(--risk-high)' : 'var(--ink-navy-muted)';
+  const bg = given ? 'rgba(34, 197, 94, 0.06)' : overdue ? 'rgba(239, 68, 68, 0.08)' : 'white';
+  const accent = given ? 'var(--risk-low)' : overdue ? 'var(--risk-high)' : 'var(--ink-navy-muted)';
   return (
     <div
       className="flex flex-col gap-1 px-3 py-2"
@@ -548,17 +522,21 @@ function VaccineTile({
     >
       <div className="flex items-baseline gap-1.5">
         <Syringe className="h-3 w-3" style={{ color: accent }} />
-        <span className="font-mono text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: fg }}>
+        <span
+          className="font-mono text-[10px] font-bold uppercase tracking-[0.1em]"
+          style={{ color: fg }}
+        >
           {label}
         </span>
         {subLabel && (
-          <span className="font-mono text-[9px] text-[var(--ink-navy-muted)]">
-            {subLabel}
-          </span>
+          <span className="font-mono text-[9px] text-[var(--ink-navy-muted)]">{subLabel}</span>
         )}
       </div>
       {given ? (
-        <div className="flex items-center gap-1 font-mono text-[12px] font-bold tabular-nums" style={{ color: fg }}>
+        <div
+          className="flex items-center gap-1 font-mono text-[12px] font-bold tabular-nums"
+          style={{ color: fg }}
+        >
           <CheckCircle2 className="h-3 w-3" />
           GIVEN
           {latest?.givenAtGa != null && (
@@ -573,7 +551,10 @@ function VaccineTile({
           )}
         </div>
       ) : (
-        <div className="flex items-center gap-1 font-mono text-[12px] font-bold tabular-nums" style={{ color: fg }}>
+        <div
+          className="flex items-center gap-1 font-mono text-[12px] font-bold tabular-nums"
+          style={{ color: fg }}
+        >
           {overdue ? <AlertTriangle className="h-3 w-3" /> : null}
           {overdue ? 'OVERDUE' : 'NOT GIVEN'}
         </div>
@@ -630,9 +611,7 @@ function MetricTile({
         >
           {value}
         </div>
-        {sub && (
-          <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">{sub}</div>
-        )}
+        {sub && <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">{sub}</div>}
       </div>
     </div>
   );
@@ -660,9 +639,7 @@ function Sparkline({
 }) {
   const pts = values.filter((v): v is number => v != null);
   if (pts.length < 1) {
-    return (
-      <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">—</span>
-    );
+    return <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">—</span>;
   }
   const min = Math.min(...pts, lowBand ?? Infinity);
   const max = Math.max(...pts, highBand ?? -Infinity);
@@ -670,8 +647,7 @@ function Sparkline({
   const pad = 4;
   const w = width - pad * 2;
   const h = height - pad * 2;
-  const x = (i: number) =>
-    pad + (values.length === 1 ? w / 2 : (i / (values.length - 1)) * w);
+  const x = (i: number) => pad + (values.length === 1 ? w / 2 : (i / (values.length - 1)) * w);
   const y = (v: number) => pad + h - ((v - min) / span) * h;
   const polyPts = values
     .map((v, i) => (v == null ? null : `${x(i)},${y(v)}`))
@@ -681,13 +657,7 @@ function Sparkline({
   const bandY0 = highBand != null ? y(highBand) : null;
   const bandY1 = lowBand != null ? y(lowBand) : null;
   return (
-    <svg
-      width={width}
-      height={height}
-      className="block"
-      role="img"
-      aria-label="trend"
-    >
+    <svg width={width} height={height} className="block" role="img" aria-label="trend">
       {bandY0 != null && bandY1 != null && (
         <rect
           x={0}
@@ -708,8 +678,7 @@ function Sparkline({
       />
       {values.map((v, i) => {
         if (v == null) return null;
-        const abnormal =
-          (lowBand != null && v < lowBand) || (highBand != null && v > highBand);
+        const abnormal = (lowBand != null && v < lowBand) || (highBand != null && v > highBand);
         return (
           <circle
             key={i}
@@ -758,8 +727,7 @@ function TrendRow({
       ? 'normal'
       : severity
         ? severity(current)
-        : (lowBand != null && current < lowBand) ||
-            (highBand != null && current > highBand)
+        : (lowBand != null && current < lowBand) || (highBand != null && current > highBand)
           ? 'abnormal'
           : 'normal';
   const c = color ?? 'var(--accent-navy)';
@@ -771,10 +739,8 @@ function TrendRow({
         ? 'var(--risk-medium)'
         : 'var(--primary-teal)';
   const valueBg = sevBg(sev);
-  const valueColor =
-    current == null ? 'var(--ink-navy-muted)' : sevColor(sev);
-  const valueBorder =
-    sev === 'normal' ? 'transparent' : sevColor(sev);
+  const valueColor = current == null ? 'var(--ink-navy-muted)' : sevColor(sev);
+  const valueBorder = sev === 'normal' ? 'transparent' : sevColor(sev);
   return (
     <div
       className="grid items-center gap-2 border-b px-3 py-1.5"
@@ -805,10 +771,7 @@ function TrendRow({
           </span>
         )}
         {sev === 'abnormal' && (
-          <AlertTriangle
-            className="ml-0.5 h-3 w-3"
-            style={{ color: 'var(--risk-high)' }}
-          />
+          <AlertTriangle className="ml-0.5 h-3 w-3" style={{ color: 'var(--risk-high)' }} />
         )}
       </div>
       <div
@@ -820,39 +783,10 @@ function TrendRow({
           : '—'}
       </div>
       <div>
-        <Sparkline
-          values={values}
-          lowBand={lowBand}
-          highBand={highBand}
-          color={c}
-        />
+        <Sparkline values={values} lowBand={lowBand} highBand={highBand} color={c} />
       </div>
     </div>
   );
-}
-
-// Compute the next WHO contact-week that hasn't been attended, together
-// with whether it's overdue / due-now / upcoming.
-function nextContactDue(
-  currentGa: number | null,
-  attendedWeeks: number[],
-): { ga: number; status: 'overdue' | 'due-now' | 'upcoming'; weeksAway: number } | null {
-  if (currentGa == null) return null;
-  for (const w of WHO_CONTACT_WEEKS) {
-    const attended = attendedWeeks.some(
-      (v) => Math.abs(v - w) <= WHO_CONTACT_WINDOW_W,
-    );
-    if (attended) continue;
-    const diff = w - currentGa;
-    if (diff < -WHO_CONTACT_WINDOW_W) {
-      return { ga: w, status: 'overdue', weeksAway: diff };
-    }
-    if (Math.abs(diff) <= WHO_CONTACT_WINDOW_W) {
-      return { ga: w, status: 'due-now', weeksAway: diff };
-    }
-    return { ga: w, status: 'upcoming', weeksAway: diff };
-  }
-  return null;
 }
 
 /** GA progress bar with WHO 8-contact schedule overlay. */
@@ -899,9 +833,12 @@ function GaProgressBar({
             <span
               className="font-semibold tabular-nums"
               style={{
-                color: attendedCount >= 6 ? 'var(--risk-low)'
-                  : attendedCount >= 3 ? 'var(--accent-navy)'
-                  : 'var(--risk-medium)',
+                color:
+                  attendedCount >= 6
+                    ? 'var(--risk-low)'
+                    : attendedCount >= 3
+                      ? 'var(--accent-navy)'
+                      : 'var(--risk-medium)',
               }}
             >
               {attendedCount}
@@ -919,11 +856,7 @@ function GaProgressBar({
           const hit = attendedWeeks.some((v) => Math.abs(v - week) <= WHO_CONTACT_WINDOW_W);
           const passed = ga >= week;
           const missed = passed && !hit;
-          const fill = hit
-            ? 'var(--risk-low)'
-            : missed
-              ? 'var(--risk-high)'
-              : '#ffffff';
+          const fill = hit ? 'var(--risk-low)' : missed ? 'var(--risk-high)' : '#ffffff';
           const border = hit
             ? 'var(--risk-low)'
             : missed
@@ -966,11 +899,7 @@ function GaProgressBar({
 
 // ─── Page ─────────────────────────────────────────────────────────────────
 
-export default function JourneyDetailPage({
-  params,
-}: {
-  params: Promise<{ journeyId: string }>;
-}) {
+export default function JourneyDetailPage({ params }: { params: Promise<{ journeyId: string }> }) {
   const { journeyId } = use(params);
   const router = useRouter();
 
@@ -978,10 +907,17 @@ export default function JourneyDetailPage({
   // throws FetchError on non-2xx so `error` actually populates. The page
   // previously defined a local fetcher that swallowed errors, causing every
   // 404/500 to render the generic "ไม่พบข้อมูลการฝากครรภ์" empty state.
-  const { data, error, isLoading } = useSWR<JourneyDetailResponse>(
+  const { data, error, isLoading, mutate } = useSWR<JourneyDetailResponse>(
     `/api/journeys/${journeyId}`,
-    { refreshInterval: 60000 },
+    { refreshInterval: REFRESH_INTERVAL_MS },
   );
+
+  // Live updates: a webhook/sync touching this patient refreshes the page
+  // immediately instead of waiting for the poll. Matches the ANC list page.
+  const refresh = useCallback(() => {
+    void mutate();
+  }, [mutate]);
+  useSSE({ onPatientUpdate: refresh, onSyncComplete: refresh });
 
   const journeyName = data?.journey?.name ?? 'Journey';
   useSetBreadcrumbs([
@@ -1022,17 +958,12 @@ export default function JourneyDetailPage({
     const firstVisitGa = visitsChrono.find((v) => v.gaWeeks != null)?.gaWeeks ?? null;
     // RTCOG OB 66-029 (2566) recommends first ANC contact < 10w. Tightened
     // from 12w (WHO threshold) because Thai guideline is stricter.
-    const lateFirstContact = firstVisitGa != null && firstVisitGa >= 10;
+    const lateFirstContact = isLateFirstContact(firstVisitGa);
 
-    // Pre-pregnancy BMI — only when we have both height (labor record) and the
-    // earliest visit weight. Clinical BMI = kg / (m*m).
-    let bmi: number | null = null;
+    // Pre-pregnancy BMI — from labor-record height and the earliest visit weight.
     const heightCm = j.heightCm;
     const firstWeight = visitsChrono.find((v) => v.weightKg != null)?.weightKg ?? null;
-    if (heightCm && heightCm > 100 && firstWeight && firstWeight > 0) {
-      const m = heightCm / 100;
-      bmi = Math.round((firstWeight / (m * m)) * 10) / 10;
-    }
+    const bmi = prePregnancyBmi(heightCm, firstWeight);
 
     // Lab flags present in the latest risk screen.
     const ruleIds = data.latestRisk?.triggeredRules ?? [];
@@ -1057,58 +988,22 @@ export default function JourneyDetailPage({
 
     const next = nextContactDue(j.gaWeeks, attendedWeeks);
 
-    // RTCOG OB 66-029 (2566) — investigation-overdue checks. Each fires when
-    // the clinical window has passed without the corresponding result.
-    const ga = j.gaWeeks ?? 0;
-    const overdue: Array<{ key: string; labelTh: string; dueBy: string; severity: 'warn' | 'high' }> = [];
-    if (ga > 22 && !j.anatomyScanDate) {
-      overdue.push({
-        key: 'anatomy_scan',
-        labelTh: 'Anatomy scan (18-22 สัปดาห์)',
-        dueBy: '22w',
-        severity: 'warn',
-      });
-    }
-    if (ga > 30 && (j.ogttResult == null || j.ogttResult === 'PENDING')) {
-      overdue.push({
-        key: 'ogtt',
-        labelTh: 'OGTT (24-28 สัปดาห์)',
-        dueBy: '28w',
-        severity: 'high',
-      });
-    }
-    if (ga >= 37 && (!j.gbsResult || j.gbsResult === 'PENDING')) {
-      overdue.push({
-        key: 'gbs',
-        labelTh: 'GBS culture (35-37 สัปดาห์)',
-        dueBy: '37w',
-        severity: 'high',
-      });
-    }
     // Tdap this pregnancy — scan all visits' vaccinesGiven.
-    const tdapGiven = visitsChrono.some(
-      (v) => (v.vaccinesGiven ?? []).some((vx) => vx.type === 'TDAP'),
+    const tdapGiven = visitsChrono.some((v) =>
+      (v.vaccinesGiven ?? []).some((vx) => vx.type === 'TDAP'),
     );
-    if (ga >= 36 && !tdapGiven) {
-      overdue.push({
-        key: 'tdap',
-        labelTh: 'Tdap (27-36 สัปดาห์)',
-        dueBy: '36w',
-        severity: 'high',
-      });
-    }
-    // Thalassemia screening — once per woman. If any of the three fields is
-    // still null by GA 16, flag it.
-    const thalassemiaDone =
-      j.mcvFl != null || j.dcipResult != null || j.hbEResult != null;
-    if (ga > 16 && !thalassemiaDone) {
-      overdue.push({
-        key: 'thalassemia',
-        labelTh: 'Thalassemia screen (1st visit)',
-        dueBy: '16w',
-        severity: 'warn',
-      });
-    }
+    // RTCOG OB 66-029 (2566) — investigation-overdue checks (centralized in
+    // src/services/anc-clinical.ts).
+    const overdue = overdueInvestigations({
+      gaWeeks: j.gaWeeks,
+      anatomyScanDate: j.anatomyScanDate,
+      ogttResult: j.ogttResult,
+      gbsResult: j.gbsResult,
+      tdapGiven,
+      mcvFl: j.mcvFl,
+      dcipResult: j.dcipResult,
+      hbEResult: j.hbEResult,
+    });
 
     // Iron contraindication — RTCOG: Hb H / β-thal major / β-thal-HbE should
     // NOT receive iron supplementation (iron-overload risk).
@@ -1123,19 +1018,16 @@ export default function JourneyDetailPage({
 
     // Immunization flags — most recent status per type, across all visits.
     const immunization = {
-      tdap: visitsChrono.flatMap((v) =>
-        (v.vaccinesGiven ?? []).filter((x) => x.type === 'TDAP'),
-      ),
+      tdap: visitsChrono.flatMap((v) => (v.vaccinesGiven ?? []).filter((x) => x.type === 'TDAP')),
       influenza: visitsChrono.flatMap((v) =>
         (v.vaccinesGiven ?? []).filter((x) => x.type === 'INFLUENZA'),
       ),
-      covid: visitsChrono.flatMap((v) =>
-        (v.vaccinesGiven ?? []).filter((x) => x.type === 'COVID'),
-      ),
-      ttDoseNo: visitsChrono
-        .map((v) => v.ttDoseNo)
-        .filter((n): n is number => n != null)
-        .pop() ?? null,
+      covid: visitsChrono.flatMap((v) => (v.vaccinesGiven ?? []).filter((x) => x.type === 'COVID')),
+      ttDoseNo:
+        visitsChrono
+          .map((v) => v.ttDoseNo)
+          .filter((n): n is number => n != null)
+          .pop() ?? null,
     };
 
     return {
@@ -1149,7 +1041,12 @@ export default function JourneyDetailPage({
       bmi,
       heightCm,
       labFlags,
-      bpSys, bpDia, weight, hb, fh, fhr,
+      bpSys,
+      bpDia,
+      weight,
+      hb,
+      fh,
+      fhr,
       next,
       overdue,
       ironContra,
@@ -1170,12 +1067,8 @@ export default function JourneyDetailPage({
       error && typeof error === 'object' && 'status' in error
         ? (error as { status: number }).status
         : null;
-    const apiMessage =
-      error instanceof Error
-        ? error.message
-        : 'ไม่พบข้อมูลการฝากครรภ์';
-    const heading =
-      status === 404 ? 'ไม่พบข้อมูลการฝากครรภ์' : 'เกิดข้อผิดพลาด';
+    const apiMessage = error instanceof Error ? error.message : 'ไม่พบข้อมูลการฝากครรภ์';
+    const heading = status === 404 ? 'ไม่พบข้อมูลการฝากครรภ์' : 'เกิดข้อผิดพลาด';
     const Icon = status === 404 ? Baby : AlertTriangle;
     return (
       <div
@@ -1183,13 +1076,9 @@ export default function JourneyDetailPage({
         style={{ background: 'var(--surface-cool)', minHeight: '100%' }}
       >
         <Icon className="h-10 w-10 text-[var(--ink-navy-muted)] opacity-50" />
-        <p className="font-mono text-[12px] text-[var(--ink-navy-muted)]">
-          {heading}
-        </p>
+        <p className="font-mono text-[12px] text-[var(--ink-navy-muted)]">{heading}</p>
         {error ? (
-          <p className="max-w-md text-center font-mono text-[11px] text-red-600">
-            {apiMessage}
-          </p>
+          <p className="max-w-md text-center font-mono text-[11px] text-red-600">{apiMessage}</p>
         ) : null}
         <button
           onClick={() => router.back()}
@@ -1205,7 +1094,7 @@ export default function JourneyDetailPage({
   const { journey, ancVisits, latestRisk, referrals, newborns } = data;
   const riskColor = ANC_RISK_COLOR[journey.ancRiskLevel ?? ''] ?? 'var(--ink-navy-muted)';
   const riskLabel = journey.ancRiskLevel
-    ? ANC_RISK_LABEL_TH[journey.ancRiskLevel] ?? journey.ancRiskLevel
+    ? (ANC_RISK_LABEL_TH[journey.ancRiskLevel] ?? journey.ancRiskLevel)
     : null;
   const stageColor = STAGE_COLOR[journey.careStage] ?? 'var(--ink-navy-muted)';
   const stageLabel = STAGE_LABEL_TH[journey.careStage] ?? journey.careStage;
@@ -1247,8 +1136,7 @@ export default function JourneyDetailPage({
         className="px-5 py-3"
         style={{
           borderBottom: '1px solid var(--rule-strong)',
-          background:
-            'linear-gradient(90deg, var(--accent-navy-soft) 0%, #f4f6fb 70%, white 100%)',
+          background: 'linear-gradient(90deg, var(--accent-navy-soft) 0%, #f4f6fb 70%, white 100%)',
         }}
       >
         <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--accent-navy)]">
@@ -1277,19 +1165,44 @@ export default function JourneyDetailPage({
               <span className="font-mono tracking-[0.05em]">
                 G<span className="font-semibold text-[var(--ink-navy)]">{journey.gravida}</span>
                 {journey.termBirths != null && (
-                  <>·T<span className="font-semibold text-[var(--ink-navy)]">{journey.termBirths}</span></>
+                  <>
+                    ·T
+                    <span className="font-semibold text-[var(--ink-navy)]">
+                      {journey.termBirths}
+                    </span>
+                  </>
                 )}
                 {journey.pretermBirths != null && (
-                  <>·P<span className="font-semibold text-[var(--ink-navy)]">{journey.pretermBirths}</span></>
+                  <>
+                    ·P
+                    <span className="font-semibold text-[var(--ink-navy)]">
+                      {journey.pretermBirths}
+                    </span>
+                  </>
                 )}
                 {journey.abortions != null && (
-                  <>·A<span className="font-semibold text-[var(--ink-navy)]">{journey.abortions}</span></>
+                  <>
+                    ·A
+                    <span className="font-semibold text-[var(--ink-navy)]">
+                      {journey.abortions}
+                    </span>
+                  </>
                 )}
                 {journey.livingChildren != null && (
-                  <>·L<span className="font-semibold text-[var(--ink-navy)]">{journey.livingChildren}</span></>
+                  <>
+                    ·L
+                    <span className="font-semibold text-[var(--ink-navy)]">
+                      {journey.livingChildren}
+                    </span>
+                  </>
                 )}
                 {journey.termBirths == null && journey.pretermBirths == null && (
-                  <>·P<span className="font-semibold text-[var(--ink-navy)]">{journey.para ?? '?'}</span></>
+                  <>
+                    ·P
+                    <span className="font-semibold text-[var(--ink-navy)]">
+                      {journey.para ?? '?'}
+                    </span>
+                  </>
                 )}
               </span>
             )}
@@ -1425,11 +1338,7 @@ export default function JourneyDetailPage({
         />
         <MetricTile
           label="NEXT DUE"
-          value={
-            derived?.next
-              ? `${derived.next.ga}w`
-              : 'ครบกำหนด'
-          }
+          value={derived?.next ? `${derived.next.ga}w` : 'ครบกำหนด'}
           sub={
             derived?.next
               ? derived.next.status === 'overdue'
@@ -1452,14 +1361,8 @@ export default function JourneyDetailPage({
       </div>
 
       {/* ─── WHO 8-contact progress ─── */}
-      <div
-        className="bg-white px-5 py-3"
-        style={{ borderBottom: '1px solid var(--rule-strong)' }}
-      >
-        <GaProgressBar
-          gaWeeks={journey.gaWeeks}
-          attendedWeeks={derived?.attendedWeeks ?? []}
-        />
+      <div className="bg-white px-5 py-3" style={{ borderBottom: '1px solid var(--rule-strong)' }}>
+        <GaProgressBar gaWeeks={journey.gaWeeks} attendedWeeks={derived?.attendedWeeks ?? []} />
       </div>
 
       {/* ═══ 2-col main ═══ */}
@@ -1469,7 +1372,6 @@ export default function JourneyDetailPage({
       >
         {/* ─── LEFT: timeline + trends + labs ─── */}
         <div className="min-w-0 border-r border-[var(--rule-strong)] bg-white p-5 space-y-6">
-
           {/* 01 — Vital trends (new) */}
           <section>
             <SectionLabel
@@ -1478,10 +1380,7 @@ export default function JourneyDetailPage({
             >
               Vital trends
             </SectionLabel>
-            <div
-              className="mt-2 border bg-white"
-              style={{ borderColor: 'var(--rule-strong)' }}
-            >
+            <div className="mt-2 border bg-white" style={{ borderColor: 'var(--rule-strong)' }}>
               {(derived?.visitsChrono.length ?? 0) === 0 ? (
                 <div className="px-4 py-8 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]">
                   ยังไม่มีข้อมูลเพียงพอสำหรับแสดงแนวโน้ม
@@ -1509,11 +1408,7 @@ export default function JourneyDetailPage({
                     highBand={BP_SYS_HIGH}
                     color="var(--risk-medium)"
                     severity={(v) =>
-                      v >= BP_SYS_HIGH
-                        ? 'abnormal'
-                        : v >= BP_SYS_AMBER
-                          ? 'borderline'
-                          : 'normal'
+                      v >= BP_SYS_HIGH ? 'abnormal' : v >= BP_SYS_AMBER ? 'borderline' : 'normal'
                     }
                   />
                   <TrendRow
@@ -1523,11 +1418,7 @@ export default function JourneyDetailPage({
                     highBand={BP_DIA_HIGH}
                     color="var(--risk-medium)"
                     severity={(v) =>
-                      v >= BP_DIA_HIGH
-                        ? 'abnormal'
-                        : v >= BP_DIA_AMBER
-                          ? 'borderline'
-                          : 'normal'
+                      v >= BP_DIA_HIGH ? 'abnormal' : v >= BP_DIA_AMBER ? 'borderline' : 'normal'
                     }
                   />
                   <TrendRow
@@ -1571,7 +1462,11 @@ export default function JourneyDetailPage({
           <section>
             <SectionLabel
               idx={2}
-              right={<span>{ancVisits.length} VISIT{ancVisits.length === 1 ? '' : 'S'}</span>}
+              right={
+                <span>
+                  {ancVisits.length} VISIT{ancVisits.length === 1 ? '' : 'S'}
+                </span>
+              }
             >
               ANC visit timeline
             </SectionLabel>
@@ -1614,9 +1509,7 @@ export default function JourneyDetailPage({
                   </div>
                   {derived!.visitsChrono.map((v, idx, arr) => {
                     const prev = idx > 0 ? arr[idx - 1] : null;
-                    const gap = prev
-                      ? daysBetween(prev.visitDate, v.visitDate)
-                      : null;
+                    const gap = prev ? daysBetween(prev.visitDate, v.visitDate) : null;
                     const bpSev = sevBp(v.bpSystolic, v.bpDiastolic);
                     const fhrSev = sevFhr(v.fetalHr);
                     const hbSev = sevHb(v.hbGDl);
@@ -1628,8 +1521,15 @@ export default function JourneyDetailPage({
                     const preeclampsiaSuspect = bpHigh && proteinuria;
                     const reducedFm = v.fetalMovementOk === false;
                     const dangers = v.dangerSigns ?? [];
-                    const anyFlag = bpSev !== 'normal' || fhrSev !== 'normal' || proteinuria || glucosuria ||
-                      anemia || preeclampsiaSuspect || reducedFm || dangers.length > 0;
+                    const anyFlag =
+                      bpSev !== 'normal' ||
+                      fhrSev !== 'normal' ||
+                      proteinuria ||
+                      glucosuria ||
+                      anemia ||
+                      preeclampsiaSuspect ||
+                      reducedFm ||
+                      dangers.length > 0;
                     return (
                       <div
                         // Composite key: HOSxP can store duplicate visit_number
@@ -1676,12 +1576,8 @@ export default function JourneyDetailPage({
                             <span className="text-[10px] text-[var(--ink-navy-muted)]">w</span>
                           )}
                         </div>
-                        <div className="font-mono tabular-nums">
-                          {v.fundalHeightCm ?? '—'}
-                        </div>
-                        <div className="font-mono tabular-nums">
-                          {v.weightKg ?? '—'}
-                        </div>
+                        <div className="font-mono tabular-nums">{v.fundalHeightCm ?? '—'}</div>
+                        <div className="font-mono tabular-nums">{v.weightKg ?? '—'}</div>
                         <div
                           className={cn(
                             'inline-flex items-center justify-start rounded-sm px-1.5 font-mono tabular-nums',
@@ -1712,7 +1608,8 @@ export default function JourneyDetailPage({
                           className="font-mono text-[11px] tracking-[0.04em]"
                           style={{
                             color:
-                              v.presentation && /BR|B|BREECH|ก้น|TR|T|OBL|ขวาง/i.test(v.presentation)
+                              v.presentation &&
+                              /BR|B|BREECH|ก้น|TR|T|OBL|ขวาง/i.test(v.presentation)
                                 ? 'var(--risk-medium)'
                                 : undefined,
                           }}
@@ -1757,11 +1654,12 @@ export default function JourneyDetailPage({
                             <VisitChip label={`PROT ${v.urineProtein}`} color="var(--risk-high)" />
                           )}
                           {glucosuria && (
-                            <VisitChip label={`GLUC ${v.urineGlucose}`} color="var(--risk-medium)" />
+                            <VisitChip
+                              label={`GLUC ${v.urineGlucose}`}
+                              color="var(--risk-medium)"
+                            />
                           )}
-                          {reducedFm && (
-                            <VisitChip label="FM↓" color="var(--risk-high)" />
-                          )}
+                          {reducedFm && <VisitChip label="FM↓" color="var(--risk-high)" />}
                           {dangers.map((d) => (
                             <VisitChip key={d} label={dangerLabel(d)} color="var(--risk-high)" />
                           ))}
@@ -1771,9 +1669,7 @@ export default function JourneyDetailPage({
                           {v.ironFolicGiven && (
                             <VisitChip label="Fe+FA" color="var(--ink-navy-muted)" />
                           )}
-                          {v.calciumGiven && (
-                            <VisitChip label="Ca" color="var(--ink-navy-muted)" />
-                          )}
+                          {v.calciumGiven && <VisitChip label="Ca" color="var(--ink-navy-muted)" />}
                           {!anyFlag && (
                             <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--risk-low)]">
                               <CheckCircle2 className="h-2.5 w-2.5" /> OK
@@ -1828,7 +1724,8 @@ export default function JourneyDetailPage({
                     ห้ามให้ iron supplement
                   </div>
                   <div className="text-[12px] leading-snug text-[var(--ink-navy-dim)]">
-                    ผู้ป่วยมี <b>{derived.ironContra}</b> — ต้องงดธาตุเหล็ก (RTCOG OB 66-029 เนื่องจากภาวะ iron overload)
+                    ผู้ป่วยมี <b>{derived.ironContra}</b> — ต้องงดธาตุเหล็ก (RTCOG OB 66-029
+                    เนื่องจากภาวะ iron overload)
                   </div>
                 </div>
               </div>
@@ -1919,11 +1816,7 @@ export default function JourneyDetailPage({
                   label="MCV (fL)"
                   value={journey.mcvFl != null ? String(journey.mcvFl) : null}
                   status={
-                    journey.mcvFl == null
-                      ? 'missing'
-                      : journey.mcvFl < 80
-                        ? 'abnormal'
-                        : 'normal'
+                    journey.mcvFl == null ? 'missing' : journey.mcvFl < 80 ? 'abnormal' : 'normal'
                   }
                 />
                 <LabTile
@@ -1951,15 +1844,12 @@ export default function JourneyDetailPage({
                 <LabTile
                   label="THAL TYPE"
                   value={
-                    journey.thalassemiaType
-                      ? journey.thalassemiaType.replace(/_/g, ' ')
-                      : null
+                    journey.thalassemiaType ? journey.thalassemiaType.replace(/_/g, ' ') : null
                   }
                   status={
                     !journey.thalassemiaType
                       ? 'missing'
-                      : journey.thalassemiaType === 'NORMAL' ||
-                          journey.thalassemiaType === 'TRAIT'
+                      : journey.thalassemiaType === 'NORMAL' || journey.thalassemiaType === 'TRAIT'
                         ? 'normal'
                         : 'abnormal'
                   }
@@ -2085,10 +1975,7 @@ export default function JourneyDetailPage({
 
           {/* 05 — Ultrasound timeline (T1 dating, T2 anatomy, T3 wellbeing) */}
           <section>
-            <SectionLabel
-              idx={5}
-              right={<span>T1 DATING · T2 ANATOMY · T3 WELLBEING</span>}
-            >
+            <SectionLabel idx={5} right={<span>T1 DATING · T2 ANATOMY · T3 WELLBEING</span>}>
               Ultrasound &amp; fetal wellbeing
             </SectionLabel>
             <div
@@ -2105,16 +1992,13 @@ export default function JourneyDetailPage({
                 </div>
                 <div className="text-[12px] text-[var(--ink-navy)]">
                   {journey.datingMethod ? (
-                    <span className="font-semibold">
-                      {journey.datingMethod}
-                    </span>
+                    <span className="font-semibold">{journey.datingMethod}</span>
                   ) : (
                     <span className="text-[var(--ink-navy-muted)]">— ไม่ระบุวิธี —</span>
                   )}
                 </div>
                 <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
-                  LMP {formatThaiShort(journey.lmp)} · EDC{' '}
-                  {formatThaiShort(journey.edc)}
+                  LMP {formatThaiShort(journey.lmp)} · EDC {formatThaiShort(journey.edc)}
                 </div>
               </div>
 
@@ -2149,14 +2033,10 @@ export default function JourneyDetailPage({
                     className="text-[12px]"
                     style={{
                       color:
-                        (journey.gaWeeks ?? 0) > 22
-                          ? 'var(--risk-high)'
-                          : 'var(--ink-navy-muted)',
+                        (journey.gaWeeks ?? 0) > 22 ? 'var(--risk-high)' : 'var(--ink-navy-muted)',
                     }}
                   >
-                    {(journey.gaWeeks ?? 0) > 22
-                      ? 'OVERDUE — ยังไม่มีผล'
-                      : 'ยังไม่ถึงกำหนด'}
+                    {(journey.gaWeeks ?? 0) > 22 ? 'OVERDUE — ยังไม่มีผล' : 'ยังไม่ถึงกำหนด'}
                   </div>
                 )}
               </div>
@@ -2203,10 +2083,7 @@ export default function JourneyDetailPage({
                         <span
                           className="font-mono"
                           style={{
-                            color:
-                              latestT3.bppScore < 8
-                                ? 'var(--risk-high)'
-                                : 'var(--ink-navy)',
+                            color: latestT3.bppScore < 8 ? 'var(--risk-high)' : 'var(--ink-navy)',
                           }}
                         >
                           BPP: <b>{latestT3.bppScore}/10</b>
@@ -2237,7 +2114,11 @@ export default function JourneyDetailPage({
             <section>
               <SectionLabel
                 idx={4}
-                right={<span>{newborns.length} INFANT{newborns.length === 1 ? '' : 'S'}</span>}
+                right={
+                  <span>
+                    {newborns.length} INFANT{newborns.length === 1 ? '' : 'S'}
+                  </span>
+                }
               >
                 Newborn outcomes
               </SectionLabel>
@@ -2348,21 +2229,23 @@ export default function JourneyDetailPage({
                   <div className="mt-2 flex items-center gap-2">
                     <Pill
                       label={latestRisk.riskLevel}
-                      color={
-                        ANC_RISK_COLOR[latestRisk.riskLevel] ?? 'var(--ink-navy-muted)'
-                      }
+                      color={ANC_RISK_COLOR[latestRisk.riskLevel] ?? 'var(--ink-navy-muted)'}
                     />
                     <span className="text-[12px] text-[var(--ink-navy-dim)]">
-                      {ANC_RISK_LABEL_TH[latestRisk.riskLevel] ??
-                        latestRisk.riskLevel}
+                      {ANC_RISK_LABEL_TH[latestRisk.riskLevel] ?? latestRisk.riskLevel}
                     </span>
                   </div>
                   <div className="mt-1 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
                     SCREENED {formatThai(latestRisk.screenedAt)}
                   </div>
                   {latestRisk.recommendedFacility && (
-                    <div className="mt-2 rounded-sm border p-2 text-[12px]"
-                         style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-sunken)' }}>
+                    <div
+                      className="mt-2 rounded-sm border p-2 text-[12px]"
+                      style={{
+                        borderColor: 'var(--rule-strong)',
+                        background: 'var(--surface-sunken)',
+                      }}
+                    >
                       <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
                         แนะนำส่งต่อ ·{' '}
                       </span>
@@ -2466,10 +2349,15 @@ export default function JourneyDetailPage({
                       WHO CONTACT
                     </span>
                   </div>
-                  <div className="mt-1 text-[12px]"
-                       style={{
-                         color: derived.next.status === 'overdue' ? 'var(--risk-high)' : 'var(--ink-navy-dim)',
-                       }}>
+                  <div
+                    className="mt-1 text-[12px]"
+                    style={{
+                      color:
+                        derived.next.status === 'overdue'
+                          ? 'var(--risk-high)'
+                          : 'var(--ink-navy-dim)',
+                    }}
+                  >
                     {derived.next.status === 'overdue'
                       ? `เลยกำหนด ${Math.abs(derived.next.weeksAway)} สัปดาห์ — ควรติดตามด่วน`
                       : derived.next.status === 'due-now'
@@ -2500,10 +2388,7 @@ export default function JourneyDetailPage({
                         key={o.key}
                         className="flex items-start gap-1.5 text-[11px]"
                         style={{
-                          color:
-                            o.severity === 'high'
-                              ? 'var(--risk-high)'
-                              : 'var(--risk-medium)',
+                          color: o.severity === 'high' ? 'var(--risk-high)' : 'var(--risk-medium)',
                         }}
                       >
                         <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -2526,9 +2411,7 @@ export default function JourneyDetailPage({
               style={{
                 borderBottom: '1px solid var(--rule-strong)',
                 borderLeft: `3px solid ${isReferred ? 'var(--risk-medium)' : 'var(--accent-navy)'}`,
-                background: isReferred
-                  ? 'rgba(234, 179, 8, 0.04)'
-                  : 'white',
+                background: isReferred ? 'rgba(234, 179, 8, 0.04)' : 'white',
               }}
             >
               <div className="flex items-baseline gap-2">
@@ -2615,7 +2498,8 @@ export default function JourneyDetailPage({
                 <span
                   className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 font-mono text-[10px] font-bold tabular-nums"
                   style={{
-                    background: referrals.length > 0 ? 'var(--accent-navy-soft)' : 'var(--surface-sunken)',
+                    background:
+                      referrals.length > 0 ? 'var(--accent-navy-soft)' : 'var(--surface-sunken)',
                     color: 'var(--ink-navy)',
                   }}
                 >
@@ -2653,9 +2537,7 @@ export default function JourneyDetailPage({
                           {ref.urgencyLevel && (
                             <Pill
                               label={ref.urgencyLevel}
-                              color={
-                                isUrgent ? 'var(--risk-high)' : 'var(--ink-navy-muted)'
-                              }
+                              color={isUrgent ? 'var(--risk-high)' : 'var(--ink-navy-muted)'}
                             />
                           )}
                         </div>
@@ -2692,9 +2574,7 @@ export default function JourneyDetailPage({
             {/* Tiny id footer */}
             <div className="px-4 py-2 font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
               JOURNEY ID{' '}
-              <span className="font-semibold text-[var(--ink-navy)]">
-                {journey.id.slice(0, 8)}
-              </span>
+              <span className="font-semibold text-[var(--ink-navy)]">{journey.id.slice(0, 8)}</span>
             </div>
           </div>
         </aside>
@@ -2747,7 +2627,7 @@ export default function JourneyDetailPage({
           JOURNEY ID{' '}
           <span className="font-semibold text-[var(--ink-navy)]">{journey.id.slice(0, 8)}</span>
         </span>
-        <span>REFRESHING EVERY 60s</span>
+        <span>REFRESHING EVERY {REFRESH_INTERVAL_MS / 1000}s</span>
       </div>
     </div>
   );

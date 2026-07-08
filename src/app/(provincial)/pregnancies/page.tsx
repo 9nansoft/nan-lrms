@@ -3,7 +3,7 @@
 // labels, mono tabular numerics, dense rows, Sarabun for Thai names.
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { useSSE } from '@/hooks/useSSE';
@@ -51,66 +51,53 @@ const RISK_OPTIONS: Array<{ value: '' | AncRisk; label: string }> = [
   { value: 'HR3', label: 'HR3 — ความเสี่ยงสูง' },
 ];
 
-interface RiskCounts {
-  low: number;
-  hr1: number;
-  hr2: number;
-  hr3: number;
-  total: number;
-}
-
 export default function PregnanciesPage() {
-  useSetBreadcrumbs([
-    { label: 'แดชบอร์ด', href: '/' },
-    { label: 'ฝากครรภ์' },
-  ]);
+  useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ฝากครรภ์' }]);
 
   const [page, setPage] = useState(1);
   const [riskFilter, setRiskFilter] = useState<'' | AncRisk>('');
   const [search, setSearch] = useState('');
+  // Debounced term actually sent to the server. Kept separate from `search`
+  // (the raw input) so keystrokes don't fire a request each; the server does a
+  // case-insensitive HN-prefix OR decrypted-name-contains match on ?q=.
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setDebouncedQuery(search.trim());
+      setPage(1); // a new search always restarts at the first page
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [search]);
 
   const queryParams = useMemo(() => {
     const p = new URLSearchParams({ stage: 'PREGNANCY', page: String(page), per_page: '20' });
     if (riskFilter) p.set('risk_level', riskFilter);
+    if (debouncedQuery) p.set('q', debouncedQuery);
     return p.toString();
-  }, [page, riskFilter]);
+  }, [page, riskFilter, debouncedQuery]);
 
   const { data, isLoading, error, mutate } = useSWR<JourneyListResponse>(
     `/api/journeys?${queryParams}`,
-    { refreshInterval: 30000 },
+    // keepPreviousData: paging/searching swaps the key but should not flash the
+    // full-page loader — the previous rows stay until the next payload lands.
+    { refreshInterval: 30000, keepPreviousData: true },
   );
 
   // Real-time refresh on webhook/sync activity. Without this the table waits
   // up to 30s for the poll interval, which feels broken during simulation.
-  const refresh = useCallback(() => { void mutate(); }, [mutate]);
+  const refresh = useCallback(() => {
+    void mutate();
+  }, [mutate]);
   useSSE({ onPatientUpdate: refresh, onSyncComplete: refresh });
 
   const journeys = useMemo(() => data?.journeys ?? [], [data?.journeys]);
 
-  // Counts across the current page (pagination-bound; full-DB counts would
-  // need a dedicated aggregate endpoint — flagged for a follow-up).
-  const counts: RiskCounts = useMemo(() => {
-    const c = { low: 0, hr1: 0, hr2: 0, hr3: 0, total: 0 };
-    for (const j of journeys) {
-      c.total += 1;
-      if (j.ancRiskLevel === 'LOW') c.low += 1;
-      else if (j.ancRiskLevel === 'HR1') c.hr1 += 1;
-      else if (j.ancRiskLevel === 'HR2') c.hr2 += 1;
-      else if (j.ancRiskLevel === 'HR3') c.hr3 += 1;
-    }
-    return c;
-  }, [journeys]);
-
-  const filteredJourneys = useMemo(() => {
-    if (!search.trim()) return journeys;
-    const q = search.trim().toLowerCase();
-    return journeys.filter(
-      (j) =>
-        j.name.toLowerCase().includes(q) ||
-        j.hn.toLowerCase().includes(q) ||
-        j.hospitalName.toLowerCase().includes(q),
-    );
-  }, [journeys, search]);
+  // DB-wide risk breakdown over the stage+freshness set — independent of
+  // pagination, the risk filter, and the search. Supplied by GET /api/journeys
+  // as `counts`; null when the endpoint omits it, in which case the strip
+  // renders em-dashes rather than misleading page-bound figures.
+  const counts = data?.counts ?? null;
 
   if (isLoading) {
     return <LoadingState message="กำลังโหลดข้อมูลฝากครรภ์..." />;
@@ -123,7 +110,9 @@ export default function PregnanciesPage() {
         style={{ color: 'var(--ink-navy-muted)' }}
       >
         <Baby className="mb-3 h-10 w-10 opacity-40" />
-        <p className="font-mono text-[11px] text-red-600">เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่</p>
+        <p className="font-mono text-[11px] text-red-600">
+          เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่
+        </p>
       </div>
     );
   }
@@ -150,7 +139,10 @@ export default function PregnanciesPage() {
           <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
             PROVINCIAL REGISTRY · ANC
           </div>
-          <h1 className="mt-0.5 text-[22px] font-bold leading-tight tracking-tight" style={{ color: 'var(--ink-navy)' }}>
+          <h1
+            className="mt-0.5 text-[22px] font-bold leading-tight tracking-tight"
+            style={{ color: 'var(--ink-navy)' }}
+          >
             ฝากครรภ์ (ANC)
           </h1>
         </div>
@@ -163,7 +155,8 @@ export default function PregnanciesPage() {
         </p>
       </div>
 
-      {/* 01 — Page-level risk strip (bound to current page of results) */}
+      {/* 01 — Province-wide risk strip (DB-wide counts, independent of paging,
+          the risk filter, and the search) */}
       <div
         className="grid bg-white"
         style={{
@@ -173,32 +166,32 @@ export default function PregnanciesPage() {
       >
         <div className="border-r border-[var(--rule-strong)] px-5 py-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
-            ON THIS PAGE
+            PROVINCE-WIDE
           </div>
           <div className="mt-1.5 flex items-baseline gap-2.5">
             <div
               className="font-mono text-[36px] font-semibold leading-none tabular-nums"
               style={{ color: 'var(--ink-navy)', letterSpacing: '-0.02em' }}
             >
-              {counts.total}
+              {counts ? counts.total : '—'}
             </div>
             <div className="font-mono text-[11px] text-[var(--ink-navy-dim)]">หญิงตั้งครรภ์</div>
           </div>
           <div className="mt-2.5">
             <RiskBar
-              low={counts.low}
-              medium={counts.hr1 + counts.hr2}
-              high={counts.hr3}
+              low={counts?.low ?? 0}
+              medium={counts ? counts.hr1 + counts.hr2 : 0}
+              high={counts?.hr3 ?? 0}
               height={6}
             />
           </div>
         </div>
         {(
           [
-            { k: 'LOW', v: counts.low, color: 'var(--risk-low)' },
-            { k: 'HR1', v: counts.hr1, color: 'var(--risk-medium)' },
-            { k: 'HR2', v: counts.hr2, color: 'var(--risk-medium)' },
-            { k: 'HR3', v: counts.hr3, color: 'var(--risk-high)' },
+            { k: 'LOW', v: counts?.low, color: 'var(--risk-low)' },
+            { k: 'HR1', v: counts?.hr1, color: 'var(--risk-medium)' },
+            { k: 'HR2', v: counts?.hr2, color: 'var(--risk-medium)' },
+            { k: 'HR3', v: counts?.hr3, color: 'var(--risk-high)' },
           ] as const
         ).map((c) => (
           <div
@@ -214,7 +207,7 @@ export default function PregnanciesPage() {
                 className="font-mono text-2xl font-semibold leading-none tabular-nums"
                 style={{ color: 'var(--ink-navy)' }}
               >
-                {c.v}
+                {c.v ?? '—'}
               </div>
               <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
                 {RISK_LABEL_TH[c.k as AncRisk]}
@@ -305,7 +298,7 @@ export default function PregnanciesPage() {
             <div>HOSPITAL</div>
           </div>
 
-          {filteredJourneys.length === 0 ? (
+          {journeys.length === 0 ? (
             <div className="px-3 py-10 text-center">
               <Baby className="mx-auto mb-2 h-8 w-8 text-[var(--ink-navy-muted)] opacity-50" />
               <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
@@ -313,7 +306,7 @@ export default function PregnanciesPage() {
               </p>
             </div>
           ) : (
-            filteredJourneys.map((j) => (
+            journeys.map((j) => (
               <Link
                 key={j.id}
                 href={`/pregnancies/${j.id}`}
@@ -328,7 +321,9 @@ export default function PregnanciesPage() {
                   {j.hn}
                 </div>
                 <div className="min-w-0">
-                  <div className="truncate text-[13px] text-[var(--ink-navy)]">{maskName(j.name)}</div>
+                  <div className="truncate text-[13px] text-[var(--ink-navy)]">
+                    {maskName(j.name)}
+                  </div>
                 </div>
                 <div className="font-mono text-[12px] tabular-nums text-[var(--ink-navy-dim)]">
                   {j.age}
@@ -345,9 +340,7 @@ export default function PregnanciesPage() {
                 </div>
                 <div className="font-mono text-[12px] tabular-nums text-[var(--ink-navy-dim)]">
                   G{j.gravida}
-                  {j.para > 0 && (
-                    <span className="text-[var(--ink-navy-muted)]">P{j.para}</span>
-                  )}
+                  {j.para > 0 && <span className="text-[var(--ink-navy-muted)]">P{j.para}</span>}
                 </div>
                 <div>
                   <RiskChip level={j.ancRiskLevel} />
