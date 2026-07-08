@@ -6,17 +6,15 @@
 import useSWR from 'swr';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { SectionLabel } from '@/components/dashboard/shared';
 import { Baby, Weight, Activity, Scale } from 'lucide-react';
 import type { NewbornKPIsResponse } from '@/types/api';
 
 export default function OutcomesPage() {
-  useSetBreadcrumbs([
-    { label: 'แดชบอร์ด', href: '/' },
-    { label: 'ผลลัพธ์ทารก' },
-  ]);
+  useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ผลลัพธ์ทารก' }]);
 
-  const { data, isLoading, error } = useSWR<NewbornKPIsResponse>(
+  const { data, isLoading, error, mutate } = useSWR<NewbornKPIsResponse>(
     '/api/dashboard/outcomes',
     { refreshInterval: 60000 },
   );
@@ -27,19 +25,21 @@ export default function OutcomesPage() {
 
   if (error) {
     return (
-      <div
-        className="flex flex-col items-center justify-center py-16 text-center"
-        style={{ color: 'var(--ink-navy-muted)' }}
-      >
-        <Baby className="mb-3 h-10 w-10 opacity-40" />
-        <p className="font-mono text-[11px] text-red-600">
-          เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่
-        </p>
-      </div>
+      <ErrorState
+        message="เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่"
+        detail={error instanceof Error ? error.message : String(error)}
+        onRetry={() => mutate()}
+      />
     );
   }
 
-  const kpis = data ?? { totalBirths: 0, lbwCount: 0, lbwRate: 0, lowApgarCount: 0, avgBirthWeightG: 0 };
+  const kpis = data ?? {
+    totalBirths: 0,
+    lbwCount: 0,
+    lbwRate: 0,
+    lowApgarCount: 0,
+    avgBirthWeightG: 0,
+  };
 
   const tiles: Array<{
     key: string;
@@ -133,8 +133,7 @@ export default function OutcomesPage() {
               className="flex flex-col gap-2 px-5 py-4"
               style={{
                 borderLeft: `2px solid ${t.color}`,
-                borderRight:
-                  i < tiles.length - 1 ? '1px solid var(--rule-strong)' : undefined,
+                borderRight: i < tiles.length - 1 ? '1px solid var(--rule-strong)' : undefined,
               }}
             >
               <div className="flex items-center gap-2" style={{ color: t.color }}>

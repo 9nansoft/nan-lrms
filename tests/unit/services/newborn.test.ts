@@ -56,15 +56,25 @@ describe('Newborn Service', () => {
 
     it('updates existing record on second upsert', async () => {
       await upsertNewborn(db, {
-        journeyId: journeyId1, infantNumber: 1, sex: 'M',
-        birthWeightG: 3200, apgar1min: 8, apgar5min: 9,
-        resuscitation: {}, vaccinations: {},
+        journeyId: journeyId1,
+        infantNumber: 1,
+        sex: 'M',
+        birthWeightG: 3200,
+        apgar1min: 8,
+        apgar5min: 9,
+        resuscitation: {},
+        vaccinations: {},
         bornAt: '2026-03-08T10:30:00Z',
       });
       const updated = await upsertNewborn(db, {
-        journeyId: journeyId1, infantNumber: 1, sex: 'M',
-        birthWeightG: 3250, apgar1min: 9, apgar5min: 10,
-        resuscitation: {}, vaccinations: {},
+        journeyId: journeyId1,
+        infantNumber: 1,
+        sex: 'M',
+        birthWeightG: 3250,
+        apgar1min: 9,
+        apgar5min: 10,
+        resuscitation: {},
+        vaccinations: {},
         bornAt: '2026-03-08T10:30:00Z',
       });
       expect(updated.birthWeightG).toBe(3250);
@@ -82,15 +92,26 @@ describe('Newborn Service', () => {
   describe('getNewbornKPIs', () => {
     it('calculates LBW rate and Apgar stats', async () => {
       await upsertNewborn(db, {
-        journeyId: journeyId1, infantNumber: 1, sex: 'F',
-        birthWeightG: 2400, apgar1min: 6, apgar5min: 7,
-        resuscitation: {}, vaccinations: {},
+        journeyId: journeyId1,
+        infantNumber: 1,
+        sex: 'F',
+        birthWeightG: 2400,
+        apgar1min: 6,
+        // 5-min Apgar drives the low-Apgar KPI; keep this baby genuinely low at 5 min.
+        apgar5min: 6,
+        resuscitation: {},
+        vaccinations: {},
         bornAt: '2026-03-08T10:30:00Z',
       });
       await upsertNewborn(db, {
-        journeyId: journeyId2, infantNumber: 1, sex: 'M',
-        birthWeightG: 3500, apgar1min: 9, apgar5min: 10,
-        resuscitation: {}, vaccinations: {},
+        journeyId: journeyId2,
+        infantNumber: 1,
+        sex: 'M',
+        birthWeightG: 3500,
+        apgar1min: 9,
+        apgar5min: 10,
+        resuscitation: {},
+        vaccinations: {},
         bornAt: '2026-03-09T14:00:00Z',
       });
 
@@ -100,6 +121,39 @@ describe('Newborn Service', () => {
       expect(kpis.lbwRate).toBe(0.5);
       expect(kpis.lowApgarCount).toBe(1);
       expect(kpis.avgBirthWeightG).toBe(2950);
+    });
+
+    it('counts low Apgar from the 5-minute score, not the 1-minute score', async () => {
+      // The 5-minute Apgar is the standard neonatal predictor. Both babies
+      // below have a NORMAL 1-min score (>=7), so the old apgar_1min<7 rule
+      // would count zero. Only the first stays depressed at 5 min, so the
+      // corrected apgar_5min<7 rule must count exactly one.
+      await upsertNewborn(db, {
+        journeyId: journeyId1,
+        infantNumber: 1,
+        sex: 'M',
+        birthWeightG: 3200,
+        apgar1min: 9,
+        apgar5min: 5,
+        resuscitation: {},
+        vaccinations: {},
+        bornAt: '2026-03-08T10:30:00Z',
+      });
+      await upsertNewborn(db, {
+        journeyId: journeyId2,
+        infantNumber: 1,
+        sex: 'F',
+        birthWeightG: 3000,
+        apgar1min: 8,
+        apgar5min: 9,
+        resuscitation: {},
+        vaccinations: {},
+        bornAt: '2026-03-09T10:30:00Z',
+      });
+
+      const kpis = await getNewbornKPIs(db);
+      expect(kpis.totalBirths).toBe(2);
+      expect(kpis.lowApgarCount).toBe(1);
     });
 
     it('returns zeros when no newborns', async () => {
@@ -123,12 +177,24 @@ describe('Newborn Service', () => {
       );
 
       await upsertNewborn(db, {
-        journeyId: journeyId1, infantNumber: 1, birthWeightG: 3000, apgar1min: 8, apgar5min: 9,
-        resuscitation: {}, vaccinations: {}, bornAt: '2026-03-08T10:00:00Z',
+        journeyId: journeyId1,
+        infantNumber: 1,
+        birthWeightG: 3000,
+        apgar1min: 8,
+        apgar5min: 9,
+        resuscitation: {},
+        vaccinations: {},
+        bornAt: '2026-03-08T10:00:00Z',
       });
       await upsertNewborn(db, {
-        journeyId: otherJourneyId, infantNumber: 1, birthWeightG: 2800, apgar1min: 7, apgar5min: 9,
-        resuscitation: {}, vaccinations: {}, bornAt: '2026-03-09T10:00:00Z',
+        journeyId: otherJourneyId,
+        infantNumber: 1,
+        birthWeightG: 2800,
+        apgar1min: 7,
+        apgar5min: 9,
+        resuscitation: {},
+        vaccinations: {},
+        bornAt: '2026-03-09T10:00:00Z',
       });
 
       const kpisHosp1 = await getNewbornKPIs(db, hospitalId);

@@ -38,15 +38,25 @@ describe('Outcomes API', () => {
 
     it('returns newborns ordered by infant_number', async () => {
       await upsertNewborn(db, {
-        journeyId, infantNumber: 2, sex: 'F',
-        birthWeightG: 2800, apgar1min: 8, apgar5min: 9,
-        resuscitation: {}, vaccinations: {},
+        journeyId,
+        infantNumber: 2,
+        sex: 'F',
+        birthWeightG: 2800,
+        apgar1min: 8,
+        apgar5min: 9,
+        resuscitation: {},
+        vaccinations: {},
         bornAt: '2026-03-08T10:35:00Z',
       });
       await upsertNewborn(db, {
-        journeyId, infantNumber: 1, sex: 'M',
-        birthWeightG: 3000, apgar1min: 9, apgar5min: 10,
-        resuscitation: {}, vaccinations: {},
+        journeyId,
+        infantNumber: 1,
+        sex: 'M',
+        birthWeightG: 3000,
+        apgar1min: 9,
+        apgar5min: 10,
+        resuscitation: {},
+        vaccinations: {},
         bornAt: '2026-03-08T10:30:00Z',
       });
 
@@ -63,9 +73,14 @@ describe('Outcomes API', () => {
   describe('neonatal KPIs', () => {
     it('returns correct KPIs with mixed data', async () => {
       await upsertNewborn(db, {
-        journeyId, infantNumber: 1, sex: 'M',
-        birthWeightG: 2400, apgar1min: 5, apgar5min: 7,
-        resuscitation: {}, vaccinations: {},
+        journeyId,
+        infantNumber: 1,
+        sex: 'M',
+        birthWeightG: 2400,
+        apgar1min: 5,
+        apgar5min: 6,
+        resuscitation: {},
+        vaccinations: {},
         bornAt: '2026-03-08T10:30:00Z',
       });
 

@@ -140,10 +140,15 @@ export async function getNewbornKPIs(
   db: DatabaseAdapter,
   hospitalId?: string,
 ): Promise<NewbornKPIs> {
+  // Low-Apgar uses the 5-minute score (apgar_5min), not the 1-minute score:
+  // the 5-min Apgar is the standard neonatal outcome predictor and is what the
+  // outcomes UI tile labels ("Apgar 5 นาที < 7"). Both HOSxP sync
+  // (services/sync/newborn.ts maps apgar_score_min5) and the infant edit UI
+  // populate this column, so the KPI reflects real data.
   let sql = `SELECT
     COUNT(*) as total,
     SUM(CASE WHEN birth_weight_g < 2500 THEN 1 ELSE 0 END) as lbw,
-    SUM(CASE WHEN apgar_1min < 7 THEN 1 ELSE 0 END) as low_apgar,
+    SUM(CASE WHEN apgar_5min < 7 THEN 1 ELSE 0 END) as low_apgar,
     AVG(birth_weight_g) as avg_weight
     FROM cached_newborns cn`;
 

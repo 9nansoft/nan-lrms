@@ -447,9 +447,12 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
     low_apgar: number;
     lbw: number;
   }>(
+    // Low-Apgar uses the 5-minute score (the standard neonatal predictor), the
+    // same column as getNewbornKPIs / the outcomes "LOW APGAR" tile — keep both
+    // in sync so the dashboard and outcomes page report the same count.
     `SELECT COUNT(*) as total,
-            SUM(CASE WHEN cn.apgar_1min < 7 OR cn.birth_weight_g < 2500 THEN 1 ELSE 0 END) as abnormal,
-            SUM(CASE WHEN cn.apgar_1min < 7 THEN 1 ELSE 0 END) as low_apgar,
+            SUM(CASE WHEN cn.apgar_5min < 7 OR cn.birth_weight_g < 2500 THEN 1 ELSE 0 END) as abnormal,
+            SUM(CASE WHEN cn.apgar_5min < 7 THEN 1 ELSE 0 END) as low_apgar,
             SUM(CASE WHEN cn.birth_weight_g < 2500 THEN 1 ELSE 0 END) as lbw
      FROM cached_newborns cn
      JOIN maternal_journeys mj ON mj.id = cn.journey_id
