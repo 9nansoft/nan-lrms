@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { SectionLabel } from '@/components/dashboard/shared';
 import { ProvinceMap } from '@/components/dashboard/ProvinceMap';
 import { HOSPITAL_LEVELS, KK_HOSPITALS } from '@/config/hospitals';
@@ -57,12 +58,7 @@ function MiniMix({ counts }: { counts: DashboardHospital['counts'] }) {
   const medPct = (counts.medium / total) * 100;
   const highPct = (counts.high / total) * 100;
   if (counts.total === 0) {
-    return (
-      <div
-        className="h-1.5 w-16 rounded-sm"
-        style={{ background: 'var(--rule-hair)' }}
-      />
-    );
+    return <div className="h-1.5 w-16 rounded-sm" style={{ background: 'var(--rule-hair)' }} />;
   }
   return (
     <div
@@ -140,10 +136,7 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
       >
         {hasPatients ? hospital.counts.total : '—'}
       </div>
-      <ChevronRight
-        className="h-3.5 w-3.5"
-        style={{ color: 'var(--ink-navy-muted)' }}
-      />
+      <ChevronRight className="h-3.5 w-3.5" style={{ color: 'var(--ink-navy-muted)' }} />
     </button>
   );
 }
@@ -200,7 +193,10 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
               </div>
               <div className="flex items-center gap-3 font-mono text-[11px] tracking-[0.06em] text-[var(--ink-navy-muted)]">
                 <span>
-                  ACT <span className="text-[var(--ink-navy)] font-semibold tabular-nums">{stats.active}</span>
+                  ACT{' '}
+                  <span className="text-[var(--ink-navy)] font-semibold tabular-nums">
+                    {stats.active}
+                  </span>
                 </span>
                 {stats.high > 0 && (
                   <span>
@@ -232,20 +228,14 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
 }
 
 export default function HospitalsPage() {
-  useSetBreadcrumbs([
-    { label: 'แดชบอร์ด', href: '/' },
-    { label: 'โรงพยาบาล' },
-  ]);
+  useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'โรงพยาบาล' }]);
 
-  const { hospitals, isLoading } = useDashboard();
+  const { hospitals, isLoading, error, updatedAt, mutate } = useDashboard();
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<TabKey>('khonkaen');
   const [selected, setSelected] = useState<string | null>(null);
 
-  const kkHospitals = useMemo(
-    () => hospitals.filter((h) => KK_HCODES.has(h.hcode)),
-    [hospitals],
-  );
+  const kkHospitals = useMemo(() => hospitals.filter((h) => KK_HCODES.has(h.hcode)), [hospitals]);
   const otherHospitals = useMemo(
     () => hospitals.filter((h) => !KK_HCODES.has(h.hcode)),
     [hospitals],
@@ -277,6 +267,21 @@ export default function HospitalsPage() {
     return <LoadingState message="กำลังโหลดรายชื่อโรงพยาบาล..." />;
   }
 
+  // Fetch failed with nothing cached — an all-zero roster is indistinguishable
+  // from an empty province, so show the failure instead of a blank map.
+  if (error && !updatedAt) {
+    return (
+      <ErrorState
+        message="ไม่สามารถโหลดข้อมูลโรงพยาบาลได้"
+        detail={error instanceof Error ? error.message : String(error)}
+        onRetry={() => mutate()}
+      />
+    );
+  }
+  // Fetch failed but SWR still holds the last good payload — keep rendering it
+  // and flag the staleness (Constitution VI: offline shows cached data + time).
+  const dataStale = Boolean(error && updatedAt);
+
   return (
     <div
       style={{
@@ -288,6 +293,14 @@ export default function HospitalsPage() {
         zoom: 1.3,
       }}
     >
+      {dataStale && (
+        <ErrorState
+          variant="banner"
+          message="การเชื่อมต่อล้มเหลว — แสดงข้อมูลโรงพยาบาลเดิมจากแคช"
+          lastUpdatedAt={updatedAt}
+          onRetry={() => mutate()}
+        />
+      )}
       {/* Header strip */}
       <div
         className="flex flex-wrap items-baseline gap-x-4 gap-y-1 bg-white px-5 py-2.5"
@@ -339,10 +352,7 @@ export default function HospitalsPage() {
           <div
             className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
             style={{
-              color:
-                onlineCount === tabHospitals.length
-                  ? 'var(--ink-navy)'
-                  : 'var(--risk-medium)',
+              color: onlineCount === tabHospitals.length ? 'var(--ink-navy)' : 'var(--risk-medium)',
               letterSpacing: '-0.02em',
             }}
           >
@@ -356,9 +366,7 @@ export default function HospitalsPage() {
               className="inline-block h-1.5 w-1.5 rounded-full"
               style={{
                 background:
-                  onlineCount === tabHospitals.length
-                    ? 'var(--risk-low)'
-                    : 'var(--risk-medium)',
+                  onlineCount === tabHospitals.length ? 'var(--risk-low)' : 'var(--risk-medium)',
               }}
             />
             {onlineCount === tabHospitals.length
@@ -385,9 +393,24 @@ export default function HospitalsPage() {
               className="mt-2 flex h-1.5 overflow-hidden rounded-sm"
               style={{ background: 'var(--rule-hair)' }}
             >
-              <span style={{ background: 'var(--risk-low)', width: `${(totalLow / totalActive) * 100}%` }} />
-              <span style={{ background: 'var(--risk-medium)', width: `${(totalMedium / totalActive) * 100}%` }} />
-              <span style={{ background: 'var(--risk-high)', width: `${(totalHigh / totalActive) * 100}%` }} />
+              <span
+                style={{
+                  background: 'var(--risk-low)',
+                  width: `${(totalLow / totalActive) * 100}%`,
+                }}
+              />
+              <span
+                style={{
+                  background: 'var(--risk-medium)',
+                  width: `${(totalMedium / totalActive) * 100}%`,
+                }}
+              />
+              <span
+                style={{
+                  background: 'var(--risk-high)',
+                  width: `${(totalHigh / totalActive) * 100}%`,
+                }}
+              />
             </div>
           )}
         </div>
@@ -406,9 +429,7 @@ export default function HospitalsPage() {
             </span>
           </div>
           <div className="mt-1 font-mono text-[11px] text-[var(--ink-navy-dim)]">
-            {totalActive > 0
-              ? `${((totalHigh / totalActive) * 100).toFixed(1)}% ของผู้คลอด`
-              : '—'}
+            {totalActive > 0 ? `${((totalHigh / totalActive) * 100).toFixed(1)}% ของผู้คลอด` : '—'}
           </div>
         </div>
       </div>
@@ -422,12 +443,20 @@ export default function HospitalsPage() {
           className="inline-flex items-center border bg-white"
           style={{ borderColor: 'var(--rule-strong)' }}
         >
-          {(
-            [
-              { k: 'khonkaen' as const, label: 'จ.ขอนแก่น', count: kkHospitals.length, icon: Building2 },
-              { k: 'other' as const, label: 'จังหวัดอื่น / ภายนอก', count: otherHospitals.length, icon: Globe },
-            ]
-          ).map((t, i) => {
+          {[
+            {
+              k: 'khonkaen' as const,
+              label: 'จ.ขอนแก่น',
+              count: kkHospitals.length,
+              icon: Building2,
+            },
+            {
+              k: 'other' as const,
+              label: 'จังหวัดอื่น / ภายนอก',
+              count: otherHospitals.length,
+              icon: Globe,
+            },
+          ].map((t, i) => {
             const active = activeTab === t.k;
             const Icon = t.icon;
             return (
@@ -485,10 +514,7 @@ export default function HospitalsPage() {
         }}
       >
         {/* Map panel */}
-        <div
-          className="bg-white"
-          style={{ borderRight: '1px solid var(--rule-strong)' }}
-        >
+        <div className="bg-white" style={{ borderRight: '1px solid var(--rule-strong)' }}>
           <div className="px-5 pt-3 pb-2">
             <SectionLabel
               idx={1}
@@ -519,8 +545,10 @@ export default function HospitalsPage() {
         </div>
 
         {/* Roster panel */}
-        <div className="overflow-y-auto bg-[var(--surface-cool)] px-5 pt-3 pb-6"
-             style={{ maxHeight: 'calc(100vh - 240px)' }}>
+        <div
+          className="overflow-y-auto bg-[var(--surface-cool)] px-5 pt-3 pb-6"
+          style={{ maxHeight: 'calc(100vh - 240px)' }}
+        >
           <SectionLabel
             idx={2}
             right={

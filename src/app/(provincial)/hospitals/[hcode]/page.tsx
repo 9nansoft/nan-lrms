@@ -15,6 +15,7 @@ import { maskName } from '@/lib/pii-mask';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { ConnectionStatus } from '@/components/shared/ConnectionStatus';
 import { ANC_RISK_RULES } from '@/config/anc-risk-rules';
 import { buildPatientId } from '@/lib/utils';
@@ -1023,14 +1024,20 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
   // now for "EDC in N days"–style copy.
   const [now] = useState<number>(() => Date.now());
 
-  const { data: laborData, isLoading: laborLoading } = useSWR<LaborResponse>(
-    `/api/hospitals/${hcode}/patients`,
-    { refreshInterval: 30000 },
-  );
-  const { data: ancData, isLoading: ancLoading } = useSWR<JourneyListResponse>(
-    `/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=200`,
-    { refreshInterval: 60000 },
-  );
+  const {
+    data: laborData,
+    isLoading: laborLoading,
+    error: laborError,
+    mutate: laborMutate,
+  } = useSWR<LaborResponse>(`/api/hospitals/${hcode}/patients`, { refreshInterval: 30000 });
+  const {
+    data: ancData,
+    isLoading: ancLoading,
+    error: ancError,
+    mutate: ancMutate,
+  } = useSWR<JourneyListResponse>(`/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=200`, {
+    refreshInterval: 60000,
+  });
   // Pregnancies elsewhere whose capability rules say they'll be referred
   // here for delivery. Only meaningful for hub hospitals (spokes return 0).
   const { data: incomingData } = useSWR<IncomingPregnanciesResponse>(
@@ -1145,8 +1152,26 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
     [journeys, now],
   );
 
-  if (laborLoading && ancLoading) {
+  // Wait for BOTH primary feeds before painting — `&&` let the page render a
+  // half-empty console the moment the faster feed resolved, so the labor tab
+  // could flash "no patients" while its own fetch was still in flight.
+  if (laborLoading || ancLoading) {
     return <LoadingState message="กำลังโหลดข้อมูลโรงพยาบาล…" />;
+  }
+
+  // Both primary feeds failed with nothing cached — there is no console to
+  // show, so surface the failure with a retry that revalidates both.
+  if (laborError && ancError && !laborData && !ancData) {
+    return (
+      <ErrorState
+        message="ไม่สามารถโหลดข้อมูลโรงพยาบาลได้"
+        detail={laborError instanceof Error ? laborError.message : String(laborError ?? ancError)}
+        onRetry={() => {
+          laborMutate();
+          ancMutate();
+        }}
+      />
+    );
   }
 
   return (
@@ -1206,6 +1231,24 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
           )}
         </div>
       </div>
+
+      {/* Per-feed staleness banners — one feed can fail while the other keeps
+          serving cached data, so name which registry went stale rather than
+          replacing the whole console. */}
+      {laborError && (
+        <ErrorState
+          variant="banner"
+          message="โหลดข้อมูลห้องคลอดไม่สำเร็จ — แสดงข้อมูลเดิมจากแคช"
+          onRetry={() => laborMutate()}
+        />
+      )}
+      {ancError && (
+        <ErrorState
+          variant="banner"
+          message="โหลดข้อมูลฝากครรภ์ไม่สำเร็จ — แสดงข้อมูลเดิมจากแคช"
+          onRetry={() => ancMutate()}
+        />
+      )}
 
       {/* KPI strip — 7 cells: 3 LABOR + 3 ANC + 1 REFER-IN (hub-only signal) */}
       <div
