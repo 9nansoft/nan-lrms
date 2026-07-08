@@ -15,6 +15,25 @@ import HospitalMaternityWardPage from '@/app/(hospital)/hospital-maternity-ward/
 const mockFetch = vi.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
 
+// PasteJSON (session-retrieval) response for the current test. Every other
+// fetch — notably TopNavBar's presence heartbeat, which fires because the
+// mocked session carries a userId — routes to a benign 200 so
+// `fetch(...).catch()` in sendHeartbeat has a real promise to chain onto.
+let sessionResolver: () => Promise<unknown>;
+
+function benignResponse(): Promise<unknown> {
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: async () => ({}),
+    text: async () => '',
+    clone() {
+      return this;
+    },
+  });
+}
+
 vi.mock('next-auth/react', () => ({
   SessionProvider: ({ children }: { children: React.ReactNode }) => children,
   useSession: () => ({
@@ -36,6 +55,19 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/hospital-maternity-ward
 
 beforeEach(() => {
   mockFetch.mockReset();
+  sessionResolver = benignResponse;
+  mockFetch.mockImplementation((input: RequestInfo | URL) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url;
+    if (url.startsWith('https://hosxp.net/phapi/PasteJSON')) {
+      return sessionResolver();
+    }
+    return benignResponse();
+  });
   document.cookie = 'bms-session-id=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   document.cookie = 'marketplace_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   localStorage.clear();
@@ -65,12 +97,13 @@ describe('Hospital route shell', () => {
   });
 
   it('shows error UI on retrieve failure', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      statusText: 'Unauthorized',
-      text: async () => 'expired',
-    });
+    sessionResolver = () =>
+      Promise.resolve({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: async () => 'expired',
+      });
     window.history.replaceState({}, '', 'http://localhost/?bms-session-id=BAD');
     render(
       <HospitalLayout>

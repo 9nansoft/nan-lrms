@@ -37,10 +37,14 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/hospital-maternity-ward
 vi.mock('@/services/maternity-ward', () => ({
   listMaternityWards: vi.fn(),
   listWardBedsInventory: vi.fn(),
+  // The redesigned page reads occupancy through useMaternityWardStateFull, which
+  // calls listWardBedsOccupancyFull (the clinical-density query). The lite
+  // listWardBedsOccupancy is kept mocked too so any stray import stays safe.
   listWardBedsOccupancy: vi.fn(),
+  listWardBedsOccupancyFull: vi.fn(),
   // Task 51-52: page now lazy-loads bed-move reasons and triggers movePatientBed
   // on drag-drop confirm. Stub both with safe defaults so the page render path
-  // is independent of these flows in this Task 25 test.
+  // is independent of these flows in this test.
   getBedMoveReasons: vi.fn().mockResolvedValue([]),
   movePatientBed: vi.fn().mockResolvedValue(undefined),
 }));
@@ -48,14 +52,33 @@ vi.mock('@/services/maternity-ward', () => ({
 import {
   listMaternityWards,
   listWardBedsInventory,
-  listWardBedsOccupancy,
+  listWardBedsOccupancyFull,
 } from '@/services/maternity-ward';
 const mockListWards = listMaternityWards as unknown as ReturnType<typeof vi.fn>;
 const mockListInventory = listWardBedsInventory as unknown as ReturnType<typeof vi.fn>;
-const mockListOccupancy = listWardBedsOccupancy as unknown as ReturnType<typeof vi.fn>;
+const mockListOccupancyFull = listWardBedsOccupancyFull as unknown as ReturnType<typeof vi.fn>;
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
+
+// PasteJSON (session-retrieval) response for the current test. Every other
+// fetch — the TopNavBar presence heartbeat (fires because the mocked session
+// carries a userId) and any skipped onboarding/poll calls — routes to a benign
+// 200 so sendHeartbeat's `fetch(...).catch()` always has a real promise.
+let sessionResolver: () => Promise<unknown>;
+
+function benignResponse(): Promise<unknown> {
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: async () => ({}),
+    text: async () => '',
+    clone() {
+      return this;
+    },
+  });
+}
 
 const PAGE = (
   <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
@@ -67,9 +90,22 @@ const PAGE = (
 
 beforeEach(() => {
   mockFetch.mockReset();
+  sessionResolver = benignResponse;
+  mockFetch.mockImplementation((input: RequestInfo | URL) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url;
+    if (url.startsWith('https://hosxp.net/phapi/PasteJSON')) {
+      return sessionResolver();
+    }
+    return benignResponse();
+  });
   mockListWards.mockReset();
   mockListInventory.mockReset();
-  mockListOccupancy.mockReset();
+  mockListOccupancyFull.mockReset();
   document.cookie = 'bms-session-id=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   document.cookie = 'marketplace_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   localStorage.clear();
@@ -83,15 +119,16 @@ describe('Hospital maternity ward page (full render)', () => {
   });
 
   it('renders header summary + 4 bed tiles when session resolves', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        jwt: 'JWT',
-        bms_url: 'https://t.example/api',
-        user_info: { loginname: 'nurse1', fullname: 'Nurse One', hospcode: '10670' },
-      }),
-    });
+    sessionResolver = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          jwt: 'JWT',
+          bms_url: 'https://t.example/api',
+          user_info: { loginname: 'nurse1', fullname: 'Nurse One', hospcode: '10670' },
+        }),
+      });
     mockListWards.mockResolvedValue([{ ward: '03', name: 'ห้องคลอด', real_bedcount: 4 }]);
     mockListInventory.mockResolvedValue([
       {
@@ -131,7 +168,7 @@ describe('Hospital maternity ward page (full render)', () => {
         room_display_number: 2,
       },
     ]);
-    mockListOccupancy.mockResolvedValue([
+    mockListOccupancyFull.mockResolvedValue([
       {
         an: 'AN1',
         hn: 'HN1',
@@ -157,28 +194,38 @@ describe('Hospital maternity ward page (full render)', () => {
 
     render(PAGE);
 
-    await waitFor(() => expect(screen.getByText('ห้องคลอด')).toBeInTheDocument(), {
+    // Wait for the full data roundtrip: the (masked) occupant only renders once
+    // wards + inventory + occupancy-full have all resolved and the dense tile
+    // mounts into bed 01.
+    await waitFor(() => expect(screen.getByText(/นาง A/)).toBeInTheDocument(), {
       timeout: 2000,
     });
-    await waitFor(
-      () => expect(screen.getByText(/4 เตียง · ใช้งาน 1 · ว่าง 3/)).toBeInTheDocument(),
-      { timeout: 2000 },
-    );
+    // Masthead heading (the h1 carries a trailing accent "." span).
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('ห้องคลอด');
+    // KPI masthead summary — Total Beds / Occupied are unique to the masthead
+    // (the "Available" label collides with the empty-tile status pill).
+    expect(screen.getByText('Total Beds')).toBeInTheDocument();
+    expect(screen.getByText('Occupied')).toBeInTheDocument();
+    // Both rooms render (room_name from the bedno inventory).
     expect(screen.getByText('LR1')).toBeInTheDocument();
     expect(screen.getByText('LR2')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /รีเฟรช/ })).toBeInTheDocument();
+    // One occupied + three empty beds.
+    expect(screen.getAllByText('ว่าง').length).toBe(3);
+    // Refresh control (redesign labels it "Refresh ↻").
+    expect(screen.getByRole('button', { name: /Refresh/i })).toBeInTheDocument();
   });
 
   it('clicks bed → opens drawer with patient header + tabs', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        jwt: 'JWT',
-        bms_url: 'https://t.example/api',
-        user_info: { loginname: 'nurse1', fullname: 'Nurse One', hospcode: '10670' },
-      }),
-    });
+    sessionResolver = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          jwt: 'JWT',
+          bms_url: 'https://t.example/api',
+          user_info: { loginname: 'nurse1', fullname: 'Nurse One', hospcode: '10670' },
+        }),
+      });
     mockListWards.mockResolvedValue([{ ward: '03', name: 'ห้องคลอด', real_bedcount: 4 }]);
     mockListInventory.mockResolvedValue([
       {
@@ -191,7 +238,7 @@ describe('Hospital maternity ward page (full render)', () => {
         room_display_number: 1,
       },
     ]);
-    mockListOccupancy.mockResolvedValue([
+    mockListOccupancyFull.mockResolvedValue([
       {
         an: 'AN1',
         hn: 'HN1',
@@ -216,32 +263,35 @@ describe('Hospital maternity ward page (full render)', () => {
     window.history.replaceState({}, '', 'http://localhost/?bms-session-id=SID');
 
     render(PAGE);
-    // Task 52: the DnD wrapper around an occupied tile also exposes role="button"
-    // (via @dnd-kit's attributes), so disambiguate via aria-label which only the
-    // inner BedTile carries.
-    await waitFor(
-      () => expect(screen.getByLabelText('เตียง 01')).toBeInTheDocument(),
-      { timeout: 2000 },
-    );
-    fireEvent.click(screen.getByLabelText('เตียง 01'));
-
-    // Drawer should now be visible with the patient's AN in header + 10 tabs
-    await waitFor(() => expect(screen.getByText(/AN1/)).toBeInTheDocument(), {
+    // The dense BedTileFull renders identity/vitals but carries no "เตียง NN"
+    // aria-label — the whole <article> is the click target (onClick → onBedClick).
+    // Click via the masked patient name, which sits inside the occupied tile so
+    // the click bubbles to the article's handler.
+    await waitFor(() => expect(screen.getByText(/นาง A/)).toBeInTheDocument(), {
       timeout: 2000,
     });
+    fireEvent.click(screen.getByText(/นาง A/));
+
+    // Drawer opens (role="dialog") with the patient's AN in the header + 10 tabs.
+    // AN also appears on the tile, so assert the drawer itself, not a bare /AN1/.
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument(), {
+      timeout: 2000,
+    });
+    expect(screen.getByText('AN AN1')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Partograph' })).toBeInTheDocument();
   });
 
   it('shows error UI when ward query fails', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        jwt: 'JWT',
-        bms_url: 'https://t.example/api',
-        user_info: { loginname: 'n1', fullname: 'N', hospcode: '10670' },
-      }),
-    });
+    sessionResolver = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          jwt: 'JWT',
+          bms_url: 'https://t.example/api',
+          user_info: { loginname: 'n1', fullname: 'N', hospcode: '10670' },
+        }),
+      });
     mockListWards.mockRejectedValue(new Error('BMS unavailable'));
     window.history.replaceState({}, '', 'http://localhost/?bms-session-id=X');
 

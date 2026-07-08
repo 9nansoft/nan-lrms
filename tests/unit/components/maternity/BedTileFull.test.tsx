@@ -61,7 +61,8 @@ describe('BedTileFull', () => {
   it('renders HOSxP admit context, latest vitals, and labour data on the ward bed card', () => {
     render(<BedTileFull bedno="01" bedLock="N" occupant={occupant} now={now} />);
 
-    expect(screen.getByText(/นาง ทดสอบ ระบบ|ทดสอบ ระบบ/)).toBeInTheDocument();
+    // Name is masked for PDPA display (maskName) → "นาง ทดสอบ ร.".
+    expect(screen.getByText(/นาง ทดสอบ ร\./)).toBeInTheDocument();
     expect(screen.getByText('AN1')).toBeInTheDocument();
     expect(screen.getByText('HN1')).toBeInTheDocument();
     expect(screen.getByText('Allergy')).toBeInTheDocument();
