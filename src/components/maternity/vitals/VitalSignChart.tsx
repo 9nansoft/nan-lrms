@@ -56,10 +56,7 @@ export function VitalSignChart({
   // in an effect would need a synchronous setState, which cascades renders).
   // The matching effect below revokes it when the blob changes or the component
   // unmounts, so we don't leak blob: URLs.
-  const objectUrl = useMemo(
-    () => (data?.ok ? URL.createObjectURL(data.blob) : null),
-    [data],
-  );
+  const objectUrl = useMemo(() => (data?.ok ? URL.createObjectURL(data.blob) : null), [data]);
   useEffect(() => {
     if (!objectUrl) return;
     return () => URL.revokeObjectURL(objectUrl);

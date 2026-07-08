@@ -394,10 +394,13 @@ export async function getJourneyDetail(
   );
   const referrals: ReferralListItem[] = refRows.map((ref) => ({
     id: ref.id as string,
+    journeyId: ref.journey_id as string,
+    referNumber: (ref.refer_number as string | null) ?? null,
     fromHospital: ref.from_name as string,
     toHospital: ref.to_name as string,
     status: ref.status as string,
     reason: ref.reason as string,
+    diagnosisCode: (ref.diagnosis_code as string | null) ?? null,
     urgencyLevel: ref.urgency_level as string,
     initiatedAt: ref.initiated_at as string,
     arrivedAt: ref.arrived_at as string | null,

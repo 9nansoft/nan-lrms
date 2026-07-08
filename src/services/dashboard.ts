@@ -13,6 +13,7 @@
 // must be lossless), so the dashboard layer is the right place to honor the
 // flag — one subquery, applied everywhere.
 import type { DatabaseAdapter } from '@/db/adapter';
+import { bangkokStartOfToday } from '@/lib/bangkok-time';
 import type {
   DashboardHospital,
   DashboardSummary,
@@ -543,16 +544,8 @@ function bangkokHourFloor(date: Date): Date {
   return d;
 }
 
-/** Returns the start of today in Asia/Bangkok, expressed as UTC. */
-function bangkokStartOfToday(now: Date = new Date()): Date {
-  // Bangkok is UTC+7, no DST. Compute by shifting now() forward 7h, taking
-  // the UTC date at that shifted point, and then shifting back.
-  const shifted = new Date(now.getTime() + 7 * 3600 * 1000);
-  const shiftedMidnightUtc = new Date(
-    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()),
-  );
-  return new Date(shiftedMidnightUtc.getTime() - 7 * 3600 * 1000);
-}
+// bangkokStartOfToday moved to src/lib/bangkok-time.ts (shared with the
+// referral list service).
 
 /** Returns the Bangkok hour-of-day (0–23) for an ISO timestamp. */
 function bangkokHourOfDay(iso: string): number {

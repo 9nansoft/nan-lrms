@@ -505,13 +505,27 @@ export interface AncRiskEntry {
 
 export interface ReferralListItem {
   id: string;
+  journeyId: string;
+  referNumber: string | null;
   fromHospital: string;
   toHospital: string;
   status: string;
   reason: string;
+  diagnosisCode: string | null;
   urgencyLevel: string;
   initiatedAt: string;
   arrivedAt: string | null;
+}
+
+/** Global status breakdown for the referrals KPI strip — computed with a
+ *  GROUP BY over the full (non-status-filtered) set, never the current page. */
+export interface ReferralStatusCounts {
+  initiated: number;
+  accepted: number;
+  inTransit: number;
+  arrived: number;
+  rejected: number;
+  total: number;
 }
 
 export interface NewbornEntry {
@@ -570,19 +584,45 @@ export interface DashboardTrends {
   previousShift: ShiftStats;
 }
 
+/** Referral row enriched with patient context from the linked maternal
+ *  journey — what the provincial referral board renders. Patient name is
+ *  decrypted at the API boundary (decryptSafe) and masked at render
+ *  (maskName), matching the journey list convention. */
+export interface ProvincialReferralListItem extends ReferralListItem {
+  patientName: string;
+  hn: string;
+  gaWeeks: number | null;
+  ancRiskLevel: string;
+}
+
+/** Fixed-window operational KPIs for the referral board. Always computed over
+ *  the whole table (never the filtered view) — see referral-list.ts. */
+export interface ReferralOpsCounts {
+  /** Initiated since Bangkok midnight. */
+  today: number;
+  /** Initiated in the last 7 days. */
+  last7d: number;
+  /** EMERGENCY urgency and not yet ARRIVED/REJECTED. */
+  emergencyActive: number;
+  /** Linked journey has a non-LOW ANC risk level. */
+  highRisk: number;
+  /** Still INITIATED past REFERRAL_SLA.overdueAfterHours. */
+  overdue: number;
+}
+
 export interface ReferralListResponse {
-  referrals: ReferralListItem[];
+  referrals: ProvincialReferralListItem[];
   pagination: Pagination;
+  statusCounts: ReferralStatusCounts;
+  opsCounts: ReferralOpsCounts;
 }
 
 export interface ReferralDetailResponse {
   referral: ReferralListItem & {
-    diagnosisCode: string | null;
     rejectionReason: string | null;
     transportMode: string | null;
     acceptedAt: string | null;
     departedAt: string | null;
     rejectedAt: string | null;
-    journeyId: string;
   };
 }
