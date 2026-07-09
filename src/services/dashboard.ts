@@ -315,6 +315,81 @@ export async function getHighRiskPatients(
   }));
 }
 
+export interface PartographAuditAdmission {
+  an: string;
+  name: string;
+  admitDate: string;
+  laborStatus: string;
+  observationCount: number;
+  lastObservedAt: string | null;
+}
+
+export interface HospitalPartographAudit {
+  windowDays: number;
+  laborRecent: number;
+  withPartograph: number;
+  /** Window admissions, never-charted first (they are the action items). */
+  admissions: PartographAuditAdmission[];
+}
+
+/**
+ * Per-hospital partograph charting audit — every labor admission inside the
+ * PARTOGRAPH_QUALITY window with its observation count, so the provincial
+ * team can name the specific uncharted cases, not just the coverage score.
+ * Returns null for an unknown hcode.
+ */
+export async function getHospitalPartographAudit(
+  db: DatabaseAdapter,
+  hcode: string,
+): Promise<HospitalPartographAudit | null> {
+  const hospitals = await db.query<{ id: string }>('SELECT id FROM hospitals WHERE hcode = ?', [
+    hcode,
+  ]);
+  if (hospitals.length === 0) return null;
+
+  const cutoff = new Date(Date.now() - PARTOGRAPH_QUALITY.windowDays * 86_400_000).toISOString();
+  const rows = await db.query<{
+    an: string;
+    name: string;
+    admit_date: string;
+    labor_status: string;
+    obs_count: number;
+    last_observed_at: string | null;
+  }>(
+    `SELECT cp.an, cp.name, cp.admit_date, cp.labor_status,
+            (SELECT COUNT(*) FROM cached_partograph_observations o
+              WHERE o.patient_id = cp.id) AS obs_count,
+            (SELECT MAX(o.observe_datetime) FROM cached_partograph_observations o
+              WHERE o.patient_id = cp.id) AS last_observed_at
+       FROM cached_patients cp
+      WHERE cp.hospital_id = ? AND cp.admit_date >= ?`,
+    [hospitals[0].id, cutoff],
+  );
+
+  const admissions: PartographAuditAdmission[] = rows
+    .map((r) => ({
+      an: r.an,
+      name: decryptSafe(r.name),
+      admitDate: r.admit_date,
+      laborStatus: r.labor_status,
+      observationCount: Number(r.obs_count) || 0,
+      lastObservedAt: r.last_observed_at,
+    }))
+    .sort((a, b) => {
+      const aCharted = a.observationCount > 0 ? 1 : 0;
+      const bCharted = b.observationCount > 0 ? 1 : 0;
+      if (aCharted !== bCharted) return aCharted - bCharted;
+      return b.admitDate.localeCompare(a.admitDate);
+    });
+
+  return {
+    windowDays: PARTOGRAPH_QUALITY.windowDays,
+    laborRecent: admissions.length,
+    withPartograph: admissions.filter((a) => a.observationCount > 0).length,
+    admissions,
+  };
+}
+
 export async function getHospitalPatientList(
   db: DatabaseAdapter,
   hcode: string,

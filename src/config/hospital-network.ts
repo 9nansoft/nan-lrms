@@ -42,6 +42,9 @@ export const PARTOGRAPH_QUALITY = {
   warnBelowPct: 60,
   /** Coverage below this percentage renders red. */
   criticalBelowPct: 30,
+  /** Grace period after admission before an uncharted ACTIVE patient gets
+   *  the NO PARTO nudge chip on the ward list. */
+  noChartNudgeHours: 4,
 } as const;
 
 export type PartographCoverageClass = 'ok' | 'warn' | 'critical' | 'none';
@@ -55,6 +58,22 @@ export function classifyPartographCoverage(
   if (pct < PARTOGRAPH_QUALITY.criticalBelowPct) return 'critical';
   if (pct < PARTOGRAPH_QUALITY.warnBelowPct) return 'warn';
   return 'ok';
+}
+
+/**
+ * Ward-list nudge: true when an ACTIVE admission has never been charted
+ * (partograph_alert_count is NULL — the sync writes 0 once observations
+ * exist) and the post-admission grace window has passed.
+ */
+export function needsPartographNudge(
+  admitDate: string | null,
+  partographAlertCount: number | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (partographAlertCount != null) return false;
+  if (!admitDate) return false;
+  const hours = (now.getTime() - new Date(admitDate).getTime()) / 3600_000;
+  return hours >= PARTOGRAPH_QUALITY.noChartNudgeHours;
 }
 
 /** One ANC-registry woman counts this much of one active labor patient when

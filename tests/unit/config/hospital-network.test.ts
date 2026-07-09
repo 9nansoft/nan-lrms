@@ -8,6 +8,7 @@ import {
   combinedWorkload,
   PARTOGRAPH_QUALITY,
   classifyPartographCoverage,
+  needsPartographNudge,
 } from '@/config/hospital-network';
 
 const NOW = new Date('2026-07-09T12:00:00+07:00');
@@ -41,6 +42,20 @@ describe('combinedWorkload', () => {
     expect(combinedWorkload({ total: 2 }, { total: 30 })).toBe(2 + 30 * ANC_WORKLOAD_WEIGHT);
     // An ANC-only hospital still registers as active.
     expect(combinedWorkload({ total: 0 }, { total: 215 })).toBeGreaterThan(5);
+  });
+
+  describe('needsPartographNudge', () => {
+    const now = new Date('2026-07-09T12:00:00Z');
+    const hoursAgo = (h: number) => new Date(now.getTime() - h * 3600_000).toISOString();
+
+    it('nudges only never-charted patients past the grace window', () => {
+      // Never charted (alert count null) + admitted long enough → nudge.
+      expect(needsPartographNudge(hoursAgo(6), null, now)).toBe(true);
+      // Charted (even with zero alerts) → no nudge.
+      expect(needsPartographNudge(hoursAgo(6), 0, now)).toBe(false);
+      // Too fresh — inside the grace window → no nudge yet.
+      expect(needsPartographNudge(hoursAgo(1), null, now)).toBe(false);
+    });
   });
 
   describe('classifyPartographCoverage', () => {

@@ -12,6 +12,12 @@ import { use, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { maskName } from '@/lib/pii-mask';
+import {
+  classifyPartographCoverage,
+  needsPartographNudge,
+  PARTOGRAPH_QUALITY,
+} from '@/config/hospital-network';
+import { KpiTip } from '@/components/shared/KpiTip';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
@@ -51,6 +57,24 @@ interface LaborPatient {
     dbp: number | null;
   } | null;
   latest_cervix_cm?: number | null;
+  /** NULL until the first partograph observation syncs (then 0+). */
+  partograph_alert_count?: number | null;
+}
+
+interface PartographAuditAdmission {
+  an: string;
+  name: string;
+  admitDate: string;
+  laborStatus: string;
+  observationCount: number;
+  lastObservedAt: string | null;
+}
+
+interface PartographAudit {
+  windowDays: number;
+  laborRecent: number;
+  withPartograph: number;
+  admissions: PartographAuditAdmission[];
 }
 
 interface HospitalInfo {
@@ -63,6 +87,7 @@ interface HospitalInfo {
 interface LaborResponse {
   hospital?: HospitalInfo;
   patients: LaborPatient[];
+  partographAudit?: PartographAudit | null;
 }
 
 type TabKey = 'labor' | 'anc';
@@ -164,7 +189,101 @@ function laborConcerns(p: LaborPatient): Array<{ label: string; warn?: boolean }
   const hrs = hoursSince(p.admit_date);
   if (hrs != null && hrs >= 12) out.push({ label: `${Math.floor(hrs)}h admit`, warn: true });
   if ((p.cpd_score ?? 0) >= 40) out.push({ label: 'CPD↑' });
+  // Charting nudge — ACTIVE past the grace window with no partograph at all.
+  // Absence used to read as "fine"; make it an explicit ward-level prompt.
+  if (
+    p.labor_status === 'ACTIVE' &&
+    needsPartographNudge(p.admit_date, p.partograph_alert_count ?? null)
+  ) {
+    out.push({ label: 'NO PARTO', warn: true });
+  }
   return out;
+}
+
+// ─── Partograph charting audit panel ────────────────────────────────────────
+// The /hospitals board scores charting coverage; this panel names the actual
+// uncharted admissions in the window so the provincial team can cite specific
+// cases when following up with the ward.
+const AUDIT_STATUS_TH: Record<string, string> = {
+  ACTIVE: 'รอคลอด',
+  DELIVERED: 'คลอดแล้ว',
+  DISCHARGED: 'จำหน่าย',
+  TRANSFERRED: 'ส่งต่อ',
+};
+
+function fmtAuditDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function PartographAuditPanel({ audit }: { audit: PartographAudit | null | undefined }) {
+  if (!audit || audit.laborRecent === 0) return null;
+  const cls = classifyPartographCoverage(audit.laborRecent, audit.withPartograph);
+  const pct = Math.round((audit.withPartograph / audit.laborRecent) * 100);
+  const color =
+    cls === 'ok' ? 'var(--risk-low)' : cls === 'warn' ? 'var(--risk-medium)' : 'var(--risk-high)';
+  const uncharted = audit.admissions.filter((a) => a.observationCount === 0);
+  return (
+    <div
+      className="mt-4 border bg-white"
+      data-testid="partograph-audit"
+      style={{ borderColor: 'var(--rule-strong)', borderLeft: `3px solid ${color}` }}
+    >
+      <div
+        className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2"
+        style={{ borderBottom: '1px solid var(--rule-strong)' }}
+      >
+        <KpiTip
+          title="คุณภาพการบันทึก Partograph"
+          body={`ผู้คลอดที่รับใหม่ใน ${audit.windowDays} วันที่ผ่านมา และมีบันทึก partograph อย่างน้อย 1 จุด — รายชื่อด้านล่างคือรายที่ยังไม่มีบันทึกเลย ใช้ติดตามกับห้องคลอดได้เป็นรายกรณี`}
+          trigger={
+            <div className="cursor-help font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]" />
+          }
+        >
+          PARTOGRAPH QUALITY · {audit.windowDays}D
+        </KpiTip>
+        <span className="font-mono text-[14px] font-semibold tabular-nums" style={{ color }}>
+          {pct}%{' '}
+          <span className="font-normal text-[12px] text-[var(--ink-navy-muted)]">
+            ({audit.withPartograph}/{audit.laborRecent} ราย)
+          </span>
+        </span>
+      </div>
+      {uncharted.length === 0 ? (
+        <div className="px-3 py-2 font-mono text-[12px]" style={{ color: 'var(--risk-low)' }}>
+          บันทึกครบทุกราย
+        </div>
+      ) : (
+        <div className="max-h-56 overflow-y-auto">
+          {uncharted.map((a) => (
+            <div
+              key={a.an}
+              className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 text-[13px]"
+              style={{ borderColor: 'var(--rule-hair)' }}
+            >
+              <span
+                className="border px-1 py-px font-mono text-[11px] font-semibold"
+                style={{ color: 'var(--risk-high)', borderColor: 'var(--risk-high)' }}
+              >
+                ไม่มีบันทึก
+              </span>
+              <span className="text-[var(--ink-navy)]">{maskName(a.name)}</span>
+              <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                AN {a.an} · ADMIT {fmtAuditDate(a.admitDate)} ·{' '}
+                {AUDIT_STATUS_TH[a.laborStatus] ?? a.laborStatus}
+              </span>
+            </div>
+          ))}
+          <div className="px-3 py-1.5 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+            บันทึกแล้ว {audit.withPartograph} ราย · ยังไม่บันทึก {uncharted.length} ราย
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ancConcerns(j: JourneyListItem): Array<{ label: string; warn?: boolean }> {
@@ -1538,31 +1657,34 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
           </div>
 
           {tab === 'labor' ? (
-            labor.length === 0 ? (
-              <div
-                className="border bg-white py-10 text-center"
-                style={{ borderColor: 'var(--rule-strong)' }}
-              >
-                <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
-                  ไม่มีผู้คลอดในขณะนี้
-                </p>
-              </div>
-            ) : (
-              <div>
-                <GroupHeader title="ALL PATIENTS" sub="sorted by CPD risk" count={labor.length} />
-                <div>
-                  {labor.map((p) => (
-                    <LaborRow
-                      key={p.an}
-                      p={p}
-                      isSelected={effectiveLabor === p.an}
-                      onSelect={() => setSelectedLabor(p.an)}
-                      onOpen={() => router.push(`/patients/${buildPatientId(hcode, p.an)}`)}
-                    />
-                  ))}
+            <>
+              {labor.length === 0 ? (
+                <div
+                  className="border bg-white py-10 text-center"
+                  style={{ borderColor: 'var(--rule-strong)' }}
+                >
+                  <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                    ไม่มีผู้คลอดในขณะนี้
+                  </p>
                 </div>
-              </div>
-            )
+              ) : (
+                <div>
+                  <GroupHeader title="ALL PATIENTS" sub="sorted by CPD risk" count={labor.length} />
+                  <div>
+                    {labor.map((p) => (
+                      <LaborRow
+                        key={p.an}
+                        p={p}
+                        isSelected={effectiveLabor === p.an}
+                        onSelect={() => setSelectedLabor(p.an)}
+                        onOpen={() => router.push(`/patients/${buildPatientId(hcode, p.an)}`)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <PartographAuditPanel audit={laborData?.partographAudit} />
+            </>
           ) : journeys.length === 0 ? (
             <div
               className="border bg-white py-10 text-center"

@@ -1,7 +1,7 @@
 // T050: GET /api/hospitals/[hcode]/patients — patient list per hospital
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
-import { getHospitalPatientList } from '@/services/dashboard';
+import { getHospitalPatientList, getHospitalPartographAudit } from '@/services/dashboard';
 import { auth } from '@/lib/auth';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
@@ -44,7 +44,11 @@ export async function GET(
       });
     }
 
-    return NextResponse.json(result);
+    // Charting audit rides along so the detail page renders the
+    // data-quality panel without a second fetch.
+    const partographAudit = await getHospitalPartographAudit(db, hcode);
+
+    return NextResponse.json({ ...result, partographAudit });
   } catch (error) {
     logger.error('patients_api_failed', { error });
     return NextResponse.json(

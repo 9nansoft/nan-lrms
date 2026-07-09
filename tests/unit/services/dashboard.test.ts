@@ -4,7 +4,7 @@ import { SqliteAdapter } from '@/db/sqlite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
-import { getProvinceDashboard, getSummaryTotals, getHospitalPatientList } from '@/services/dashboard';
+import { getProvinceDashboard, getSummaryTotals, getHospitalPatientList , getHospitalPartographAudit } from '@/services/dashboard';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('Dashboard Service', () => {
@@ -102,6 +102,44 @@ describe('Dashboard Service', () => {
     // Hospitals with no recent admissions report zeros, not undefined.
     const other = result.hospitals.find((h) => h.hcode !== '10670')!;
     expect(other.partographQuality).toEqual({ laborRecent: 0, withPartograph: 0 });
+  });
+
+  it('partograph audit lists window admissions, uncharted first; null for unknown hcode', async () => {
+    expect(await getHospitalPartographAudit(db, '99999')).toBeNull();
+
+    const hospitals = await db.query<{ id: string }>(
+      "SELECT id FROM hospitals WHERE hcode = '10670'",
+    );
+    const hospitalId = hospitals[0].id;
+    const iso = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+    const insertPatient = (id: string, an: string, admitDaysAgo: number) =>
+      db.execute(
+        'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, hospitalId, `HN-${an}`, an, 'enc', 28, iso(admitDaysAgo), 'ACTIVE',
+         iso(0), iso(0), iso(0)],
+      );
+    await insertPatient('pa-1', 'PA001', 2); // charted
+    await insertPatient('pa-2', 'PA002', 5); // never charted
+    await insertPatient('pa-3', 'PA003', 60); // outside window
+    await db.execute(
+      `INSERT INTO cached_partograph_observations
+         (id, patient_id, hospital_id, source_system, source_pk, observe_datetime,
+          synced_at, created_at, updated_at)
+       VALUES (?, 'pa-1', ?, 'hosxp', 'src-audit-1', ?, ?, ?, ?)`,
+      [uuidv4(), hospitalId, iso(1), iso(0), iso(0), iso(0)],
+    );
+
+    const audit = await getHospitalPartographAudit(db, '10670');
+    expect(audit).not.toBeNull();
+    expect(audit!.laborRecent).toBe(2);
+    expect(audit!.withPartograph).toBe(1);
+    expect(audit!.admissions).toHaveLength(2);
+    // Uncharted admissions sort first — they are the action items.
+    expect(audit!.admissions[0].an).toBe('PA002');
+    expect(audit!.admissions[0].observationCount).toBe(0);
+    expect(audit!.admissions[1].an).toBe('PA001');
+    expect(audit!.admissions[1].observationCount).toBe(1);
+    expect(audit!.admissions[1].lastObservedAt).toBeTruthy();
   });
 
   it('should handle hospitals with OFFLINE status', async () => {
