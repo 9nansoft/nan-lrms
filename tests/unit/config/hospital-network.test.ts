@@ -17,9 +17,9 @@ function minutesAgo(m: number): string {
 describe('classifySyncHealth', () => {
   it('classifies fresh, stale, and critical syncs by age', () => {
     expect(classifySyncHealth('OK', minutesAgo(5), NOW)).toBe('ok');
-    expect(
-      classifySyncHealth('OK', minutesAgo(SYNC_HEALTH.staleAfterMinutes + 10), NOW),
-    ).toBe('stale');
+    expect(classifySyncHealth('OK', minutesAgo(SYNC_HEALTH.staleAfterMinutes + 10), NOW)).toBe(
+      'stale',
+    );
     expect(
       classifySyncHealth('OK', minutesAgo(SYNC_HEALTH.criticalAfterHours * 60 + 10), NOW),
     ).toBe('critical');

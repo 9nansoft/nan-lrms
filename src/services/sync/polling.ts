@@ -5,7 +5,12 @@ import { BmsSessionClient } from '@/lib/bms-session';
 import { SseManager } from '@/lib/sse';
 import { encrypt } from '@/lib/encryption';
 import { calculateAge } from '@/lib/utils';
-import { getQuery, ACTIVE_LABOR_PATIENTS, PARTOGRAPH_OBSERVATIONS } from '@/config/hosxp-queries';
+import {
+  getQuery,
+  ACTIVE_LABOR_PATIENTS,
+  PARTOGRAPH_OBSERVATIONS,
+  LABOUR_INFANTS_SINCE,
+} from '@/config/hosxp-queries';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
 import {
   upsertCachedPatients,
@@ -16,6 +21,8 @@ import {
 } from './patient';
 import { upsertPartographObservations, type PartographRow } from './partograph';
 import { autoArriveReferrals } from '@/services/referral';
+import { newbornSyncCutoffDate, syncNewbornsFromRows } from './newborn';
+import type { HosxpLabourInfantRow } from '@/types/hosxp';
 import { calculateAndStoreCpdScores } from './cpd-persist';
 import { syncAncData } from './anc';
 import { logger } from '@/lib/logger';
@@ -1256,6 +1263,54 @@ export async function pollHospital(
         hospitalId,
         error: partographError,
       });
+    }
+
+    // ─── Newborn outcomes: HOSxP labour_infant → cached_newborns ─────────
+    // Fetches every infant born since the self-healing cutoff (one-year
+    // backfill on first run, 2-day overlap after) and fans the batch out to
+    // journeys via cached_patients.an. Own try/catch: a failure here must
+    // not abort the rest of the cycle.
+    try {
+      const cutoff = await newbornSyncCutoffDate(db, hospitalId);
+      // Defense in depth — the cutoff is generated above, but never inline
+      // anything that doesn't look like a plain date.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) {
+        throw new Error(`invalid newborn sync cutoff: ${cutoff}`);
+      }
+      const infantSql = getQuery(LABOUR_INFANTS_SINCE, databaseType).replace('{{CUTOFF}}', cutoff);
+      emitStep(options, {
+        name: 'sync_newborns',
+        status: 'running',
+        message: `Querying HOSxP labour infants born since ${cutoff}.`,
+      });
+      const infantResult = await client.executeQuery(infantSql, bmsUrl, jwt, undefined, {
+        appIdentifier: APP_IDENTIFIER,
+        marketplaceToken: options.marketplaceToken,
+      });
+      const newbornResult = await syncNewbornsFromRows(
+        db,
+        hospitalId,
+        infantResult.data as unknown as HosxpLabourInfantRow[],
+      );
+      emitStep(options, {
+        name: 'sync_newborns',
+        status: 'success',
+        message: `Upserted ${newbornResult.upserted} newborns across ${newbornResult.journeys} journeys (${newbornResult.skippedNoJourney} ANs without a journey).`,
+        counts: {
+          rows: newbornResult.rowsRead,
+          upserted: newbornResult.upserted,
+          journeys: newbornResult.journeys,
+          skipped: newbornResult.skippedNoJourney,
+        },
+      });
+    } catch (newbornError) {
+      emitStep(options, {
+        name: 'sync_newborns',
+        status: 'warning',
+        message: 'Newborn sync failed — continuing the cycle.',
+        detail: newbornError instanceof Error ? newbornError.message : String(newbornError),
+      });
+      logger.warn('newborn_sync_failed', { hospitalId, error: newbornError });
     }
 
     try {

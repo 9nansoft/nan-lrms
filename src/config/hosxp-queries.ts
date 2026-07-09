@@ -309,6 +309,42 @@ export const LABOUR_INFANTS: SqlQueryTemplate = {
       WHERE il.an = ?`,
 };
 
+// Batch variant of LABOUR_INFANTS for the polling cycle — one round trip per
+// hospital per cycle instead of one per admission. {{CUTOFF}} is substituted
+// in app code with a validated YYYY-MM-DD string (see polling.ts); an inline
+// literal is used because the BMS gateway's parameter contract varies across
+// versions, and the value is generated (never user input).
+export const LABOUR_INFANTS_SINCE: SqlQueryTemplate = {
+  postgresql: `
+      SELECT li.ipt_labour_infant_id, li.ipt_labour_id, il.an,
+             li.infant_number, li.sex, li.birth_weight, li.body_length, li.head_length,
+             li.temperature, li.rr, li.hr,
+             li.apgar_score_min1, li.apgar_score_min5, li.apgar_score_min10,
+             li.infant_check_ppv, li.infant_check_et_tube, li.infant_check_chest_pump,
+             li.infant_check_oxygen_box, li.infant_check_narcan,
+             li.infant_check_feed_milk, li.infant_check_vitk, li.infant_check_eyepaste,
+             li.infant_check_bcg, li.infant_check_hepb, li.infant_check_azt,
+             li.infant_icd10, li.hn AS infant_hn, li.infant_an, li.infant_dchstts,
+             li.birth_date, li.birth_time
+      FROM ipt_labour_infant li
+      JOIN ipt_labour il ON il.ipt_labour_id = li.ipt_labour_id
+      WHERE li.birth_date >= '{{CUTOFF}}'`,
+  mysql: `
+      SELECT li.ipt_labour_infant_id, li.ipt_labour_id, il.an,
+             li.infant_number, li.sex, li.birth_weight, li.body_length, li.head_length,
+             li.temperature, li.rr, li.hr,
+             li.apgar_score_min1, li.apgar_score_min5, li.apgar_score_min10,
+             li.infant_check_ppv, li.infant_check_et_tube, li.infant_check_chest_pump,
+             li.infant_check_oxygen_box, li.infant_check_narcan,
+             li.infant_check_feed_milk, li.infant_check_vitk, li.infant_check_eyepaste,
+             li.infant_check_bcg, li.infant_check_hepb, li.infant_check_azt,
+             li.infant_icd10, li.hn AS infant_hn, li.infant_an, li.infant_dchstts,
+             li.birth_date, li.birth_time
+      FROM ipt_labour_infant li
+      JOIN ipt_labour il ON il.ipt_labour_id = li.ipt_labour_id
+      WHERE li.birth_date >= '{{CUTOFF}}'`,
+};
+
 export const REFEROUT_PREGNANCY: SqlQueryTemplate = {
   postgresql: `
       SELECT ro.refer_number, ro.refer_date, p.hn,

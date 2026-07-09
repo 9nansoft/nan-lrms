@@ -90,7 +90,8 @@ function buildHospitalIcon(params: {
   syncStatus: 'OK' | 'BLOCKED' | 'NEVER_SYNCED';
   syncBlockedReason: string | null;
 }): DivIcon {
-  const { color, sizePx, isHigh, isSelected, connectionStatus, syncStatus, syncBlockedReason } = params;
+  const { color, sizePx, isHigh, isSelected, connectionStatus, syncStatus, syncBlockedReason } =
+    params;
   const isOffline = connectionStatus === 'OFFLINE';
   const classes = [
     'kk-pin',
@@ -282,19 +283,14 @@ export default function ProvinceMapLeaflet({
     () => loadProvinceShapes(activeProvince),
   );
 
-  const liveByHcode = useMemo(
-    () => new Map(hospitals.map((h) => [h.hcode, h])),
-    [hospitals],
-  );
+  const liveByHcode = useMemo(() => new Map(hospitals.map((h) => [h.hcode, h])), [hospitals]);
 
   const tileUrl =
     mode === 'kiosk'
       ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
       : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
   const tileAttribution =
-    mode === 'kiosk'
-      ? '© OpenStreetMap contributors, © CARTO'
-      : '© OpenStreetMap contributors';
+    mode === 'kiosk' ? '© OpenStreetMap contributors, © CARTO' : '© OpenStreetMap contributors';
 
   const handleMarkerClick = (hcode: string) => {
     if (onSelect) onSelect(hcode === selected ? null : hcode);
@@ -316,10 +312,7 @@ export default function ProvinceMapLeaflet({
     if (!loadedShapes) return null;
     const bbox = computeBounds(loadedShapes.province);
     if (!bbox) return null;
-    const center: LatLngExpression = [
-      (bbox[0][0] + bbox[1][0]) / 2,
-      (bbox[0][1] + bbox[1][1]) / 2,
-    ];
+    const center: LatLngExpression = [(bbox[0][0] + bbox[1][0]) / 2, (bbox[0][1] + bbox[1][1]) / 2];
     return {
       bounds: bbox,
       center,
@@ -346,9 +339,7 @@ export default function ProvinceMapLeaflet({
         activeCountRadiusBoost(
           combinedWorkload(live?.counts ?? { total: 0 }, live?.ancCounts ?? { total: 0 }),
         );
-      const sizePx = Math.round(
-        Math.min(w.pinMaxPx, Math.max(w.pinMinPx, baseRadius * w.pinMult)),
-      );
+      const sizePx = Math.round(Math.min(w.pinMaxPx, Math.max(w.pinMinPx, baseRadius * w.pinMult)));
       const color = riskColor(live, palette);
       const isSel = selected === hcode;
       // Status is tri-state: ONLINE / OFFLINE / UNKNOWN. Anything not
@@ -419,15 +410,7 @@ export default function ProvinceMapLeaflet({
       pins.push(buildPin(h.hcode, h.name, h.level, coord));
     }
     return pins;
-  }, [
-    activeMap,
-    hospitals,
-    liveByHcode,
-    centroidByDistrict,
-    selected,
-    palette,
-    w,
-  ]);
+  }, [activeMap, hospitals, liveByHcode, centroidByDistrict, selected, palette, w]);
 
   if (!activeMap) {
     return (
@@ -501,11 +484,7 @@ export default function ProvinceMapLeaflet({
              Tooltip direction is picked dynamically per pin so the popup
              never gets clipped by the map div edge — see HospitalMarker. */}
         {hospitalPins.map((pin) => (
-          <HospitalMarker
-            key={pin.hcode}
-            pin={pin}
-            onClick={handleMarkerClick}
-          />
+          <HospitalMarker key={pin.hcode} pin={pin} onClick={handleMarkerClick} />
         ))}
 
         <ZoomControl position="bottomright" />
@@ -524,17 +503,9 @@ export default function ProvinceMapLeaflet({
 // tooltip is ~280 × ~150 px, so we estimate the half-extents below and
 // re-pick a direction whenever the pointer enters the marker. Re-picking
 // on hover (not on every map move) keeps the cost trivial.
-function HospitalMarker({
-  pin,
-  onClick,
-}: {
-  pin: PinEntry;
-  onClick: (hcode: string) => void;
-}) {
+function HospitalMarker({ pin, onClick }: { pin: PinEntry; onClick: (hcode: string) => void }) {
   const map = useMap();
-  const [direction, setDirection] = useState<
-    'top' | 'bottom' | 'left' | 'right'
-  >('top');
+  const [direction, setDirection] = useState<'top' | 'bottom' | 'left' | 'right'>('top');
 
   // Approx tooltip extents — keep generous so we err on the side of safety
   // and pick a different direction even if the pin is moderately close to
@@ -591,12 +562,7 @@ function HospitalMarker({
         mouseover: recompute,
       }}
     >
-      <Tooltip
-        direction={direction}
-        offset={offset}
-        sticky
-        className="kk-map-tooltip"
-      >
+      <Tooltip direction={direction} offset={offset} sticky className="kk-map-tooltip">
         <HospitalTooltip pin={pin} />
       </Tooltip>
     </Marker>
@@ -664,8 +630,7 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
         lineHeight: 1.35,
         minWidth: 220,
         maxWidth: 280,
-        fontFamily:
-          'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+        fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       }}
     >
       {/* Title block */}
@@ -683,9 +648,7 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
         >
           {level}
         </span>
-        <span style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>
-          {hcode}
-        </span>
+        <span style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>{hcode}</span>
       </div>
 
       {/* Status row */}
@@ -803,9 +766,7 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
         }}
       >
         <span>SYNC · {lastSyncRel}</span>
-        {lastSyncAbs && (
-          <span style={{ fontSize: 9, opacity: 0.8 }}>{lastSyncAbs}</span>
-        )}
+        {lastSyncAbs && <span style={{ fontSize: 9, opacity: 0.8 }}>{lastSyncAbs}</span>}
       </div>
 
       {/* Click hint */}
@@ -860,8 +821,7 @@ function MapStatusLegend({ mode }: { mode: 'light' | 'kiosk' }) {
         borderRadius: 4,
         padding: '6px 8px',
         boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
-        fontFamily:
-          'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
         pointerEvents: 'none',
       }}
       aria-label="Map dot color legend"

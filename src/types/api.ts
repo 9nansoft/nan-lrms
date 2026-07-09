@@ -568,9 +568,56 @@ export interface NewbornEntry {
 export interface NewbornKPIsResponse {
   totalBirths: number;
   lbwCount: number;
+  /** Percentage 0–100 of births under 2,500 g. */
   lbwRate: number;
   lowApgarCount: number;
   avgBirthWeightG: number;
+}
+
+export interface OutcomeTrendPoint {
+  /** Bangkok calendar month, YYYY-MM. */
+  month: string;
+  births: number;
+  lbw: number;
+}
+
+export interface OutcomeHospitalRow {
+  hcode: string;
+  name: string;
+  births: number;
+  lbw: number;
+  lowApgar: number;
+}
+
+export interface RecentBirthEntry {
+  id: string;
+  journeyId: string;
+  /** Decrypted at the API boundary; mask at render (maskName). */
+  motherName: string;
+  hospitalName: string;
+  infantNumber: number;
+  sex: string | null;
+  birthWeightG: number | null;
+  apgar1min: number | null;
+  apgar5min: number | null;
+  resuscitated: boolean;
+  bornAt: string;
+}
+
+/** Full payload for the /outcomes board — KPI fields stay at the root for
+ *  back-compat with the original NewbornKPIsResponse shape. */
+export interface OutcomesResponse extends NewbornKPIsResponse {
+  /** Births with infant_number > 1 (multiple-gestation deliveries). */
+  multiples: number;
+  /** Births with any resuscitation intervention flag set. */
+  resuscitated: number;
+  /** Last six Bangkok months, oldest first — always all-range. */
+  trend: OutcomeTrendPoint[];
+  /** Per-hospital breakdown over the selected range (facet — ignores the
+   *  hospital filter). */
+  byHospital: OutcomeHospitalRow[];
+  /** Most recent births (max 20) within the selected range/hospital. */
+  recent: RecentBirthEntry[];
 }
 
 export interface DashboardStageKPIs {

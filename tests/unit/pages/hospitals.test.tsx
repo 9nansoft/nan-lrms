@@ -131,8 +131,6 @@ describe('HospitalsPage — roster rows', () => {
     const rows = screen.getAllByTestId(/hospital-row-/);
     const codes = rows.map((r) => r.getAttribute('data-testid'));
     // Both M2 hospitals: บ้านฝาง (workload ~22.5) before พระยืน (~1).
-    expect(codes.indexOf('hospital-row-10995')).toBeLessThan(
-      codes.indexOf('hospital-row-10996'),
-    );
+    expect(codes.indexOf('hospital-row-10995')).toBeLessThan(codes.indexOf('hospital-row-10996'));
   });
 });

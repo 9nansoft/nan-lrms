@@ -36,9 +36,6 @@ export function classifySyncHealth(
  *  on par with a 20-bed labor ward. */
 export const ANC_WORKLOAD_WEIGHT = 0.1;
 
-export function combinedWorkload(
-  labor: { total: number },
-  anc: { total: number },
-): number {
+export function combinedWorkload(labor: { total: number }, anc: { total: number }): number {
   return labor.total + anc.total * ANC_WORKLOAD_WEIGHT;
 }

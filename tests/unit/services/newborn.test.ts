@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqliteAdapter } from '@/db/sqlite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables';
-import { upsertNewborn, getNewbornKPIs } from '@/services/newborn';
+import { upsertNewborn, getNewbornKPIs, getOutcomes } from '@/services/newborn';
 
 describe('Newborn Service', () => {
   let db: SqliteAdapter;
@@ -118,7 +118,8 @@ describe('Newborn Service', () => {
       const kpis = await getNewbornKPIs(db);
       expect(kpis.totalBirths).toBe(2);
       expect(kpis.lbwCount).toBe(1);
-      expect(kpis.lbwRate).toBe(0.5);
+      // lbwRate is a percentage (0–100), matching the UI's "% ของทารกทั้งหมด".
+      expect(kpis.lbwRate).toBe(50);
       expect(kpis.lowApgarCount).toBe(1);
       expect(kpis.avgBirthWeightG).toBe(2950);
     });
@@ -197,12 +198,100 @@ describe('Newborn Service', () => {
         bornAt: '2026-03-09T10:00:00Z',
       });
 
-      const kpisHosp1 = await getNewbornKPIs(db, hospitalId);
+      const kpisHosp1 = await getNewbornKPIs(db, { hospitalId });
       expect(kpisHosp1.totalBirths).toBe(1);
       expect(kpisHosp1.avgBirthWeightG).toBe(3000);
 
       const kpisAll = await getNewbornKPIs(db);
       expect(kpisAll.totalBirths).toBe(2);
+    });
+
+    it('applies the range window: Bangkok month-to-date and last 30 days', async () => {
+      const NOW = new Date('2026-07-15T18:00:00+07:00');
+      const daysAgo = (d: number) => new Date(NOW.getTime() - d * 24 * 3600_000).toISOString();
+
+      const base = {
+        resuscitation: {},
+        vaccinations: {},
+        apgar1min: 9,
+        apgar5min: 9,
+        birthWeightG: 3000,
+      };
+      // Jul 13 — inside month-to-date.
+      await upsertNewborn(db, { ...base, journeyId: journeyId1, infantNumber: 1, bornAt: daysAgo(2) });
+      // Jun 25 — outside MTD, inside 30 days.
+      await upsertNewborn(db, { ...base, journeyId: journeyId2, infantNumber: 1, bornAt: daysAgo(20) });
+      // Apr — outside both.
+      await upsertNewborn(db, { ...base, journeyId: journeyId2, infantNumber: 2, bornAt: daysAgo(100) });
+
+      expect((await getNewbornKPIs(db, { range: 'mtd' }, NOW)).totalBirths).toBe(1);
+      expect((await getNewbornKPIs(db, { range: '30d' }, NOW)).totalBirths).toBe(2);
+      expect((await getNewbornKPIs(db, { range: 'all' }, NOW)).totalBirths).toBe(3);
+      // Default keeps the historical all-time semantics.
+      expect((await getNewbornKPIs(db, {}, NOW)).totalBirths).toBe(3);
+    });
+  });
+
+  describe('getOutcomes', () => {
+    it('adds multiples + resuscitated counts, 6-month trend, hospital breakdown, recent births', async () => {
+      const NOW = new Date('2026-07-15T18:00:00+07:00');
+      const base = { resuscitation: {}, vaccinations: {}, apgar1min: 9, apgar5min: 9 };
+
+      // Twin birth this month, second twin resuscitated + LBW.
+      await upsertNewborn(db, {
+        ...base,
+        journeyId: journeyId1,
+        infantNumber: 1,
+        sex: 'M',
+        birthWeightG: 3100,
+        bornAt: '2026-07-10T08:00:00Z',
+      });
+      await upsertNewborn(db, {
+        ...base,
+        journeyId: journeyId1,
+        infantNumber: 2,
+        sex: 'F',
+        birthWeightG: 2300,
+        apgar5min: 6,
+        resuscitation: { ppv: true },
+        bornAt: '2026-07-10T08:05:00Z',
+      });
+      // Singleton two months earlier.
+      await upsertNewborn(db, {
+        ...base,
+        journeyId: journeyId2,
+        infantNumber: 1,
+        sex: 'M',
+        birthWeightG: 3400,
+        bornAt: '2026-05-20T10:00:00Z',
+      });
+
+      const outcomes = await getOutcomes(db, { range: 'all' }, NOW);
+
+      expect(outcomes.totalBirths).toBe(3);
+      expect(outcomes.multiples).toBe(1); // one infant_number > 1
+      expect(outcomes.resuscitated).toBe(1);
+
+      // Six Bangkok months, oldest first; May has 1 birth, July has 2.
+      expect(outcomes.trend).toHaveLength(6);
+      expect(outcomes.trend[5]).toEqual({ month: '2026-07', births: 2, lbw: 1 });
+      expect(outcomes.trend[3]).toEqual({ month: '2026-05', births: 1, lbw: 0 });
+
+      expect(outcomes.byHospital).toEqual([
+        { hcode: '10670', name: 'รพ.ขอนแก่น', births: 3, lbw: 1, lowApgar: 1 },
+      ]);
+
+      // Recent births, newest first, mother name decrypted at the boundary.
+      expect(outcomes.recent).toHaveLength(3);
+      expect(outcomes.recent[0]).toMatchObject({
+        journeyId: journeyId1,
+        infantNumber: 2,
+        motherName: 'Test1',
+        hospitalName: 'รพ.ขอนแก่น',
+        birthWeightG: 2300,
+        apgar5min: 6,
+        resuscitated: true,
+      });
     });
   });
 });

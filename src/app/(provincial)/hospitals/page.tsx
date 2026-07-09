@@ -225,7 +225,8 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
         const stats = levelStats(levelHospitals);
         // Busiest first — combined labor + weighted-ANC workload.
         const ordered = [...levelHospitals].sort(
-          (a, b) => combinedWorkload(b.counts, b.ancCounts) - combinedWorkload(a.counts, a.ancCounts),
+          (a, b) =>
+            combinedWorkload(b.counts, b.ancCounts) - combinedWorkload(a.counts, a.ancCounts),
         );
         return (
           <div
