@@ -126,7 +126,7 @@ export function KioskHeader({
             </div>
           )}
           <div className="mt-0.5">
-            {onlineCount}/{totalCount} NODES ONLINE
+            {onlineCount}/{totalCount} NODES · DATA FRESH
           </div>
         </div>
 

@@ -13,7 +13,7 @@
 // must be lossless), so the dashboard layer is the right place to honor the
 // flag — one subquery, applied everywhere.
 import type { DatabaseAdapter } from '@/db/adapter';
-import { bangkokStartOfToday } from '@/lib/bangkok-time';
+import { bangkokStartOfMonth, bangkokStartOfToday } from '@/lib/bangkok-time';
 import { referralSlaCutoffs } from '@/config/referral-sla';
 import { ancOpsCutoffs } from '@/config/anc-ops';
 import { ancFreshnessCutoffs, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
@@ -440,10 +440,21 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
   }
 
   // Delivered counts (this month) with outcome flags
-  const firstOfMonth = new Date();
-  firstOfMonth.setDate(1);
-  firstOfMonth.setHours(0, 0, 0, 0);
-  const monthStart = firstOfMonth.toISOString();
+  // Bangkok month boundary — consistent with the outcomes board (the old
+  // server-local setHours(0,0,0,0) drifted from every other monthly figure).
+  const monthStart = bangkokStartOfMonth().toISOString();
+
+  // Total comes from journeys: newborn records lag the journey transition
+  // (they arrive via the labour_infant sync), so a delivered card keyed only
+  // on cached_newborns reads 0 while deliveries are demonstrably happening.
+  const deliveredJourneyRows = await db.query<{ total: number }>(
+    `SELECT COUNT(*) as total FROM maternal_journeys mj
+     WHERE mj.care_stage = 'DELIVERED'
+       AND mj.stage_changed_at >= ?
+       AND (mj.hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
+            OR mj.current_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})`,
+    [monthStart],
+  );
 
   const deliveredRows = await db.query<{
     total: number;
@@ -468,7 +479,12 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
   );
 
   const dr = deliveredRows[0] || { total: 0, abnormal: 0, low_apgar: 0, lbw: 0 };
-  const totalDelivered = Number(dr.total) || 0;
+  const newbornTotal = Number(dr.total) || 0;
+  const journeyTotal = Number(deliveredJourneyRows[0]?.total) || 0;
+  // Journeys lead, newborn records refine — take whichever is larger so the
+  // card is never zero while deliveries exist, and never below the infant
+  // count for multiple births.
+  const totalDelivered = Math.max(journeyTotal, newbornTotal);
   const abnormal = Number(dr.abnormal) || 0;
   const lowApgar = Number(dr.low_apgar) || 0;
   const lbw = Number(dr.lbw) || 0;
@@ -478,7 +494,7 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
     labor,
     delivered: {
       total: totalDelivered,
-      normal: totalDelivered - abnormal,
+      normal: Math.max(totalDelivered - abnormal, 0),
       lowApgar,
       lbw,
     },

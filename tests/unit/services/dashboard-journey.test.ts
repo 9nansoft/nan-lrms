@@ -45,6 +45,20 @@ describe('Dashboard Journey Extensions', () => {
       expect(kpis.pregnancy.hr1).toBe(1);
       expect(kpis.pregnancy.hr3).toBe(1);
     });
+
+    it('delivered total counts journeys this month even before newborn records arrive', async () => {
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
+         VALUES ('j-delivered-1', ?, ?, 'HN-D1', 'Test', 'enc_cid', 'cidhash', 25, 1, 0, 'DELIVERED', 'LOW', 5, ?, ?, ?, ?, ?)`,
+        [hospitalId, hospitalId, now, now, now, now, now],
+      );
+
+      const kpis = await getStageKPIs(db);
+      expect(kpis.delivered.total).toBe(1);
+      expect(kpis.delivered.normal).toBe(1);
+      expect(kpis.delivered.lowApgar).toBe(0);
+    });
   });
 
   describe('getDashboardAlerts', () => {

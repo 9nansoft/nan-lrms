@@ -132,7 +132,13 @@ describe('HighRiskPatientList', () => {
 
   it('shows empty state when no patients', () => {
     render(<HighRiskPatientList patients={[]} />);
-    expect(screen.getByText(/ไม่มีผู้ป่วยที่ต้องเฝ้าระวัง/)).toBeTruthy();
+    expect(screen.getByText(/ไม่มีผู้คลอดเสี่ยงสูงในห้องคลอดขณะนี้/)).toBeTruthy();
+  });
+
+  it('empty state surfaces upstream ANC pressure with board links', () => {
+    render(<HighRiskPatientList patients={[]} ancFallback={{ hr3: 106, dueSoon: 172 }} />);
+    expect(screen.getByText(/HR3 106 ราย/)).toBeTruthy();
+    expect(screen.getByText(/≤14 วัน 172 ราย/)).toBeTruthy();
   });
 
   it('shows loading skeletons when isLoading is true', () => {
@@ -143,7 +149,7 @@ describe('HighRiskPatientList', () => {
 
   it('does not show empty state when loading', () => {
     render(<HighRiskPatientList patients={[]} isLoading={true} />);
-    expect(screen.queryByText(/ไม่มีผู้ป่วยที่ต้องเฝ้าระวัง/)).toBeNull();
+    expect(screen.queryByText(/ไม่มีผู้คลอดเสี่ยงสูงในห้องคลอดขณะนี้/)).toBeNull();
   });
 
   it('renders GA weeks in HIGH tab', () => {

@@ -30,6 +30,7 @@ import { HospitalDetailDialog } from '@/components/dashboard/HospitalDetailDialo
 import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { ConnectionStatus as ConnectionStatusEnum } from '@/types/domain';
+import { classifySyncHealth } from '@/config/hospital-network';
 import { Copy, Info, Monitor, RefreshCw, Maximize2, Expand } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -158,8 +159,18 @@ export default function DashboardPage() {
   const [onboardingErrorDismissed, setOnboardingErrorDismissed] = useState(false);
   const [hosxpSyncDialogOpen, setHosxpSyncDialogOpen] = useState(false);
   const [hosxpReportCopied, setHosxpReportCopied] = useState(false);
-  const { hospitals, summary, stageKPIs, alerts, trends, updatedAt, isLoading, error, mutate } =
-    useDashboard();
+  const {
+    hospitals,
+    summary,
+    stageKPIs,
+    alerts,
+    trends,
+    continuum,
+    updatedAt,
+    isLoading,
+    error,
+    mutate,
+  } = useDashboard();
   const {
     patients: highRiskPatients,
     isLoading: hrLoading,
@@ -220,6 +231,14 @@ export default function DashboardPage() {
   const onlineCount = hospitals.filter(
     (h) => h.connectionStatus === ConnectionStatusEnum.ONLINE,
   ).length;
+  // Data freshness beats transport status: a hospital can be ONLINE with a
+  // two-week-old sync. Same classifier as the /hospitals board.
+  const freshCount = hospitals.filter(
+    (h) => classifySyncHealth(h.syncStatus, h.lastSyncAt) === 'ok',
+  ).length;
+  const ancFallback = continuum
+    ? { hr3: continuum.anc.hr3, dueSoon: continuum.anc.dueSoon }
+    : null;
 
   // ═══════════════════════════════════════════════════════════════
   // KIOSK MODE — 1920×1080 wall display, dark phosphor-glow palette
@@ -237,7 +256,7 @@ export default function DashboardPage() {
         <KioskHeader
           updatedAt={updatedAt}
           onExit={exitKiosk}
-          onlineCount={onlineCount}
+          onlineCount={freshCount}
           totalCount={hospitals.length}
         />
 
@@ -264,7 +283,7 @@ export default function DashboardPage() {
             className="border"
             style={{ borderColor: 'var(--kiosk-rule)', background: 'var(--kiosk-panel)' }}
           >
-            <ProvinceVitalsStrip summary={summary} trends={trends} />
+            <ProvinceVitalsStrip summary={summary} trends={trends} continuum={continuum} />
           </div>
 
           {/* 03+04 — HIGH-risk + Province map (side-by-side, kiosk privacy on list) */}
@@ -278,6 +297,7 @@ export default function DashboardPage() {
                 isLoading={hrLoading}
                 variant="kiosk"
                 maxRows={8}
+                ancFallback={ancFallback}
               />
             </div>
             <div
@@ -336,7 +356,7 @@ export default function DashboardPage() {
             {sseMeta.stream}
           </span>
           <span>
-            {onlineCount}/{hospitals.length} ONLINE
+            {freshCount}/{hospitals.length} DATA FRESH
           </span>
           <span style={{ color: 'var(--kiosk-ink)' }}>ESC TO EXIT</span>
         </div>
@@ -485,8 +505,8 @@ export default function DashboardPage() {
               <span className="font-semibold text-[var(--ink-navy)]">{sseMeta.chip}</span>
             </span>
             <span className="tabular-nums">
-              <span className="font-semibold text-[var(--ink-navy)]">{onlineCount}</span>
-              <span className="text-[var(--ink-navy-muted)]">/{hospitals.length}</span> ONLINE
+              <span className="font-semibold text-[var(--ink-navy)]">{freshCount}</span>
+              <span className="text-[var(--ink-navy-muted)]">/{hospitals.length}</span> ข้อมูลสด
             </span>
             <OnlineUsersBadge />
             {updatedAt && (
@@ -568,11 +588,11 @@ export default function DashboardPage() {
           <AlertBar alerts={alerts} />
 
           {/* 02 — Province vitals strip */}
-          <ProvinceVitalsStrip summary={summary} trends={trends} />
+          <ProvinceVitalsStrip summary={summary} trends={trends} continuum={continuum} />
 
           {/* 03 — HIGH-risk & active labor */}
           <div className="bg-white p-5">
-            <HighRiskPatientList patients={highRiskPatients} isLoading={hrLoading} />
+            <HighRiskPatientList patients={highRiskPatients} isLoading={hrLoading} ancFallback={ancFallback} />
 
             {/* 05 — Stage KPIs */}
             <div className="mt-6">
@@ -763,7 +783,7 @@ export default function DashboardPage() {
             {sseMeta.stream}
           </span>
           <span>
-            {onlineCount}/{hospitals.length} NODES LIVE
+            {freshCount}/{hospitals.length} DATA FRESH
           </span>
           <OnlineUsersBadge />
           <button

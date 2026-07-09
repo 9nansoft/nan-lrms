@@ -124,8 +124,13 @@ export default function PregnanciesPage() {
   // Deep links from the dashboard alert ribbon land pre-filtered
   // (e.g. /pregnancies?cohort=anc_stale).
   const searchParams = useSearchParams();
+  const riskParam = searchParams.get('risk');
   const [page, setPage] = useState(1);
-  const [riskFilter, setRiskFilter] = useState<'' | AncRisk>('');
+  const [riskFilter, setRiskFilter] = useState<'' | AncRisk>(
+    riskParam === 'LOW' || riskParam === 'HR1' || riskParam === 'HR2' || riskParam === 'HR3'
+      ? riskParam
+      : '',
+  );
   const [cohortFilter, setCohortFilter] = useState(searchParams.get('cohort') ?? '');
   const [hospitalFilter, setHospitalFilter] = useState('');
   const [sortBy, setSortBy] = useState('due');

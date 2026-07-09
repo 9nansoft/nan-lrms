@@ -9,13 +9,18 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import type { DashboardSummary, DashboardTrends } from '@/types/api';
+import Link from 'next/link';
+import type { DashboardSummary, DashboardTrends, DashboardContinuum } from '@/types/api';
 import { RiskBar, StatCell, BarStrip } from './shared';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ProvinceVitalsStripProps {
   summary: DashboardSummary;
   trends: DashboardTrends;
+  /** Cross-board headline numbers (ANC registry + referral flow) — the labor
+   *  vitals alone described ~11 patients while the province carried a
+   *  1,169-woman ANC registry. Optional so kiosk/offline payloads degrade. */
+  continuum?: DashboardContinuum | null;
 }
 
 // Small wrapper that turns any cell into a tooltip trigger. The cell content
@@ -61,8 +66,9 @@ function CellWithTooltip({
   );
 }
 
-export function ProvinceVitalsStrip({ summary, trends }: ProvinceVitalsStripProps) {
+export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVitalsStripProps) {
   return (
+    <>
     <div
       className="grid border-b border-[var(--rule-strong)] bg-white"
       style={{ gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1.6fr' }}
@@ -217,5 +223,74 @@ export function ProvinceVitalsStrip({ summary, trends }: ProvinceVitalsStripProp
         </div>
       </CellWithTooltip>
     </div>
+
+    {/* Continuum row — ANC registry + referral flow headline numbers, linked
+        to their boards. Same sources as the boards, so they cannot drift. */}
+    {continuum && (
+      <div
+        className="grid border-b border-[var(--rule-strong)] bg-white"
+        style={{ gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1.6fr' }}
+        data-testid="continuum-strip"
+      >
+        <Link
+          href="/pregnancies"
+          className="border-r border-[var(--rule-strong)] px-5 py-3 transition-colors hover:bg-[var(--accent-navy-soft)]"
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            ANC REGISTRY
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-mono text-[22px] font-semibold leading-none tabular-nums text-[var(--accent-navy)]">
+              {continuum.anc.total}
+            </span>
+            <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+              หญิงตั้งครรภ์ทั้งจังหวัด
+            </span>
+          </div>
+        </Link>
+        <Link
+          href="/pregnancies?risk=HR3"
+          className="border-r border-[var(--rule-strong)] px-5 py-3 transition-colors hover:bg-[var(--accent-navy-soft)]"
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            HR3
+          </div>
+          <div className="mt-1 font-mono text-[22px] font-semibold leading-none tabular-nums" style={{ color: 'var(--risk-high)' }}>
+            {continuum.anc.hr3}
+          </div>
+        </Link>
+        <Link
+          href="/pregnancies?cohort=due_soon"
+          className="border-r border-[var(--rule-strong)] px-5 py-3 transition-colors hover:bg-[var(--accent-navy-soft)]"
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            DUE ≤14D
+          </div>
+          <div className="mt-1 font-mono text-[22px] font-semibold leading-none tabular-nums" style={{ color: 'var(--risk-medium)' }}>
+            {continuum.anc.dueSoon}
+          </div>
+        </Link>
+        <Link
+          href="/referrals"
+          className="border-r border-[var(--rule-strong)] px-5 py-3 transition-colors hover:bg-[var(--accent-navy-soft)]"
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            REFERRALS 7D
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-mono text-[22px] font-semibold leading-none tabular-nums text-[var(--ink-navy)]">
+              {continuum.referrals.last7d}
+            </span>
+            <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+              วันนี้ {continuum.referrals.today}
+            </span>
+          </div>
+        </Link>
+        <div className="flex items-center px-5 py-3 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
+          CARE CONTINUUM · คลิกเพื่อเปิดหน้ารายการ
+        </div>
+      </div>
+    )}
+    </>
   );
 }

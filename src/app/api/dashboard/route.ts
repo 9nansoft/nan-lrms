@@ -7,6 +7,9 @@ import {
   getDashboardAlerts,
   getTrends,
 } from '@/services/dashboard';
+import { getAncBoardCounts } from '@/services/journey-list';
+import { getReferralOpsCounts } from '@/services/referral-list';
+import type { DashboardContinuum } from '@/types/api';
 import { auth } from '@/lib/auth';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
@@ -20,6 +23,7 @@ interface DashboardApiPayload {
   trends: Awaited<ReturnType<typeof getTrends>>;
   hospitals: Awaited<ReturnType<typeof getProvinceDashboard>>['hospitals'];
   summary: Awaited<ReturnType<typeof getProvinceDashboard>>['summary'];
+  continuum: DashboardContinuum;
   updatedAt: string;
 }
 
@@ -52,13 +56,23 @@ export async function GET() {
       }
     }
 
-    const [result, stageKPIs, alerts, trends] = await Promise.all([
+    const [result, stageKPIs, alerts, trends, ancCounts, referralOps] = await Promise.all([
       getProvinceDashboard(db),
       getStageKPIs(db),
       getDashboardAlerts(db),
       getTrends(db),
+      getAncBoardCounts(db),
+      getReferralOpsCounts(db),
     ]);
-    const payload = { ...result, stageKPIs, alerts, trends };
+    const continuum: DashboardContinuum = {
+      anc: {
+        total: ancCounts.risk.total,
+        hr3: ancCounts.risk.hr3,
+        dueSoon: ancCounts.ops.dueSoon,
+      },
+      referrals: { today: referralOps.today, last7d: referralOps.last7d },
+    };
+    const payload = { ...result, stageKPIs, alerts, trends, continuum };
     if (DASHBOARD_CACHE_ENABLED) {
       await cacheSetJson(DASHBOARD_CACHE_KEY, payload, DASHBOARD_CACHE_TTL_SECONDS);
     }

@@ -241,6 +241,19 @@ async function computeRiskCounts(
   return counts;
 }
 
+/** Province-wide ANC board counts (risk breakdown + ops cohorts) for the
+ *  dashboard continuum strip — same numbers the pregnancies board shows. */
+export async function getAncBoardCounts(
+  db: DatabaseAdapter,
+  now: Date = new Date(),
+): Promise<{ risk: JourneyRiskCounts; ops: AncOpsCounts }> {
+  const filters: JourneyListFilters = { stage: CareStage.PREGNANCY };
+  return {
+    risk: await computeRiskCounts(db, '1=1', [], filters, now),
+    ops: await computeOpsCounts(db, filters, now),
+  };
+}
+
 /**
  * Province-wide journey list for GET /api/journeys.
  * Supports stage (+freshness), risk_level, hospital_id, pagination, and a `q`

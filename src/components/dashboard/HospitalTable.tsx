@@ -10,6 +10,7 @@ import { ConnectionStatus as ConnectionStatusEnum } from '@/types/domain';
 import { RiskBar } from './shared';
 import { cn } from '@/lib/utils';
 import { formatRelativeAge } from '@/lib/relative-time';
+import { combinedWorkload } from '@/config/hospital-network';
 
 interface HospitalTableProps {
   hospitals: DashboardHospital[];
@@ -85,8 +86,17 @@ export function HospitalTable({
     const dir = sortDir === 'asc' ? 1 : -1;
     return [...hospitals].sort((a, b) => {
       switch (sortKey) {
-        case 'severity':
-          return (severityRank(a) - severityRank(b)) * dir;
+        case 'severity': {
+          const bySeverity = (severityRank(a) - severityRank(b)) * dir;
+          if (bySeverity !== 0) return bySeverity;
+          // Tie-break by combined workload (labor + weighted ANC) so the
+          // busiest hospitals lead even when the labor floor is quiet and
+          // every severity rank is zero.
+          return (
+            (combinedWorkload(a.counts, a.ancCounts) - combinedWorkload(b.counts, b.ancCounts)) *
+            dir
+          );
+        }
         case 'name':
           return a.name.localeCompare(b.name, 'th') * dir;
         case 'total':

@@ -33,6 +33,10 @@ export interface HighRiskPatientListProps {
   isLoading?: boolean;
   variant?: 'light' | 'kiosk';
   maxRows?: number;
+  /** ANC pressure shown in the empty state — with a quiet labor floor the
+   *  panel would otherwise read as "nothing to watch" while high-risk
+   *  pregnancies are approaching term. */
+  ancFallback?: { hr3: number; dueSoon: number } | null;
 }
 
 function RiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' | 'kiosk' }) {
@@ -106,6 +110,7 @@ export function HighRiskPatientList({
   isLoading = false,
   variant = 'light',
   maxRows,
+  ancFallback,
 }: HighRiskPatientListProps) {
   const router = useRouter();
   const [tab, setTab] = useState<'high' | 'all'>('high');
@@ -237,7 +242,26 @@ export function HighRiskPatientList({
             className="border-b px-2 py-8 text-center font-mono text-[11px]"
             style={{ color: inkMuted, borderColor: ruleHair }}
           >
-            ไม่มีผู้ป่วยที่ต้องเฝ้าระวัง
+            <div>ไม่มีผู้คลอดเสี่ยงสูงในห้องคลอดขณะนี้</div>
+            {ancFallback && (ancFallback.hr3 > 0 || ancFallback.dueSoon > 0) && (
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                <span>เฝ้าระวังล่วงหน้า:</span>
+                <a
+                  href="/pregnancies?risk=HR3"
+                  className="underline decoration-dotted underline-offset-2"
+                  style={{ color: 'var(--risk-high)' }}
+                >
+                  ครรภ์เสี่ยงสูง HR3 {ancFallback.hr3} ราย
+                </a>
+                <a
+                  href="/pregnancies?cohort=due_soon"
+                  className="underline decoration-dotted underline-offset-2"
+                  style={{ color: 'var(--risk-medium)' }}
+                >
+                  ใกล้คลอด ≤14 วัน {ancFallback.dueSoon} ราย
+                </a>
+              </div>
+            )}
           </div>
         ) : (
           shown.map((p, i) => {

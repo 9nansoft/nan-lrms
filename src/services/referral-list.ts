@@ -214,6 +214,15 @@ async function computeOpsCounts(db: DatabaseAdapter, now: Date): Promise<Referra
   };
 }
 
+/** Province-wide referral ops KPIs for the dashboard continuum strip —
+ *  same numbers the referrals board shows. */
+export async function getReferralOpsCounts(
+  db: DatabaseAdapter,
+  now: Date = new Date(),
+): Promise<ReferralOpsCounts> {
+  return computeOpsCounts(db, now);
+}
+
 const DAY_MS = 24 * 3600_000;
 
 /** Bangkok calendar date (YYYY-MM-DD) for an instant. */

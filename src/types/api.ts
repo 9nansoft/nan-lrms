@@ -640,6 +640,14 @@ export interface DashboardAlerts {
   dueSoon: number;
 }
 
+/** Cross-board headline numbers for the dashboard — the same figures the
+ *  pregnancies/referrals boards show, so the landing page and the drill-down
+ *  pages can never disagree. */
+export interface DashboardContinuum {
+  anc: { total: number; hr3: number; dueSoon: number };
+  referrals: { today: number; last7d: number };
+}
+
 export interface ShiftStats {
   /** Human-readable Thai shift label (e.g. "เวรบ่าย 15:00-22:00"). */
   label: string;

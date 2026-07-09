@@ -7,12 +7,14 @@ import type {
   DashboardStageKPIs,
   DashboardAlerts,
   DashboardTrends,
+  DashboardContinuum,
 } from '@/types/api';
 
 interface DashboardWithExtras extends DashboardResponse {
   stageKPIs?: DashboardStageKPIs;
   alerts?: DashboardAlerts;
   trends?: DashboardTrends;
+  continuum?: DashboardContinuum;
 }
 
 const DEFAULT_STAGE_KPIS: DashboardStageKPIs = {
@@ -65,6 +67,7 @@ export function useDashboard() {
     stageKPIs: data?.stageKPIs ?? DEFAULT_STAGE_KPIS,
     alerts: data?.alerts ?? DEFAULT_ALERTS,
     trends: data?.trends ?? DEFAULT_TRENDS,
+    continuum: data?.continuum ?? null,
     updatedAt: data?.updatedAt ?? null,
     isLoading,
     isValidating,
