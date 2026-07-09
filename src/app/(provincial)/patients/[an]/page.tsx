@@ -35,14 +35,59 @@ import {
   AlertTriangle,
   HeartPulse,
   LineChart,
+  Send,
   Waves,
 } from 'lucide-react';
 import Link from 'next/link';
 import { RiskLevel } from '@/types/domain';
 import { RISK_LEVELS, isHighRisk } from '@/config/risk-levels';
 import { SectionLabel } from '@/components/dashboard/shared';
+import { KpiTip } from '@/components/shared/KpiTip';
+import { FlagChip } from '@/components/shared/FlagChip';
+import { Pill, STATUS_META, URGENCY_META } from '@/components/referrals/chips';
+import { formatRelativeAge } from '@/lib/relative-time';
+import { classifySyncHealth } from '@/config/hospital-network';
+import { NEWBORN_THRESHOLDS } from '@/config/newborn';
+import { FHR_LOW, FHR_HIGH, BP_SYS_HIGH, BP_DIA_HIGH } from '@/services/anc-clinical';
 
 type WorkspaceTab = 'summary' | 'partograph' | 'contractions';
+
+// Dot color per sync-health class — classes come from the shared
+// hospital-network config so this page and /hospitals agree on "stale".
+const SYNC_DOT: Record<string, string> = {
+  ok: 'var(--risk-low)',
+  stale: 'var(--risk-medium)',
+  critical: 'var(--risk-high)',
+  never: 'var(--risk-high)',
+  blocked: 'var(--risk-high)',
+};
+
+const SEX_TH: Record<string, string> = { M: 'ชาย', F: 'หญิง' };
+
+function fmtDateTimeTh(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// Clinical tinting for the observations table — thresholds shared with the
+// ANC clinical service, never restated here.
+function fhrTint(v: number | null): string | undefined {
+  if (v == null) return undefined;
+  return v < FHR_LOW || v > FHR_HIGH ? 'var(--risk-high)' : undefined;
+}
+
+function bpTint(sys: number | null, dia: number | null): string | undefined {
+  if ((sys != null && sys >= BP_SYS_HIGH) || (dia != null && dia >= BP_DIA_HIGH))
+    return 'var(--risk-high)';
+  return undefined;
+}
 
 export default function PatientDetailPage({ params }: { params: Promise<{ an: string }> }) {
   const { an: patientId } = use(params);
@@ -141,6 +186,10 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
   // Latest vital timestamp for quick stats
   const latestVitalAt = vitals.length > 0 ? vitals[vitals.length - 1].measuredAt : null;
 
+  // Per-patient data freshness — same classifier the hospitals board uses
+  // (stale > 60 min amber, > 24 h red), applied to this row's synced_at.
+  const syncHealth = classifySyncHealth('OK', patient.syncedAt, new Date(now));
+
   // Secondary feeds (vitals / contractions / partograph) load independently of
   // the main patient detail. When one fails we keep the detail on screen and
   // surface a non-blocking banner naming the failed feed(s); onRetry revalidates
@@ -192,6 +241,22 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
         >
           <ArrowLeft className="h-3.5 w-3.5" /> BACK
         </button>
+        <KpiTip
+          title="ความสดของข้อมูล"
+          body={`เวลาที่ระบบดึงข้อมูลผู้คลอดรายนี้จาก HOSxP ${patient.hospital.name} ครั้งล่าสุด (รอบซิงก์ ~30 วินาที/รพ.) — เกิน 60 นาทีจุดเป็นสีเหลือง เกิน 24 ชั่วโมงเป็นสีแดง`}
+          trigger={
+            <div
+              data-testid="sync-stamp"
+              className="flex cursor-default items-center gap-1.5 font-mono text-[11px] text-[var(--ink-navy-muted)]"
+            />
+          }
+        >
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ background: SYNC_DOT[syncHealth] }}
+          />
+          ข้อมูลจาก HOSxP · อัปเดต {formatRelativeAge(patient.syncedAt)}ที่แล้ว
+        </KpiTip>
       </div>
 
       {/* Section 1: Patient Header — full-bleed navy gradient identity band.
@@ -415,6 +480,69 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
           );
         })()}
 
+      {/* Section 3.6: Referral history — the same journey rows the /referrals
+          board tracks, so staff see how (and how urgently) this woman was
+          referred without leaving the patient view. */}
+      {journeyContext && journeyContext.referrals.length > 0 && (
+        <div
+          data-testid="patient-referrals"
+          className="bg-white px-6 py-3"
+          style={{ borderBottom: '1px solid var(--rule-strong)' }}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <KpiTip
+              title="การส่งต่อของครรภ์นี้"
+              body="ประวัติใบส่งตัวทั้งหมดที่ผูกกับการตั้งครรภ์นี้จากทุกโรงพยาบาลในเครือข่าย — สถานะ ความเร่งด่วน และเวลาตรงกับกระดานส่งต่อ /referrals"
+              trigger={<div className="flex cursor-default items-center gap-2" />}
+            >
+              <Send className="h-4 w-4" style={{ color: 'var(--accent-navy)' }} />
+              <h3 className="text-[14px] font-bold" style={{ color: 'var(--ink-navy)' }}>
+                การส่งต่อ (REFERRAL)
+              </h3>
+              <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                {journeyContext.referrals.length} รายการ
+              </span>
+            </KpiTip>
+            <Link
+              href="/referrals"
+              className="font-mono text-[11px] font-bold tracking-[0.06em] text-[var(--accent-navy)] hover:underline"
+            >
+              ดูกระดานส่งต่อ →
+            </Link>
+          </div>
+          <div className="mt-2 space-y-1.5">
+            {journeyContext.referrals.map((ref) => (
+              <div
+                key={ref.id}
+                className="flex flex-wrap items-center gap-2 border px-2.5 py-1.5"
+                style={{ borderColor: 'var(--rule-strong)' }}
+              >
+                <Pill meta={STATUS_META[ref.status]} fallback={ref.status} />
+                <Pill meta={URGENCY_META[ref.urgencyLevel]} fallback={ref.urgencyLevel} />
+                <span className="font-mono text-[11px] font-semibold text-[var(--ink-navy)]">
+                  {ref.referNumber ?? '—'}
+                </span>
+                <span className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
+                  {ref.fromHospital} → {ref.toHospital}
+                </span>
+                {ref.diagnosisCode && (
+                  <FlagChip color="var(--accent-navy)">{ref.diagnosisCode}</FlagChip>
+                )}
+                {ref.reason && (
+                  <span className="max-w-[24rem] truncate text-[12px] text-[var(--ink-navy-dim)]">
+                    {ref.reason}
+                  </span>
+                )}
+                <span className="ml-auto font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                  ส่งเมื่อ {fmtDateTimeTh(ref.initiatedAt)}
+                  {ref.arrivedAt ? ` · ถึงเมื่อ ${fmtDateTimeTh(ref.arrivedAt)}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Secondary-feed failure banner — main detail is on screen (we passed
           the error/!patient guard above), but one or more supporting feeds
           failed to load. Name them and offer a retry that revalidates only the
@@ -561,53 +689,130 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
             {/* Tab content — flush white surface with generous horizontal padding. */}
             <div className="bg-white px-6 py-4">
               {activeTab === 'summary' && (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <div className="space-y-3">
-                    <CurrentVitalsPanel vitals={vitals} />
-                    <LaborProgressCard
-                      admitDate={patient.admitDate}
-                      laborStatus={patient.laborStatus}
-                      partogramEntries={partogram?.entries ?? null}
-                      contractions={contractions}
-                    />
-                  </div>
-                  <div className="space-y-3">
-                    {cpdScore && (
-                      <CpdFactorBreakdown
-                        score={cpdScore.score}
-                        riskLevel={cpdScore.riskLevel}
-                        factors={cpdScore.factors}
-                        missingFactors={cpdScore.missingFactors}
-                        calculatedAt={cpdScore.calculatedAt}
+                <>
+                  {journeyContext && journeyContext.newborns.length > 0 && (
+                    <div data-testid="patient-newborns" className="mb-4">
+                      <SectionLabel
+                        idx={1}
+                        right={<span>{journeyContext.newborns.length} INFANT(S)</span>}
+                      >
+                        <KpiTip
+                          title="ทารกแรกเกิด"
+                          body={`ผลลัพธ์การคลอดจากระบบซิงก์ทารกแรกเกิด — LBW = น้ำหนักแรกเกิดต่ำกว่า ${NEWBORN_THRESHOLDS.lbwGrams.toLocaleString('th-TH')} กรัม และ Apgar นาทีที่ 5 ต่ำกว่า ${NEWBORN_THRESHOLDS.apgarLowAt5min} ควรติดตามภาวะแทรกซ้อน (นิยามเดียวกับหน้าผลลัพธ์ทารก)`}
+                          trigger={<span className="cursor-default" />}
+                        >
+                          ทารกแรกเกิด (NEWBORN OUTCOMES)
+                        </KpiTip>
+                      </SectionLabel>
+                      <div className="space-y-1.5">
+                        {journeyContext.newborns.map((nb) => {
+                          const lbw =
+                            nb.birthWeightG != null &&
+                            nb.birthWeightG < NEWBORN_THRESHOLDS.lbwGrams;
+                          const lowApgar =
+                            nb.apgar5min != null &&
+                            nb.apgar5min < NEWBORN_THRESHOLDS.apgarLowAt5min;
+                          const flagged = lbw || lowApgar;
+                          return (
+                            <div
+                              key={nb.infantNumber}
+                              className="flex flex-wrap items-center gap-3 border px-3 py-2"
+                              style={{
+                                borderColor: 'var(--rule-strong)',
+                                borderLeft: `3px solid ${flagged ? 'var(--risk-high)' : 'var(--risk-low)'}`,
+                              }}
+                            >
+                              <Baby className="h-4 w-4" style={{ color: 'var(--accent-navy)' }} />
+                              <span className="font-mono text-[12px] font-bold text-[var(--ink-navy)]">
+                                #{nb.infantNumber}
+                              </span>
+                              <span className="text-[13px] text-[var(--ink-navy-dim)]">
+                                เพศ{SEX_TH[nb.sex ?? ''] ?? 'ไม่ระบุ'}
+                              </span>
+                              <span
+                                className="font-mono text-[13px] font-semibold tabular-nums"
+                                style={{ color: lbw ? 'var(--risk-high)' : 'var(--ink-navy)' }}
+                              >
+                                {nb.birthWeightG != null
+                                  ? `${nb.birthWeightG.toLocaleString('th-TH')} กรัม`
+                                  : 'น้ำหนัก —'}
+                              </span>
+                              {lbw && <FlagChip color="var(--risk-high)">LBW</FlagChip>}
+                              <span
+                                data-testid={`newborn-apgar-${nb.infantNumber}`}
+                                data-low={lowApgar ? 'true' : 'false'}
+                                className="font-mono text-[12px] tabular-nums"
+                                style={{
+                                  color: lowApgar ? 'var(--risk-high)' : 'var(--ink-navy-dim)',
+                                  fontWeight: lowApgar ? 700 : 400,
+                                }}
+                              >
+                                Apgar {nb.apgar1min ?? '—'} / {nb.apgar5min ?? '—'}
+                              </span>
+                              {lowApgar && <FlagChip color="var(--risk-high)">APGAR&lt;7</FlagChip>}
+                              <span className="ml-auto font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                                เกิดเมื่อ {fmtDateTimeTh(nb.bornAt)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div className="space-y-3">
+                      <SectionLabel idx={2} right={<span>LIVE MONITORING</span>}>
+                        สัญญาณชีพและความก้าวหน้า
+                      </SectionLabel>
+                      <CurrentVitalsPanel vitals={vitals} />
+                      <LaborProgressCard
+                        admitDate={patient.admitDate}
+                        laborStatus={patient.laborStatus}
+                        partogramEntries={partogram?.entries ?? null}
+                        contractions={contractions}
                       />
-                    )}
-                    <ClinicalData
-                      gravida={patient.gravida}
-                      para={patient.para}
-                      abortion={patient.abortion}
-                      livingChildren={patient.livingChildren}
-                      pregNo={patient.pregNo}
-                      gaWeeks={patient.gaWeeks}
-                      gaDay={patient.gaDay}
-                      ancCount={patient.ancCount}
-                      heightCm={patient.heightCm}
-                      weightKg={patient.weightKg}
-                      weightDiffKg={patient.weightDiffKg}
-                      prePregnancyWeightKg={patient.prePregnancyWeightKg}
-                      fundalHeightCm={patient.fundalHeightCm}
-                      usWeightG={patient.usWeightG}
-                      hematocritPct={patient.hematocritPct}
-                      bpSystolicAdmit={patient.bpSystolicAdmit}
-                      bpDiastolicAdmit={patient.bpDiastolicAdmit}
-                      pulseAdmit={patient.pulseAdmit}
-                      rrAdmit={patient.rrAdmit}
-                      temperatureAdmit={patient.temperatureAdmit}
-                      cervicalOpenCmAdmit={patient.cervicalOpenCmAdmit}
-                      effacementPctAdmit={patient.effacementPctAdmit}
-                      stationAdmit={patient.stationAdmit}
-                    />
+                    </div>
+                    <div className="space-y-3">
+                      <SectionLabel idx={3} right={<span>ADMISSION RECORD</span>}>
+                        ข้อมูลคลินิก
+                      </SectionLabel>
+                      {cpdScore && (
+                        <CpdFactorBreakdown
+                          score={cpdScore.score}
+                          riskLevel={cpdScore.riskLevel}
+                          factors={cpdScore.factors}
+                          missingFactors={cpdScore.missingFactors}
+                          calculatedAt={cpdScore.calculatedAt}
+                        />
+                      )}
+                      <ClinicalData
+                        gravida={patient.gravida}
+                        para={patient.para}
+                        abortion={patient.abortion}
+                        livingChildren={patient.livingChildren}
+                        pregNo={patient.pregNo}
+                        gaWeeks={patient.gaWeeks}
+                        gaDay={patient.gaDay}
+                        ancCount={patient.ancCount}
+                        heightCm={patient.heightCm}
+                        weightKg={patient.weightKg}
+                        weightDiffKg={patient.weightDiffKg}
+                        prePregnancyWeightKg={patient.prePregnancyWeightKg}
+                        fundalHeightCm={patient.fundalHeightCm}
+                        usWeightG={patient.usWeightG}
+                        hematocritPct={patient.hematocritPct}
+                        bpSystolicAdmit={patient.bpSystolicAdmit}
+                        bpDiastolicAdmit={patient.bpDiastolicAdmit}
+                        pulseAdmit={patient.pulseAdmit}
+                        rrAdmit={patient.rrAdmit}
+                        temperatureAdmit={patient.temperatureAdmit}
+                        cervicalOpenCmAdmit={patient.cervicalOpenCmAdmit}
+                        effacementPctAdmit={patient.effacementPctAdmit}
+                        stationAdmit={patient.stationAdmit}
+                      />
+                    </div>
                   </div>
-                </div>
+                </>
               )}
 
               {activeTab === 'partograph' &&
@@ -714,10 +919,26 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
                                     {o.observeDatetime?.replace('T', ' ').slice(0, 16) ?? '-'}
                                   </td>
                                   <td className="px-3 py-2">{o.hourNo ?? '-'}</td>
-                                  <td className="px-3 py-2">{o.fetalHeartRate ?? '-'}</td>
+                                  <td
+                                    className="px-3 py-2"
+                                    style={{
+                                      color: fhrTint(o.fetalHeartRate),
+                                      fontWeight: fhrTint(o.fetalHeartRate) ? 600 : undefined,
+                                    }}
+                                  >
+                                    {o.fetalHeartRate ?? '-'}
+                                  </td>
                                   <td className="px-3 py-2">{o.cervicalDilationCm ?? '-'}</td>
                                   <td className="px-3 py-2">{o.contractionPer10Min ?? '-'}</td>
-                                  <td className="px-3 py-2">
+                                  <td
+                                    className="px-3 py-2"
+                                    style={{
+                                      color: bpTint(o.bpSystolic, o.bpDiastolic),
+                                      fontWeight: bpTint(o.bpSystolic, o.bpDiastolic)
+                                        ? 600
+                                        : undefined,
+                                    }}
+                                  >
                                     {o.bpSystolic ?? '-'}/{o.bpDiastolic ?? '-'}
                                   </td>
                                   <td className="px-3 py-2">{o.pulse ?? '-'}</td>

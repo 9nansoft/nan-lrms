@@ -19,6 +19,7 @@ import { ErrorState } from '@/components/shared/ErrorState';
 import { SectionLabel, RiskBar } from '@/components/dashboard/shared';
 import { AncRiskChip } from '@/components/shared/AncRiskChip';
 import { KpiTip } from '@/components/shared/KpiTip';
+import { FlagChip } from '@/components/shared/FlagChip';
 import { formatThaiDate, formatThaiTime, formatRelativeTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import { ANC_RISK_LABEL_TH } from '@/config/anc-risk-display';
@@ -46,17 +47,6 @@ function daysSince(iso: string): number {
 }
 
 /** Small bordered mono flag — due/follow-up/age markers in the risk palette. */
-function FlagChip({ color, children }: { color: string; children: React.ReactNode }) {
-  return (
-    <span
-      className="inline-block border px-1 py-px font-mono text-[12px] font-semibold tracking-[0.04em]"
-      style={{ color, borderColor: color, background: 'transparent' }}
-    >
-      {children}
-    </span>
-  );
-}
-
 function ageFlag(age: number): 'teen' | 'ama' | undefined {
   if (age < ANC_OPS.teenAgeUnder) return 'teen';
   if (age >= ANC_OPS.advancedMaternalAgeMin) return 'ama';

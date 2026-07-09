@@ -493,6 +493,55 @@ function parseJson<T = unknown>(raw: unknown): T | null {
   return null;
 }
 
+/** Referrals attached to one journey, hospital names resolved — shared by
+ *  the journey detail and the labor patient detail. */
+export async function getJourneyReferrals(
+  db: DatabaseAdapter,
+  journeyId: string,
+): Promise<ReferralListItem[]> {
+  const refRows = await db.query<Record<string, unknown>>(
+    `SELECT cr.*, fh.name as from_name, th.name as to_name
+     FROM cached_referrals cr
+     JOIN hospitals fh ON fh.id = cr.from_hospital_id
+     JOIN hospitals th ON th.id = cr.to_hospital_id
+     WHERE cr.journey_id = ?
+     ORDER BY cr.initiated_at DESC`,
+    [journeyId],
+  );
+  return refRows.map((ref) => ({
+    id: ref.id as string,
+    journeyId: ref.journey_id as string,
+    referNumber: (ref.refer_number as string | null) ?? null,
+    fromHospital: ref.from_name as string,
+    toHospital: ref.to_name as string,
+    status: ref.status as string,
+    reason: ref.reason as string,
+    diagnosisCode: (ref.diagnosis_code as string | null) ?? null,
+    urgencyLevel: ref.urgency_level as string,
+    initiatedAt: ref.initiated_at as string,
+    arrivedAt: ref.arrived_at as string | null,
+  }));
+}
+
+/** Newborn records for one journey — shared by journey + patient details. */
+export async function getJourneyNewborns(
+  db: DatabaseAdapter,
+  journeyId: string,
+): Promise<NewbornEntry[]> {
+  const nbRows = await db.query<Record<string, unknown>>(
+    `SELECT * FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
+    [journeyId],
+  );
+  return nbRows.map((nb) => ({
+    infantNumber: nb.infant_number as number,
+    sex: nb.sex as string | null,
+    birthWeightG: nb.birth_weight_g as number | null,
+    apgar1min: nb.apgar_1min as number | null,
+    apgar5min: nb.apgar_5min as number | null,
+    bornAt: nb.born_at as string,
+  }));
+}
+
 /**
  * Full journey detail for GET /api/journeys/[journeyId].
  * Returns null when the journey is not found (route maps to 404).
@@ -586,43 +635,8 @@ export async function getJourneyDetail(
         }
       : null;
 
-  // Referrals with hospital names.
-  const refRows = await db.query<Record<string, unknown>>(
-    `SELECT cr.*, fh.name as from_name, th.name as to_name
-     FROM cached_referrals cr
-     JOIN hospitals fh ON fh.id = cr.from_hospital_id
-     JOIN hospitals th ON th.id = cr.to_hospital_id
-     WHERE cr.journey_id = ?
-     ORDER BY cr.initiated_at DESC`,
-    [journeyId],
-  );
-  const referrals: ReferralListItem[] = refRows.map((ref) => ({
-    id: ref.id as string,
-    journeyId: ref.journey_id as string,
-    referNumber: (ref.refer_number as string | null) ?? null,
-    fromHospital: ref.from_name as string,
-    toHospital: ref.to_name as string,
-    status: ref.status as string,
-    reason: ref.reason as string,
-    diagnosisCode: (ref.diagnosis_code as string | null) ?? null,
-    urgencyLevel: ref.urgency_level as string,
-    initiatedAt: ref.initiated_at as string,
-    arrivedAt: ref.arrived_at as string | null,
-  }));
-
-  // Newborns.
-  const nbRows = await db.query<Record<string, unknown>>(
-    `SELECT * FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
-    [journeyId],
-  );
-  const newborns: NewbornEntry[] = nbRows.map((nb) => ({
-    infantNumber: nb.infant_number as number,
-    sex: nb.sex as string | null,
-    birthWeightG: nb.birth_weight_g as number | null,
-    apgar1min: nb.apgar_1min as number | null,
-    apgar5min: nb.apgar_5min as number | null,
-    bornAt: nb.born_at as string,
-  }));
+  const referrals = await getJourneyReferrals(db, journeyId);
+  const newborns = await getJourneyNewborns(db, journeyId);
 
   return {
     journey: {

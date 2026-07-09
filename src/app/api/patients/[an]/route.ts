@@ -10,6 +10,7 @@ import { parsePatientId } from '@/lib/utils';
 import { logger } from '@/lib/logger';
 import type { PatientDetailResponse } from '@/types/api';
 import { getJourneyByHn, getActiveJourneyByCid } from '@/services/journey';
+import { getJourneyReferrals, getJourneyNewborns } from '@/services/journey-list';
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ an: string }> }) {
   try {
@@ -165,15 +166,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     //   2. cid_hash cross-hospital match (woman registered ANC at hospital A
     //      then labored at hospital B — HN differs, CID stays constant).
     //   3. HN + hospital (legacy HOSxP data without CID).
-    let journeyContext: {
-      journeyId: string;
-      careStage: string;
-      ancRiskLevel: string;
-      ancVisitCount: number;
-      lastAncDate: string | null;
-      lmp: string | null;
-      edc: string | null;
-    } | null = null;
+    let journeyContext: PatientDetailResponse['journeyContext'] = null;
     const journey =
       (p.cid_hash ? await getActiveJourneyByCid(db, p.cid_hash) : null) ??
       (hospitalId ? await getJourneyByHn(db, p.hn, hospitalId) : null);
@@ -186,6 +179,10 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
         lastAncDate: journey.lastAncDate,
         lmp: journey.lmp,
         edc: journey.edc,
+        // Transfer + birth context — same service getters the journey
+        // detail page uses, so both views can never disagree.
+        referrals: await getJourneyReferrals(db, journey.id),
+        newborns: await getJourneyNewborns(db, journey.id),
       };
     }
 

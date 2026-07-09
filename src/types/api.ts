@@ -166,6 +166,11 @@ export interface PatientDetailResponse {
     lastAncDate: string | null;
     lmp: string | null;
     edc: string | null;
+    /** Transfer history for this pregnancy — same rows the referrals board
+     *  shows, so the labor view carries the woman's referral context. */
+    referrals: ReferralListItem[];
+    /** Birth outcomes once delivered (from the newborn sync). */
+    newborns: NewbornEntry[];
   } | null;
 }
 

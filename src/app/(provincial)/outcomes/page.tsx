@@ -16,6 +16,7 @@ import { SectionLabel } from '@/components/dashboard/shared';
 import { cn, formatThaiDate, formatThaiTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import { KpiTip } from '@/components/shared/KpiTip';
+import { FlagChip } from '@/components/shared/FlagChip';
 import { Activity, Baby, HeartPulse, Scale, Users, Weight } from 'lucide-react';
 import type { OutcomesResponse, RecentBirthEntry } from '@/types/api';
 
@@ -55,17 +56,6 @@ const RANGE_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 /** Small bordered mono flag in the risk palette. */
-function FlagChip({ color, children }: { color: string; children: React.ReactNode }) {
-  return (
-    <span
-      className="inline-block border px-1 py-px font-mono text-[12px] font-semibold tracking-[0.04em]"
-      style={{ color, borderColor: color, background: 'transparent' }}
-    >
-      {children}
-    </span>
-  );
-}
-
 export default function OutcomesPage() {
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ผลลัพธ์ทารก' }]);
 

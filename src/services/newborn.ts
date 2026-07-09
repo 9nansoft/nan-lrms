@@ -4,6 +4,7 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import type { CachedNewborn } from '@/types/domain';
 import { decryptSafe } from '@/lib/encryption';
 import { bangkokMonthKey, bangkokStartOfMonth } from '@/lib/bangkok-time';
+import { NEWBORN_THRESHOLDS } from '@/config/newborn';
 import type {
   OutcomeHospitalRow,
   OutcomeTrendPoint,
@@ -200,8 +201,8 @@ export async function getNewbornKPIs(
   const rows = await db.query<Record<string, unknown>>(
     `SELECT
       COUNT(*) as total,
-      SUM(CASE WHEN cn.birth_weight_g < 2500 THEN 1 ELSE 0 END) as lbw,
-      SUM(CASE WHEN cn.apgar_5min < 7 THEN 1 ELSE 0 END) as low_apgar,
+      SUM(CASE WHEN cn.birth_weight_g < ${NEWBORN_THRESHOLDS.lbwGrams} THEN 1 ELSE 0 END) as lbw,
+      SUM(CASE WHEN cn.apgar_5min < ${NEWBORN_THRESHOLDS.apgarLowAt5min} THEN 1 ELSE 0 END) as low_apgar,
       AVG(cn.birth_weight_g) as avg_weight
       FROM cached_newborns cn${joins}${clause}`,
     params,
@@ -284,7 +285,7 @@ export async function getOutcomes(
     const bucket = trendByMonth.get(bangkokMonthKey(r.born_at));
     if (!bucket) continue;
     bucket.births += 1;
-    if (r.birth_weight_g != null && Number(r.birth_weight_g) < 2500) bucket.lbw += 1;
+    if (r.birth_weight_g != null && Number(r.birth_weight_g) < NEWBORN_THRESHOLDS.lbwGrams) bucket.lbw += 1;
   }
   const trend = monthKeys.map((m) => trendByMonth.get(m)!);
 
@@ -294,8 +295,8 @@ export async function getOutcomes(
   const hospitalRows = await db.query<Record<string, unknown>>(
     `SELECT h.id, h.hcode, h.name,
         COUNT(*) as births,
-        SUM(CASE WHEN cn.birth_weight_g < 2500 THEN 1 ELSE 0 END) as lbw,
-        SUM(CASE WHEN cn.apgar_5min < 7 THEN 1 ELSE 0 END) as low_apgar
+        SUM(CASE WHEN cn.birth_weight_g < ${NEWBORN_THRESHOLDS.lbwGrams} THEN 1 ELSE 0 END) as lbw,
+        SUM(CASE WHEN cn.apgar_5min < ${NEWBORN_THRESHOLDS.apgarLowAt5min} THEN 1 ELSE 0 END) as low_apgar
       FROM cached_newborns cn
       JOIN maternal_journeys mj ON mj.id = cn.journey_id
       JOIN hospitals h ON h.id = mj.current_hospital_id${hw.clause}
