@@ -20,6 +20,8 @@ import {
   type SyncHealthClass,
 } from '@/config/hospital-network';
 import { cn, formatThaiTime } from '@/lib/utils';
+import { KpiTip } from '@/components/shared/KpiTip';
+import { SYNC_HEALTH } from '@/config/hospital-network';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { Search, Building2, Globe, ChevronRight } from 'lucide-react';
 import type { DashboardHospital } from '@/types/api';
@@ -401,7 +403,11 @@ export default function HospitalsPage() {
           borderBottom: '1px solid var(--rule-strong)',
         }}
       >
-        <div className="border-r border-[var(--rule-strong)] px-5 py-3">
+        <KpiTip
+          title="โรงพยาบาลในเครือข่าย"
+          body="จำนวน รพ.ในแท็บที่เลือก (จ.ขอนแก่น / ภายนอก) และจำนวนแห่งที่มีผู้ป่วยในระบบ — นับจากภาระงานรวมห้องคลอด + ทะเบียนฝากครรภ์"
+          trigger={<div className="cursor-help border-r border-[var(--rule-strong)] px-5 py-3" />}
+        >
           <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             ROSTER
           </div>
@@ -417,9 +423,18 @@ export default function HospitalsPage() {
           <div className="mt-1 font-mono text-[13px] text-[var(--ink-navy-dim)]">
             มีผู้ป่วยในระบบ {withWorkload} / {tabHospitals.length} แห่ง
           </div>
-        </div>
+        </KpiTip>
 
-        <div className="border-r border-[var(--rule-strong)] px-5 py-3" data-testid="kpi-sync">
+        <KpiTip
+          title="ความสดของข้อมูล (ไม่ใช่แค่การเชื่อมต่อ)"
+          body={`นับ รพ.ที่ซิงก์ข้อมูลจาก HOSxP ภายใน ${SYNC_HEALTH.staleAfterMinutes} นาทีล่าสุด — ช้า = เกิน ${SYNC_HEALTH.staleAfterMinutes} นาที (แดงเมื่อเกิน ${SYNC_HEALTH.criticalAfterHours} ชม.), ยังไม่ซิงก์ = ไม่เคยมีข้อมูล, ถูกบล็อก = ระบบระงับการซิงก์ (ดูเหตุผลที่แถวรายชื่อ) — การเชื่อมต่อ ONLINE อย่างเดียวไม่รับประกันว่าข้อมูลเป็นปัจจุบัน`}
+          trigger={
+            <div
+              className="cursor-help border-r border-[var(--rule-strong)] px-5 py-3"
+              data-testid="kpi-sync"
+            />
+          }
+        >
           <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             DATA SYNC
           </div>
@@ -441,9 +456,18 @@ export default function HospitalsPage() {
               ถูกบล็อก {syncBreakdown.blocked}
             </span>
           </div>
-        </div>
+        </KpiTip>
 
-        <div className="border-r border-[var(--rule-strong)] px-5 py-3" data-testid="kpi-anc">
+        <KpiTip
+          title="ทะเบียนฝากครรภ์ทั้งเครือข่าย"
+          body="ผลรวมหญิงตั้งครรภ์ในทะเบียน active ของทุก รพ.ในแท็บ พร้อมจำนวนครรภ์เสี่ยงสูงสุด (HR3) — ตัวเลขเดียวกับหน้า ฝากครรภ์"
+          trigger={
+            <div
+              className="cursor-help border-r border-[var(--rule-strong)] px-5 py-3"
+              data-testid="kpi-anc"
+            />
+          }
+        >
           <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             ANC REGISTRY
           </div>
@@ -459,9 +483,13 @@ export default function HospitalsPage() {
           <div className="mt-1 font-mono text-[13px]" style={{ color: 'var(--risk-high)' }}>
             HR3 {totalAncHr3} ราย
           </div>
-        </div>
+        </KpiTip>
 
-        <div className="px-5 py-3" data-testid="kpi-labor">
+        <KpiTip
+          title="ห้องคลอดทั้งเครือข่าย"
+          body="ผู้ป่วยที่กำลังรอคลอด (labor_status = ACTIVE) รวมทุก รพ. แถบสีคือสัดส่วนระดับความเสี่ยง CPD ล่าสุด — LOW/MED/HIGH"
+          trigger={<div className="cursor-help px-5 py-3" data-testid="kpi-labor" />}
+        >
           <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             LABOR WARD
           </div>
@@ -503,7 +531,7 @@ export default function HospitalsPage() {
               ไม่มีผู้คลอดที่กำลังรอคลอด
             </div>
           )}
-        </div>
+        </KpiTip>
       </div>
 
       {/* Controls — tabs + search */}

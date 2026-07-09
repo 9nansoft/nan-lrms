@@ -18,7 +18,9 @@ describe('Dashboard Journey Extensions', () => {
     );
   });
 
-  afterEach(() => { db.close(); });
+  afterEach(() => {
+    db.close();
+  });
 
   describe('getStageKPIs', () => {
     it('returns zero counts when no data', async () => {
@@ -31,7 +33,12 @@ describe('Dashboard Journey Extensions', () => {
     it('counts pregnancies by ANC risk level', async () => {
       const now = new Date().toISOString();
       // 2 LOW, 1 HR1, 1 HR3
-      for (const [hn, risk] of [['001', 'LOW'], ['002', 'LOW'], ['003', 'HR1'], ['004', 'HR3']]) {
+      for (const [hn, risk] of [
+        ['001', 'LOW'],
+        ['002', 'LOW'],
+        ['003', 'HR1'],
+        ['004', 'HR3'],
+      ]) {
         await db.execute(
           `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
            VALUES (?, ?, ?, ?, 'Test', 'enc_cid', 'cidhash', 25, 1, 0, 'PREGNANCY', ?, 0, ?, ?, ?, ?, ?)`,

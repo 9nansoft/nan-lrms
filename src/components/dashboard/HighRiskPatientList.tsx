@@ -115,10 +115,7 @@ export function HighRiskPatientList({
   const router = useRouter();
   const [tab, setTab] = useState<'high' | 'all'>('high');
 
-  const sorted = useMemo(
-    () => [...patients].sort((a, b) => b.cpdScore - a.cpdScore),
-    [patients],
-  );
+  const sorted = useMemo(() => [...patients].sort((a, b) => b.cpdScore - a.cpdScore), [patients]);
 
   const shown = useMemo(() => {
     const base = tab === 'high' ? sorted.filter((p) => p.riskLevel === 'HIGH') : sorted;
@@ -175,23 +172,13 @@ export function HighRiskPatientList({
 
   return (
     <div>
-      <SectionLabel
-        idx={1}
-        right={
-          <span>
-            AUTO-SORT · HIGH → MED · {counts.total} ACTIVE
-          </span>
-        }
-      >
+      <SectionLabel idx={1} right={<span>AUTO-SORT · HIGH → MED · {counts.total} ACTIVE</span>}>
         High-risk &amp; Active labor
       </SectionLabel>
 
       {/* Tabs */}
       {!isKiosk && (
-        <div
-          className="mt-2.5 mb-2.5 flex gap-0 border-b"
-          style={{ borderColor: ruleHair }}
-        >
+        <div className="mt-2.5 mb-2.5 flex gap-0 border-b" style={{ borderColor: ruleHair }}>
           {[
             { k: 'high', l: 'HIGH-RISK ONLY', n: counts.high },
             { k: 'all', l: 'ALL ACTIVE', n: counts.total },
@@ -266,8 +253,7 @@ export function HighRiskPatientList({
         ) : (
           shown.map((p, i) => {
             const isHigh = p.riskLevel === 'HIGH';
-            const isCritical =
-              isHigh || p.partographSeverity === 'CRITICAL';
+            const isCritical = isHigh || p.partographSeverity === 'CRITICAL';
             const freshness = vitalFreshness(p.lastVitalAt);
             return (
               <div
@@ -302,10 +288,7 @@ export function HighRiskPatientList({
                 <div>
                   <RiskChip riskLevel={p.riskLevel} variant={variant} />
                 </div>
-                <div
-                  className="font-mono"
-                  style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}
-                >
+                <div className="font-mono" style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}>
                   <div className="font-semibold">{p.an}</div>
                   <div
                     className="font-normal"
@@ -319,10 +302,7 @@ export function HighRiskPatientList({
                     <div className="truncate">
                       {p.name ? maskName(p.name) : <span style={{ color: inkMuted }}>ไม่ระบุ</span>}
                     </div>
-                    <div
-                      className="font-mono"
-                      style={{ color: inkMuted, fontSize: 11 }}
-                    >
+                    <div className="font-mono" style={{ color: inkMuted, fontSize: 11 }}>
                       {p.age != null ? `อายุ ${p.age}` : '—'}
                     </div>
                   </div>
@@ -364,16 +344,10 @@ export function HighRiskPatientList({
                 >
                   {p.cpdScore}
                 </div>
-                <div
-                  className="truncate"
-                  style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}
-                >
+                <div className="truncate" style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}>
                   {p.hospital}
                 </div>
-                <div
-                  className="font-mono"
-                  style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}
-                >
+                <div className="font-mono" style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}>
                   {admitTime(p.admitDate)}
                 </div>
                 {!isKiosk && (

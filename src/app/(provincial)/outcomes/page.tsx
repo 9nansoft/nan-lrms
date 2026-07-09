@@ -15,8 +15,38 @@ import { ErrorState } from '@/components/shared/ErrorState';
 import { SectionLabel } from '@/components/dashboard/shared';
 import { cn, formatThaiDate, formatThaiTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
+import { KpiTip } from '@/components/shared/KpiTip';
 import { Activity, Baby, HeartPulse, Scale, Users, Weight } from 'lucide-react';
 import type { OutcomesResponse, RecentBirthEntry } from '@/types/api';
+
+// Hover copy for the KPI tiles — mirrors the SQL in services/newborn.ts so
+// the explanation cannot drift from the metric.
+const TILE_TIPS: Record<string, { title: string; body: string }> = {
+  'kpi-total': {
+    title: 'ทารกเกิดทั้งหมดในช่วงที่เลือก',
+    body: 'นับจากบันทึกทารกแรกเกิด (labour_infant) ที่ซิงก์จาก HOSxP ตามวันเวลาเกิด — ครรภ์แฝดนับแยกรายทารก เปลี่ยนช่วงเวลาได้ที่ปุ่ม PERIOD',
+  },
+  'kpi-lbw': {
+    title: 'ทารกน้ำหนักแรกเกิดน้อย (LBW)',
+    body: 'น้ำหนักแรกเกิดต่ำกว่า 2,500 กรัม — ตัวชี้วัดอนามัยแม่และเด็กหลักของ สธ. เปอร์เซ็นต์คิดจากทารกทั้งหมดในช่วงเดียวกัน',
+  },
+  'kpi-apgar': {
+    title: 'Apgar ที่ 5 นาที ต่ำกว่า 7',
+    body: 'ใช้คะแนน Apgar นาทีที่ 5 (ตัวทำนายผลลัพธ์มาตรฐาน ไม่ใช่นาทีที่ 1) — ทารกกลุ่มนี้ควรได้รับการติดตามภาวะแทรกซ้อน',
+  },
+  'kpi-resus': {
+    title: 'ทารกที่ได้รับการกู้ชีพแรกเกิด',
+    body: 'มีการช่วยเหลืออย่างน้อยหนึ่งอย่าง: PPV / ใส่ท่อช่วยหายใจ / กดหน้าอก / ออกซิเจน / Narcan — จากแบบบันทึกห้องคลอด HOSxP',
+  },
+  'kpi-multiples': {
+    title: 'ทารกจากครรภ์แฝด',
+    body: 'ทารกลำดับที่ 2 ขึ้นไปของการคลอดเดียวกัน (infant_number > 1) — ครรภ์แฝดเป็นกลุ่มเสี่ยงที่ต้องวางแผนคลอดล่วงหน้า',
+  },
+  'kpi-avg-weight': {
+    title: 'น้ำหนักแรกเกิดเฉลี่ย',
+    body: 'ค่าเฉลี่ยน้ำหนักแรกเกิด (กรัม) ของทารกทุกคนในช่วงที่เลือก — ใช้ดูแนวโน้มโภชนาการมารดาในภาพรวม',
+  },
+};
 
 const RANGE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'mtd', label: 'เดือนนี้' },
@@ -253,15 +283,22 @@ export default function OutcomesPage() {
       >
         {tiles.map((t, i) => {
           const Icon = t.icon;
+          const tip = TILE_TIPS[t.testId];
           return (
-            <div
+            <KpiTip
               key={t.key}
-              data-testid={t.testId}
-              className="flex flex-col gap-1.5 px-4 py-3"
-              style={{
-                borderLeft: `2px solid ${t.color}`,
-                borderRight: i < tiles.length - 1 ? '1px solid var(--rule-strong)' : undefined,
-              }}
+              title={tip.title}
+              body={tip.body}
+              trigger={
+                <div
+                  data-testid={t.testId}
+                  className="flex cursor-help flex-col gap-1.5 px-4 py-3"
+                  style={{
+                    borderLeft: `2px solid ${t.color}`,
+                    borderRight: i < tiles.length - 1 ? '1px solid var(--rule-strong)' : undefined,
+                  }}
+                />
+              }
             >
               <div className="flex items-center gap-2" style={{ color: t.color }}>
                 <Icon className="h-3.5 w-3.5" />
@@ -279,7 +316,7 @@ export default function OutcomesPage() {
                 <span className="font-mono text-[12px] text-[var(--ink-navy-dim)]">{t.sub}</span>
               </div>
               <div className="text-[13px] text-[var(--ink-navy-dim)]">{t.label}</div>
-            </div>
+            </KpiTip>
           );
         })}
       </div>
@@ -302,9 +339,15 @@ export default function OutcomesPage() {
       >
         {/* Six-month trend */}
         <div className="bg-white px-5 py-3" data-testid="outcome-trend">
-          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <KpiTip
+            title="แนวโน้มการเกิดรายเดือน"
+            body="จำนวนทารกเกิดต่อเดือน (เดือนตามเวลาไทย) ย้อนหลัง 6 เดือน พร้อมจำนวน LBW ใต้แต่ละแท่ง — ไม่ขึ้นกับช่วงเวลาที่เลือกด้านบน แต่กรองตาม รพ.ได้"
+            trigger={
+              <div className="cursor-help font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]" />
+            }
+          >
             BIRTHS · LAST 6 MONTHS
-          </div>
+          </KpiTip>
           <div className="mt-2 flex h-[96px] items-end gap-2">
             {kpis.trend.map((t) => (
               <div key={t.month} className="flex flex-1 flex-col items-center gap-0.5">
@@ -334,9 +377,15 @@ export default function OutcomesPage() {
 
         {/* Per-hospital breakdown */}
         <div className="bg-white px-5 py-3" data-testid="hospital-outcomes">
-          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <KpiTip
+            title="ผลลัพธ์รายโรงพยาบาล"
+            body="จำนวนเกิด, LBW (จำนวนและร้อยละ), และ Apgar-5 < 7 ของแต่ละ รพ. ในช่วงเวลาที่เลือก — เรียงจาก รพ.ที่มีการเกิดมากที่สุด"
+            trigger={
+              <div className="cursor-help font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]" />
+            }
+          >
             BY HOSPITAL · {rangeLabel}
-          </div>
+          </KpiTip>
           <div className="mt-2">
             <div
               className="grid gap-2 border-b border-[var(--rule-strong)] pb-1 font-mono text-[12px] tracking-[0.1em] text-[var(--ink-navy-muted)]"

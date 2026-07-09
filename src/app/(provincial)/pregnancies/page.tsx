@@ -18,6 +18,7 @@ import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { SectionLabel, RiskBar } from '@/components/dashboard/shared';
 import { AncRiskChip } from '@/components/shared/AncRiskChip';
+import { KpiTip } from '@/components/shared/KpiTip';
 import { formatThaiDate, formatThaiTime, formatRelativeTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import { ANC_RISK_LABEL_TH } from '@/config/anc-risk-display';
@@ -109,6 +110,42 @@ function LastAncCell({
     </div>
   );
 }
+
+// Hover copy for the KPI strips — mirrors journey-list.ts SQL and the
+// thresholds in config/anc-ops.ts + anc-freshness.ts so it cannot drift.
+const RISK_TIPS: Record<string, string> = {
+  LOW: 'หญิงตั้งครรภ์ที่ผลคัดกรองความเสี่ยง ANC อยู่ระดับปกติ ติดตามตามนัดมาตรฐาน คลิกเพื่อกรองรายการ',
+  HR1: 'ความเสี่ยงระดับ 1 จากแบบคัดกรอง ANC ของ HOSxP — ติดตามใกล้ชิดขึ้น คลิกเพื่อกรองรายการ',
+  HR2: 'ความเสี่ยงระดับ 2 — ควรพบแพทย์ตามแนวทางครรภ์เสี่ยง คลิกเพื่อกรองรายการ',
+  HR3: 'ความเสี่ยงสูงสุด — ควรฝากครรภ์/คลอดใน รพ.ที่มีศักยภาพ คลิกเพื่อกรองรายการ',
+};
+
+const COHORT_TIPS: Record<string, { title: string; body: string }> = {
+  'kpi-due-soon': {
+    title: `ครบกำหนดคลอดภายใน ${ANC_OPS.dueSoonDays} วัน`,
+    body: `EDC อยู่ภายใน ${ANC_OPS.dueSoonDays} วันข้างหน้า (รวมที่เลยกำหนดแล้ว) — ภาระงานห้องคลอดที่กำลังมาถึง ใช้วางแผนเตียงและการส่งต่อ คลิกเพื่อกรองรายการ`,
+  },
+  'kpi-overdue-edc': {
+    title: 'เลยกำหนดคลอดแล้วยังไม่คลอด',
+    body: 'EDC ผ่านมาแล้วแต่ยังไม่มีบันทึกคลอด (ระบบตัดออกจากทะเบียนอัตโนมัติเมื่อเกิน 14 วัน) — ควรตรวจสอบสถานะจริงกับ รพ. คลิกเพื่อกรองรายการ',
+  },
+  'kpi-anc-stale': {
+    title: `ห่างนัด ANC เกิน ${ANC_OPS.followupWarnDays} วัน`,
+    body: `นัดล่าสุดผ่านมาเกิน ${ANC_OPS.followupWarnDays} วัน แต่ยังไม่ถึงเกณฑ์หลุดการติดตาม (60 วัน) — ช่วงเวลาทองของการตามกลับมาตรวจ คลิกเพื่อกรองรายการ`,
+  },
+  'kpi-low-visits': {
+    title: `ฝากครรภ์ไม่ครบเกณฑ์ ${ANC_OPS.minVisits} ครั้ง`,
+    body: `อายุครรภ์ ≥ ${ANC_OPS.minVisitsGaWeeks} สัปดาห์แล้ว แต่จำนวนครั้ง ANC ยังน้อยกว่า ${ANC_OPS.minVisits} ครั้งตามเกณฑ์คุณภาพ ANC ของ สธ. คลิกเพื่อกรองรายการ`,
+  },
+  'kpi-near-term': {
+    title: `อายุครรภ์ ≥ ${ANC_OPS.nearTermGaWeeks} สัปดาห์`,
+    body: `กลุ่มใกล้คลอด (GA ≥ ${ANC_OPS.nearTermGaWeeks}w) — ตัวเลขเดียวกับ KPI ใกล้คลอดของหน้าโรงพยาบาลแม่ข่าย ใช้เตรียมแผนรับคลอด คลิกเพื่อกรองรายการ`,
+  },
+  'kpi-ltfu': {
+    title: 'หลุดการติดตาม (60–120 วัน)',
+    body: `ขาดนัดเกิน 60 วันจนถูกตัดออกจากทะเบียน active แต่ยังไม่เกิน ${ANC_OPS.ltfuWindowDays} วัน — รายชื่อสำหรับตามกลับเข้าระบบก่อนปิดเคส คลิกเพื่อเปิดรายการ`,
+  },
+};
 
 const SORT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'due', label: 'ใกล้กำหนดคลอด' },
@@ -353,19 +390,25 @@ function PregnanciesBoard() {
         {riskCells.map((c) => {
           const active = riskFilter === c.k;
           return (
-            <button
+            <KpiTip
               key={c.k}
-              data-testid={`risk-${c.k}`}
-              aria-pressed={active}
-              onClick={() => {
-                setRiskFilter((r) => (r === c.k ? '' : c.k));
-                setPage(1);
-              }}
-              className="flex flex-col gap-0.5 px-4 py-3 text-left transition-colors hover:bg-[var(--accent-navy-soft)]"
-              style={{
-                borderLeft: `2px solid ${c.color}`,
-                background: active ? 'var(--accent-navy-soft)' : undefined,
-              }}
+              title={`${c.k} — ${ANC_RISK_LABEL_TH[c.k]}`}
+              body={RISK_TIPS[c.k]}
+              trigger={
+                <button
+                  data-testid={`risk-${c.k}`}
+                  aria-pressed={active}
+                  onClick={() => {
+                    setRiskFilter((r) => (r === c.k ? '' : c.k));
+                    setPage(1);
+                  }}
+                  className="flex flex-col gap-0.5 px-4 py-3 text-left transition-colors hover:bg-[var(--accent-navy-soft)]"
+                  style={{
+                    borderLeft: `2px solid ${c.color}`,
+                    background: active ? 'var(--accent-navy-soft)' : undefined,
+                  }}
+                />
+              }
             >
               <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                 {c.k}
@@ -381,7 +424,7 @@ function PregnanciesBoard() {
                   {ANC_RISK_LABEL_TH[c.k]}
                 </div>
               </div>
-            </button>
+            </KpiTip>
           );
         })}
       </div>
@@ -393,21 +436,28 @@ function PregnanciesBoard() {
       >
         {opsCells.map((c, i) => {
           const active = cohortFilter === c.cohort;
+          const tip = COHORT_TIPS[c.testId];
           return (
-            <button
+            <KpiTip
               key={c.cohort}
-              data-testid={c.testId}
-              aria-pressed={active}
-              onClick={() => {
-                setCohortFilter((cur) => (cur === c.cohort ? '' : c.cohort));
-                setPage(1);
-              }}
-              className="flex flex-col gap-0.5 px-4 py-3 text-left transition-colors hover:bg-[var(--accent-navy-soft)]"
-              style={{
-                borderLeft: `2px solid ${c.color}`,
-                borderRight: i < opsCells.length - 1 ? '1px solid var(--rule-strong)' : undefined,
-                background: active ? 'var(--accent-navy-soft)' : undefined,
-              }}
+              title={tip.title}
+              body={tip.body}
+              trigger={
+                <button
+                  data-testid={c.testId}
+                  aria-pressed={active}
+                  onClick={() => {
+                    setCohortFilter((cur) => (cur === c.cohort ? '' : c.cohort));
+                    setPage(1);
+                  }}
+                  className="flex flex-col gap-0.5 px-4 py-3 text-left transition-colors hover:bg-[var(--accent-navy-soft)]"
+                  style={{
+                    borderLeft: `2px solid ${c.color}`,
+                    borderRight: i < opsCells.length - 1 ? '1px solid var(--rule-strong)' : undefined,
+                    background: active ? 'var(--accent-navy-soft)' : undefined,
+                  }}
+                />
+              }
             >
               <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                 {c.k}
@@ -422,7 +472,7 @@ function PregnanciesBoard() {
                 {c.v ?? '—'}
               </div>
               <div className="text-[12px] text-[var(--ink-navy-muted)]">{c.labelTh}</div>
-            </button>
+            </KpiTip>
           );
         })}
       </div>

@@ -236,9 +236,7 @@ export default function DashboardPage() {
   const freshCount = hospitals.filter(
     (h) => classifySyncHealth(h.syncStatus, h.lastSyncAt) === 'ok',
   ).length;
-  const ancFallback = continuum
-    ? { hr3: continuum.anc.hr3, dueSoon: continuum.anc.dueSoon }
-    : null;
+  const ancFallback = continuum ? { hr3: continuum.anc.hr3, dueSoon: continuum.anc.dueSoon } : null;
 
   // ═══════════════════════════════════════════════════════════════
   // KIOSK MODE — 1920×1080 wall display, dark phosphor-glow palette
@@ -584,7 +582,11 @@ export default function DashboardPage() {
 
           {/* 03 — HIGH-risk & active labor */}
           <div className="bg-white p-5">
-            <HighRiskPatientList patients={highRiskPatients} isLoading={hrLoading} ancFallback={ancFallback} />
+            <HighRiskPatientList
+              patients={highRiskPatients}
+              isLoading={hrLoading}
+              ancFallback={ancFallback}
+            />
 
             {/* 05 — Stage KPIs */}
             <div className="mt-6">

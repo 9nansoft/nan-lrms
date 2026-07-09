@@ -17,7 +17,8 @@ import { SectionLabel } from '@/components/dashboard/shared';
 import { cn, formatThaiDate, formatThaiTime } from '@/lib/utils';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { maskName } from '@/lib/pii-mask';
-import { classifyReferralAge, type ReferralAgeClass } from '@/config/referral-sla';
+import { classifyReferralAge, REFERRAL_SLA, type ReferralAgeClass } from '@/config/referral-sla';
+import { KpiTip } from '@/components/shared/KpiTip';
 import { AgeChip, Pill, RiskChip, STATUS_META, URGENCY_META } from '@/components/referrals/chips';
 import { ReferralDetailDialog } from '@/components/referrals/ReferralDetailDialog';
 import { ArrowRightLeft, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
@@ -42,6 +43,39 @@ const RANGE_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 const GRID_COLUMNS = '104px 1.7fr 1.7fr 118px 95px 84px 1.4fr 180px';
+
+// Hover copy for the KPI strip — mirrors the SQL in services/referral-list.ts
+// and the thresholds in config/referral-sla.ts so it cannot drift.
+const OPS_TIPS: Record<string, { title: string; body: string }> = {
+  'kpi-today': {
+    title: 'การส่งต่อที่เริ่มวันนี้',
+    body: 'จำนวนเคสส่งต่อทั้งจังหวัดที่เริ่ม (initiated) ตั้งแต่เที่ยงคืนวันนี้ตามเวลาไทย ไม่ขึ้นกับตัวกรองด้านล่าง คลิกเพื่อกรองรายการเป็นช่วงวันนี้',
+  },
+  'kpi-7d': {
+    title: 'การส่งต่อช่วง 7 วันล่าสุด',
+    body: 'จำนวนเคสส่งต่อที่เริ่มภายใน 7 วันที่ผ่านมา ใช้ดูปริมาณงานส่งต่อล่าสุดของเครือข่าย คลิกเพื่อกรองรายการ',
+  },
+  'kpi-emergency': {
+    title: 'เคสฉุกเฉินที่ยังไม่ถึงปลายทาง',
+    body: 'เคสความเร่งด่วน EMERGENCY ที่สถานะยังไม่เป็น ARRIVED หรือ REJECTED — ต้องติดตามจนถึงปลายทาง คลิกเพื่อกรองเฉพาะเคสฉุกเฉิน',
+  },
+  'kpi-highrisk': {
+    title: 'ผู้ป่วยส่งต่อที่ครรภ์เสี่ยง',
+    body: 'เคสส่งต่อที่ผู้ป่วยมีระดับความเสี่ยง ANC ไม่ใช่ LOW (HR1–HR3) จากทะเบียนครรภ์ — สะท้อนสัดส่วนเคสซับซ้อนในงานส่งต่อ',
+  },
+  'kpi-overdue': {
+    title: `ส่งต่อค้างเกิน ${REFERRAL_SLA.overdueAfterHours} ชั่วโมง`,
+    body: `เคสที่ยังเป็น INITIATED (ปลายทางยังไม่ตอบรับ) นานเกิน ${REFERRAL_SLA.overdueAfterHours} ชม. ตามเกณฑ์ SLA — ควรเร่งประสานปลายทาง คลิกเพื่อกรองรายการค้าง`,
+  },
+};
+
+const STATUS_TIPS: Record<string, string> = {
+  INITIATED: 'ต้นทางส่งคำขอแล้ว ปลายทางยังไม่ตอบรับ — สถานะเริ่มต้นของทุกเคสจาก HOSxP',
+  ACCEPTED: 'ปลายทางตอบรับเคสแล้ว รอการเดินทาง',
+  IN_TRANSIT: 'กำลังเดินทางไปปลายทาง (ปัจจุบันต้นทางยังไม่ส่งสถานะนี้เข้าระบบ จึงมักเป็น 0)',
+  ARRIVED: 'ถึงปลายทางแล้ว — ระบบยืนยันอัตโนมัติเมื่อพบผู้ป่วยเข้ารักษาที่ รพ.ปลายทาง',
+  REJECTED: 'ปลายทางปฏิเสธ พร้อมเหตุผล/รพ.ทางเลือก (ดูในรายละเอียดเคส)',
+};
 
 const EMPTY_STATUS_COUNTS = {
   initiated: 0,
@@ -265,10 +299,13 @@ function ReferralsBoard() {
       >
         {opsCells.map((c, i) => {
           const CellTag = c.onClick ? 'button' : 'div';
+          const tip = OPS_TIPS[c.testId];
           return (
-            <CellTag
+            <KpiTip
               key={c.k}
-              data-testid={c.testId}
+              title={tip.title}
+              body={tip.body}
+              trigger={<CellTag data-testid={c.testId}
               onClick={c.onClick}
               aria-pressed={c.onClick ? c.active : undefined}
               className={cn(
@@ -280,6 +317,7 @@ function ReferralsBoard() {
                 borderRight: i < opsCells.length - 1 ? '1px solid var(--rule-strong)' : undefined,
                 background: c.active ? 'var(--accent-navy-soft)' : undefined,
               }}
+            />}
             >
               <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                 {c.k}
@@ -293,7 +331,7 @@ function ReferralsBoard() {
                 {c.v}
               </div>
               <div className="text-[12px] text-[var(--ink-navy-muted)]">{c.labelTh}</div>
-            </CellTag>
+            </KpiTip>
           );
         })}
       </div>
@@ -310,18 +348,24 @@ function ReferralsBoard() {
           const meta = STATUS_META[c.k];
           const active = statusFilter === c.k;
           return (
-            <button
+            <KpiTip
               key={c.k}
-              data-testid={`status-${c.k}`}
-              aria-pressed={active}
-              onClick={() => {
-                setStatusFilter((s) => (s === c.k ? '' : c.k));
-                setPage(1);
-              }}
-              className="flex items-baseline gap-1.5 border-b-2 px-1 py-1 transition-colors hover:bg-[var(--accent-navy-soft)]"
-              style={{
-                borderBottomColor: active ? meta.color : 'transparent',
-              }}
+              title={`สถานะ ${meta.label}`}
+              body={STATUS_TIPS[c.k]}
+              trigger={
+                <button
+                  data-testid={`status-${c.k}`}
+                  aria-pressed={active}
+                  onClick={() => {
+                    setStatusFilter((s) => (s === c.k ? '' : c.k));
+                    setPage(1);
+                  }}
+                  className="flex items-baseline gap-1.5 border-b-2 px-1 py-1 transition-colors hover:bg-[var(--accent-navy-soft)]"
+                  style={{
+                    borderBottomColor: active ? meta.color : 'transparent',
+                  }}
+                />
+              }
             >
               <span
                 className="font-mono text-[20px] font-semibold leading-none tabular-nums"
@@ -332,7 +376,7 @@ function ReferralsBoard() {
               <span className="font-mono text-[12px] tracking-[0.06em] text-[var(--ink-navy-dim)]">
                 {meta.label}
               </span>
-            </button>
+            </KpiTip>
           );
         })}
       </div>
@@ -345,9 +389,15 @@ function ReferralsBoard() {
         >
           {/* Corridors */}
           <div className="bg-white px-5 py-3" data-testid="corridors-panel">
-            <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            <KpiTip
+              title="เส้นทางส่งต่อหลักของจังหวัด"
+              body="จับคู่ รพ.ต้นทาง → ปลายทาง ที่มีจำนวนเคสส่งต่อสะสมมากที่สุด (สูงสุด 6 อันดับ) ใช้ดูภาระของ รพ.แม่ข่ายและวางแผนศักยภาพรับส่งต่อ"
+              trigger={
+                <div className="cursor-help font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]" />
+              }
+            >
               REFERRAL CORRIDORS · TOP {insights.corridors.length}
-            </div>
+            </KpiTip>
             <div className="mt-2 space-y-1.5">
               {insights.corridors.map((c) => {
                 const max = insights.corridors[0]?.count || 1;
@@ -381,9 +431,15 @@ function ReferralsBoard() {
 
           {/* 7-day volume */}
           <div className="bg-white px-5 py-3" data-testid="daily-volume">
-            <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            <KpiTip
+              title="ปริมาณการส่งต่อรายวัน"
+              body="จำนวนเคสส่งต่อที่เริ่มในแต่ละวัน (ตามวันเวลาไทย) ย้อนหลัง 7 วัน — ใช้ดูแนวโน้มภาระงานของเครือข่าย"
+              trigger={
+                <div className="cursor-help font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]" />
+              }
+            >
               VOLUME · LAST 7 DAYS
-            </div>
+            </KpiTip>
             <div className="mt-2 flex h-[72px] items-end gap-1.5">
               {insights.daily.map((d) => {
                 const max = Math.max(...insights.daily.map((x) => x.count), 1);

@@ -380,10 +380,7 @@ export function HospitalTable({
           );
         })}
         {sorted.length === 0 && (
-          <div
-            className="p-6 text-center font-mono text-[13px]"
-            style={{ color: inkMuted }}
-          >
+          <div className="p-6 text-center font-mono text-[13px]" style={{ color: inkMuted }}>
             ไม่มีโรงพยาบาลในรายการ
           </div>
         )}
