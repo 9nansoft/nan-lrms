@@ -16,6 +16,7 @@ import {
   classifyPartographCoverage,
   needsPartographNudge,
   PARTOGRAPH_QUALITY,
+  STALE_ADMISSION,
 } from '@/config/hospital-network';
 import { KpiTip } from '@/components/shared/KpiTip';
 import { formatRelativeAge } from '@/lib/relative-time';
@@ -189,6 +190,15 @@ function laborConcerns(p: LaborPatient): Array<{ label: string; warn?: boolean }
   const hrs = hoursSince(p.admit_date);
   if (hrs != null && hrs >= 12) out.push({ label: `${Math.floor(hrs)}h admit`, warn: true });
   if ((p.cpd_score ?? 0) >= 40) out.push({ label: 'CPD↑' });
+  // Long-stay prompt — the usual cause is a skipped HOSxP discharge entry
+  // (dchdate never filled in), so name that action instead of just the age.
+  if (
+    p.labor_status === 'ACTIVE' &&
+    hrs != null &&
+    hrs / 24 >= STALE_ADMISSION.checkDischargeAfterDays
+  ) {
+    out.push({ label: 'ตรวจสอบจำหน่าย', warn: true });
+  }
   // Charting nudge — ACTIVE past the grace window with no partograph at all.
   // Absence used to read as "fine"; make it an explicit ward-level prompt.
   if (

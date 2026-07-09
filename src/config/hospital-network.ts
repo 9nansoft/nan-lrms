@@ -31,6 +31,36 @@ export function classifySyncHealth(
   return 'ok';
 }
 
+// ─── Stale labor admissions ─────────────────────────────────────────────────
+// Some wards let patients leave without completing the HOSxP discharge entry
+// (dchdate stays NULL, confirm_discharge stays 'N'), so HOSxP keeps reporting
+// them as admitted forever — the น้ำพอง case, 2026-07-09.
+export const STALE_ADMISSION = {
+  /** ACTIVE admissions older than this (no discharge entry) are dropped from
+   *  the browser sync's active set, letting the server's reconciliation
+   *  close them as DELIVERED through the normal discharge flow. */
+  autoCloseAfterDays: 7,
+  /** Ward-list chip prompting a HOSxP discharge-entry check appears after
+   *  this many days admitted. */
+  checkDischargeAfterDays: 4,
+} as const;
+
+/**
+ * True when an HOSxP admission row is administratively dead: no discharge
+ * date entered, yet admitted longer than the auto-close threshold. Rows with
+ * a dchdate map to DELIVERED normally and are never "stale".
+ */
+export function isStaleAdmission(
+  regdate: string | null,
+  dchdate: unknown,
+  now: Date = new Date(),
+): boolean {
+  if (dchdate) return false;
+  if (!regdate) return false;
+  const days = (now.getTime() - new Date(regdate).getTime()) / 86_400_000;
+  return days >= STALE_ADMISSION.autoCloseAfterDays;
+}
+
 // ─── Partograph data quality ────────────────────────────────────────────────
 // Of labor admissions in the window, how many were charted with at least one
 // partograph observation. Some hospitals skip charting entirely — the admin

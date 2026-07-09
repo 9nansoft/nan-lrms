@@ -23,6 +23,7 @@
 import { executeSql } from '@/lib/bms-browser-client';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
 import { LABOUR_INFANTS_SINCE, IPT_PREGNANCY_DELIVERIES_SINCE } from '@/config/hosxp-queries';
+import { isStaleAdmission } from '@/config/hospital-network';
 import type { ConnectionConfig, SqlApiResponse } from '@/types/bms-browser';
 
 // ─── Webhook payload shapes (mirror src/services/webhook.ts) ────────────────
@@ -145,7 +146,14 @@ export interface BrowserPushBody {
 export interface BrowserPollResult {
   durationMs: number;
   /** `dropped*` = patients filtered out by the per-patient name probe. */
-  labor: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
+  labor: {
+    read: number;
+    mapped: number;
+    sent: number;
+    droppedNameUnstable: number;
+    /** Admissions auto-closed by the stale-admission policy this cycle. */
+    droppedStaleAdmission?: number;
+  };
   partograph: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
   anc: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
   /** Delivery rows read since the server-issued newborn cutoff. */
@@ -799,13 +807,23 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // Five queries in parallel — saves a couple of RTTs vs sequential. The
     // BMS gateway tolerates up to 15 calls/sec/hospital, so 5 in parallel
     // from one tab is well below the limit.
-    const [laborRows, partRows, ancMasters, ancVisits, ancClasses] = await Promise.all([
+    const [rawLaborRows, partRows, ancMasters, ancVisits, ancClasses] = await Promise.all([
       runQuery<Record<string, unknown>>(SQL_ACTIVE_LABOUR, opts),
       runQuery<Record<string, unknown>>(SQL_PARTOGRAPH, opts),
       runQuery<Record<string, unknown>>(ancMastersSql(), opts),
       runQuery<Record<string, unknown>>(ancVisitsSql(), opts),
       runQuery<Record<string, unknown>>(ancClassifyingSql(), opts),
     ]);
+
+    // Stale-admission policy: rows still "active" in HOSxP long after
+    // admission with no discharge entry (dchdate NULL — the ward skipped the
+    // discharge screen) are administratively dead. Excluding them here drops
+    // them from the upsert list AND from activeAns, so the server's existing
+    // reconciliation closes them as DELIVERED via the normal discharge flow.
+    const laborRows = rawLaborRows.filter(
+      (r) => !isStaleAdmission(strOrNull(r.regdate), r.dchdate),
+    );
+    result.labor.droppedStaleAdmission = rawLaborRows.length - laborRows.length;
 
     result.labor.read = laborRows.length;
     result.partograph.read = partRows.length;

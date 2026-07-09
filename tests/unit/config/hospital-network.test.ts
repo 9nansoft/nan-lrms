@@ -9,6 +9,8 @@ import {
   PARTOGRAPH_QUALITY,
   classifyPartographCoverage,
   needsPartographNudge,
+  STALE_ADMISSION,
+  isStaleAdmission,
 } from '@/config/hospital-network';
 
 const NOW = new Date('2026-07-09T12:00:00+07:00');
@@ -42,6 +44,31 @@ describe('combinedWorkload', () => {
     expect(combinedWorkload({ total: 2 }, { total: 30 })).toBe(2 + 30 * ANC_WORKLOAD_WEIGHT);
     // An ANC-only hospital still registers as active.
     expect(combinedWorkload({ total: 0 }, { total: 215 })).toBeGreaterThan(5);
+  });
+
+  describe('isStaleAdmission', () => {
+    const now = new Date('2026-07-09T12:00:00Z');
+    const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000).toISOString();
+
+    it('flags never-discharged admissions past the auto-close threshold', () => {
+      expect(isStaleAdmission(daysAgo(STALE_ADMISSION.autoCloseAfterDays + 1), null, now)).toBe(
+        true,
+      );
+      // Fresh admission → not stale.
+      expect(isStaleAdmission(daysAgo(2), null, now)).toBe(false);
+      // Discharge date entered → maps DELIVERED normally, never "stale".
+      expect(
+        isStaleAdmission(daysAgo(STALE_ADMISSION.autoCloseAfterDays + 1), '2026-07-01', now),
+      ).toBe(false);
+      // Missing regdate → conservative, keep the row.
+      expect(isStaleAdmission(null, null, now)).toBe(false);
+    });
+
+    it('ward-check chip fires before auto-close does', () => {
+      expect(STALE_ADMISSION.checkDischargeAfterDays).toBeLessThan(
+        STALE_ADMISSION.autoCloseAfterDays,
+      );
+    });
   });
 
   describe('needsPartographNudge', () => {
