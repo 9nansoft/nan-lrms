@@ -14,6 +14,9 @@
 // flag — one subquery, applied everywhere.
 import type { DatabaseAdapter } from '@/db/adapter';
 import { bangkokStartOfToday } from '@/lib/bangkok-time';
+import { referralSlaCutoffs } from '@/config/referral-sla';
+import { ancOpsCutoffs } from '@/config/anc-ops';
+import { ancFreshnessCutoffs, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
 import type {
   DashboardHospital,
   DashboardSummary,
@@ -482,41 +485,59 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
   };
 }
 
-// T14: Dashboard alerts — referral alerts, overdue ANC, in-transit referrals
-export async function getDashboardAlerts(db: DatabaseAdapter): Promise<DashboardAlerts> {
-  // Referral alerts: pending referrals (INITIATED or ACCEPTED)
+// T14: Dashboard alerts — recalibrated 2026-07-09. Every cell must be a
+// number that can actually move: the old definitions ("all pending
+// referrals" = permanently ~125, ungated 28-day ANC rule = 817 vs the
+// boards' 138, in-transit = eternally 0) trained users to ignore the ribbon.
+// Thresholds come from the same configs the boards use so the dashboard and
+// the drill-down pages can never disagree.
+export async function getDashboardAlerts(
+  db: DatabaseAdapter,
+  now: Date = new Date(),
+): Promise<DashboardAlerts> {
+  const { overdueBefore } = referralSlaCutoffs(now);
+  const { staleBefore, dueSoonBefore } = ancOpsCutoffs(now);
+  const { edcOnOrAfter, lastAncOnOrAfter } = ancFreshnessCutoffs(now);
+
+  // Actionable referrals: past-SLA INITIATED or active EMERGENCY.
   const refAlerts = await db.query<{ count: number }>(
     `SELECT COUNT(*) as count FROM cached_referrals
-     WHERE status IN ('INITIATED', 'ACCEPTED')
+     WHERE ((status = 'INITIATED' AND initiated_at < ?)
+         OR (urgency_level = 'EMERGENCY' AND status NOT IN ('ARRIVED', 'REJECTED')))
        AND (from_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
             OR to_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})`,
+    [overdueBefore],
   );
 
-  // Overdue ANC: pregnancies where last_anc_date is > 28 days ago
-  // Uses date string comparison — works in both SQLite and PostgreSQL
-  const twentyEightDaysAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+  // Both ANC alerts run over the same gated registry as the pregnancies
+  // board (GA ≤ 42, EDC within grace, last visit within the LTFU window).
+  const gatedAnc = `care_stage = 'PREGNANCY'
+       AND (ga_weeks IS NULL OR ga_weeks <= ${ANC_MAX_GA_WEEKS})
+       AND (edc IS NULL OR edc >= ?)
+       AND (last_anc_date IS NULL OR last_anc_date >= ?)
+       AND (hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
+            OR current_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})`;
+
   const overdueAnc = await db.query<{ count: number }>(
     `SELECT COUNT(*) as count FROM maternal_journeys
-     WHERE care_stage = 'PREGNANCY'
+     WHERE ${gatedAnc}
        AND last_anc_date IS NOT NULL
-       AND last_anc_date < ?
-       AND (hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
-            OR current_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})`,
-    [twentyEightDaysAgo],
+       AND last_anc_date < ?`,
+    [edcOnOrAfter, lastAncOnOrAfter, staleBefore],
   );
 
-  // In-transit referrals
-  const inTransit = await db.query<{ count: number }>(
-    `SELECT COUNT(*) as count FROM cached_referrals
-     WHERE status = 'IN_TRANSIT'
-       AND (from_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
-            OR to_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})`,
+  const dueSoon = await db.query<{ count: number }>(
+    `SELECT COUNT(*) as count FROM maternal_journeys
+     WHERE ${gatedAnc}
+       AND edc IS NOT NULL
+       AND edc <= ?`,
+    [edcOnOrAfter, lastAncOnOrAfter, dueSoonBefore],
   );
 
   return {
     referralAlerts: Number(refAlerts[0]?.count) || 0,
     overdueAnc: Number(overdueAnc[0]?.count) || 0,
-    inTransitReferrals: Number(inTransit[0]?.count) || 0,
+    dueSoon: Number(dueSoon[0]?.count) || 0,
   };
 }
 

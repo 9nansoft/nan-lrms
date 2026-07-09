@@ -9,6 +9,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { useSSE } from '@/hooks/useSSE';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
@@ -120,9 +121,12 @@ const GRID_COLUMNS = '118px 1.4fr 82px 64px 72px 60px 170px 170px 1fr';
 export default function PregnanciesPage() {
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ฝากครรภ์' }]);
 
+  // Deep links from the dashboard alert ribbon land pre-filtered
+  // (e.g. /pregnancies?cohort=anc_stale).
+  const searchParams = useSearchParams();
   const [page, setPage] = useState(1);
   const [riskFilter, setRiskFilter] = useState<'' | AncRisk>('');
-  const [cohortFilter, setCohortFilter] = useState('');
+  const [cohortFilter, setCohortFilter] = useState(searchParams.get('cohort') ?? '');
   const [hospitalFilter, setHospitalFilter] = useState('');
   const [sortBy, setSortBy] = useState('due');
   const [search, setSearch] = useState('');

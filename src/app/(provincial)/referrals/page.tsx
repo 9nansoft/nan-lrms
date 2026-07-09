@@ -7,6 +7,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
@@ -54,12 +55,15 @@ const EMPTY_OPS_COUNTS = { today: 0, last7d: 0, emergencyActive: 0, highRisk: 0,
 export default function ReferralsPage() {
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ส่งต่อ' }]);
 
+  // Deep links from the dashboard alert ribbon land pre-filtered
+  // (e.g. /referrals?overdue=1).
+  const searchParams = useSearchParams();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('');
-  const [urgencyFilter, setUrgencyFilter] = useState('');
+  const [urgencyFilter, setUrgencyFilter] = useState(searchParams.get('urgency') ?? '');
   const [rangeFilter, setRangeFilter] = useState('');
   const [toHospitalFilter, setToHospitalFilter] = useState('');
-  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [overdueOnly, setOverdueOnly] = useState(searchParams.get('overdue') === '1');
   const [search, setSearch] = useState('');
   // Debounced term actually sent to the server (see pregnancies page — the
   // server matches refer number contains, HN prefix, or decrypted name).

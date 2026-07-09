@@ -13,9 +13,9 @@ export interface HosxpPatientRow {
 // Patient address (joined from patient + thaiaddress)
 export interface HosxpPatientAddressRow {
   hn: string;
-  chwpart: string | null;  // จังหวัด 2-digit
-  amppart: string | null;  // อำเภอ 2-digit
-  tmbpart: string | null;  // ตำบล 2-digit
+  chwpart: string | null; // จังหวัด 2-digit
+  amppart: string | null; // อำเภอ 2-digit
+  tmbpart: string | null; // ตำบล 2-digit
 }
 
 export interface HosxpIptRow {

@@ -24,7 +24,7 @@ const DEFAULT_STAGE_KPIS: DashboardStageKPIs = {
 const DEFAULT_ALERTS: DashboardAlerts = {
   referralAlerts: 0,
   overdueAnc: 0,
-  inTransitReferrals: 0,
+  dueSoon: 0,
 };
 
 const DEFAULT_TRENDS: DashboardTrends = {

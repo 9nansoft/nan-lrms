@@ -628,9 +628,16 @@ export interface DashboardStageKPIs {
 }
 
 export interface DashboardAlerts {
+  /** Actionable referrals: INITIATED past REFERRAL_SLA.overdueAfterHours,
+   *  plus active EMERGENCY referrals — NOT every pending row (that number
+   *  never moved and trained users to ignore the ribbon). */
   referralAlerts: number;
+  /** Gated ANC registry rows past ANC_OPS.followupWarnDays since the last
+   *  visit — the same rule the pregnancies board uses. */
   overdueAnc: number;
-  inTransitReferrals: number;
+  /** Gated pregnancies with EDC within ANC_OPS.dueSoonDays (incl. passed).
+   *  Replaces the permanently-zero in-transit referral count. */
+  dueSoon: number;
 }
 
 export interface ShiftStats {
