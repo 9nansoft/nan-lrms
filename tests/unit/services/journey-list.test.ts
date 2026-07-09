@@ -407,6 +407,33 @@ describe('journey-list service', () => {
       expect(res!.newborns).toEqual([]);
       expect(res!.referrals).toEqual([]);
       expect(res!.latestRisk).toBeNull();
+      // No labor record linked → no cross-link; syncedAt always present.
+      expect(res!.laborAdmission).toBeNull();
+      expect(res!.journey.syncedAt).toBeTruthy();
+    });
+
+    it('returns the linked labor admission (latest by admit date) for the cross-link', async () => {
+      const id = await insertJourney(db, { careStage: 'LABOR', gaWeeks: 39 });
+      const now = new Date().toISOString();
+      const insertLabor = (rowId: string, an: string, admitDate: string) =>
+        db.execute(
+          `INSERT INTO cached_patients
+             (id, hospital_id, journey_id, hn, an, name, age, admit_date, labor_status,
+              synced_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [rowId, HOSP_A, id, 'HN-L1', an, 'enc', 28, admitDate, 'ACTIVE', now, now, now],
+        );
+      await insertLabor('cp-old', '69000001', daysAgoIso(30));
+      await insertLabor('cp-new', '69000002', daysAgoIso(1));
+
+      const res = await getJourneyDetail(db, id);
+
+      expect(res!.laborAdmission).toEqual({
+        an: '69000002',
+        hcode: '10670',
+        laborStatus: 'ACTIVE',
+        admitDate: expect.any(String),
+      });
     });
   });
 });

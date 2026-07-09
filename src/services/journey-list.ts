@@ -638,6 +638,27 @@ export async function getJourneyDetail(
   const referrals = await getJourneyReferrals(db, journeyId);
   const newborns = await getJourneyNewborns(db, journeyId);
 
+  // Latest linked labor admission — lets the journey page cross-link to the
+  // labor detail (/patients/[hcode]-[an]) once the woman is admitted.
+  const laborRows = await db.query<Record<string, unknown>>(
+    `SELECT cp.an, lh.hcode, cp.labor_status, cp.admit_date
+       FROM cached_patients cp
+       JOIN hospitals lh ON lh.id = cp.hospital_id
+      WHERE cp.journey_id = ?
+      ORDER BY cp.admit_date DESC
+      LIMIT 1`,
+    [journeyId],
+  );
+  const laborAdmission =
+    laborRows.length > 0
+      ? {
+          an: laborRows[0].an as string,
+          hcode: laborRows[0].hcode as string,
+          laborStatus: laborRows[0].labor_status as string,
+          admitDate: laborRows[0].admit_date as string,
+        }
+      : null;
+
   return {
     journey: {
       id: r.id as string,
@@ -700,10 +721,12 @@ export async function getJourneyDetail(
       teratogenExposure: r.teratogen_exposure == null ? null : !!r.teratogen_exposure,
       congenitalInfection: r.congenital_infection == null ? null : !!r.congenital_infection,
       gdmRiskFactors: parseJson<string[]>(r.gdm_risk_factors_json) ?? null,
+      syncedAt: (r.synced_at as string | null) ?? null,
     },
     ancVisits,
     latestRisk,
     referrals,
     newborns,
+    laborAdmission,
   };
 }

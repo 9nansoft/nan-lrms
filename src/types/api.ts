@@ -470,11 +470,21 @@ export interface JourneyDetailResponse {
     teratogenExposure: boolean | null;
     congenitalInfection: boolean | null;
     gdmRiskFactors: string[] | null;
+    /** When this journey row was last written by the HOSxP sync/webhook. */
+    syncedAt: string | null;
   };
   ancVisits: AncVisitEntry[];
   latestRisk: AncRiskEntry | null;
   referrals: ReferralListItem[];
   newborns: NewbornEntry[];
+  /** Latest linked labor admission (cached_patients) — enables the
+   *  cross-link to /patients/[hcode]-[an]. Null until admitted. */
+  laborAdmission: {
+    an: string;
+    hcode: string;
+    laborStatus: string;
+    admitDate: string;
+  } | null;
 }
 
 export interface AncVisitEntry {

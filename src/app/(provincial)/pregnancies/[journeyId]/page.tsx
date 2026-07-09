@@ -15,6 +15,13 @@ import { SectionLabel } from '@/components/dashboard/shared';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import { ANC_RISK_COLOR, ANC_RISK_LABEL_TH } from '@/config/anc-risk-display';
+import { ANC_RISK_RULES } from '@/config/anc-risk-rules';
+import { classifySyncHealth } from '@/config/hospital-network';
+import { NEWBORN_THRESHOLDS } from '@/config/newborn';
+import { formatRelativeAge } from '@/lib/relative-time';
+import { KpiTip } from '@/components/shared/KpiTip';
+import { FlagChip } from '@/components/shared/FlagChip';
+import { STATUS_META, URGENCY_META } from '@/components/referrals/chips';
 import {
   BP_SYS_HIGH,
   BP_SYS_AMBER,
@@ -23,6 +30,8 @@ import {
   FHR_LOW,
   FHR_HIGH,
   HB_LOW,
+  PROTEINURIA_24H_HIGH_MG,
+  CREATININE_HIGH_MG_DL,
   sevBp,
   sevFhr,
   sevHb,
@@ -173,6 +182,8 @@ interface Journey {
   teratogenExposure?: boolean | null;
   congenitalInfection?: boolean | null;
   gdmRiskFactors?: string[] | null;
+  /** When this journey row was last written by the HOSxP sync/webhook. */
+  syncedAt?: string | null;
 }
 
 interface VaccineRecord {
@@ -187,6 +198,13 @@ interface JourneyDetailResponse {
   latestRisk: LatestRisk | null;
   referrals: Referral[];
   newborns: Newborn[];
+  /** Latest linked labor admission — cross-link to /patients/[hcode]-[an]. */
+  laborAdmission?: {
+    an: string;
+    hcode: string;
+    laborStatus: string;
+    admitDate: string;
+  } | null;
 }
 
 // ─── Labels + thresholds ──────────────────────────────────────────────────
@@ -204,14 +222,30 @@ const STAGE_COLOR: Record<string, string> = {
   DELIVERED: 'var(--risk-low)',
   POSTPARTUM: 'var(--ink-navy-muted)',
 };
-const REFERRAL_STATUS_LABEL: Record<string, string> = {
-  INITIATED: 'รอรับเคส',
-  ACCEPTED: 'รับแล้ว',
-  IN_TRANSIT: 'กำลังเดินทาง',
-  ARRIVED: 'ถึงปลายทาง',
-  REJECTED: 'ปฏิเสธ',
-  PENDING: 'รอดำเนินการ',
-  CANCELLED: 'ยกเลิก',
+// Referral status/urgency labels come from the shared chips module
+// (components/referrals/chips) so this rail can never disagree with the
+// /referrals board.
+
+// Thai labels for triggered ANC-risk rule IDs — from the rules config, so
+// clinicians read "เคยคลอดน้ำหนัก <2500g" instead of "hr1_previous_lbw".
+const RULE_LABEL_TH: Record<string, string> = Object.fromEntries(
+  ANC_RISK_RULES.map((r) => [r.id, r.labelTh]),
+);
+
+// Dot color per sync-health class — same classifier the hospitals board and
+// the labor detail page use.
+const SYNC_DOT: Record<string, string> = {
+  ok: 'var(--risk-low)',
+  stale: 'var(--risk-medium)',
+  critical: 'var(--risk-high)',
+  never: 'var(--risk-high)',
+  blocked: 'var(--risk-high)',
+};
+
+const LABOR_STATUS_TH: Record<string, string> = {
+  ACTIVE: 'อยู่ห้องคลอด',
+  DELIVERED: 'คลอดแล้ว',
+  DISCHARGED: 'จำหน่ายแล้ว',
 };
 const SEX_LABEL_TH: Record<string, string> = { M: 'ชาย', F: 'หญิง' };
 
@@ -1110,6 +1144,24 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         >
           <ArrowLeft className="h-3.5 w-3.5" /> BACK
         </button>
+        <KpiTip
+          title="ความสดของข้อมูล"
+          body={`เวลาที่ระบบเขียนข้อมูลการฝากครรภ์รายนี้จาก HOSxP/webhook ครั้งล่าสุด — เกิน 60 นาทีจุดเป็นสีเหลือง เกิน 24 ชั่วโมงเป็นสีแดง`}
+          trigger={
+            <div
+              data-testid="sync-stamp"
+              className="flex cursor-default items-center gap-1.5 font-mono text-[11px] text-[var(--ink-navy-muted)]"
+            />
+          }
+        >
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{
+              background: SYNC_DOT[classifySyncHealth('OK', journey.syncedAt ?? null, new Date())],
+            }}
+          />
+          ข้อมูลจาก HOSxP · อัปเดต {formatRelativeAge(journey.syncedAt ?? null)}ที่แล้ว
+        </KpiTip>
         <div className="flex items-center gap-2">
           {journey.ancRiskLevel && (
             <Pill
@@ -1244,6 +1296,50 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         </div>
       </div>
 
+      {/* ─── Labor cross-link — once admitted, jump straight to the labor
+          detail (partograph, vitals) the ward is charting right now. ─── */}
+      {data.laborAdmission &&
+        (() => {
+          const la = data.laborAdmission!;
+          const delivered = la.laborStatus === 'DELIVERED' || la.laborStatus === 'DISCHARGED';
+          const accent = delivered ? 'var(--risk-low)' : 'var(--risk-medium)';
+          return (
+            <div
+              className="flex flex-wrap items-center justify-between gap-2 px-5 py-2"
+              style={{
+                borderBottom: '1px solid var(--rule-strong)',
+                borderLeft: `3px solid ${accent}`,
+                background: `color-mix(in srgb, ${accent} 7%, white)`,
+              }}
+            >
+              <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-[var(--ink-navy-dim)]">
+                <Activity className="h-3.5 w-3.5" style={{ color: accent }} />
+                <span className="font-bold uppercase tracking-[0.1em]" style={{ color: accent }}>
+                  LABOR RECORD
+                </span>
+                <span>
+                  AN <span className="font-semibold text-[var(--ink-navy)]">{la.an}</span>
+                </span>
+                <span>
+                  ADMIT{' '}
+                  <span className="font-semibold text-[var(--ink-navy)]">
+                    {formatThaiDateTime(la.admitDate)}
+                  </span>
+                </span>
+                <Pill label={LABOR_STATUS_TH[la.laborStatus] ?? la.laborStatus} color={accent} />
+              </div>
+              <Link
+                data-testid="labor-admission-link"
+                href={`/patients/${la.hcode}-${la.an}`}
+                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 font-mono text-[11px] font-bold tracking-[0.06em] text-white transition-colors hover:opacity-90"
+                style={{ background: 'var(--accent-navy)' }}
+              >
+                เปิดข้อมูลห้องคลอด / Partograph →
+              </Link>
+            </div>
+          );
+        })()}
+
       {/* ─── Pregnancy summary strip (6 tiles) ─── */}
       <div
         className="grid bg-white"
@@ -1252,102 +1348,138 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           borderBottom: '1px solid var(--rule-strong)',
         }}
       >
-        <MetricTile
-          label="GA"
-          value={journey.gaWeeks != null ? `${journey.gaWeeks}w` : '—'}
-          sub={
-            journey.gaWeeks != null
-              ? journey.gaWeeks >= 37
-                ? 'Term'
-                : journey.gaWeeks >= 28
-                  ? 'Third tri'
-                  : journey.gaWeeks >= 14
-                    ? 'Second tri'
-                    : 'First tri'
-              : undefined
-          }
-          color={
-            journey.gaWeeks != null && journey.gaWeeks >= 41
-              ? 'var(--risk-high)'
-              : 'var(--accent-navy)'
-          }
-          icon={<Clock className="h-3 w-3" />}
-          tone="bold"
-        />
-        <MetricTile
-          label="EDC"
-          value={formatThaiShort(journey.edc)}
-          sub={
-            derived?.daysToEdc != null
-              ? derived.daysToEdc > 0
-                ? `อีก ${derived.daysToEdc} วัน`
-                : `เลย ${Math.abs(derived.daysToEdc)} วัน`
-              : 'วันกำหนดคลอด'
-          }
-          color={
-            derived?.daysToEdc != null && derived.daysToEdc < 0
-              ? 'var(--risk-high)'
-              : 'var(--primary-teal)'
-          }
-          icon={<Calendar className="h-3 w-3" />}
-        />
-        <MetricTile
-          label="LMP"
-          value={formatThaiShort(journey.lmp)}
-          sub="ประจำเดือนครั้งสุดท้าย"
-          color="var(--ink-navy-muted)"
-          icon={<Calendar className="h-3 w-3" />}
-        />
-        <MetricTile
-          label="ANC VISITS"
-          value={journey.ancVisitCount}
-          sub={
-            derived?.daysSinceLastAnc != null
-              ? `ครั้งล่าสุด ${derived.daysSinceLastAnc}d ago`
-              : 'ยังไม่มีนัด'
-          }
-          color={
-            derived?.daysSinceLastAnc != null && derived.daysSinceLastAnc > 28
-              ? 'var(--risk-high)'
-              : 'var(--accent-navy)'
-          }
-          icon={<Activity className="h-3 w-3" />}
-        />
-        <MetricTile
-          label="1ST CONTACT"
-          value={derived?.firstVisitGa != null ? `${derived.firstVisitGa}w` : '—'}
-          sub={
-            derived?.lateFirstContact
-              ? 'LATE — RTCOG < 10w'
-              : derived?.firstVisitGa != null
-                ? 'RTCOG on-time'
+        <KpiTip
+          title="อายุครรภ์ (GA)"
+          body="อายุครรภ์เป็นสัปดาห์จาก HOSxP (หรือคำนวณย้อนจาก EDC เมื่อไม่มีค่า) — ครบกำหนดที่ 37 สัปดาห์, เกิน 41 สัปดาห์แสดงสีแดง (post-term)"
+          trigger={<div className="cursor-default" />}
+        >
+          <MetricTile
+            label="GA"
+            value={journey.gaWeeks != null ? `${journey.gaWeeks}w` : '—'}
+            sub={
+              journey.gaWeeks != null
+                ? journey.gaWeeks >= 37
+                  ? 'Term'
+                  : journey.gaWeeks >= 28
+                    ? 'Third tri'
+                    : journey.gaWeeks >= 14
+                      ? 'Second tri'
+                      : 'First tri'
                 : undefined
-          }
-          color={derived?.lateFirstContact ? 'var(--risk-high)' : 'var(--risk-low)'}
-          icon={<TrendingUp className="h-3 w-3" />}
-        />
-        <MetricTile
-          label="NEXT DUE"
-          value={derived?.next ? `${derived.next.ga}w` : 'ครบกำหนด'}
-          sub={
-            derived?.next
-              ? derived.next.status === 'overdue'
-                ? `เลย ${Math.abs(derived.next.weeksAway)}w`
-                : derived.next.status === 'due-now'
-                  ? 'นัดครั้งถัดไป'
-                  : `อีก ${derived.next.weeksAway}w`
-              : 'ครบ 8 contact'
-          }
-          color={
-            derived?.next?.status === 'overdue'
-              ? 'var(--risk-high)'
-              : derived?.next?.status === 'due-now'
-                ? 'var(--risk-medium)'
-                : 'var(--risk-low)'
-          }
-          icon={<AlertTriangle className="h-3 w-3" />}
-          tone="bold"
-        />
+            }
+            color={
+              journey.gaWeeks != null && journey.gaWeeks >= 41
+                ? 'var(--risk-high)'
+                : 'var(--accent-navy)'
+            }
+            icon={<Clock className="h-3 w-3" />}
+            tone="bold"
+          />
+        </KpiTip>
+        <KpiTip
+          title="วันกำหนดคลอด (EDC)"
+          body="นับถอยหลังถึงวันกำหนดคลอด — เลยกำหนดแล้วแสดงสีแดง ควรประเมินการชักนำคลอด/ติดตามใกล้ชิด"
+          trigger={<div className="cursor-default" />}
+        >
+          <MetricTile
+            label="EDC"
+            value={formatThaiShort(journey.edc)}
+            sub={
+              derived?.daysToEdc != null
+                ? derived.daysToEdc > 0
+                  ? `อีก ${derived.daysToEdc} วัน`
+                  : `เลย ${Math.abs(derived.daysToEdc)} วัน`
+                : 'วันกำหนดคลอด'
+            }
+            color={
+              derived?.daysToEdc != null && derived.daysToEdc < 0
+                ? 'var(--risk-high)'
+                : 'var(--primary-teal)'
+            }
+            icon={<Calendar className="h-3 w-3" />}
+          />
+        </KpiTip>
+        <KpiTip
+          title="ประจำเดือนครั้งสุดท้าย (LMP)"
+          body="วันแรกของประจำเดือนครั้งสุดท้าย — ฐานการคำนวณ GA/EDC เมื่อไม่มีอัลตราซาวด์กำหนดอายุครรภ์"
+          trigger={<div className="cursor-default" />}
+        >
+          <MetricTile
+            label="LMP"
+            value={formatThaiShort(journey.lmp)}
+            sub="ประจำเดือนครั้งสุดท้าย"
+            color="var(--ink-navy-muted)"
+            icon={<Calendar className="h-3 w-3" />}
+          />
+        </KpiTip>
+        <KpiTip
+          title="จำนวนครั้งฝากครรภ์"
+          body="จำนวนครั้ง ANC ทั้งหมดของครรภ์นี้ (ทุกโรงพยาบาล) — สีแดงเมื่อห่างจากครั้งล่าสุดเกิน 28 วัน"
+          trigger={<div className="cursor-default" />}
+        >
+          <MetricTile
+            label="ANC VISITS"
+            value={journey.ancVisitCount}
+            sub={
+              derived?.daysSinceLastAnc != null
+                ? `ครั้งล่าสุด ${derived.daysSinceLastAnc}d ago`
+                : 'ยังไม่มีนัด'
+            }
+            color={
+              derived?.daysSinceLastAnc != null && derived.daysSinceLastAnc > 28
+                ? 'var(--risk-high)'
+                : 'var(--accent-navy)'
+            }
+            icon={<Activity className="h-3 w-3" />}
+          />
+        </KpiTip>
+        <KpiTip
+          title="ฝากครรภ์ครั้งแรก"
+          body="GA ของการฝากครรภ์ครั้งแรก — RTCOG OB 66-029 แนะนำให้ฝากครรภ์ครั้งแรกก่อน 10 สัปดาห์ (เข้มกว่าเกณฑ์ WHO 12 สัปดาห์)"
+          trigger={<div className="cursor-default" />}
+        >
+          <MetricTile
+            label="1ST CONTACT"
+            value={derived?.firstVisitGa != null ? `${derived.firstVisitGa}w` : '—'}
+            sub={
+              derived?.lateFirstContact
+                ? 'LATE — RTCOG < 10w'
+                : derived?.firstVisitGa != null
+                  ? 'RTCOG on-time'
+                  : undefined
+            }
+            color={derived?.lateFirstContact ? 'var(--risk-high)' : 'var(--risk-low)'}
+            icon={<TrendingUp className="h-3 w-3" />}
+          />
+        </KpiTip>
+        <KpiTip
+          title="นัดถัดไป (WHO 8-contact)"
+          body="WHO contact ครั้งถัดไปตามตารางนัด 8 ครั้ง เทียบกับ GA ปัจจุบันและครั้งที่มาแล้ว — เลยกำหนดแสดงสีแดง ควรติดตามตัว"
+          trigger={<div className="cursor-default" />}
+        >
+          <MetricTile
+            label="NEXT DUE"
+            value={derived?.next ? `${derived.next.ga}w` : 'ครบกำหนด'}
+            sub={
+              derived?.next
+                ? derived.next.status === 'overdue'
+                  ? `เลย ${Math.abs(derived.next.weeksAway)}w`
+                  : derived.next.status === 'due-now'
+                    ? 'นัดครั้งถัดไป'
+                    : `อีก ${derived.next.weeksAway}w`
+                : 'ครบ 8 contact'
+            }
+            color={
+              derived?.next?.status === 'overdue'
+                ? 'var(--risk-high)'
+                : derived?.next?.status === 'due-now'
+                  ? 'var(--risk-medium)'
+                  : 'var(--risk-low)'
+            }
+            icon={<AlertTriangle className="h-3 w-3" />}
+            tone="bold"
+          />
+        </KpiTip>
       </div>
 
       {/* ─── WHO 8-contact progress ─── */}
@@ -1913,6 +2045,99 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 </div>
               </div>
             )}
+
+            {/* Sub-group 3d — High-risk history (RTCOG OB 66-029 booking
+                flags). Only renders when at least one flag/value is present. */}
+            {(() => {
+              const hxFlags: Array<{ key: string; label: string; color: string }> = [];
+              if (journey.priorPeDvt)
+                hxFlags.push({ key: 'pe', label: 'เคยมี PE/DVT', color: 'var(--risk-high)' });
+              if (journey.severeLungDisease)
+                hxFlags.push({ key: 'lung', label: 'โรคปอดรุนแรง', color: 'var(--risk-high)' });
+              if (journey.alloimmunizationCde)
+                hxFlags.push({
+                  key: 'allo',
+                  label: 'Alloimmunization (CDE)',
+                  color: 'var(--risk-high)',
+                });
+              if (journey.bariatricSurgeryHx)
+                hxFlags.push({
+                  key: 'bariatric',
+                  label: 'เคยผ่าตัดลดขนาดกระเพาะ',
+                  color: 'var(--risk-medium)',
+                });
+              if (journey.teratogenExposure)
+                hxFlags.push({
+                  key: 'teratogen',
+                  label: 'สัมผัสสารก่อวิรูป (teratogen)',
+                  color: 'var(--risk-medium)',
+                });
+              if (journey.congenitalInfection)
+                hxFlags.push({
+                  key: 'congenital',
+                  label: 'ติดเชื้อก่อวิรูปแต่กำเนิด',
+                  color: 'var(--risk-medium)',
+                });
+              const hasValues =
+                journey.proteinuria24hMg != null ||
+                journey.creatinineMgDl != null ||
+                (journey.gdmRiskFactors?.length ?? 0) > 0;
+              if (hxFlags.length === 0 && !hasValues) return null;
+              return (
+                <div
+                  data-testid="high-risk-history"
+                  className="mt-3 border bg-white px-4 py-3"
+                  style={{
+                    borderColor: 'var(--rule-strong)',
+                    borderLeft: '3px solid var(--risk-medium)',
+                  }}
+                >
+                  <KpiTip
+                    title="ประวัติเสี่ยงสูง"
+                    body="ปัจจัยเสี่ยงระดับประวัติจากระเบียนฝากครรภ์ (RTCOG OB 66-029) — แสดงเฉพาะข้อที่มีข้อมูล; โปรตีนปัสสาวะ 24 ชม. แดงเมื่อเข้าเกณฑ์ครรภ์เป็นพิษ"
+                    trigger={
+                      <div className="cursor-default font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]" />
+                    }
+                  >
+                    HIGH-RISK HISTORY · ประวัติเสี่ยงสูง
+                  </KpiTip>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {hxFlags.map((f) => (
+                      <FlagChip key={f.key} color={f.color}>
+                        {f.label}
+                      </FlagChip>
+                    ))}
+                    {journey.proteinuria24hMg != null && (
+                      <FlagChip
+                        color={
+                          journey.proteinuria24hMg >= PROTEINURIA_24H_HIGH_MG
+                            ? 'var(--risk-high)'
+                            : 'var(--ink-navy-muted)'
+                        }
+                      >
+                        โปรตีนปัสสาวะ 24 ชม. {journey.proteinuria24hMg} mg
+                      </FlagChip>
+                    )}
+                    {journey.creatinineMgDl != null && (
+                      <FlagChip
+                        color={
+                          journey.creatinineMgDl > CREATININE_HIGH_MG_DL
+                            ? 'var(--risk-high)'
+                            : 'var(--ink-navy-muted)'
+                        }
+                      >
+                        Creatinine {journey.creatinineMgDl} mg/dL
+                      </FlagChip>
+                    )}
+                    {(journey.gdmRiskFactors ?? []).map((g) => (
+                      <FlagChip key={g} color="var(--risk-medium)">
+                        GDM: {g}
+                      </FlagChip>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </section>
 
           {/* 04 — Immunization (RTCOG: Tdap every pregnancy 27-36w) */}
@@ -2114,9 +2339,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               </SectionLabel>
               <div className="mt-2 grid gap-3 sm:grid-cols-2">
                 {newborns.map((nb) => {
-                  const lbw = nb.birthWeightG != null && nb.birthWeightG < 2500;
-                  const lowApgar1 = nb.apgar1min != null && nb.apgar1min < 7;
-                  const lowApgar5 = nb.apgar5min != null && nb.apgar5min < 7;
+                  const lbw =
+                    nb.birthWeightG != null && nb.birthWeightG < NEWBORN_THRESHOLDS.lbwGrams;
+                  // Same <7 cutoff applies at 1 and 5 minutes.
+                  const lowApgar1 =
+                    nb.apgar1min != null && nb.apgar1min < NEWBORN_THRESHOLDS.apgarLowAt5min;
+                  const lowApgar5 =
+                    nb.apgar5min != null && nb.apgar5min < NEWBORN_THRESHOLDS.apgarLowAt5min;
                   return (
                     <div
                       key={nb.infantNumber}
@@ -2260,7 +2489,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                               className="mt-0.5 h-3 w-3 shrink-0"
                               style={{ color: 'var(--risk-medium)' }}
                             />
-                            <span className="font-mono text-[11px]">{rule}</span>
+                            <span className="text-[11px]">{RULE_LABEL_TH[rule] ?? rule}</span>
                           </li>
                         ))}
                       </ul>
@@ -2503,7 +2732,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               ) : (
                 <div className="mt-2 flex flex-col gap-2">
                   {referrals.map((ref) => {
-                    const statusLabel = REFERRAL_STATUS_LABEL[ref.status] ?? ref.status;
+                    const statusLabel = STATUS_META[ref.status]?.label ?? ref.status;
                     const isArrived = ref.status === 'ARRIVED' || !!ref.arrivedAt;
                     const isUrgent =
                       ref.urgencyLevel === 'URGENT' || ref.urgencyLevel === 'EMERGENCY';
@@ -2526,7 +2755,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                           />
                           {ref.urgencyLevel && (
                             <Pill
-                              label={ref.urgencyLevel}
+                              label={URGENCY_META[ref.urgencyLevel]?.label ?? ref.urgencyLevel}
                               color={isUrgent ? 'var(--risk-high)' : 'var(--ink-navy-muted)'}
                             />
                           )}
@@ -2584,8 +2813,8 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               {latestRisk.triggeredRules.length > 0 && (
                 <ul className="text-[12px] space-y-1">
                   {latestRisk.triggeredRules.map((r) => (
-                    <li key={r} className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
-                      · {r}
+                    <li key={r} className="text-[11px] text-[var(--ink-navy-dim)]">
+                      · {RULE_LABEL_TH[r] ?? r}
                     </li>
                   ))}
                 </ul>

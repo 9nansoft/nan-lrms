@@ -15,6 +15,12 @@ export const FHR_HIGH = 160;
 export const HB_LOW = 11; // anemia
 export const HB_SEVERE = 9; // severe anemia
 
+// Preeclampsia work-up cutoffs (RTCOG/ACOG): 24-h urine protein >= 300 mg is
+// diagnostic-range proteinuria; serum creatinine > 1.1 mg/dL suggests renal
+// involvement (severe-features criterion).
+export const PROTEINURIA_24H_HIGH_MG = 300;
+export const CREATININE_HIGH_MG_DL = 1.1;
+
 export type Severity = 'normal' | 'borderline' | 'abnormal';
 
 export function sevBp(sys: number | null, dia: number | null): Severity {
