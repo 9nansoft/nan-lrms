@@ -382,6 +382,30 @@ export interface JourneyRiskCounts {
   total: number;
 }
 
+/** Operational cohort totals for the province ANC board — computed over the
+ *  gated PREGNANCY set, independent of the risk/q/cohort filters. Thresholds
+ *  live in src/config/anc-ops.ts. */
+export interface AncOpsCounts {
+  /** EDC within dueSoonDays (including already passed). */
+  dueSoon: number;
+  /** EDC already passed (still inside the freshness grace window). */
+  overdueEdc: number;
+  /** Last ANC older than followupWarnDays but still inside the 60d gate. */
+  ancStale: number;
+  /** Fewer than minVisits ANC visits at GA ≥ minVisitsGaWeeks. */
+  lowVisits: number;
+  /** GA ≥ nearTermGaWeeks. */
+  nearTerm: number;
+  /** Lost to follow-up: last ANC beyond the 60d gate, within ltfuWindowDays. */
+  ltfu: number;
+}
+
+export interface JourneyHospitalFacet {
+  id: string;
+  name: string;
+  count: number;
+}
+
 export interface JourneyListResponse {
   journeys: JourneyListItem[];
   pagination: Pagination;
@@ -392,6 +416,10 @@ export interface JourneyListResponse {
    * totals; omitted by the per-hospital journeys endpoint.
    */
   counts?: JourneyRiskCounts;
+  /** Present on GET /api/journeys when stage=PREGNANCY; see AncOpsCounts. */
+  opsCounts?: AncOpsCounts;
+  /** Hospitals in the gated set with counts — feeds the hospital filter. */
+  hospitalCounts?: JourneyHospitalFacet[];
 }
 
 export interface JourneyDetailResponse {

@@ -12,6 +12,7 @@ import {
   ANC_LAST_VISIT_MAX_AGE_DAYS,
   ancFreshnessCutoffs,
 } from '@/config/anc-freshness';
+import { ANC_OPS } from '@/config/anc-ops';
 import { listJourneys, listHospitalJourneys, getJourneyDetail } from '@/services/journey-list';
 
 const HOSP_A = 'hosp-a';
@@ -36,6 +37,8 @@ interface JourneySeed {
   edc?: string | null;
   lastAncDate?: string | null;
   createdAt?: string;
+  age?: number;
+  ancVisitCount?: number;
 }
 
 async function insertJourney(db: SqliteAdapter, seed: JourneySeed = {}): Promise<string> {
@@ -61,14 +64,14 @@ async function insertJourney(db: SqliteAdapter, seed: JourneySeed = {}): Promise
       name,
       `cid-${seq}`,
       `hash-${seq}`,
-      28,
+      seed.age ?? 28,
       1,
       0,
       null,
       seed.edc ?? null,
       seed.careStage ?? 'PREGNANCY',
       seed.ancRiskLevel ?? 'LOW',
-      0,
+      seed.ancVisitCount ?? 0,
       seed.lastAncDate ?? null,
       seed.gaWeeks ?? null,
       now,
@@ -242,6 +245,95 @@ describe('journey-list service', () => {
       expect(res.counts!.total).toBe(1);
       expect(res.counts!.low).toBe(1);
       expect(res.counts!.hr2).toBe(0);
+    });
+  });
+
+  describe('ops counts, cohort filters, sort (province ANC board)', () => {
+    it('opsCounts summarise the gated PREGNANCY set independent of risk/q filters', async () => {
+      // dueSoon + nearTerm
+      await insertJourney(db, { gaWeeks: 38, edc: daysAheadIso(5), ancVisitCount: 6, lastAncDate: daysAgoIso(5) });
+      // dueSoon + overdueEdc + nearTerm (EDC passed but inside the 14d grace)
+      await insertJourney(db, { gaWeeks: 40, edc: daysAgoIso(3), ancVisitCount: 5, lastAncDate: daysAgoIso(10) });
+      // ancStale (last visit 40 days ago — inside gate, past warn threshold)
+      await insertJourney(db, { gaWeeks: 20, edc: daysAheadIso(60), ancVisitCount: 1, lastAncDate: daysAgoIso(40) });
+      // lowVisits (GA >= 32 with < 5 visits), not nearTerm
+      await insertJourney(db, { gaWeeks: 33, edc: daysAheadIso(40), ancVisitCount: 3, lastAncDate: daysAgoIso(10) });
+      // LTFU — outside the 60d gate but inside the 120d worklist window
+      await insertJourney(db, { gaWeeks: 30, edc: daysAheadIso(30), ancVisitCount: 2, lastAncDate: daysAgoIso(80) });
+      // Other stage — never counted
+      await insertJourney(db, { careStage: 'LABOR', gaWeeks: 39, edc: daysAheadIso(2) });
+
+      const result = await listJourneys(db, { stage: 'PREGNANCY', riskLevel: 'HR3' });
+
+      expect(result.opsCounts).toEqual({
+        dueSoon: 2,
+        overdueEdc: 1,
+        ancStale: 1,
+        lowVisits: 1,
+        nearTerm: 2,
+        ltfu: 1,
+      });
+    });
+
+    it('cohort=due_soon returns only women whose EDC falls within the window', async () => {
+      const dueA = await insertJourney(db, { edc: daysAheadIso(5), lastAncDate: daysAgoIso(5) });
+      const dueB = await insertJourney(db, { edc: daysAgoIso(3), lastAncDate: daysAgoIso(5) });
+      await insertJourney(db, { edc: daysAheadIso(ANC_OPS.dueSoonDays + 10), lastAncDate: daysAgoIso(5) });
+
+      const result = await listJourneys(db, { stage: 'PREGNANCY', cohort: 'due_soon' });
+
+      expect(result.journeys.map((j) => j.id).sort()).toEqual([dueA, dueB].sort());
+    });
+
+    it('cohort=ltfu relaxes the last-ANC gate and returns the 60–120 day cohort', async () => {
+      await insertJourney(db, { lastAncDate: daysAgoIso(10), edc: daysAheadIso(30) }); // active — not LTFU
+      const ltfu = await insertJourney(db, { lastAncDate: daysAgoIso(80), edc: daysAheadIso(30) });
+      await insertJourney(db, { lastAncDate: daysAgoIso(130), edc: daysAheadIso(30) }); // beyond worklist window
+
+      const result = await listJourneys(db, { stage: 'PREGNANCY', cohort: 'ltfu' });
+
+      expect(result.journeys.map((j) => j.id)).toEqual([ltfu]);
+    });
+
+    it('sort=due orders by soonest EDC with unknown EDC last', async () => {
+      const later = await insertJourney(db, { edc: daysAheadIso(20), lastAncDate: daysAgoIso(5) });
+      const soonest = await insertJourney(db, { edc: daysAheadIso(5), lastAncDate: daysAgoIso(5) });
+      const unknown = await insertJourney(db, { edc: null, lastAncDate: daysAgoIso(5) });
+
+      const result = await listJourneys(db, { stage: 'PREGNANCY', sort: 'due' });
+
+      expect(result.journeys.map((j) => j.id)).toEqual([soonest, later, unknown]);
+    });
+
+    it('q also matches the hospital name', async () => {
+      await insertJourney(db, { hospitalId: HOSP_A, lastAncDate: daysAgoIso(5) });
+      const atB = await insertJourney(db, { hospitalId: HOSP_B, lastAncDate: daysAgoIso(5) });
+
+      const result = await listJourneys(db, { stage: 'PREGNANCY', q: 'รพ.B' });
+
+      expect(result.journeys.map((j) => j.id)).toEqual([atB]);
+    });
+
+    it('derives GA from EDC when ga_weeks is missing', async () => {
+      // EDC 42 days out → 280 - 42 = 238 gestational days → 34 weeks.
+      await insertJourney(db, { gaWeeks: null, edc: daysAheadIso(42), lastAncDate: daysAgoIso(5) });
+
+      const result = await listJourneys(db, { stage: 'PREGNANCY' });
+
+      expect(result.journeys[0].gaWeeks).toBe(34);
+    });
+
+    it('returns a hospitalCounts facet over the gated set', async () => {
+      await insertJourney(db, { hospitalId: HOSP_A, lastAncDate: daysAgoIso(5) });
+      await insertJourney(db, { hospitalId: HOSP_A, lastAncDate: daysAgoIso(5) });
+      await insertJourney(db, { hospitalId: HOSP_B, lastAncDate: daysAgoIso(5) });
+
+      const result = await listJourneys(db, { stage: 'PREGNANCY' });
+
+      expect(result.hospitalCounts).toEqual([
+        { id: HOSP_A, name: 'รพ.A', count: 2 },
+        { id: HOSP_B, name: 'รพ.B', count: 1 },
+      ]);
     });
   });
 

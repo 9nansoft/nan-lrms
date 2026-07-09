@@ -18,6 +18,8 @@ export async function GET(request: NextRequest) {
       riskLevel: searchParams.get('risk_level') ?? undefined,
       hospitalId: searchParams.get('hospital_id') ?? undefined,
       q: searchParams.get('q') ?? undefined,
+      cohort: searchParams.get('cohort') ?? undefined,
+      sort: searchParams.get('sort') ?? undefined,
       page: parseInt(searchParams.get('page') ?? '1', 10),
       perPage: parseInt(searchParams.get('per_page') ?? '20', 10),
     });

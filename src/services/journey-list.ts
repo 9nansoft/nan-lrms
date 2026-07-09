@@ -8,7 +8,10 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { decryptSafe } from '@/lib/encryption';
 import { CareStage } from '@/types/domain';
 import { ancFreshnessCutoffs, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
+import { ANC_OPS, ancOpsCutoffs } from '@/config/anc-ops';
 import type {
+  AncOpsCounts,
+  JourneyHospitalFacet,
   JourneyListItem,
   JourneyListResponse,
   JourneyRiskCounts,
@@ -19,13 +22,31 @@ import type {
   NewbornEntry,
 } from '@/types/api';
 
+/** Working cohorts for the province ANC board — each maps to one KPI cell.
+ *  'ltfu' is special: it swaps the 60-day last-ANC freshness gate for the
+ *  60→ltfuWindowDays window so recently-dropped women become a worklist. */
+export type JourneyCohort =
+  | 'due_soon'
+  | 'overdue_edc'
+  | 'anc_stale'
+  | 'low_visits'
+  | 'near_term'
+  | 'ltfu';
+
+export type JourneySort = 'due' | 'ga' | 'last_anc' | 'newest';
+
 export interface JourneyListFilters {
   stage?: string;
   riskLevel?: string;
   /** Filters on current_hospital_id (province-wide endpoint only). */
   hospitalId?: string;
-  /** Free-text search — HN prefix or decrypted-name contains (case-insensitive). */
+  /** Free-text search — HN prefix, decrypted-name contains, or hospital-name
+   *  contains (case-insensitive). */
   q?: string;
+  /** Narrow the list to one operational cohort (PREGNANCY stage only). */
+  cohort?: string;
+  /** Row order; defaults to newest-registered first. */
+  sort?: string;
   page?: number;
   perPage?: number;
 }
@@ -42,7 +63,7 @@ interface WhereClause {
 function buildJourneyWhere(
   base: string,
   baseParams: unknown[],
-  filters: Pick<JourneyListFilters, 'stage' | 'riskLevel' | 'hospitalId'>,
+  filters: Pick<JourneyListFilters, 'stage' | 'riskLevel' | 'hospitalId' | 'cohort'>,
   now: Date,
 ): WhereClause {
   let clause = base;
@@ -59,9 +80,20 @@ function buildJourneyWhere(
       const { edcOnOrAfter, lastAncOnOrAfter } = ancFreshnessCutoffs(now);
       clause += `
         AND (mj.ga_weeks IS NULL OR mj.ga_weeks <= ?)
-        AND (mj.edc IS NULL OR mj.edc >= ?)
+        AND (mj.edc IS NULL OR mj.edc >= ?)`;
+      params.push(ANC_MAX_GA_WEEKS, edcOnOrAfter);
+      if (filters.cohort === 'ltfu') {
+        // LTFU worklist: swap the last-ANC freshness gate for the window just
+        // beyond it, so silently-dropped women become visible and recoverable.
+        const { ltfuFloor } = ancOpsCutoffs(now);
+        clause += `
+        AND mj.last_anc_date IS NOT NULL AND mj.last_anc_date < ? AND mj.last_anc_date >= ?`;
+        params.push(lastAncOnOrAfter, ltfuFloor);
+      } else {
+        clause += `
         AND (mj.last_anc_date IS NULL OR mj.last_anc_date >= ?)`;
-      params.push(ANC_MAX_GA_WEEKS, edcOnOrAfter, lastAncOnOrAfter);
+        params.push(lastAncOnOrAfter);
+      }
     }
   }
   if (filters.riskLevel) {
@@ -72,14 +104,74 @@ function buildJourneyWhere(
     clause += ` AND mj.current_hospital_id = ?`;
     params.push(filters.hospitalId);
   }
+  if (filters.cohort && filters.cohort !== 'ltfu') {
+    const { dueSoonBefore, staleBefore } = ancOpsCutoffs(now);
+    switch (filters.cohort) {
+      case 'due_soon':
+        clause += ` AND mj.edc IS NOT NULL AND mj.edc <= ?`;
+        params.push(dueSoonBefore);
+        break;
+      case 'overdue_edc':
+        clause += ` AND mj.edc IS NOT NULL AND mj.edc < ?`;
+        params.push(now.toISOString());
+        break;
+      case 'anc_stale':
+        clause += ` AND mj.last_anc_date IS NOT NULL AND mj.last_anc_date < ?`;
+        params.push(staleBefore);
+        break;
+      case 'low_visits':
+        clause += ` AND mj.anc_visit_count < ? AND mj.ga_weeks >= ?`;
+        params.push(ANC_OPS.minVisits, ANC_OPS.minVisitsGaWeeks);
+        break;
+      case 'near_term':
+        clause += ` AND mj.ga_weeks >= ?`;
+        params.push(ANC_OPS.nearTermGaWeeks);
+        break;
+    }
+  }
 
   return { clause, params };
+}
+
+/** Row order for the registry. 'due' and 'last_anc' put the actionable end
+ *  first; unknown values sort where they are least misleading. */
+function buildOrderBy(sort?: string): string {
+  switch (sort) {
+    case 'due':
+      return `ORDER BY CASE WHEN mj.edc IS NULL THEN 1 ELSE 0 END, mj.edc ASC`;
+    case 'ga':
+      return `ORDER BY CASE WHEN mj.ga_weeks IS NULL THEN 1 ELSE 0 END, mj.ga_weeks DESC`;
+    case 'last_anc':
+      // Never-visited rows first (most urgent to chase), then oldest visit.
+      return `ORDER BY CASE WHEN mj.last_anc_date IS NULL THEN 0 ELSE 1 END, mj.last_anc_date ASC`;
+    default:
+      return `ORDER BY mj.created_at DESC`;
+  }
 }
 
 const DATA_SELECT = `SELECT mj.*, h.name as hospital_name, h.hcode
   FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id`;
 const COUNT_SELECT = `SELECT COUNT(*) as total
   FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id`;
+
+const GESTATION_DAYS = 280;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Live GA: prefer the synced ga_weeks; otherwise derive from EDC (40 weeks
+ *  minus time-to-EDC). Keeps GA current between syncs and fills the ~14% of
+ *  registry rows where HOSxP sends EDC but no GA. Returns null outside a
+ *  plausible 0–44 week window. */
+export function effectiveGaWeeks(
+  gaWeeks: number | null,
+  edc: string | null,
+  now: Date = new Date(),
+): number | null {
+  if (gaWeeks != null) return gaWeeks;
+  if (!edc) return null;
+  const gaDays = GESTATION_DAYS - Math.round((new Date(edc).getTime() - now.getTime()) / DAY_MS);
+  const weeks = Math.floor(gaDays / 7);
+  return weeks >= 0 && weeks <= 44 ? weeks : null;
+}
 
 function mapJourneyListItem(r: Record<string, unknown>, decryptedName?: string): JourneyListItem {
   return {
@@ -89,7 +181,7 @@ function mapJourneyListItem(r: Record<string, unknown>, decryptedName?: string):
     age: r.age as number,
     gravida: r.gravida as number,
     para: r.para as number,
-    gaWeeks: r.ga_weeks as number | null,
+    gaWeeks: effectiveGaWeeks(r.ga_weeks as number | null, r.edc as string | null),
     lmp: r.lmp as string | null,
     edc: r.edc as string | null,
     careStage: r.care_stage as string,
@@ -174,12 +266,15 @@ export async function listJourneys(
   let journeys: JourneyListItem[];
   let total: number;
 
+  const orderBy = buildOrderBy(filters.sort);
+
   if (q) {
-    // Names are encrypted at rest, so the name half of the search cannot run in
-    // SQL. Fetch the full base-filtered set, decrypt, match (HN prefix OR name
-    // contains), then paginate in memory — the match must happen before paging.
+    // Names are encrypted at rest, so the name half of the search cannot run
+    // in SQL. Fetch the full base-filtered set, decrypt, match (HN prefix OR
+    // name contains OR hospital-name contains), then paginate in memory — the
+    // match must happen before paging.
     const rows = await db.query<Record<string, unknown>>(
-      `${DATA_SELECT} WHERE ${clause} ORDER BY mj.created_at DESC`,
+      `${DATA_SELECT} WHERE ${clause} ${orderBy}`,
       params,
     );
     const qLower = q.toLowerCase();
@@ -189,7 +284,11 @@ export async function listJourneys(
         ({ row, name }) =>
           String(row.hn ?? '')
             .toLowerCase()
-            .startsWith(qLower) || name.toLowerCase().includes(qLower),
+            .startsWith(qLower) ||
+          name.toLowerCase().includes(qLower) ||
+          String(row.hospital_name ?? '')
+            .toLowerCase()
+            .includes(qLower),
       );
     total = matched.length;
     journeys = matched
@@ -199,7 +298,7 @@ export async function listJourneys(
     const countRows = await db.query<{ total: number }>(`${COUNT_SELECT} WHERE ${clause}`, params);
     total = Number(countRows[0]?.total) || 0;
     const rows = await db.query<Record<string, unknown>>(
-      `${DATA_SELECT} WHERE ${clause} ORDER BY mj.created_at DESC LIMIT ? OFFSET ?`,
+      `${DATA_SELECT} WHERE ${clause} ${orderBy} LIMIT ? OFFSET ?`,
       [...params, perPage, (page - 1) * perPage],
     );
     journeys = rows.map((row) => mapJourneyListItem(row));
@@ -207,11 +306,108 @@ export async function listJourneys(
 
   const counts = await computeRiskCounts(db, base, baseParams, filters, now);
 
+  // Operational cohorts + hospital facet are PREGNANCY-board concerns.
+  let opsCounts: AncOpsCounts | undefined;
+  let hospitalCounts: JourneyHospitalFacet[] | undefined;
+  if (filters.stage === CareStage.PREGNANCY) {
+    opsCounts = await computeOpsCounts(db, filters, now);
+    hospitalCounts = await computeHospitalCounts(db, filters, now);
+  }
+
   return {
     journeys,
     pagination: { total, page, perPage, totalPages: Math.ceil(total / perPage) },
     counts,
+    ...(opsCounts ? { opsCounts } : {}),
+    ...(hospitalCounts ? { hospitalCounts } : {}),
   };
+}
+
+// Fixed-cohort KPIs over the gated PREGNANCY set — independent of the
+// risk/q/cohort filters (same stability contract as computeRiskCounts).
+// SUM(CASE ...) is portable across SQLite and Postgres; NULL ga_weeks rows
+// never satisfy the GA comparisons, so they are conservatively excluded.
+async function computeOpsCounts(
+  db: DatabaseAdapter,
+  filters: JourneyListFilters,
+  now: Date,
+): Promise<AncOpsCounts> {
+  const { clause, params } = buildJourneyWhere(
+    '1=1',
+    [],
+    { stage: CareStage.PREGNANCY, hospitalId: filters.hospitalId },
+    now,
+  );
+  const { dueSoonBefore, staleBefore } = ancOpsCutoffs(now);
+
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT
+      SUM(CASE WHEN mj.edc IS NOT NULL AND mj.edc <= ? THEN 1 ELSE 0 END) as due_soon,
+      SUM(CASE WHEN mj.edc IS NOT NULL AND mj.edc < ? THEN 1 ELSE 0 END) as overdue_edc,
+      SUM(CASE WHEN mj.last_anc_date IS NOT NULL AND mj.last_anc_date < ? THEN 1 ELSE 0 END) as anc_stale,
+      SUM(CASE WHEN mj.anc_visit_count < ? AND mj.ga_weeks >= ? THEN 1 ELSE 0 END) as low_visits,
+      SUM(CASE WHEN mj.ga_weeks >= ? THEN 1 ELSE 0 END) as near_term
+    FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id
+    WHERE ${clause}`,
+    [
+      dueSoonBefore,
+      now.toISOString(),
+      staleBefore,
+      ANC_OPS.minVisits,
+      ANC_OPS.minVisitsGaWeeks,
+      ANC_OPS.nearTermGaWeeks,
+      ...params,
+    ],
+  );
+
+  // LTFU lives outside the normal gate, so it needs its own where-clause.
+  const ltfu = buildJourneyWhere(
+    '1=1',
+    [],
+    { stage: CareStage.PREGNANCY, hospitalId: filters.hospitalId, cohort: 'ltfu' },
+    now,
+  );
+  const ltfuRows = await db.query<{ cnt: number }>(
+    `SELECT COUNT(*) as cnt
+       FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id
+      WHERE ${ltfu.clause}`,
+    ltfu.params,
+  );
+
+  const r = rows[0] ?? {};
+  return {
+    dueSoon: Number(r.due_soon) || 0,
+    overdueEdc: Number(r.overdue_edc) || 0,
+    ancStale: Number(r.anc_stale) || 0,
+    lowVisits: Number(r.low_visits) || 0,
+    nearTerm: Number(r.near_term) || 0,
+    ltfu: Number(ltfuRows[0]?.cnt) || 0,
+  };
+}
+
+// Hospitals present in the gated set with counts — excludes the hospitalId
+// filter (it is the dimension being faceted) and the risk/q/cohort filters.
+async function computeHospitalCounts(
+  db: DatabaseAdapter,
+  filters: JourneyListFilters,
+  now: Date,
+): Promise<JourneyHospitalFacet[]> {
+  const { clause, params } = buildJourneyWhere('1=1', [], { stage: filters.stage }, now);
+  const rows = await db.query<Record<string, unknown>>(
+    `SELECT mj.current_hospital_id as id, ch.name as name, COUNT(*) as cnt
+       FROM maternal_journeys mj
+       JOIN hospitals h ON h.id = mj.hospital_id
+       JOIN hospitals ch ON ch.id = mj.current_hospital_id
+      WHERE ${clause}
+      GROUP BY mj.current_hospital_id, ch.name
+      ORDER BY cnt DESC, ch.name`,
+    params,
+  );
+  return rows.map((r) => ({
+    id: r.id as string,
+    name: (r.name as string) ?? 'ไม่ทราบ',
+    count: Number(r.cnt) || 0,
+  }));
 }
 
 /**
@@ -243,7 +439,7 @@ export async function listHospitalJourneys(
   const total = Number(countRows[0]?.total) || 0;
 
   const rows = await db.query<Record<string, unknown>>(
-    `${DATA_SELECT} WHERE ${clause} ORDER BY mj.created_at DESC LIMIT ? OFFSET ?`,
+    `${DATA_SELECT} WHERE ${clause} ${buildOrderBy(filters.sort)} LIMIT ? OFFSET ?`,
     [...params, perPage, (page - 1) * perPage],
   );
   const journeys = rows.map((row) => mapJourneyListItem(row));
