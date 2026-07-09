@@ -140,6 +140,47 @@ export async function syncNewbornsFromRows(
     patientRows.filter((p) => p.journey_id).map((p) => [p.an, p.journey_id as string]),
   );
 
+  // Fallback for admissions outside the cached_patients window (the backfill
+  // path): resolve via the mother's HN carried on LABOUR_INFANTS_SINCE rows.
+  // For repeat mothers with several journeys, attribute the birth to the
+  // pregnancy registered most recently BEFORE the birth date.
+  const unresolved = ans
+    .filter((an) => !journeyByAn.has(an))
+    .map((an) => {
+      const first = byAn.get(an)![0];
+      return {
+        an,
+        hn: first.mother_hn ? String(first.mother_hn) : null,
+        bornMs: first.birth_date ? new Date(first.birth_date).getTime() : Number.MAX_SAFE_INTEGER,
+      };
+    })
+    .filter((u): u is { an: string; hn: string; bornMs: number } => u.hn !== null);
+
+  if (unresolved.length > 0) {
+    const hns = Array.from(new Set(unresolved.map((u) => u.hn)));
+    const hnPlaceholders = hns.map(() => '?').join(',');
+    const journeyRows = await db.query<{ id: string; hn: string; registered_at: string }>(
+      `SELECT id, hn, registered_at FROM maternal_journeys
+        WHERE hospital_id = ? AND hn IN (${hnPlaceholders})`,
+      [hospitalId, ...hns],
+    );
+    const journeysByHn = new Map<string, Array<{ id: string; regMs: number }>>();
+    for (const j of journeyRows) {
+      const list = journeysByHn.get(j.hn) ?? [];
+      list.push({ id: j.id, regMs: new Date(j.registered_at).getTime() });
+      journeysByHn.set(j.hn, list);
+    }
+    for (const list of journeysByHn.values()) list.sort((a, b) => a.regMs - b.regMs);
+
+    for (const u of unresolved) {
+      const candidates = journeysByHn.get(u.hn);
+      if (!candidates || candidates.length === 0) continue;
+      const before = candidates.filter((c) => c.regMs <= u.bornMs);
+      const pick = before.length > 0 ? before[before.length - 1] : candidates[0];
+      journeyByAn.set(u.an, pick.id);
+    }
+  }
+
   for (const [an, infantRows] of byAn) {
     const journeyId = journeyByAn.get(an);
     if (!journeyId) {

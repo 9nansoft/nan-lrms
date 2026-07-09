@@ -116,6 +116,49 @@ describe('newborn polling sync', () => {
     expect(Number(count[0].cnt)).toBe(1);
   });
 
+  it('falls back to the mother HN when the AN was never cached (backfill path)', async () => {
+    // No cached_patients row for AN-OLD — the admission predates the system.
+    // The infant row carries the mother's HN from HOSxP (ipt join), which
+    // resolves to the journey directly.
+    const rows = [makeInfantRow('AN-OLD', 1, { mother_hn: 'HN001' })];
+
+    const result = await syncNewbornsFromRows(db, HOSPITAL_ID, rows);
+
+    expect(result.upserted).toBe(1);
+    expect(result.skippedNoJourney).toBe(0);
+    const newborns = await db.query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(Number(newborns[0].cnt)).toBe(1);
+  });
+
+  it('for repeat mothers, attributes the birth to the pregnancy registered before it', async () => {
+    const now = Date.now();
+    const iso = (d: number) => new Date(now - d * 24 * 3600_000).toISOString();
+    // Same HN, two pregnancies: an old delivered journey and the current one.
+    await db.execute(
+      `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
+       VALUES ('journey-old', ?, ?, 'HN002', 'Repeat Mother', 'enc_cid2', 'cidhash_y', 32, 2, 1, 'DELIVERED', 'LOW', 5, ?, ?, ?, ?, ?)`,
+      [HOSPITAL_ID, HOSPITAL_ID, iso(400), iso(400), iso(400), iso(400), iso(400)],
+    );
+    await db.execute(
+      `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
+       VALUES ('journey-new', ?, ?, 'HN002', 'Repeat Mother', 'enc_cid2', 'cidhash_y', 32, 3, 2, 'LABOR', 'LOW', 5, ?, ?, ?, ?, ?)`,
+      [HOSPITAL_ID, HOSPITAL_ID, iso(200), iso(200), iso(200), iso(200), iso(200)],
+    );
+
+    const birthDate = new Date(now - 5 * 24 * 3600_000).toISOString().slice(0, 10);
+    await syncNewbornsFromRows(db, HOSPITAL_ID, [
+      makeInfantRow('AN-REPEAT', 1, { mother_hn: 'HN002', birth_date: birthDate }),
+    ]);
+
+    const newborns = await db.query<{ journey_id: string }>(
+      `SELECT journey_id FROM cached_newborns WHERE infant_hn = 'NB-AN-REPEAT-1'`,
+    );
+    expect(newborns[0].journey_id).toBe('journey-new');
+  });
+
   it('cutoff: 365-day backfill window when nothing is cached for the hospital', async () => {
     const now = new Date('2026-07-09T12:00:00+07:00');
     const cutoff = await newbornSyncCutoffDate(db, HOSPITAL_ID, now);

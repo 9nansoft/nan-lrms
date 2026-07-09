@@ -171,6 +171,10 @@ export interface HosxpLabourInfantRow {
   infant_dchstts: string | null;
   birth_date: string | null;
   birth_time: string | null;
+  /** Mother's HN via the ipt join — present on LABOUR_INFANTS_SINCE (the
+   *  batch/polling variant); resolves journeys for admissions that predate
+   *  the cached_patients window. */
+  mother_hn?: string | null;
 }
 
 export interface HosxpReferoutRow {
