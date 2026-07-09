@@ -14,7 +14,13 @@ import { ErrorState } from '@/components/shared/ErrorState';
 import { SectionLabel } from '@/components/dashboard/shared';
 import { ProvinceMap } from '@/components/dashboard/ProvinceMap';
 import { HOSPITAL_LEVELS, KK_HOSPITALS } from '@/config/hospitals';
-import { cn } from '@/lib/utils';
+import {
+  classifySyncHealth,
+  combinedWorkload,
+  type SyncHealthClass,
+} from '@/config/hospital-network';
+import { cn, formatThaiTime } from '@/lib/utils';
+import { formatRelativeAge } from '@/lib/relative-time';
 import { Search, Building2, Globe, ChevronRight } from 'lucide-react';
 import type { DashboardHospital } from '@/types/api';
 import type { HospitalLevel } from '@/types/domain';
@@ -40,37 +46,53 @@ function groupByLevel(hospitals: DashboardHospital[]) {
 }
 
 function levelStats(list: DashboardHospital[]) {
-  let online = 0;
-  let active = 0;
+  let anc = 0;
+  let labor = 0;
   let high = 0;
   for (const h of list) {
-    if (h.connectionStatus === 'ONLINE') online++;
-    active += h.counts.total;
+    anc += h.ancCounts.total;
+    labor += h.counts.total;
     high += h.counts.high;
   }
-  return { online, active, high };
+  return { anc, labor, high };
 }
 
-// Mini risk-mix bar for each roster row — proportional segments scaled to row width.
-function MiniMix({ counts }: { counts: DashboardHospital['counts'] }) {
-  const total = counts.total || 1;
-  const lowPct = (counts.low / total) * 100;
-  const medPct = (counts.medium / total) * 100;
-  const highPct = (counts.high / total) * 100;
-  if (counts.total === 0) {
-    return <div className="h-1.5 w-16 rounded-sm" style={{ background: 'var(--rule-hair)' }} />;
-  }
+// Sync-freshness display tokens — classification itself lives in
+// src/config/hospital-network.ts.
+const SYNC_META: Record<SyncHealthClass, { color: string }> = {
+  ok: { color: 'var(--risk-low)' },
+  stale: { color: 'var(--risk-medium)' },
+  critical: { color: 'var(--risk-high)' },
+  never: { color: 'var(--ink-navy-muted)' },
+  blocked: { color: 'var(--risk-high)' },
+};
+
+/** Relative last-sync stamp with a status dot; blocked/never get labels. */
+function SyncCell({ hospital }: { hospital: DashboardHospital }) {
+  const health = classifySyncHealth(hospital.syncStatus, hospital.lastSyncAt);
+  const meta = SYNC_META[health];
+  const text =
+    health === 'blocked'
+      ? 'ถูกบล็อก'
+      : health === 'never'
+        ? 'ยังไม่ซิงก์'
+        : formatRelativeAge(hospital.lastSyncAt, 'th');
   return (
-    <div
-      className="flex h-1.5 w-16 overflow-hidden rounded-sm"
-      style={{ background: 'var(--rule-hair)' }}
+    <span
+      className="inline-flex items-center gap-1.5 font-mono text-[11px] tabular-nums"
+      style={{ color: health === 'ok' ? 'var(--ink-navy-muted)' : meta.color }}
+      title={hospital.syncBlockedReason ?? undefined}
     >
-      {lowPct > 0 && <span style={{ background: 'var(--risk-low)', width: `${lowPct}%` }} />}
-      {medPct > 0 && <span style={{ background: 'var(--risk-medium)', width: `${medPct}%` }} />}
-      {highPct > 0 && <span style={{ background: 'var(--risk-high)', width: `${highPct}%` }} />}
-    </div>
+      <span
+        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ background: meta.color }}
+      />
+      {text}
+    </span>
   );
 }
+
+const ROSTER_GRID = '50px 1fr 52px 52px 84px 14px';
 
 interface RosterRowProps {
   hospital: DashboardHospital;
@@ -90,11 +112,13 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
     }
   }, [isSelected]);
 
-  const hasPatients = hospital.counts.total > 0;
+  const health = classifySyncHealth(hospital.syncStatus, hospital.lastSyncAt);
   return (
     <button
       ref={ref}
       type="button"
+      data-testid={`hospital-row-${hospital.hcode}`}
+      data-sync={health}
       onMouseEnter={onSelect}
       onClick={onOpen}
       className={cn(
@@ -102,7 +126,7 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
         isSelected ? '' : 'hover:bg-[var(--accent-navy-soft)]',
       )}
       style={{
-        gridTemplateColumns: '54px 1fr 70px 32px 14px',
+        gridTemplateColumns: ROSTER_GRID,
         borderColor: 'var(--rule-hair)',
         background: isSelected ? 'var(--accent-navy-soft)' : undefined,
         minHeight: 42,
@@ -118,23 +142,40 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
         {hospital.name}
         {hospital.counts.high > 0 && (
           <span
-            className="ml-2 rounded-sm px-1.5 py-0.5 align-middle font-mono text-[10px] tracking-[0.06em]"
-            style={{ background: '#fde2dc', color: '#9b2c1c' }}
+            className="ml-2 border px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-[0.06em]"
+            style={{ color: 'var(--risk-high)', borderColor: 'var(--risk-high)' }}
           >
             HR
           </span>
         )}
-      </div>
-      <div className="flex items-center justify-end">
-        <MiniMix counts={hospital.counts} />
+        {hospital.ancCounts.hr3 > 0 && (
+          <span
+            className="ml-2 border px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-[0.06em]"
+            style={{ color: 'var(--risk-medium)', borderColor: 'var(--risk-medium)' }}
+            title={`ครรภ์เสี่ยงสูง (HR3) ${hospital.ancCounts.hr3} ราย`}
+          >
+            HR3 {hospital.ancCounts.hr3}
+          </span>
+        )}
       </div>
       <div
-        className="text-right font-mono text-[14px] font-semibold tabular-nums"
+        className="text-right font-mono text-[13px] font-semibold tabular-nums"
         style={{
-          color: hasPatients ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
+          color: hospital.ancCounts.total > 0 ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
         }}
       >
-        {hasPatients ? hospital.counts.total : '—'}
+        {hospital.ancCounts.total > 0 ? hospital.ancCounts.total : '—'}
+      </div>
+      <div
+        className="text-right font-mono text-[13px] font-semibold tabular-nums"
+        style={{
+          color: hospital.counts.total > 0 ? 'var(--ink-navy)' : 'var(--ink-navy-muted)',
+        }}
+      >
+        {hospital.counts.total > 0 ? hospital.counts.total : '—'}
+      </div>
+      <div className="text-right">
+        <SyncCell hospital={hospital} />
       </div>
       <ChevronRight className="h-3.5 w-3.5" style={{ color: 'var(--ink-navy-muted)' }} />
     </button>
@@ -167,9 +208,25 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
 
   return (
     <div className="space-y-3">
+      {/* Column legend — mirrors the row grid so numbers read as columns. */}
+      <div
+        className="grid gap-3 px-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]"
+        style={{ gridTemplateColumns: ROSTER_GRID }}
+      >
+        <div>CODE</div>
+        <div>HOSPITAL</div>
+        <div className="text-right">ANC</div>
+        <div className="text-right">LABOR</div>
+        <div className="text-right">SYNC</div>
+        <div />
+      </div>
       {Array.from(grouped.entries()).map(([level, levelHospitals]) => {
         const config = HOSPITAL_LEVELS[level];
         const stats = levelStats(levelHospitals);
+        // Busiest first — combined labor + weighted-ANC workload.
+        const ordered = [...levelHospitals].sort(
+          (a, b) => combinedWorkload(b.counts, b.ancCounts) - combinedWorkload(a.counts, a.ancCounts),
+        );
         return (
           <div
             key={level}
@@ -193,9 +250,15 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
               </div>
               <div className="flex items-center gap-3 font-mono text-[11px] tracking-[0.06em] text-[var(--ink-navy-muted)]">
                 <span>
-                  ACT{' '}
+                  ANC{' '}
+                  <span className="font-semibold tabular-nums text-[var(--accent-navy)]">
+                    {stats.anc}
+                  </span>
+                </span>
+                <span>
+                  LABOR{' '}
                   <span className="text-[var(--ink-navy)] font-semibold tabular-nums">
-                    {stats.active}
+                    {stats.labor}
                   </span>
                 </span>
                 {stats.high > 0 && (
@@ -211,7 +274,7 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
                 )}
               </div>
             </div>
-            {levelHospitals.map((h) => (
+            {ordered.map((h) => (
               <RosterRow
                 key={h.hcode}
                 hospital={h}
@@ -256,12 +319,24 @@ export default function HospitalsPage() {
 
   // KPI roll-ups — bound to the active tab so switching from KK to "other"
   // re-summarises (28 hospitals total = 26 KK + a couple of webhook guests).
-  const onlineCount = tabHospitals.filter((h) => h.connectionStatus === 'ONLINE').length;
   const totalActive = tabHospitals.reduce((sum, h) => sum + h.counts.total, 0);
   const totalLow = tabHospitals.reduce((sum, h) => sum + h.counts.low, 0);
   const totalMedium = tabHospitals.reduce((sum, h) => sum + h.counts.medium, 0);
   const totalHigh = tabHospitals.reduce((sum, h) => sum + h.counts.high, 0);
-  const withPatients = tabHospitals.filter((h) => h.counts.total > 0).length;
+  const totalAnc = tabHospitals.reduce((sum, h) => sum + h.ancCounts.total, 0);
+  const totalAncHr3 = tabHospitals.reduce((sum, h) => sum + h.ancCounts.hr3, 0);
+  const withWorkload = tabHospitals.filter(
+    (h) => combinedWorkload(h.counts, h.ancCounts) > 0,
+  ).length;
+
+  // Data-freshness breakdown — connection_status only says the tunnel is up;
+  // these say whether the *data* is current (see config/hospital-network.ts).
+  const syncBreakdown = { ok: 0, stale: 0, critical: 0, never: 0, blocked: 0 };
+  for (const h of tabHospitals) {
+    syncBreakdown[classifySyncHealth(h.syncStatus, h.lastSyncAt)] += 1;
+  }
+  const syncAttention =
+    syncBreakdown.stale + syncBreakdown.critical + syncBreakdown.never + syncBreakdown.blocked;
 
   if (isLoading) {
     return <LoadingState message="กำลังโหลดรายชื่อโรงพยาบาล..." />;
@@ -283,16 +358,7 @@ export default function HospitalsPage() {
   const dataStale = Boolean(error && updatedAt);
 
   return (
-    <div
-      style={{
-        color: 'var(--ink-navy)',
-        background: 'var(--surface-cool)',
-        // Bumped from 1.15 → 1.3 so the air-traffic-control aesthetic reads
-        // at a clinic-room distance — same proportions as sister pages, just
-        // larger overall.
-        zoom: 1.3,
-      }}
-    >
+    <div style={{ color: 'var(--ink-navy)', background: 'var(--surface-cool)' }}>
       {dataStale && (
         <ErrorState
           variant="banner"
@@ -317,6 +383,13 @@ export default function HospitalsPage() {
             โรงพยาบาล จังหวัดขอนแก่น
           </h1>
         </div>
+        <p className="ml-auto font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
+          อัปเดตล่าสุด{' '}
+          <span className="tabular-nums text-[var(--ink-navy-dim)]">
+            {updatedAt ? formatThaiTime(updatedAt) : '—'}
+          </span>{' '}
+          · รีเฟรชอัตโนมัติทุก 30 วิ
+        </p>
       </div>
 
       {/* KPI strip — 4 cells, vertical-rule division */}
@@ -341,54 +414,66 @@ export default function HospitalsPage() {
             </span>
           </div>
           <div className="mt-1 font-mono text-[11px] text-[var(--ink-navy-dim)]">
-            มีผู้คลอด {withPatients} / {tabHospitals.length} แห่ง
+            มีผู้ป่วยในระบบ {withWorkload} / {tabHospitals.length} แห่ง
           </div>
         </div>
 
-        <div className="border-r border-[var(--rule-strong)] px-5 py-3">
+        <div className="border-r border-[var(--rule-strong)] px-5 py-3" data-testid="kpi-sync">
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
-            ONLINE
+            DATA SYNC
           </div>
           <div
             className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
             style={{
-              color: onlineCount === tabHospitals.length ? 'var(--ink-navy)' : 'var(--risk-medium)',
+              color: syncAttention === 0 ? 'var(--ink-navy)' : 'var(--risk-medium)',
               letterSpacing: '-0.02em',
             }}
           >
-            {onlineCount}
+            <span>{syncBreakdown.ok}</span>
             <span className="ml-1 font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
-              /{tabHospitals.length}
+              /{tabHospitals.length} ข้อมูลสด
             </span>
           </div>
-          <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-[var(--ink-navy-dim)]">
-            <span
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{
-                background:
-                  onlineCount === tabHospitals.length ? 'var(--risk-low)' : 'var(--risk-medium)',
-              }}
-            />
-            {onlineCount === tabHospitals.length
-              ? 'เชื่อมต่อครบ'
-              : `${tabHospitals.length - onlineCount} แห่งหลุดการเชื่อมต่อ`}
+          <div className="mt-1 font-mono text-[11px] text-[var(--ink-navy-dim)]">
+            ช้า {syncBreakdown.stale + syncBreakdown.critical} · ยังไม่ซิงก์ {syncBreakdown.never} ·{' '}
+            <span style={{ color: syncBreakdown.blocked > 0 ? 'var(--risk-high)' : undefined }}>
+              ถูกบล็อก {syncBreakdown.blocked}
+            </span>
           </div>
         </div>
 
-        <div className="border-r border-[var(--rule-strong)] px-5 py-3">
+        <div className="border-r border-[var(--rule-strong)] px-5 py-3" data-testid="kpi-anc">
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
-            ACTIVE
+            ANC REGISTRY
+          </div>
+          <div
+            className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
+            style={{ color: 'var(--accent-navy)', letterSpacing: '-0.02em' }}
+          >
+            <span>{totalAnc}</span>
+            <span className="ml-2 font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
+              หญิงตั้งครรภ์
+            </span>
+          </div>
+          <div className="mt-1 font-mono text-[11px]" style={{ color: 'var(--risk-high)' }}>
+            HR3 {totalAncHr3} ราย
+          </div>
+        </div>
+
+        <div className="px-5 py-3" data-testid="kpi-labor">
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            LABOR WARD
           </div>
           <div
             className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
             style={{ color: 'var(--ink-navy)', letterSpacing: '-0.02em' }}
           >
-            {totalActive}
+            <span>{totalActive}</span>
             <span className="ml-2 font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
-              ราย
+              ผู้คลอด{totalHigh > 0 ? ` · เสี่ยงสูง ${totalHigh}` : ''}
             </span>
           </div>
-          {totalActive > 0 && (
+          {totalActive > 0 ? (
             <div
               className="mt-2 flex h-1.5 overflow-hidden rounded-sm"
               style={{ background: 'var(--rule-hair)' }}
@@ -412,25 +497,11 @@ export default function HospitalsPage() {
                 }}
               />
             </div>
+          ) : (
+            <div className="mt-1 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+              ไม่มีผู้คลอดที่กำลังรอคลอด
+            </div>
           )}
-        </div>
-
-        <div className="px-5 py-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
-            HIGH-RISK
-          </div>
-          <div
-            className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
-            style={{ color: 'var(--risk-high)', letterSpacing: '-0.02em' }}
-          >
-            {totalHigh}
-            <span className="ml-2 font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
-              ราย
-            </span>
-          </div>
-          <div className="mt-1 font-mono text-[11px] text-[var(--ink-navy-dim)]">
-            {totalActive > 0 ? `${((totalHigh / totalActive) * 100).toFixed(1)}% ของผู้คลอด` : '—'}
-          </div>
         </div>
       </div>
 
@@ -505,13 +576,10 @@ export default function HospitalsPage() {
         </div>
       </div>
 
-      {/* Map + Roster split */}
+      {/* Map + Roster split — stacks on small screens, splits from lg up. */}
       <div
-        className="grid"
-        style={{
-          gridTemplateColumns: '1.4fr 1fr',
-          minHeight: 'calc(100vh - 240px)',
-        }}
+        className="grid grid-cols-1 lg:[grid-template-columns:1.4fr_1fr]"
+        style={{ minHeight: 'calc(100vh - 240px)' }}
       >
         {/* Map panel */}
         <div className="bg-white" style={{ borderRight: '1px solid var(--rule-strong)' }}>

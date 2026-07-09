@@ -1,0 +1,44 @@
+// Hospital network board policy — /hospitals directory.
+//
+// Two knobs live here (constitution IV: policy in config, not components):
+//   1. Sync freshness classification — how old a hospital's last HOSxP sync
+//      may be before the board flags it. connection_status only says the
+//      transport is up; freshness says the *data* is current.
+//   2. Combined-workload weighting — the roster sort and map pin sizing need
+//      one activity number spanning both the labor floor (acute, small
+//      counts) and the ANC registry (chronic, hundreds of women).
+export const SYNC_HEALTH = {
+  /** Last sync older than this (minutes) is stale — amber. */
+  staleAfterMinutes: 60,
+  /** Last sync older than this (hours) is critical — red. */
+  criticalAfterHours: 24,
+} as const;
+
+export type SyncHealthClass = 'ok' | 'stale' | 'critical' | 'never' | 'blocked';
+
+/** Classify one hospital's data freshness. BLOCKED (auth/purge) always wins;
+ *  an OK status without any recorded sync is still 'never'. */
+export function classifySyncHealth(
+  syncStatus: string,
+  lastSyncAt: string | null | undefined,
+  now: Date = new Date(),
+): SyncHealthClass {
+  if (syncStatus === 'BLOCKED') return 'blocked';
+  if (syncStatus === 'NEVER_SYNCED' || !lastSyncAt) return 'never';
+  const mins = (now.getTime() - new Date(lastSyncAt).getTime()) / 60_000;
+  if (mins >= SYNC_HEALTH.criticalAfterHours * 60) return 'critical';
+  if (mins >= SYNC_HEALTH.staleAfterMinutes) return 'stale';
+  return 'ok';
+}
+
+/** One ANC-registry woman counts this much of one active labor patient when
+ *  sizing pins / ranking rosters. 0.1 keeps a 200-woman ANC hospital roughly
+ *  on par with a 20-bed labor ward. */
+export const ANC_WORKLOAD_WEIGHT = 0.1;
+
+export function combinedWorkload(
+  labor: { total: number },
+  anc: { total: number },
+): number {
+  return labor.total + anc.total * ANC_WORKLOAD_WEIGHT;
+}

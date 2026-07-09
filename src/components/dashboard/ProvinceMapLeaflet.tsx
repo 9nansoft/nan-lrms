@@ -24,6 +24,7 @@ import L, { type LatLngExpression, type LatLngBoundsExpression, type DivIcon } f
 import 'leaflet/dist/leaflet.css';
 import type { FeatureCollection } from 'geojson';
 import type { DashboardHospital } from '@/types/api';
+import { combinedWorkload } from '@/config/hospital-network';
 import { ConnectionStatus as ConnectionStatusEnum, HospitalLevel } from '@/types/domain';
 import { HOSPITAL_COORDS } from '@/data/kk-hospital-coords';
 import { KK_GEOJSON } from '@/data/kk-province-geojson';
@@ -174,10 +175,13 @@ const LEVEL_BASE_RADIUS: Partial<Record<HospitalLevel, number>> = {
 };
 const DEFAULT_RADIUS = 7;
 
-function activeCountRadiusBoost(total: number): number {
-  if (total === 0) return 0;
-  if (total < 3) return 1;
-  if (total < 6) return 3;
+// Boost thresholds are in combined-workload units (labor + weighted ANC —
+// see config/hospital-network.ts), so an ANC-only hospital with a large
+// registry still grows its pin even when the labor floor is empty.
+function activeCountRadiusBoost(workload: number): number {
+  if (workload === 0) return 0;
+  if (workload < 3) return 1;
+  if (workload < 6) return 3;
   return 5;
 }
 
@@ -186,9 +190,15 @@ function riskColor(
   palette: ReturnType<typeof buildPalette>,
 ): string {
   if (!live) return palette.idle;
+  // Acute labor risk owns red/amber outright.
   if (live.counts.high > 0) return palette.high;
   if (live.counts.medium > 0) return palette.med;
   if (live.counts.low > 0) return palette.low;
+  // Labor floor empty — fall back to the ANC registry so the map still
+  // shows where attention (HR3) and activity live. HR3 renders amber, not
+  // red: red stays reserved for acute intrapartum risk.
+  if (live.ancCounts.hr3 > 0) return palette.med;
+  if (live.ancCounts.total > 0) return palette.low;
   return palette.idle;
 }
 
@@ -333,7 +343,9 @@ export default function ProvinceMapLeaflet({
       const live = liveByHcode.get(hcode);
       const baseRadius =
         (LEVEL_BASE_RADIUS[level] ?? DEFAULT_RADIUS) +
-        activeCountRadiusBoost(live?.counts.total ?? 0);
+        activeCountRadiusBoost(
+          combinedWorkload(live?.counts ?? { total: 0 }, live?.ancCounts ?? { total: 0 }),
+        );
       const sizePx = Math.round(
         Math.min(w.pinMaxPx, Math.max(w.pinMinPx, baseRadius * w.pinMult)),
       );
