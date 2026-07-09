@@ -20,6 +20,8 @@ import {
   transitionToDelivered,
 } from '@/services/journey';
 import { AncRiskLevel } from '@/types/domain';
+import { classifyAncItems } from '@/config/anc-classifying-canon';
+import { ANC_RISK_CONFIGS } from '@/config/anc-risk-rules';
 import { logger } from '@/lib/logger';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
 import { isoDatesEqual } from '@/lib/dates';
@@ -145,6 +147,10 @@ export interface WebhookAncPatient {
   lmp?: string;
   edc?: string;
   riskLevel?: string;
+  /** Checked person_anc_classifying item IDs (canonical catalog, identical
+   *  at every hospital) — lets the server persist WHICH criteria fired,
+   *  not just the level. Optional for legacy clients. */
+  riskItemIds?: number[] | null;
   changwatCode?: string; // จังหวัด 2-digit (e.g. "40" = ขอนแก่น)
   amphurCode?: string; // อำเภอ 2-digit
   tambonCode?: string; // ตำบล 2-digit
@@ -795,6 +801,55 @@ export async function processWebhookPayload(
 
 // ─── ANC webhook processing ───
 
+// Persist one risk-screening observation per CHANGE in classification —
+// level + checked-item labels — so the journey detail can show which
+// provincial criteria fired and when. Unchanged classifications are not
+// re-inserted (the webhook pushes every few minutes; without the dedupe
+// this table would grow one row per woman per push).
+async function recordAncRiskScreening(
+  db: DatabaseAdapter,
+  journeyId: string,
+  declaredLevel: string | undefined,
+  itemIds: number[],
+): Promise<void> {
+  const derived = classifyAncItems(itemIds);
+  const level = (
+    declaredLevel && declaredLevel in ANC_RISK_CONFIGS ? declaredLevel : derived.level
+  ) as AncRiskLevel;
+  const labelsJson = JSON.stringify(derived.labels);
+
+  const latest = await db.query<{ risk_level: string; triggered_rules: unknown }>(
+    `SELECT risk_level, triggered_rules FROM cached_anc_risks
+      WHERE journey_id = ? ORDER BY screened_at DESC, created_at DESC LIMIT 1`,
+    [journeyId],
+  );
+  if (latest.length > 0) {
+    // pg returns JSONB pre-parsed, SQLite returns TEXT — normalize both.
+    const prev = latest[0].triggered_rules;
+    const prevJson = typeof prev === 'string' ? prev : JSON.stringify(prev);
+    if (latest[0].risk_level === level && prevJson === labelsJson) return;
+  }
+
+  const config = ANC_RISK_CONFIGS[level];
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors,
+     recommended_facility, recommended_provider, screened_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      uuidv4(),
+      journeyId,
+      level,
+      labelsJson,
+      JSON.stringify({ itemIds }),
+      config?.facilityTh ?? null,
+      config?.providerTh ?? null,
+      now,
+      now,
+    ],
+  );
+}
+
 export async function processAncWebhook(
   db: DatabaseAdapter,
   hospitalId: string,
@@ -1002,6 +1057,13 @@ export async function processAncWebhook(
           journeyId,
         ],
       );
+    }
+
+    // Persist the risk screening (level + which criteria fired) when the
+    // client sends the checked classifying items. Legacy payloads without
+    // riskItemIds keep the old level-only behavior.
+    if (Array.isArray(patient.riskItemIds)) {
+      await recordAncRiskScreening(db, journeyId, patient.riskLevel, patient.riskItemIds);
     }
 
     // Persist ANC visit records — replace strategy (delete old, insert new).

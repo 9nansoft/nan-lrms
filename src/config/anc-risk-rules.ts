@@ -63,6 +63,8 @@ export interface AncRiskLevelConfig {
   action: string;
 }
 
+import { ANC_CLASSIFYING_CANON } from '@/config/anc-classifying-canon';
+
 // Mapping from HOSxP anc_risk_id to lab boolean flags
 // These IDs correspond to entries in the HOSxP anc_risk lookup table
 export const HOSXP_RISK_TO_LAB_FLAGS: Record<number, keyof Pick<AncRiskInput, 'rhNegative' | 'hbsAgPositive' | 'syphilisPositive' | 'hivPositive' | 'thalassemiaDisease' | 'niptHighRisk'>> = {
@@ -125,18 +127,31 @@ export const ANC_RISK_CONFIGS: Record<AncRiskLevel, AncRiskLevelConfig> = {
 };
 
 export const ANC_RISK_RULES: AncRiskRule[] = [
+  // Provincial classifying items 1-18 — generated from ANC_CLASSIFYING_CANON
+  // (the same module the browser/webhook classifier uses), so this engine can
+  // never diverge from the live path again. Earlier hand-written rules here
+  // mapped item 1 to "vaginal bleeding" when the canonical item 1 is
+  // "previous stillbirth" — bleeding is item 11.
+  ...ANC_CLASSIFYING_CANON.map(
+    (item): AncRiskRule => ({
+      id: `kk_classifying_${item.id}`,
+      level: item.level,
+      labelTh: item.labelTh,
+      labelEn: `Provincial classifying item ${item.id}`,
+      source: 'hosxp_classifying',
+      evaluate: (d) => d.classifyingItems.some((i) => i.itemId === item.id && i.value === 'Y'),
+    }),
+  ),
   // --- HR1 rules ---
   { id: 'hr1_age', level: 'HR1', labelTh: 'อายุ < 17 ปี หรือ ≥ 35 ปี', labelEn: 'Age <17 or >=35', source: 'computed', evaluate: (d) => d.age < 17 || d.age >= 35 },
   { id: 'hr1_bmi_low', level: 'HR1', labelTh: 'BMI < 18.5', labelEn: 'BMI <18.5 (underweight)', source: 'computed', evaluate: (d) => d.prePregnancyBmi < 18.5 },
   { id: 'hr1_bmi_high', level: 'HR1', labelTh: 'BMI ≥ 23 (< 30)', labelEn: 'BMI >=23 and <30 (overweight)', source: 'computed', evaluate: (d) => d.prePregnancyBmi >= 23 && d.prePregnancyBmi < 30 },
   { id: 'hr1_o2sat', level: 'HR1', labelTh: 'O2sat < 95%', labelEn: 'O2 saturation <95%', source: 'computed', evaluate: (d) => d.o2Sat < 95 },
   { id: 'hr1_height', level: 'HR1', labelTh: 'ส่วนสูง < 145 ซม.', labelEn: 'Height <145cm', source: 'computed', evaluate: (d) => d.heightCm < 145 },
-  { id: 'hr1_vaginal_bleeding', level: 'HR1', labelTh: 'เลือดออกทางช่องคลอด', labelEn: 'Vaginal bleeding', source: 'hosxp_classifying', evaluate: (d) => d.classifyingItems.some((i) => i.itemId === 1 && i.value === 'Y') },
   { id: 'hr1_previous_stillbirth', level: 'HR1', labelTh: 'เคยมีทารกตายในครรภ์/เสียชีวิตแรกเกิด', labelEn: 'Previous stillbirth/neonatal death', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(1) },
   { id: 'hr1_previous_lbw', level: 'HR1', labelTh: 'เคยคลอดน้ำหนัก <2500g หรือ >4000g', labelEn: 'Previous birth weight <2500g or >4000g', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(2) },
   { id: 'hr1_preeclampsia_hx', level: 'HR1', labelTh: 'ประวัติครรภ์เป็นพิษ (ตนเอง/ครอบครัว)', labelEn: 'History of preeclampsia (self/family)', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(3) },
   { id: 'hr1_gdm_hx', level: 'HR1', labelTh: 'ประวัติเบาหวานในครรภ์ (ตนเอง/ครอบครัว)', labelEn: 'History of GDM (self/family)', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(4) },
-  { id: 'hr1_abnormal_exam', level: 'HR1', labelTh: 'ตรวจร่างกายพบความผิดปกติ', labelEn: 'Abnormal physical examination', source: 'hosxp_classifying', evaluate: (d) => d.classifyingItems.some((i) => i.itemId === 2 && i.value === 'Y') },
 
   // --- HR2 rules ---
   { id: 'hr2_bmi', level: 'HR2', labelTh: 'BMI 30-40', labelEn: 'BMI 30-40 (obese)', source: 'computed', evaluate: (d) => d.prePregnancyBmi >= 30 && d.prePregnancyBmi < 40 },

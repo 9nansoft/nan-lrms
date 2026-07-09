@@ -21,6 +21,33 @@ describe('ANC Risk Rules Configuration', () => {
     expect(ANC_RISK_RULES.length).toBeGreaterThanOrEqual(20);
   });
 
+  describe('classifying rules follow the provincial canon (anc-classifying-canon)', () => {
+    const withItem = (itemId: number): AncRiskInput => ({
+      ...baseInput,
+      classifyingItems: [{ itemId, value: 'Y' }],
+    });
+
+    it('item 16 (โรคหัวใจ) classifies HR3', () => {
+      expect(classifyAncRisk(withItem(16)).level).toBe(AncRiskLevel.HR3);
+    });
+
+    it('item 11 (เลือดออกทางช่องคลอด) classifies HR1 — not item 1', () => {
+      const res = classifyAncRisk(withItem(11));
+      expect(res.level).toBe(AncRiskLevel.HR1);
+      const rule = ANC_RISK_RULES.find((r) => r.id === res.triggeredRules[0])!;
+      expect(rule.labelTh).toContain('เลือดออก');
+    });
+
+    it('item 13 (BP diastolic > 90) classifies HR2', () => {
+      expect(classifyAncRisk(withItem(13)).level).toBe(AncRiskLevel.HR2);
+    });
+
+    it('no classifying rule maps item 1 to vaginal bleeding anymore', () => {
+      const wrong = ANC_RISK_RULES.find((r) => r.id === 'hr1_vaginal_bleeding');
+      expect(wrong).toBeUndefined();
+    });
+  });
+
   it('every rule has required fields', () => {
     for (const rule of ANC_RISK_RULES) {
       expect(rule.id).toBeTruthy();

@@ -21,6 +21,7 @@
 // session), and the same code path the Delphi client exercises in prod.
 
 import { executeSql } from '@/lib/bms-browser-client';
+import { classifyAncItems } from '@/config/anc-classifying-canon';
 import type { ConnectionConfig, SqlApiResponse } from '@/types/bms-browser';
 
 // ─── Webhook payload shapes (mirror src/services/webhook.ts) ────────────────
@@ -113,6 +114,7 @@ interface BrowserAncPatient {
   lmp?: string;
   edc?: string;
   riskLevel?: string;
+  riskItemIds?: number[];
   changwatCode?: string;
   amphurCode?: string;
   tambonCode?: string;
@@ -321,25 +323,8 @@ function pickLatest(r1: unknown, r2: unknown): string | null {
   return strOrNull(r1);
 }
 
-// Khon Kaen ANC risk classification — mirrors GetANCRiskLevel in
-// docs/hosxp/KKLRMSWebhookUnit.pas. HR3 > HR2 > HR1; any HR3 item wins.
-function deriveAncRisk(itemIds: number[]): string {
-  let max = 0;
-  for (const id of itemIds) {
-    const lvl = [15, 16, 17, 18].includes(id)
-      ? 3
-      : [4, 6, 10, 12, 13, 14].includes(id)
-        ? 2
-        : [1, 2, 3, 5, 7, 8, 9, 11].includes(id)
-          ? 1
-          : 1;
-    if (lvl > max) max = lvl;
-  }
-  if (max === 3) return 'HR3';
-  if (max === 2) return 'HR2';
-  if (max === 1) return 'HR1';
-  return 'LOW';
-}
+// Khon Kaen ANC risk classification — shared canon (mirrors GetANCRiskLevel
+// in docs/hosxp/KKLRMSWebhookUnit.pas); see src/config/anc-classifying-canon.
 
 function calcAge(birthday: string | null): number {
   if (!birthday) return 0;
@@ -512,7 +497,8 @@ function mapAncBundle(
     if (amp) patient.amphurCode = amp;
     const tmb = strOrNull(m.tmbpart);
     if (tmb) patient.tambonCode = tmb;
-    patient.riskLevel = deriveAncRisk(items);
+    patient.riskLevel = classifyAncItems(items).level;
+    patient.riskItemIds = items;
     patient.vdrlResult = pickLatest(m.blood_vdrl1_result, m.blood_vdrl2_result);
     patient.hivResult = pickLatest(m.blood_hiv1_result, m.blood_hiv2_result);
     if (visitRows.length > 0) patient.visits = visitRows;
