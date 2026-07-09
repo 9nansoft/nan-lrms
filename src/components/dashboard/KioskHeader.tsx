@@ -71,13 +71,13 @@ export function KioskHeader({
           LR
         </div>
         <div>
-          <div className="text-[22px] font-semibold leading-tight" style={{ color: 'var(--kiosk-ink)', letterSpacing: '-0.01em' }}>
+          <div className="text-[26px] font-semibold leading-tight" style={{ color: 'var(--kiosk-ink)', letterSpacing: '-0.01em' }}>
             KK-LRMS ·{' '}
             <span style={{ color: 'var(--kiosk-dim)', fontWeight: 500 }}>
               OneLR ห้องคลอดหนึ่งเดียว
             </span>
           </div>
-          <div className="mt-0.5 font-mono text-[11px] tracking-[0.18em]" style={{ color: 'var(--kiosk-dim)' }}>
+          <div className="mt-0.5 font-mono text-[13px] tracking-[0.18em]" style={{ color: 'var(--kiosk-dim)' }}>
             PROVINCIAL LABOR-ROOM NETWORK · KHON KAEN · WAR-ROOM DISPLAY
           </div>
         </div>
@@ -86,7 +86,7 @@ export function KioskHeader({
 
         {/* Center — date + clock */}
         <div className="text-center">
-          <div className="font-mono text-xs tracking-[0.2em]" style={{ color: 'var(--kiosk-dim)' }}>
+          <div className="font-mono text-sm tracking-[0.2em]" style={{ color: 'var(--kiosk-dim)' }}>
             {dateStr}
           </div>
           <div
@@ -100,7 +100,7 @@ export function KioskHeader({
         <div className="flex-1" />
 
         {/* Right — status */}
-        <div className="text-right font-mono text-xs tracking-[0.1em]" style={{ color: 'var(--kiosk-dim)' }}>
+        <div className="text-right font-mono text-sm tracking-[0.1em]" style={{ color: 'var(--kiosk-dim)' }}>
           <div className="flex items-center justify-end gap-2">
             <span
               className="h-2.5 w-2.5 rounded-full"

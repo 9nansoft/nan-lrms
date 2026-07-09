@@ -421,7 +421,7 @@ export default function ProvinceMapLeaflet({
           isolation: 'isolate',
         }}
       >
-        <span className="font-mono text-[10px] tracking-[0.18em] text-[var(--ink-navy-muted)]">
+        <span className="font-mono text-[12px] tracking-[0.18em] text-[var(--ink-navy-muted)]">
           LOADING {activeProvince === KK_PROVINCE_CODE ? 'MAP' : `PROVINCE ${activeProvince}`}…
         </span>
       </div>

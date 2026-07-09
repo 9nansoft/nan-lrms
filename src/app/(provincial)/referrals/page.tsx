@@ -7,6 +7,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
@@ -52,7 +53,7 @@ const EMPTY_STATUS_COUNTS = {
 };
 const EMPTY_OPS_COUNTS = { today: 0, last7d: 0, emergencyActive: 0, highRisk: 0, overdue: 0 };
 
-export default function ReferralsPage() {
+function ReferralsBoard() {
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ส่งต่อ' }]);
 
   // Deep links from the dashboard alert ribbon land pre-filtered
@@ -854,5 +855,16 @@ function ReferralCard({
         )}
       </div>
     </div>
+  );
+}
+
+// useSearchParams (alert-ribbon deep links) requires a Suspense boundary in
+// prerendered app-router pages — Next.js bails out of static rendering
+// without one.
+export default function ReferralsPage() {
+  return (
+    <Suspense fallback={<LoadingState message="กำลังโหลด..." />}>
+      <ReferralsBoard />
+    </Suspense>
   );
 }

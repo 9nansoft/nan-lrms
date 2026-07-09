@@ -58,7 +58,7 @@ function RiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' 
     <span
       data-risk={riskLevel}
       className={cn(
-        'inline-block border px-1.5 py-0.5 text-center font-mono text-[11px] font-semibold tracking-[0.04em]',
+        'inline-block border px-1.5 py-0.5 text-center font-mono text-[13px] font-semibold tracking-[0.04em]',
         isKiosk && riskLevel === 'HIGH' && 'shadow-[0_0_8px_var(--kiosk-high)]',
       )}
       style={{
@@ -200,7 +200,7 @@ export function HighRiskPatientList({
               key={x.k}
               onClick={() => setTab(x.k as 'high' | 'all')}
               className={cn(
-                'border-b-2 bg-transparent px-3.5 py-2 font-mono text-[11px] tracking-[0.08em]',
+                'border-b-2 bg-transparent px-3.5 py-2 font-mono text-[13px] tracking-[0.08em]',
                 tab === x.k ? 'font-semibold' : 'font-normal',
               )}
               style={{
@@ -218,7 +218,7 @@ export function HighRiskPatientList({
       <div className="overflow-x-auto">
         {/* Header */}
         <div
-          className="grid gap-2 border-t border-b px-2 py-2 font-mono text-[10px] tracking-[0.1em]"
+          className="grid gap-2 border-t border-b px-2 py-2 font-mono text-[12px] tracking-[0.1em]"
           style={{
             gridTemplateColumns: gridCols,
             color: inkMuted,
@@ -239,7 +239,7 @@ export function HighRiskPatientList({
           </>
         ) : shown.length === 0 ? (
           <div
-            className="border-b px-2 py-8 text-center font-mono text-[11px]"
+            className="border-b px-2 py-8 text-center font-mono text-[13px]"
             style={{ color: inkMuted, borderColor: ruleHair }}
           >
             <div>ไม่มีผู้คลอดเสี่ยงสูงในห้องคลอดขณะนี้</div>

@@ -58,8 +58,8 @@ function CellWithTooltip({
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-sm whitespace-normal text-left leading-snug">
         <div className="space-y-1">
-          <div className="text-xs font-semibold">{title}</div>
-          <div className="text-[11px] opacity-90">{body}</div>
+          <div className="text-sm font-semibold">{title}</div>
+          <div className="text-[13px] opacity-90">{body}</div>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -88,7 +88,7 @@ export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVita
         }
       >
         <div className="border-r border-[var(--rule-strong)] px-5 py-4">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             ACTIVE LABOR · PROVINCE
           </div>
           <div className="mt-1.5 flex items-baseline gap-2.5">
@@ -98,9 +98,9 @@ export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVita
             >
               {summary.totalActive}
             </div>
-            <div className="font-mono text-[11px] text-[var(--ink-navy-dim)]">เคสในห้องคลอด</div>
+            <div className="font-mono text-[13px] text-[var(--ink-navy-dim)]">เคสในห้องคลอด</div>
             <div
-              className="ml-auto font-mono text-[11px]"
+              className="ml-auto font-mono text-[13px]"
               style={{ color: 'var(--ink-navy-muted)' }}
             >
               +{trends.newByRisk24h.total} ราย/24h
@@ -113,7 +113,7 @@ export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVita
               high={summary.totalHigh}
               height={6}
             />
-            <div className="mt-1.5 flex justify-between font-mono text-[10px] text-[var(--ink-navy-muted)]">
+            <div className="mt-1.5 flex justify-between font-mono text-[12px] text-[var(--ink-navy-muted)]">
               <span>
                 <span style={{ color: 'var(--risk-low)' }}>■</span> LOW {summary.totalLow}
               </span>
@@ -202,17 +202,17 @@ export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVita
       >
         <div className="border-l border-[var(--rule-strong)] px-5 py-3">
           <div className="flex items-baseline justify-between">
-            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
               ADMISSIONS · LAST 24H
             </div>
-            <div className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
+            <div className="font-mono text-[13px] text-[var(--ink-navy-dim)]">
               <span className="font-semibold text-[var(--ink-navy)]">{trends.admissionsToday}</span>{' '}
               today · avg {trends.admissions7dAvg.toFixed(1)}
             </div>
           </div>
           <div className="mt-1.5">
             <BarStrip values={trends.admissions24h} width={280} height={26} color="var(--accent-navy)" />
-            <div className="mt-0.5 flex justify-between font-mono text-[9px] text-[var(--ink-navy-muted)]">
+            <div className="mt-0.5 flex justify-between font-mono text-[11px] text-[var(--ink-navy-muted)]">
               <span>−24h</span>
               <span>−18h</span>
               <span>−12h</span>
@@ -236,14 +236,14 @@ export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVita
           href="/pregnancies"
           className="border-r border-[var(--rule-strong)] px-5 py-3 transition-colors hover:bg-[var(--accent-navy-soft)]"
         >
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             ANC REGISTRY
           </div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="font-mono text-[22px] font-semibold leading-none tabular-nums text-[var(--accent-navy)]">
+            <span className="font-mono text-[26px] font-semibold leading-none tabular-nums text-[var(--accent-navy)]">
               {continuum.anc.total}
             </span>
-            <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+            <span className="font-mono text-[12px] text-[var(--ink-navy-muted)]">
               หญิงตั้งครรภ์ทั้งจังหวัด
             </span>
           </div>
@@ -252,10 +252,10 @@ export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVita
           href="/pregnancies?risk=HR3"
           className="border-r border-[var(--rule-strong)] px-5 py-3 transition-colors hover:bg-[var(--accent-navy-soft)]"
         >
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             HR3
           </div>
-          <div className="mt-1 font-mono text-[22px] font-semibold leading-none tabular-nums" style={{ color: 'var(--risk-high)' }}>
+          <div className="mt-1 font-mono text-[26px] font-semibold leading-none tabular-nums" style={{ color: 'var(--risk-high)' }}>
             {continuum.anc.hr3}
           </div>
         </Link>
@@ -263,10 +263,10 @@ export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVita
           href="/pregnancies?cohort=due_soon"
           className="border-r border-[var(--rule-strong)] px-5 py-3 transition-colors hover:bg-[var(--accent-navy-soft)]"
         >
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             DUE ≤14D
           </div>
-          <div className="mt-1 font-mono text-[22px] font-semibold leading-none tabular-nums" style={{ color: 'var(--risk-medium)' }}>
+          <div className="mt-1 font-mono text-[26px] font-semibold leading-none tabular-nums" style={{ color: 'var(--risk-medium)' }}>
             {continuum.anc.dueSoon}
           </div>
         </Link>
@@ -274,19 +274,19 @@ export function ProvinceVitalsStrip({ summary, trends, continuum }: ProvinceVita
           href="/referrals"
           className="border-r border-[var(--rule-strong)] px-5 py-3 transition-colors hover:bg-[var(--accent-navy-soft)]"
         >
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             REFERRALS 7D
           </div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="font-mono text-[22px] font-semibold leading-none tabular-nums text-[var(--ink-navy)]">
+            <span className="font-mono text-[26px] font-semibold leading-none tabular-nums text-[var(--ink-navy)]">
               {continuum.referrals.last7d}
             </span>
-            <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+            <span className="font-mono text-[12px] text-[var(--ink-navy-muted)]">
               วันนี้ {continuum.referrals.today}
             </span>
           </div>
         </Link>
-        <div className="flex items-center px-5 py-3 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
+        <div className="flex items-center px-5 py-3 font-mono text-[12px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
           CARE CONTINUUM · คลิกเพื่อเปิดหน้ารายการ
         </div>
       </div>

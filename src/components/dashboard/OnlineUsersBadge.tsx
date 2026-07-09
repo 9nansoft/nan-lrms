@@ -57,7 +57,7 @@ export function OnlineUsersBadge() {
       onBlur={() => setOpen(false)}
     >
       <span
-        className="inline-flex cursor-default items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[11px] tracking-[0.06em] tabular-nums"
+        className="inline-flex cursor-default items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[13px] tracking-[0.06em] tabular-nums"
         style={{
           borderColor: 'var(--rule-strong)',
           color: 'var(--ink-navy)',

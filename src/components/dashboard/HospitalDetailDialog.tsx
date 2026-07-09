@@ -34,20 +34,20 @@ interface HospitalDetailDialogProps {
 function ConnectionPill({ status }: { status: ConnectionStatusEnum | string }) {
   if (status === ConnectionStatusEnum.ONLINE) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-sm bg-emerald-50 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.08em] text-emerald-700">
+      <span className="inline-flex items-center gap-1 rounded-sm bg-emerald-50 px-2 py-0.5 font-mono text-[12px] font-semibold tracking-[0.08em] text-emerald-700">
         <Radio className="h-3 w-3" /> ONLINE
       </span>
     );
   }
   if (status === ConnectionStatusEnum.OFFLINE) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-sm bg-red-50 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.08em] text-red-700">
+      <span className="inline-flex items-center gap-1 rounded-sm bg-red-50 px-2 py-0.5 font-mono text-[12px] font-semibold tracking-[0.08em] text-red-700">
         <WifiOff className="h-3 w-3" /> OFFLINE
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-sm bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.08em] text-slate-600">
+    <span className="inline-flex items-center gap-1 rounded-sm bg-slate-100 px-2 py-0.5 font-mono text-[12px] font-semibold tracking-[0.08em] text-slate-600">
       <CircleHelp className="h-3 w-3" /> UNKNOWN
     </span>
   );
@@ -87,7 +87,7 @@ export function HospitalDetailDialog({
               <Building2 className="h-5 w-5" />
               <span className="truncate">{hospital?.name ?? capability?.name ?? hcode ?? '—'}</span>
             </DialogTitle>
-            <DialogDescription className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-white/80">
+            <DialogDescription className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-white/80">
               <span>{hcode ?? ''}</span>
               {hospital?.level && <Badge variant="outline" className="bg-white/10 text-white border-white/30">{hospital.level}</Badge>}
               {hospital && <ConnectionPill status={hospital.connectionStatus} />}
@@ -102,7 +102,7 @@ export function HospitalDetailDialog({
           {hcode && (
             <Link
               href={`/hospitals/${hcode}`}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-sm bg-white px-3 py-1.5 font-mono text-[11px] font-semibold tracking-[0.08em] text-[var(--accent-navy-strong)] hover:bg-white/90"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-sm bg-white px-3 py-1.5 font-mono text-[13px] font-semibold tracking-[0.08em] text-[var(--accent-navy-strong)] hover:bg-white/90"
               onClick={onClose}
             >
               <ExternalLink className="h-3.5 w-3.5" /> Full page
@@ -120,17 +120,17 @@ export function HospitalDetailDialog({
               className="border-b border-r px-5 py-4"
               style={{ borderColor: 'var(--rule-strong)' }}
             >
-              <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+              <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
                 ACTIVE LABOR · AT THIS HOSPITAL
               </div>
               <div className="mt-1.5 flex items-baseline gap-2.5">
                 <div
-                  className="font-mono text-[36px] font-semibold leading-none text-[var(--ink-navy)] tabular-nums"
+                  className="font-mono text-[40px] font-semibold leading-none text-[var(--ink-navy)] tabular-nums"
                   style={{ letterSpacing: '-0.02em' }}
                 >
                   {counts.total}
                 </div>
-                <div className="font-mono text-[11px] text-[var(--ink-navy-dim)]">เคส</div>
+                <div className="font-mono text-[13px] text-[var(--ink-navy-dim)]">เคส</div>
               </div>
               <div className="mt-2.5">
                 <RiskBar
@@ -165,9 +165,9 @@ export function HospitalDetailDialog({
           {/* 02 — Capability metadata */}
           <section className="border-b bg-white px-5 py-3"
                    style={{ borderColor: 'var(--rule-strong)' }}>
-            <div className="grid grid-cols-4 gap-4 text-[12px]">
+            <div className="grid grid-cols-4 gap-4 text-[14px]">
               <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   GA threshold
                 </div>
                 <div className="mt-0.5 font-semibold text-[var(--ink-navy)]">
@@ -175,7 +175,7 @@ export function HospitalDetailDialog({
                 </div>
               </div>
               <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   FW threshold
                 </div>
                 <div className="mt-0.5 font-semibold text-[var(--ink-navy)]">
@@ -183,7 +183,7 @@ export function HospitalDetailDialog({
                 </div>
               </div>
               <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   Max risk accepted
                 </div>
                 <div className="mt-0.5 font-semibold text-[var(--ink-navy)]">
@@ -191,7 +191,7 @@ export function HospitalDetailDialog({
                 </div>
               </div>
               <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   Refers to
                 </div>
                 <div className="mt-0.5 font-semibold text-[var(--ink-navy)]">
@@ -216,7 +216,7 @@ export function HospitalDetailDialog({
             className="border-b bg-white px-5 py-3"
             style={{ borderColor: 'var(--rule-strong)' }}
           >
-            <div className="flex items-center justify-between font-mono text-[11px] text-[var(--ink-navy-dim)]">
+            <div className="flex items-center justify-between font-mono text-[13px] text-[var(--ink-navy-dim)]">
               <span>
                 Last sync:{' '}
                 <span
@@ -239,7 +239,7 @@ export function HospitalDetailDialog({
           {/* 04 — HIGH/MED patients at this hospital */}
           <section className="bg-white px-5 py-4">
             {patients.length === 0 ? (
-              <div className="py-6 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]">
+              <div className="py-6 text-center font-mono text-[13px] text-[var(--ink-navy-muted)]">
                 ไม่มีผู้ป่วยที่ต้องเฝ้าระวังที่โรงพยาบาลนี้
               </div>
             ) : (

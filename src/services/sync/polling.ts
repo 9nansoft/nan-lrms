@@ -1292,6 +1292,16 @@ export async function pollHospital(
         hospitalId,
         infantResult.data as unknown as HosxpLabourInfantRow[],
       );
+      // Info-level so the counts are diagnosable from docker logs — the
+      // emitStep stream only reaches the SSE progress store.
+      logger.info('newborn_sync_cycle', {
+        hospitalId,
+        cutoff,
+        rows: newbornResult.rowsRead,
+        upserted: newbornResult.upserted,
+        journeys: newbornResult.journeys,
+        skippedNoJourney: newbornResult.skippedNoJourney,
+      });
       emitStep(options, {
         name: 'sync_newborns',
         status: 'success',

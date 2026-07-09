@@ -9,6 +9,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { useSSE } from '@/hooks/useSSE';
@@ -118,7 +119,7 @@ const SORT_OPTIONS: Array<{ value: string; label: string }> = [
 
 const GRID_COLUMNS = '118px 1.4fr 82px 64px 72px 60px 170px 170px 1fr';
 
-export default function PregnanciesPage() {
+function PregnanciesBoard() {
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ฝากครรภ์' }]);
 
   // Deep links from the dashboard alert ribbon land pre-filtered
@@ -737,5 +738,16 @@ function JourneyCard({ journey: j }: { journey: JourneyListItem }) {
       </div>
       <div className="mt-1 text-[13px] text-[var(--ink-navy-dim)]">{j.hospitalName}</div>
     </Link>
+  );
+}
+
+// useSearchParams (alert-ribbon deep links) requires a Suspense boundary in
+// prerendered app-router pages — Next.js bails out of static rendering
+// without one.
+export default function PregnanciesPage() {
+  return (
+    <Suspense fallback={<LoadingState message="กำลังโหลด..." />}>
+      <PregnanciesBoard />
+    </Suspense>
   );
 }

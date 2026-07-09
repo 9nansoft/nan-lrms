@@ -25,8 +25,8 @@ function StageCard({ title, total, href, rows }: StageCardProps) {
       className="block border border-[var(--rule-strong)] bg-white p-3.5 transition-colors hover:bg-[var(--accent-navy-soft)]"
     >
       <div className="flex items-baseline justify-between">
-        <div className="text-[13px] font-semibold text-[var(--ink-navy)]">{title}</div>
-        <div className="font-mono text-2xl font-semibold tabular-nums text-[var(--ink-navy)]">
+        <div className="text-[15px] font-semibold text-[var(--ink-navy)]">{title}</div>
+        <div className="font-mono text-[28px] font-semibold tabular-nums text-[var(--ink-navy)]">
           {total}
         </div>
       </div>
@@ -34,7 +34,7 @@ function StageCard({ title, total, href, rows }: StageCardProps) {
         {rows.map(([label, value, color]) => (
           <div
             key={label}
-            className="flex items-center gap-2 font-mono text-[11px] text-[var(--ink-navy-dim)]"
+            className="flex items-center gap-2 font-mono text-[13px] text-[var(--ink-navy-dim)]"
           >
             <div style={{ width: 6, height: 6, background: color }} aria-hidden="true" />
             <div className="flex-1">{label}</div>
