@@ -15,6 +15,12 @@ import { auth } from '@/lib/auth';
 import { logger } from '@/lib/logger';
 import { SseManager } from '@/lib/sse';
 import {
+  processBrowserNewborns,
+  newbornSyncCutoffDate,
+  type BrowserNewbornsSection,
+} from '@/services/sync/newborn';
+import { autoArriveReferrals } from '@/services/referral';
+import {
   processWebhookPayload,
   processAncWebhook,
   processPartographWebhook,
@@ -36,6 +42,9 @@ interface BrowserPushBody {
   labor?: Omit<WebhookPayload, 'hospitalCode'>;
   anc?: Omit<WebhookAncPayload, 'hospitalCode' | 'type'>;
   partograph?: Omit<WebhookPartographPayload, 'hospitalCode' | 'type'>;
+  /** Raw HOSxP delivery rows (labour infants + ipt_pregnancy summaries)
+   *  since the server-issued cutoff — see GET below. */
+  newborns?: BrowserNewbornsSection;
 }
 
 export async function POST(request: NextRequest) {
@@ -84,6 +93,7 @@ export async function POST(request: NextRequest) {
       labor?: { processed: number; newAdmissions: number; discharges: number; transfers: number };
       anc?: { processed: number };
       partograph?: { accepted: number; skipped: number };
+      newborns?: { upserted: number; journeys: number };
     } = {};
 
     // Labor — main payload, mirrors webhook 'labor' default route.
@@ -303,6 +313,73 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Newborn outcomes — raw labour-infant + ipt_pregnancy rows since the
+    // cutoff this route's GET handed out. Both processors are idempotent
+    // ((journey_id, infant_number) upsert key), so overlap is safe.
+    if (body.newborns && typeof body.newborns === 'object') {
+      const infantsCount = Array.isArray(body.newborns.infants) ? body.newborns.infants.length : 0;
+      const pregCount = Array.isArray(body.newborns.pregnancies)
+        ? body.newborns.pregnancies.length
+        : 0;
+      await appendSyncStep(hospitalId, runId, {
+        name: 'persist_newborns',
+        status: 'running',
+        message: `Persisting newborn outcomes (${infantsCount} infant rows, ${pregCount} delivery summaries).`,
+        counts: { infants: infantsCount, pregnancies: pregCount },
+      });
+      try {
+        const r = await processBrowserNewborns(db, hospitalId, body.newborns);
+        const upserted = r.infants.upserted + r.fallback.upserted;
+        const journeys = r.infants.journeys + r.fallback.journeys;
+        result.newborns = { upserted, journeys };
+        // Same event name the polling path used — dashboards/log greps keep working.
+        logger.info('newborn_sync_cycle', {
+          hospitalId,
+          source: 'browser',
+          rows: r.infants.rowsRead,
+          upserted: r.infants.upserted,
+          journeys: r.infants.journeys,
+          skippedNoJourney: r.infants.skippedNoJourney,
+          fallbackRows: r.fallback.rowsRead,
+          fallbackUpserted: r.fallback.upserted,
+          fallbackJourneys: r.fallback.journeys,
+          fallbackSkippedHasDetail: r.fallback.skippedHasDetail,
+        });
+        await appendSyncStep(hospitalId, runId, {
+          name: 'persist_newborns',
+          status: 'success',
+          message: `Upserted ${upserted} newborns across ${journeys} journeys (${r.infants.skippedNoJourney + r.fallback.skippedNoJourney} ANs without a journey).`,
+          counts: { upserted, journeys },
+        });
+      } catch (e) {
+        hadWarning = true;
+        await appendSyncStep(hospitalId, runId, {
+          name: 'persist_newborns',
+          status: 'warning',
+          message: 'Newborn persist failed (continuing).',
+          detail: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    // Referral auto-arrive reconciliation — previously lived only in the
+    // disabled polling cycle, so it never ran in production. Cheap query;
+    // never blocks the push.
+    try {
+      const arrived = await autoArriveReferrals(db);
+      if (arrived > 0) {
+        logger.info('auto_arrive_referrals', { hospitalId, arrived, source: 'browser' });
+        await appendSyncStep(hospitalId, runId, {
+          name: 'auto_arrive_referrals',
+          status: 'success',
+          message: `Auto-arrived ${arrived} referral(s) with journey evidence at the destination.`,
+          counts: { arrived },
+        });
+      }
+    } catch (e) {
+      logger.warn('auto_arrive_referrals_failed', { hospitalId, error: e });
+    }
+
     // Mark hospital ONLINE — browser successfully reached HOSxP and pushed
     // a bundle, so we know the upstream is reachable from somewhere.
     await db.execute(
@@ -336,6 +413,36 @@ export async function POST(request: NextRequest) {
         error instanceof Error ? error.message : String(error),
       );
     }
+    return NextResponse.json({ error: 'internal_error' }, { status: 500 });
+  }
+}
+
+// GET — sync bootstrap for the browser client: the self-healing newborn
+// cutoff (MAX(born_at) − 2d, or a 365-day backfill window when the hospital
+// has no cached newborns yet). The client inlines it into the two delivery
+// queries it runs against the local gateway.
+export async function GET() {
+  try {
+    await ensureInit();
+    const session = await auth();
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const hcode = session.user.hospitalCode ?? null;
+    if (!hcode) {
+      return NextResponse.json({ error: 'no_hospital_code_in_session' }, { status: 400 });
+    }
+    const db = await getDatabase();
+    const rows = await db.query<{ id: string }>('SELECT id FROM hospitals WHERE hcode = ?', [
+      hcode,
+    ]);
+    if (rows.length === 0) {
+      return NextResponse.json({ error: 'hospital_not_registered', hcode }, { status: 403 });
+    }
+    const newbornCutoff = await newbornSyncCutoffDate(db, rows[0].id);
+    return NextResponse.json({ newbornCutoff });
+  } catch (error) {
+    logger.error('browser_push_bootstrap_failed', { error });
     return NextResponse.json({ error: 'internal_error' }, { status: 500 });
   }
 }

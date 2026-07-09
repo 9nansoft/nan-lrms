@@ -197,9 +197,7 @@ export async function syncNewbornsFromRows(
     Array.from(byAn.entries()).map(([an, list]) => ({
       an,
       motherHn: list[0].mother_hn ? String(list[0].mother_hn) : null,
-      bornMs: list[0].birth_date
-        ? new Date(list[0].birth_date).getTime()
-        : Number.MAX_SAFE_INTEGER,
+      bornMs: list[0].birth_date ? new Date(list[0].birth_date).getTime() : Number.MAX_SAFE_INTEGER,
     })),
   );
 
@@ -304,4 +302,36 @@ export async function syncNewbornsFromPregnancyRows(
   }
 
   return result;
+}
+
+// ─── Browser-push glue ──────────────────────────────────────────────────────
+// Production syncs through the browser gateway (server-side polling is
+// disabled), so /api/sync/browser-push needs one entry point that runs raw
+// gateway rows through BOTH sources: detailed labour infants first, then the
+// ipt_pregnancy summary fallback (which skips journeys the first pass filled).
+
+export interface BrowserNewbornsSection {
+  infants?: unknown;
+  pregnancies?: unknown;
+}
+
+export interface BrowserNewbornsResult {
+  infants: NewbornSyncResult;
+  fallback: PregnancyFallbackResult;
+}
+
+export async function processBrowserNewborns(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  section: BrowserNewbornsSection,
+): Promise<BrowserNewbornsResult> {
+  const infantRows = Array.isArray(section.infants)
+    ? (section.infants as HosxpLabourInfantRow[])
+    : [];
+  const pregnancyRows = Array.isArray(section.pregnancies)
+    ? (section.pregnancies as HosxpIptPregnancyRow[])
+    : [];
+  const infants = await syncNewbornsFromRows(db, hospitalId, infantRows);
+  const fallback = await syncNewbornsFromPregnancyRows(db, hospitalId, pregnancyRows);
+  return { infants, fallback };
 }

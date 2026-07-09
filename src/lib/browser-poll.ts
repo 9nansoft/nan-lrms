@@ -22,6 +22,7 @@
 
 import { executeSql } from '@/lib/bms-browser-client';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
+import { LABOUR_INFANTS_SINCE, IPT_PREGNANCY_DELIVERIES_SINCE } from '@/config/hosxp-queries';
 import type { ConnectionConfig, SqlApiResponse } from '@/types/bms-browser';
 
 // ─── Webhook payload shapes (mirror src/services/webhook.ts) ────────────────
@@ -134,6 +135,11 @@ export interface BrowserPushBody {
   };
   anc?: { patients: BrowserAncPatient[] };
   partograph?: { observations: BrowserPartographObservation[] };
+  /** Raw HOSxP delivery rows since the server-issued newborn cutoff. */
+  newborns?: {
+    infants: Record<string, unknown>[];
+    pregnancies: Record<string, unknown>[];
+  };
 }
 
 export interface BrowserPollResult {
@@ -142,6 +148,8 @@ export interface BrowserPollResult {
   labor: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
   partograph: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
   anc: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
+  /** Delivery rows read since the server-issued newborn cutoff. */
+  newborns?: { infantsRead: number; pregnanciesRead: number };
   pushedToServer: boolean;
   /** Verdict of the name round-trip probe — present whenever a probe ran. */
   authenticity?: {
@@ -970,6 +978,47 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       .map((r) => strOrNull(r.an))
       .filter((an): an is string => an !== null);
 
+    // ─── Newborn deliveries (labour infants + ipt_pregnancy summaries) ────
+    // Cutoff comes from the server (GET /api/sync/browser-push) — it self-
+    // heals from MAX(born_at) per hospital, so the first cycle backfills a
+    // year and later cycles re-read a 2-day overlap. ORDER BY + LIMIT keeps
+    // the payload bounded; the cutoff advances as rows land, so a large
+    // backfill completes progressively across cycles. Additive feed: any
+    // failure here never blocks the main labor/ANC push.
+    let newbornsSection: {
+      infants: Record<string, unknown>[];
+      pregnancies: Record<string, unknown>[];
+    } | null = null;
+    try {
+      const bootRes = await fetch('/api/sync/browser-push', {
+        method: 'GET',
+        signal: opts.signal,
+        credentials: 'same-origin',
+      });
+      if (bootRes.ok) {
+        const boot = (await bootRes.json()) as { newbornCutoff?: string };
+        const cutoff = boot.newbornCutoff;
+        if (typeof cutoff === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cutoff)) {
+          const infantsSql =
+            LABOUR_INFANTS_SINCE.mysql.replace('{{CUTOFF}}', cutoff) +
+            ' ORDER BY li.birth_date LIMIT 1000';
+          const pregSql =
+            IPT_PREGNANCY_DELIVERIES_SINCE.mysql.replace('{{CUTOFF}}', cutoff) +
+            ' ORDER BY ipr.labor_date LIMIT 1000';
+          const [infantRows, pregRows] = await Promise.all([
+            runQuery<Record<string, unknown>>(infantsSql, opts),
+            runQuery<Record<string, unknown>>(pregSql, opts),
+          ]);
+          result.newborns = { infantsRead: infantRows.length, pregnanciesRead: pregRows.length };
+          if (infantRows.length > 0 || pregRows.length > 0) {
+            newbornsSection = { infants: infantRows, pregnancies: pregRows };
+          }
+        }
+      }
+    } catch {
+      // Newborn feed is best-effort; the next cycle retries from the same cutoff.
+    }
+
     const decision = decideLaborPush({
       laborPatients,
       laborActiveAns,
@@ -981,7 +1030,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // Skip the POST when there's nothing to upsert AND the active set is
     // unchanged — keeps the Sync Log clean for perpetually-empty wards while
     // still firing a reconciliation when the ward empties/shrinks (Mantis #9505).
-    if (decision.skip) {
+    if (decision.skip && !newbornsSection) {
       result.durationMs = Date.now() - startedAt;
       return result;
     }
@@ -990,6 +1039,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     if (decision.labor) body.labor = decision.labor;
     if (partographs.length > 0) body.partograph = { observations: partographs };
     if (ancPatients.length > 0) body.anc = { patients: ancPatients };
+    if (newbornsSection) body.newborns = newbornsSection;
 
     const pushRes = await fetch('/api/sync/browser-push', {
       method: 'POST',

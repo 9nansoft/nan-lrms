@@ -8,6 +8,7 @@ import { ALL_TABLES } from '@/db/tables';
 import {
   syncNewbornsFromRows,
   syncNewbornsFromPregnancyRows,
+  processBrowserNewborns,
   newbornSyncCutoffDate,
 } from '@/services/sync/newborn';
 import type { HosxpLabourInfantRow, HosxpIptPregnancyRow } from '@/types/hosxp';
@@ -264,6 +265,34 @@ describe('newborn polling sync', () => {
       [JOURNEY_ID],
     );
     expect(Number(newborns[0].cnt)).toBeLessThanOrEqual(5);
+  });
+
+  // ── browser-push glue ──────────────────────────────────────────────────
+  // Production syncs via the browser gateway (polling.ts is disabled), so
+  // the route needs one entry point that runs raw gateway rows through both
+  // newborn sources and reports the counts.
+
+  it('processBrowserNewborns: runs infants then the pregnancy fallback (detail wins)', async () => {
+    const result = await processBrowserNewborns(db, HOSPITAL_ID, {
+      infants: [makeInfantRow('AN001', 1) as unknown as Record<string, unknown>],
+      pregnancies: [
+        makePregnancyRow('AN001', { child_count: 3 }) as unknown as Record<string, unknown>,
+      ],
+    });
+
+    expect(result.infants.upserted).toBe(1);
+    expect(result.fallback.skippedHasDetail).toBe(1);
+    const rows = await db.query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(Number(rows[0].cnt)).toBe(1);
+  });
+
+  it('processBrowserNewborns: tolerates missing/empty sections', async () => {
+    const result = await processBrowserNewborns(db, HOSPITAL_ID, {});
+    expect(result.infants.rowsRead).toBe(0);
+    expect(result.fallback.rowsRead).toBe(0);
   });
 
   it('cutoff: 365-day backfill window when nothing is cached for the hospital', async () => {
