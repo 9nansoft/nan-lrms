@@ -31,6 +31,32 @@ export function classifySyncHealth(
   return 'ok';
 }
 
+// ─── Partograph data quality ────────────────────────────────────────────────
+// Of labor admissions in the window, how many were charted with at least one
+// partograph observation. Some hospitals skip charting entirely — the admin
+// team tracks this per hospital on /hospitals.
+export const PARTOGRAPH_QUALITY = {
+  /** Admissions newer than this many days count toward coverage. */
+  windowDays: 30,
+  /** Coverage below this percentage renders amber. */
+  warnBelowPct: 60,
+  /** Coverage below this percentage renders red. */
+  criticalBelowPct: 30,
+} as const;
+
+export type PartographCoverageClass = 'ok' | 'warn' | 'critical' | 'none';
+
+export function classifyPartographCoverage(
+  laborRecent: number,
+  withPartograph: number,
+): PartographCoverageClass {
+  if (laborRecent <= 0) return 'none';
+  const pct = (withPartograph / laborRecent) * 100;
+  if (pct < PARTOGRAPH_QUALITY.criticalBelowPct) return 'critical';
+  if (pct < PARTOGRAPH_QUALITY.warnBelowPct) return 'warn';
+  return 'ok';
+}
+
 /** One ANC-registry woman counts this much of one active labor patient when
  *  sizing pins / ranking rosters. 0.1 keeps a 200-woman ANC hospital roughly
  *  on par with a 20-bed labor ward. */

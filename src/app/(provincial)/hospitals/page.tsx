@@ -17,7 +17,10 @@ import { HOSPITAL_LEVELS, KK_HOSPITALS } from '@/config/hospitals';
 import {
   classifySyncHealth,
   combinedWorkload,
+  classifyPartographCoverage,
+  PARTOGRAPH_QUALITY,
   type SyncHealthClass,
+  type PartographCoverageClass,
 } from '@/config/hospital-network';
 import { cn, formatThaiTime } from '@/lib/utils';
 import { KpiTip } from '@/components/shared/KpiTip';
@@ -94,7 +97,45 @@ function SyncCell({ hospital }: { hospital: DashboardHospital }) {
   );
 }
 
-const ROSTER_GRID = '58px 1fr 60px 60px 96px 16px';
+const ROSTER_GRID = '58px 1fr 60px 60px 64px 96px 16px';
+
+// Coverage-class → color, shared by the roster cell and the KPI number.
+const PARTO_COLOR: Record<PartographCoverageClass, string> = {
+  ok: 'var(--risk-low)',
+  warn: 'var(--risk-medium)',
+  critical: 'var(--risk-high)',
+  none: 'var(--ink-navy-muted)',
+};
+
+/** Partograph charting coverage for one hospital — "charted/recent" over the
+ *  quality window; hospitals with no recent admissions show a dash. */
+function PartoCell({ hospital }: { hospital: DashboardHospital }) {
+  const pq = hospital.partographQuality;
+  const cls = classifyPartographCoverage(pq.laborRecent, pq.withPartograph);
+  return (
+    <div
+      className="text-right"
+      data-testid="parto-cell"
+      data-parto={cls}
+      title={
+        cls === 'none'
+          ? `ไม่มีผู้คลอดรับใหม่ใน ${PARTOGRAPH_QUALITY.windowDays} วัน`
+          : `บันทึก partograph ${pq.withPartograph} จาก ${pq.laborRecent} ราย (${PARTOGRAPH_QUALITY.windowDays} วัน)`
+      }
+    >
+      {cls === 'none' ? (
+        <span className="font-mono text-[13px] text-[var(--ink-navy-muted)]">—</span>
+      ) : (
+        <span
+          className="font-mono text-[14px] font-semibold tabular-nums"
+          style={{ color: PARTO_COLOR[cls] }}
+        >
+          {pq.withPartograph}/{pq.laborRecent}
+        </span>
+      )}
+    </div>
+  );
+}
 
 interface RosterRowProps {
   hospital: DashboardHospital;
@@ -176,6 +217,7 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
       >
         {hospital.counts.total > 0 ? hospital.counts.total : '—'}
       </div>
+      <PartoCell hospital={hospital} />
       <div className="text-right">
         <SyncCell hospital={hospital} />
       </div>
@@ -219,6 +261,7 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
         <div>HOSPITAL</div>
         <div className="text-right">ANC</div>
         <div className="text-right">LABOR</div>
+        <div className="text-right">PARTO</div>
         <div className="text-right">SYNC</div>
         <div />
       </div>
@@ -327,6 +370,19 @@ export default function HospitalsPage() {
   const totalMedium = tabHospitals.reduce((sum, h) => sum + h.counts.medium, 0);
   const totalHigh = tabHospitals.reduce((sum, h) => sum + h.counts.high, 0);
   const totalAnc = tabHospitals.reduce((sum, h) => sum + h.ancCounts.total, 0);
+  // Partograph data quality — province coverage over the config window plus
+  // how many hospitals sit below the warn threshold.
+  const partoRecent = tabHospitals.reduce((sum, h) => sum + h.partographQuality.laborRecent, 0);
+  const partoCharted = tabHospitals.reduce((sum, h) => sum + h.partographQuality.withPartograph, 0);
+  const partoClass = classifyPartographCoverage(partoRecent, partoCharted);
+  const partoPct = partoRecent > 0 ? Math.round((partoCharted / partoRecent) * 100) : null;
+  const partoBelow = tabHospitals.filter((h) => {
+    const c = classifyPartographCoverage(
+      h.partographQuality.laborRecent,
+      h.partographQuality.withPartograph,
+    );
+    return c === 'warn' || c === 'critical';
+  }).length;
   const totalAncHr3 = tabHospitals.reduce((sum, h) => sum + h.ancCounts.hr3, 0);
   const withWorkload = tabHospitals.filter(
     (h) => combinedWorkload(h.counts, h.ancCounts) > 0,
@@ -399,7 +455,7 @@ export default function HospitalsPage() {
       <div
         className="grid bg-white"
         style={{
-          gridTemplateColumns: '1.4fr 1fr 1fr 1fr',
+          gridTemplateColumns: '1.4fr 1fr 1fr 1fr 1fr',
           borderBottom: '1px solid var(--rule-strong)',
         }}
       >
@@ -488,7 +544,12 @@ export default function HospitalsPage() {
         <KpiTip
           title="ห้องคลอดทั้งเครือข่าย"
           body="ผู้ป่วยที่กำลังรอคลอด (labor_status = ACTIVE) รวมทุก รพ. แถบสีคือสัดส่วนระดับความเสี่ยง CPD ล่าสุด — LOW/MED/HIGH"
-          trigger={<div className="cursor-help px-5 py-3" data-testid="kpi-labor" />}
+          trigger={
+            <div
+              className="cursor-help border-r border-[var(--rule-strong)] px-5 py-3"
+              data-testid="kpi-labor"
+            />
+          }
         >
           <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             LABOR WARD
@@ -531,6 +592,31 @@ export default function HospitalsPage() {
               ไม่มีผู้คลอดที่กำลังรอคลอด
             </div>
           )}
+        </KpiTip>
+
+        <KpiTip
+          title="คุณภาพการบันทึก Partograph"
+          body={`สัดส่วนผู้คลอดที่รับใหม่ใน ${PARTOGRAPH_QUALITY.windowDays} วันที่ผ่านมา ที่มีการบันทึก partograph อย่างน้อย 1 จุด — ต่ำกว่า ${PARTOGRAPH_QUALITY.warnBelowPct}% สีเหลือง, ต่ำกว่า ${PARTOGRAPH_QUALITY.criticalBelowPct}% สีแดง; รพ.ที่ไม่บันทึกเลย ส่วนกลางจะมองไม่เห็นภาวะวิกฤตระหว่างคลอด`}
+          trigger={<div className="cursor-help px-5 py-3" data-testid="kpi-partograph" />}
+        >
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+            PARTOGRAPH QUALITY
+          </div>
+          <div
+            className="mt-1 font-mono text-[32px] font-semibold leading-none tabular-nums"
+            style={{ color: PARTO_COLOR[partoClass], letterSpacing: '-0.02em' }}
+          >
+            <span>{partoPct == null ? '—' : `${partoPct}%`}</span>
+            <span className="ml-2 font-mono text-[14px] font-normal text-[var(--ink-navy-muted)]">
+              {partoCharted}/{partoRecent} ราย · {PARTOGRAPH_QUALITY.windowDays} วัน
+            </span>
+          </div>
+          <div
+            className="mt-1 font-mono text-[13px]"
+            style={{ color: partoBelow > 0 ? 'var(--risk-medium)' : 'var(--ink-navy-muted)' }}
+          >
+            {partoBelow > 0 ? `ต่ำกว่าเกณฑ์ ${partoBelow} รพ.` : 'ทุก รพ.ผ่านเกณฑ์'}
+          </div>
         </KpiTip>
       </div>
 

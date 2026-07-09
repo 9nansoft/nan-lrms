@@ -119,6 +119,7 @@ export function AdminMapPane({ onSelectHospital }: AdminMapPaneProps = {}) {
           lon: h.lon,
           counts: { low: 0, medium: 0, high: 0, total: 0 },
           ancCounts: { total: 0, hr3: 0 },
+          partographQuality: { laborRecent: 0, withPartograph: 0 },
           syncStatus,
           syncBlockedReason,
         };

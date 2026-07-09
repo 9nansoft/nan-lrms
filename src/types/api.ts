@@ -36,6 +36,9 @@ export interface DashboardHospital {
     total: number;
     hr3: number;
   };
+  /** Partograph data quality: labor admissions in the PARTOGRAPH_QUALITY
+   *  window vs how many have at least one partograph observation. */
+  partographQuality: { laborRecent: number; withPartograph: number };
   syncStatus: DashboardSyncStatus;
   /** When syncStatus is BLOCKED, this carries the underlying reason
    *  (e.g. 'purged_pending_reonboard', 'missing_marketplace_token') so

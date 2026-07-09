@@ -37,6 +37,7 @@ function makeHospitals(): DashboardHospital[] {
       lastSyncAt: iso(13 * 24 * 60 * MIN), // 13 days stale → critical
       counts: { low: 0, medium: 0, high: 0, total: 0 },
       ancCounts: { total: 62, hr3: 5 },
+      partographQuality: { laborRecent: 10, withPartograph: 2 }, // 20% → critical
       syncStatus: 'OK' as DashboardHospital['syncStatus'],
       syncBlockedReason: null,
     },
@@ -48,6 +49,7 @@ function makeHospitals(): DashboardHospital[] {
       lastSyncAt: iso(2 * MIN), // fresh
       counts: { low: 1, medium: 0, high: 0, total: 1 },
       ancCounts: { total: 215, hr3: 20 },
+      partographQuality: { laborRecent: 4, withPartograph: 3 }, // 75% → ok
       syncStatus: 'OK' as DashboardHospital['syncStatus'],
       syncBlockedReason: null,
     },
@@ -59,6 +61,7 @@ function makeHospitals(): DashboardHospital[] {
       lastSyncAt: null,
       counts: { low: 0, medium: 0, high: 0, total: 0 },
       ancCounts: { total: 10, hr3: 0 },
+      partographQuality: { laborRecent: 0, withPartograph: 0 }, // no admissions → none
       syncStatus: 'BLOCKED' as DashboardHospital['syncStatus'],
       syncBlockedReason: 'missing_marketplace_token',
     },
@@ -132,5 +135,23 @@ describe('HospitalsPage — roster rows', () => {
     const codes = rows.map((r) => r.getAttribute('data-testid'));
     // Both M2 hospitals: บ้านฝาง (workload ~22.5) before พระยืน (~1).
     expect(codes.indexOf('hospital-row-10995')).toBeLessThan(codes.indexOf('hospital-row-10996'));
+  });
+
+  it('shows the partograph data-quality KPI and per-row coverage', async () => {
+    renderPage();
+
+    // Province KPI: 5 of 14 recent admissions charted → 36%, one hospital
+    // below the quality threshold.
+    const kpi = await screen.findByTestId('kpi-partograph');
+    expect(kpi.textContent).toContain('36%');
+    expect(kpi.textContent).toMatch(/ต่ำกว่าเกณฑ์\s*1/);
+
+    // Per-row coverage cell, colored by the config thresholds.
+    const critical = within(screen.getByTestId('hospital-row-10670')).getByTestId('parto-cell');
+    expect(critical.getAttribute('data-parto')).toBe('critical');
+    expect(critical.textContent).toContain('2/10');
+
+    const none = within(screen.getByTestId('hospital-row-10996')).getByTestId('parto-cell');
+    expect(none.getAttribute('data-parto')).toBe('none');
   });
 });

@@ -13,6 +13,7 @@
 // must be lossless), so the dashboard layer is the right place to honor the
 // flag — one subquery, applied everywhere.
 import type { DatabaseAdapter } from '@/db/adapter';
+import { PARTOGRAPH_QUALITY } from '@/config/hospital-network';
 import { bangkokStartOfMonth, bangkokStartOfToday } from '@/lib/bangkok-time';
 import { referralSlaCutoffs } from '@/config/referral-sla';
 import { ancOpsCutoffs } from '@/config/anc-ops';
@@ -148,6 +149,7 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
       lon: lon !== null && Number.isFinite(lon) ? lon : null,
       counts: { low: 0, medium: 0, high: 0, total: 0 },
       ancCounts: { total: 0, hr3: 0 },
+      partographQuality: { laborRecent: 0, withPartograph: 0 },
       syncStatus,
       syncBlockedReason,
     });
@@ -174,6 +176,35 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
     if (!hospital) continue;
     hospital.ancCounts.total = Number(r.total) || 0;
     hospital.ancCounts.hr3 = Number(r.hr3) || 0;
+  }
+
+  // Partograph coverage — labor admissions inside the quality window vs how
+  // many have at least one charted observation. Cutoff computed in JS and
+  // bound as an ISO param (portable across PG + SQLite).
+  const partoCutoff = new Date(
+    Date.now() - PARTOGRAPH_QUALITY.windowDays * 86_400_000,
+  ).toISOString();
+  const partoRows = await db.query<{
+    hcode: string;
+    labor_recent: number;
+    with_partograph: number;
+  }>(
+    `SELECT h.hcode,
+            COUNT(*) AS labor_recent,
+            SUM(CASE WHEN EXISTS (
+              SELECT 1 FROM cached_partograph_observations o WHERE o.patient_id = cp.id
+            ) THEN 1 ELSE 0 END) AS with_partograph
+       FROM cached_patients cp
+       JOIN hospitals h ON h.id = cp.hospital_id
+      WHERE h.is_active = true AND cp.admit_date >= ?
+      GROUP BY h.hcode`,
+    [partoCutoff],
+  );
+  for (const r of partoRows) {
+    const hospital = hospitalMap.get(r.hcode);
+    if (!hospital) continue;
+    hospital.partographQuality.laborRecent = Number(r.labor_recent) || 0;
+    hospital.partographQuality.withPartograph = Number(r.with_partograph) || 0;
   }
 
   for (const row of counts) {

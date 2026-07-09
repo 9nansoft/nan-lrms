@@ -6,6 +6,8 @@ import {
   classifySyncHealth,
   ANC_WORKLOAD_WEIGHT,
   combinedWorkload,
+  PARTOGRAPH_QUALITY,
+  classifyPartographCoverage,
 } from '@/config/hospital-network';
 
 const NOW = new Date('2026-07-09T12:00:00+07:00');
@@ -39,5 +41,15 @@ describe('combinedWorkload', () => {
     expect(combinedWorkload({ total: 2 }, { total: 30 })).toBe(2 + 30 * ANC_WORKLOAD_WEIGHT);
     // An ANC-only hospital still registers as active.
     expect(combinedWorkload({ total: 0 }, { total: 215 })).toBeGreaterThan(5);
+  });
+
+  describe('classifyPartographCoverage', () => {
+    it('classifies by the configured thresholds; no admissions → none', () => {
+      expect(classifyPartographCoverage(0, 0)).toBe('none');
+      expect(classifyPartographCoverage(10, 1)).toBe('critical'); // 10% < criticalBelowPct
+      expect(classifyPartographCoverage(10, 5)).toBe('warn'); // 50% < warnBelowPct
+      expect(classifyPartographCoverage(10, 8)).toBe('ok');
+      expect(PARTOGRAPH_QUALITY.windowDays).toBeGreaterThan(0);
+    });
   });
 });

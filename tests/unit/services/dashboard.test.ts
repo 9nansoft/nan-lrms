@@ -69,6 +69,41 @@ describe('Dashboard Service', () => {
     expect(hospital!.counts.high).toBe(1);
   });
 
+  it('reports per-hospital partograph coverage over the quality window', async () => {
+    const hospitals = await db.query<{ id: string }>(
+      "SELECT id FROM hospitals WHERE hcode = '10670'",
+    );
+    const hospitalId = hospitals[0].id;
+    const now = new Date();
+    const iso = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
+
+    const insertPatient = (id: string, an: string, admitDaysAgo: number) =>
+      db.execute(
+        'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, hospitalId, `HN-${an}`, an, 'enc', 28, iso(admitDaysAgo), 'ACTIVE',
+         iso(0), iso(0), iso(0)],
+      );
+    // Two admissions inside the window (one charted), one outside it.
+    await insertPatient('pq-1', 'PQ001', 2);
+    await insertPatient('pq-2', 'PQ002', 5);
+    await insertPatient('pq-3', 'PQ003', 60);
+    await db.execute(
+      `INSERT INTO cached_partograph_observations
+         (id, patient_id, hospital_id, source_system, source_pk, observe_datetime,
+          synced_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'hosxp', 'src-1', ?, ?, ?, ?)`,
+      [uuidv4(), 'pq-1', hospitalId, iso(1), iso(0), iso(0), iso(0)],
+    );
+
+    const result = await getProvinceDashboard(db);
+    const hospital = result.hospitals.find((h) => h.hcode === '10670')!;
+    expect(hospital.partographQuality).toEqual({ laborRecent: 2, withPartograph: 1 });
+
+    // Hospitals with no recent admissions report zeros, not undefined.
+    const other = result.hospitals.find((h) => h.hcode !== '10670')!;
+    expect(other.partographQuality).toEqual({ laborRecent: 0, withPartograph: 0 });
+  });
+
   it('should handle hospitals with OFFLINE status', async () => {
     // Update a hospital status
     await db.execute("UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '10670'");
