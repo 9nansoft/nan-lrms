@@ -582,6 +582,7 @@ export interface OutcomeTrendPoint {
 }
 
 export interface OutcomeHospitalRow {
+  id: string;
   hcode: string;
   name: string;
   births: number;

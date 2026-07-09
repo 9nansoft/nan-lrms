@@ -292,18 +292,19 @@ export async function getOutcomes(
   // does not (it is the dimension being faceted).
   const hw = newbornWhere({ range: filters.range }, now);
   const hospitalRows = await db.query<Record<string, unknown>>(
-    `SELECT h.hcode, h.name,
+    `SELECT h.id, h.hcode, h.name,
         COUNT(*) as births,
         SUM(CASE WHEN cn.birth_weight_g < 2500 THEN 1 ELSE 0 END) as lbw,
         SUM(CASE WHEN cn.apgar_5min < 7 THEN 1 ELSE 0 END) as low_apgar
       FROM cached_newborns cn
       JOIN maternal_journeys mj ON mj.id = cn.journey_id
       JOIN hospitals h ON h.id = mj.current_hospital_id${hw.clause}
-      GROUP BY h.hcode, h.name
+      GROUP BY h.id, h.hcode, h.name
       ORDER BY births DESC, h.name`,
     hw.params,
   );
   const byHospital: OutcomeHospitalRow[] = hospitalRows.map((r) => ({
+    id: r.id as string,
     hcode: r.hcode as string,
     name: r.name as string,
     births: Number(r.births) || 0,

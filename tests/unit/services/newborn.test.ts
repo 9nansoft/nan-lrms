@@ -278,7 +278,7 @@ describe('Newborn Service', () => {
       expect(outcomes.trend[3]).toEqual({ month: '2026-05', births: 1, lbw: 0 });
 
       expect(outcomes.byHospital).toEqual([
-        { hcode: '10670', name: 'รพ.ขอนแก่น', births: 3, lbw: 1, lowApgar: 1 },
+        { id: hospitalId, hcode: '10670', name: 'รพ.ขอนแก่น', births: 3, lbw: 1, lowApgar: 1 },
       ]);
 
       // Recent births, newest first, mother name decrypted at the boundary.
