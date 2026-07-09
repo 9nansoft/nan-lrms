@@ -3,8 +3,10 @@
 'use client';
 
 import { formatRelativeAge } from '@/lib/relative-time';
-import { ANC_RISK_COLOR, ANC_RISK_FALLBACK_COLOR } from '@/config/anc-risk-display';
 import type { ReferralAgeClass } from '@/config/referral-sla';
+
+// Risk chip moved to shared — re-exported so existing imports keep working.
+export { AncRiskChip as RiskChip } from '@/components/shared/AncRiskChip';
 
 export interface StatusMeta {
   color: string;
@@ -38,19 +40,6 @@ export function Pill({ meta, fallback }: { meta: StatusMeta | undefined; fallbac
       style={{ color: m.color, borderColor: m.color, background: 'transparent' }}
     >
       {m.label}
-    </span>
-  );
-}
-
-export function RiskChip({ level }: { level: string }) {
-  const color = ANC_RISK_COLOR[level] ?? ANC_RISK_FALLBACK_COLOR;
-  return (
-    <span
-      data-risk={level}
-      className="inline-block border px-1 py-px font-mono text-[10px] font-semibold tracking-[0.04em]"
-      style={{ color, borderColor: color, background: 'transparent' }}
-    >
-      {level}
     </span>
   );
 }
