@@ -347,6 +347,26 @@ export const LABOUR_INFANTS_SINCE: SqlQueryTemplate = {
       WHERE li.birth_date >= '{{CUTOFF}}'`,
 };
 
+// Fallback delivery source: the IPD pregnancy summary (one row per admit
+// type 3 admission, PK an). Some sites record deliveries here without ever
+// filling the labour-module infant table — child_count/dead_child_count and
+// labor_date are enough to close journeys and count births. Same validated
+// {{CUTOFF}} (YYYY-MM-DD) contract as LABOUR_INFANTS_SINCE.
+export const IPT_PREGNANCY_DELIVERIES_SINCE: SqlQueryTemplate = {
+  postgresql: `
+      SELECT ipr.an, ip.hn AS mother_hn, ipr.labor_date,
+             ipr.child_count, ipr.dead_child_count, ipr.preg_number, ipr.ga
+      FROM ipt_pregnancy ipr
+      JOIN ipt ip ON ip.an = ipr.an
+      WHERE ipr.labor_date IS NOT NULL AND ipr.labor_date >= '{{CUTOFF}}'`,
+  mysql: `
+      SELECT ipr.an, ip.hn AS mother_hn, ipr.labor_date,
+             ipr.child_count, ipr.dead_child_count, ipr.preg_number, ipr.ga
+      FROM ipt_pregnancy ipr
+      JOIN ipt ip ON ip.an = ipr.an
+      WHERE ipr.labor_date IS NOT NULL AND ipr.labor_date >= '{{CUTOFF}}'`,
+};
+
 export const REFEROUT_PREGNANCY: SqlQueryTemplate = {
   postgresql: `
       SELECT ro.refer_number, ro.refer_date, p.hn,

@@ -10,6 +10,7 @@ import {
   ACTIVE_LABOR_PATIENTS,
   PARTOGRAPH_OBSERVATIONS,
   LABOUR_INFANTS_SINCE,
+  IPT_PREGNANCY_DELIVERIES_SINCE,
 } from '@/config/hosxp-queries';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
 import {
@@ -21,8 +22,12 @@ import {
 } from './patient';
 import { upsertPartographObservations, type PartographRow } from './partograph';
 import { autoArriveReferrals } from '@/services/referral';
-import { newbornSyncCutoffDate, syncNewbornsFromRows } from './newborn';
-import type { HosxpLabourInfantRow } from '@/types/hosxp';
+import {
+  newbornSyncCutoffDate,
+  syncNewbornsFromRows,
+  syncNewbornsFromPregnancyRows,
+} from './newborn';
+import type { HosxpLabourInfantRow, HosxpIptPregnancyRow } from '@/types/hosxp';
 import { calculateAndStoreCpdScores } from './cpd-persist';
 import { syncAncData } from './anc';
 import { logger } from '@/lib/logger';
@@ -1292,6 +1297,39 @@ export async function pollHospital(
         hospitalId,
         infantResult.data as unknown as HosxpLabourInfantRow[],
       );
+
+      // Fallback: the IPD pregnancy summary (ipt_pregnancy) — HOSxP's own
+      // Account 2 module closes pregnancies from it, and some sites never
+      // fill ipt_labour_infant at all. Journeys that already gained detailed
+      // rows above are skipped inside the service. Own try/catch so an odd
+      // schema at one site can't take down the primary counts.
+      let fallback = {
+        rowsRead: 0,
+        upserted: 0,
+        journeys: 0,
+        skippedNoJourney: 0,
+        skippedHasDetail: 0,
+      };
+      let fallbackError: string | null = null;
+      try {
+        const pregSql = getQuery(IPT_PREGNANCY_DELIVERIES_SINCE, databaseType).replace(
+          '{{CUTOFF}}',
+          cutoff,
+        );
+        const pregResult = await client.executeQuery(pregSql, bmsUrl, jwt, undefined, {
+          appIdentifier: APP_IDENTIFIER,
+          marketplaceToken: options.marketplaceToken,
+        });
+        fallback = await syncNewbornsFromPregnancyRows(
+          db,
+          hospitalId,
+          pregResult.data as unknown as HosxpIptPregnancyRow[],
+        );
+      } catch (pregError) {
+        fallbackError = pregError instanceof Error ? pregError.message : String(pregError);
+        logger.warn('newborn_pregnancy_fallback_failed', { hospitalId, error: pregError });
+      }
+
       // Info-level so the counts are diagnosable from docker logs — the
       // emitStep stream only reaches the SSE progress store.
       logger.info('newborn_sync_cycle', {
@@ -1301,16 +1339,23 @@ export async function pollHospital(
         upserted: newbornResult.upserted,
         journeys: newbornResult.journeys,
         skippedNoJourney: newbornResult.skippedNoJourney,
+        fallbackRows: fallback.rowsRead,
+        fallbackUpserted: fallback.upserted,
+        fallbackJourneys: fallback.journeys,
+        fallbackSkippedHasDetail: fallback.skippedHasDetail,
+        fallbackError,
       });
       emitStep(options, {
         name: 'sync_newborns',
         status: 'success',
-        message: `Upserted ${newbornResult.upserted} newborns across ${newbornResult.journeys} journeys (${newbornResult.skippedNoJourney} ANs without a journey).`,
+        message: `Upserted ${newbornResult.upserted} newborns across ${newbornResult.journeys} journeys (${newbornResult.skippedNoJourney} ANs without a journey); ipt_pregnancy fallback added ${fallback.upserted} across ${fallback.journeys} journeys.`,
         counts: {
           rows: newbornResult.rowsRead,
           upserted: newbornResult.upserted,
           journeys: newbornResult.journeys,
           skipped: newbornResult.skippedNoJourney,
+          fallbackRows: fallback.rowsRead,
+          fallbackUpserted: fallback.upserted,
         },
       });
     } catch (newbornError) {

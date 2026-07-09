@@ -39,6 +39,19 @@ export interface HosxpPregnancyRow {
   deliver_type: number | null;
 }
 
+/** Row from IPT_PREGNANCY_DELIVERIES_SINCE — the per-admission delivery
+ *  summary (ipt_pregnancy). Fallback source for the newborn sync when a
+ *  site fills the IPD pregnancy record but not ipt_labour_infant. */
+export interface HosxpIptPregnancyRow {
+  an: string;
+  mother_hn: string | null;
+  labor_date: string | null;
+  child_count: number | null;
+  dead_child_count: number | null;
+  preg_number: number | null;
+  ga: number | null;
+}
+
 export interface HosxpVitalSignRow {
   an: string;
   hr: number | null;

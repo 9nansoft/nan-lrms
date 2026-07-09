@@ -1,6 +1,6 @@
 // Newborn sync — HOSxP labour_infant rows → cached_newborns + journey transition
 import type { DatabaseAdapter } from '@/db/adapter';
-import type { HosxpLabourInfantRow } from '@/types/hosxp';
+import type { HosxpLabourInfantRow, HosxpIptPregnancyRow } from '@/types/hosxp';
 import { upsertNewborn } from '@/services/newborn';
 import { transitionToDelivered } from '@/services/journey';
 
@@ -102,6 +102,68 @@ export async function newbornSyncCutoffDate(
   return new Date(baseMs).toISOString().slice(0, 10);
 }
 
+interface BirthResolutionItem {
+  an: string;
+  motherHn: string | null;
+  bornMs: number;
+}
+
+/**
+ * Resolve mothers' ANs to journey IDs: cached_patients (hospital + AN)
+ * first, then the mother's HN against maternal_journeys — for repeat
+ * mothers, the pregnancy registered most recently BEFORE the birth wins.
+ * Shared by the labour-infant batch and the ipt_pregnancy fallback.
+ */
+async function resolveJourneysForBirths(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  items: BirthResolutionItem[],
+): Promise<Map<string, string>> {
+  const journeyByAn = new Map<string, string>();
+  if (items.length === 0) return journeyByAn;
+
+  const ans = items.map((i) => i.an);
+  const placeholders = ans.map(() => '?').join(',');
+  const patientRows = await db.query<{ an: string; journey_id: string | null }>(
+    `SELECT an, journey_id FROM cached_patients
+      WHERE hospital_id = ? AND an IN (${placeholders})`,
+    [hospitalId, ...ans],
+  );
+  for (const p of patientRows) {
+    if (p.journey_id) journeyByAn.set(p.an, p.journey_id);
+  }
+
+  const unresolved = items.filter(
+    (i): i is BirthResolutionItem & { motherHn: string } =>
+      !journeyByAn.has(i.an) && i.motherHn !== null,
+  );
+  if (unresolved.length === 0) return journeyByAn;
+
+  const hns = Array.from(new Set(unresolved.map((u) => u.motherHn)));
+  const hnPlaceholders = hns.map(() => '?').join(',');
+  const journeyRows = await db.query<{ id: string; hn: string; registered_at: string }>(
+    `SELECT id, hn, registered_at FROM maternal_journeys
+      WHERE hospital_id = ? AND hn IN (${hnPlaceholders})`,
+    [hospitalId, ...hns],
+  );
+  const journeysByHn = new Map<string, Array<{ id: string; regMs: number }>>();
+  for (const j of journeyRows) {
+    const list = journeysByHn.get(j.hn) ?? [];
+    list.push({ id: j.id, regMs: new Date(j.registered_at).getTime() });
+    journeysByHn.set(j.hn, list);
+  }
+  for (const list of journeysByHn.values()) list.sort((a, b) => a.regMs - b.regMs);
+
+  for (const u of unresolved) {
+    const candidates = journeysByHn.get(u.motherHn);
+    if (!candidates || candidates.length === 0) continue;
+    const before = candidates.filter((c) => c.regMs <= u.bornMs);
+    const pick = before.length > 0 ? before[before.length - 1] : candidates[0];
+    journeyByAn.set(u.an, pick.id);
+  }
+  return journeyByAn;
+}
+
 /**
  * Fan a LABOUR_INFANTS_SINCE batch out to journeys. Rows group by the
  * mother's AN; the journey resolves through cached_patients (hospital + AN).
@@ -129,57 +191,17 @@ export async function syncNewbornsFromRows(
     byAn.set(an, list);
   }
 
-  const ans = Array.from(byAn.keys());
-  const placeholders = ans.map(() => '?').join(',');
-  const patientRows = await db.query<{ an: string; journey_id: string | null }>(
-    `SELECT an, journey_id FROM cached_patients
-      WHERE hospital_id = ? AND an IN (${placeholders})`,
-    [hospitalId, ...ans],
+  const journeyByAn = await resolveJourneysForBirths(
+    db,
+    hospitalId,
+    Array.from(byAn.entries()).map(([an, list]) => ({
+      an,
+      motherHn: list[0].mother_hn ? String(list[0].mother_hn) : null,
+      bornMs: list[0].birth_date
+        ? new Date(list[0].birth_date).getTime()
+        : Number.MAX_SAFE_INTEGER,
+    })),
   );
-  const journeyByAn = new Map(
-    patientRows.filter((p) => p.journey_id).map((p) => [p.an, p.journey_id as string]),
-  );
-
-  // Fallback for admissions outside the cached_patients window (the backfill
-  // path): resolve via the mother's HN carried on LABOUR_INFANTS_SINCE rows.
-  // For repeat mothers with several journeys, attribute the birth to the
-  // pregnancy registered most recently BEFORE the birth date.
-  const unresolved = ans
-    .filter((an) => !journeyByAn.has(an))
-    .map((an) => {
-      const first = byAn.get(an)![0];
-      return {
-        an,
-        hn: first.mother_hn ? String(first.mother_hn) : null,
-        bornMs: first.birth_date ? new Date(first.birth_date).getTime() : Number.MAX_SAFE_INTEGER,
-      };
-    })
-    .filter((u): u is { an: string; hn: string; bornMs: number } => u.hn !== null);
-
-  if (unresolved.length > 0) {
-    const hns = Array.from(new Set(unresolved.map((u) => u.hn)));
-    const hnPlaceholders = hns.map(() => '?').join(',');
-    const journeyRows = await db.query<{ id: string; hn: string; registered_at: string }>(
-      `SELECT id, hn, registered_at FROM maternal_journeys
-        WHERE hospital_id = ? AND hn IN (${hnPlaceholders})`,
-      [hospitalId, ...hns],
-    );
-    const journeysByHn = new Map<string, Array<{ id: string; regMs: number }>>();
-    for (const j of journeyRows) {
-      const list = journeysByHn.get(j.hn) ?? [];
-      list.push({ id: j.id, regMs: new Date(j.registered_at).getTime() });
-      journeysByHn.set(j.hn, list);
-    }
-    for (const list of journeysByHn.values()) list.sort((a, b) => a.regMs - b.regMs);
-
-    for (const u of unresolved) {
-      const candidates = journeysByHn.get(u.hn);
-      if (!candidates || candidates.length === 0) continue;
-      const before = candidates.filter((c) => c.regMs <= u.bornMs);
-      const pick = before.length > 0 ? before[before.length - 1] : candidates[0];
-      journeyByAn.set(u.an, pick.id);
-    }
-  }
 
   for (const [an, infantRows] of byAn) {
     const journeyId = journeyByAn.get(an);
@@ -188,6 +210,96 @@ export async function syncNewbornsFromRows(
       continue;
     }
     result.upserted += await syncNewbornData(db, journeyId, infantRows);
+    result.journeys += 1;
+  }
+
+  return result;
+}
+
+// ─── ipt_pregnancy fallback ─────────────────────────────────────────────────
+// HOSxP's own Account 2 module closes pregnancies from ipt_pregnancy (the
+// per-admission delivery summary), not from ipt_labour_infant — some sites
+// only ever fill the former. The fallback synthesizes minimal newborn rows
+// (infant 1..child_count, bornAt = labor_date, no sex/weight/Apgar) so births
+// are counted and journeys transition; if detailed infant rows arrive later
+// they overwrite these via the (journey_id, infant_number) upsert key.
+
+/** Sanity cap on synthesized infants per delivery — guards against garbage
+ *  child_count values (quintuplets are the largest plausible multiple). */
+const MAX_SYNTHESIZED_INFANTS = 5;
+
+export interface PregnancyFallbackResult extends NewbornSyncResult {
+  /** Journeys skipped because detailed infant rows already exist. */
+  skippedHasDetail: number;
+}
+
+export async function syncNewbornsFromPregnancyRows(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  rows: HosxpIptPregnancyRow[],
+): Promise<PregnancyFallbackResult> {
+  const result: PregnancyFallbackResult = {
+    rowsRead: rows.length,
+    upserted: 0,
+    journeys: 0,
+    skippedNoJourney: 0,
+    skippedHasDetail: 0,
+  };
+
+  // an is ipt_pregnancy's PK, but dedupe defensively; undelivered admissions
+  // (labor_date NULL) carry no outcome yet.
+  const byAn = new Map<string, HosxpIptPregnancyRow>();
+  for (const row of rows) {
+    if (row.labor_date == null) continue;
+    byAn.set(String(row.an), row);
+  }
+  if (byAn.size === 0) return result;
+
+  const journeyByAn = await resolveJourneysForBirths(
+    db,
+    hospitalId,
+    Array.from(byAn.entries()).map(([an, row]) => ({
+      an,
+      motherHn: row.mother_hn ? String(row.mother_hn) : null,
+      bornMs: new Date(row.labor_date as string).getTime() || Number.MAX_SAFE_INTEGER,
+    })),
+  );
+
+  for (const [an, row] of byAn) {
+    const journeyId = journeyByAn.get(an);
+    if (!journeyId) {
+      result.skippedNoJourney += 1;
+      continue;
+    }
+
+    // Never clobber richer per-infant data (from the labour module or an
+    // earlier cycle) with weight-less synthesized rows.
+    const existing = await db.query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
+      [journeyId],
+    );
+    if (Number(existing[0]?.cnt) > 0) {
+      result.skippedHasDetail += 1;
+      continue;
+    }
+
+    const live = Math.min(Math.max(Number(row.child_count) || 0, 0), MAX_SYNTHESIZED_INFANTS);
+    const dead = Number(row.dead_child_count) || 0;
+    // A delivery happened only if some outcome was recorded — an admission
+    // with labor_date but zero counts stays open for the detailed source.
+    if (live === 0 && dead === 0) continue;
+
+    for (let i = 1; i <= live; i++) {
+      await upsertNewborn(db, {
+        journeyId,
+        infantNumber: i,
+        bornAt: row.labor_date as string,
+        resuscitation: {},
+        vaccinations: {},
+      });
+      result.upserted += 1;
+    }
+    await transitionToDelivered(db, journeyId);
     result.journeys += 1;
   }
 

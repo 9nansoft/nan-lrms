@@ -5,8 +5,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqliteAdapter } from '@/db/sqlite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables';
-import { syncNewbornsFromRows, newbornSyncCutoffDate } from '@/services/sync/newborn';
-import type { HosxpLabourInfantRow } from '@/types/hosxp';
+import {
+  syncNewbornsFromRows,
+  syncNewbornsFromPregnancyRows,
+  newbornSyncCutoffDate,
+} from '@/services/sync/newborn';
+import type { HosxpLabourInfantRow, HosxpIptPregnancyRow } from '@/types/hosxp';
 
 const HOSPITAL_ID = 'hosp-001';
 const JOURNEY_ID = 'journey-001';
@@ -157,6 +161,109 @@ describe('newborn polling sync', () => {
       `SELECT journey_id FROM cached_newborns WHERE infant_hn = 'NB-AN-REPEAT-1'`,
     );
     expect(newborns[0].journey_id).toBe('journey-new');
+  });
+
+  // ── ipt_pregnancy fallback ─────────────────────────────────────────────
+  // Some sites fill the IPD pregnancy summary (ipt_pregnancy) but never the
+  // labour-module infant table — the fallback synthesizes minimal newborn
+  // rows from the delivery summary so births are counted and journeys close.
+
+  function makePregnancyRow(
+    an: string,
+    overrides: Partial<HosxpIptPregnancyRow> = {},
+  ): HosxpIptPregnancyRow {
+    return {
+      an,
+      mother_hn: null,
+      labor_date: '2026-07-01',
+      child_count: 1,
+      dead_child_count: 0,
+      preg_number: 1,
+      ga: 39,
+      ...overrides,
+    };
+  }
+
+  it('fallback: synthesizes one newborn per live child and transitions the journey', async () => {
+    const result = await syncNewbornsFromPregnancyRows(db, HOSPITAL_ID, [
+      makePregnancyRow('AN001', { child_count: 2 }),
+      makePregnancyRow('AN-UNKNOWN'),
+    ]);
+
+    expect(result).toEqual({
+      rowsRead: 2,
+      upserted: 2,
+      journeys: 1,
+      skippedNoJourney: 1,
+      skippedHasDetail: 0,
+    });
+
+    const newborns = await db.query<{ infant_number: number; born_at: string }>(
+      `SELECT infant_number, born_at FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
+      [JOURNEY_ID],
+    );
+    expect(newborns.map((n) => n.infant_number)).toEqual([1, 2]);
+    expect(newborns[0].born_at.slice(0, 10)).toBe('2026-07-01');
+
+    const journey = await db.query<{ care_stage: string }>(
+      `SELECT care_stage FROM maternal_journeys WHERE id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(journey[0].care_stage).toBe('DELIVERED');
+  });
+
+  it('fallback: never clobbers journeys that already have detailed infant rows', async () => {
+    await syncNewbornsFromRows(db, HOSPITAL_ID, [makeInfantRow('AN001', 1)]);
+
+    const result = await syncNewbornsFromPregnancyRows(db, HOSPITAL_ID, [
+      makePregnancyRow('AN001', { child_count: 3 }),
+    ]);
+
+    expect(result.upserted).toBe(0);
+    expect(result.skippedHasDetail).toBe(1);
+    const newborns = await db.query<{ birth_weight_g: number | null }>(
+      `SELECT birth_weight_g FROM cached_newborns WHERE journey_id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(newborns).toHaveLength(1);
+    expect(Number(newborns[0].birth_weight_g)).toBe(3200); // detail row untouched
+  });
+
+  it('fallback: resolves via mother HN when the AN was never cached', async () => {
+    const result = await syncNewbornsFromPregnancyRows(db, HOSPITAL_ID, [
+      makePregnancyRow('AN-OLD', { mother_hn: 'HN001' }),
+    ]);
+
+    expect(result.upserted).toBe(1);
+    expect(result.skippedNoJourney).toBe(0);
+  });
+
+  it('fallback: stillbirth-only delivery closes the journey without newborn rows', async () => {
+    const result = await syncNewbornsFromPregnancyRows(db, HOSPITAL_ID, [
+      makePregnancyRow('AN001', { child_count: 0, dead_child_count: 1 }),
+    ]);
+
+    expect(result.upserted).toBe(0);
+    expect(result.journeys).toBe(1);
+    const journey = await db.query<{ care_stage: string }>(
+      `SELECT care_stage FROM maternal_journeys WHERE id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(journey[0].care_stage).toBe('DELIVERED');
+  });
+
+  it('fallback: skips undelivered rows and caps garbage child counts', async () => {
+    const result = await syncNewbornsFromPregnancyRows(db, HOSPITAL_ID, [
+      makePregnancyRow('AN001', { child_count: 99 }),
+      makePregnancyRow('AN-PENDING', { labor_date: null }),
+    ]);
+
+    expect(result.rowsRead).toBe(2);
+    const newborns = await db.query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(Number(newborns[0].cnt)).toBeLessThanOrEqual(5);
   });
 
   it('cutoff: 365-day backfill window when nothing is cached for the hospital', async () => {
