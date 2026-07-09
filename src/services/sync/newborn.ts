@@ -12,9 +12,10 @@ export async function syncNewbornData(
   let count = 0;
 
   for (const infant of infantRows) {
-    const bornAt = infant.birth_date && infant.birth_time
-      ? `${infant.birth_date}T${infant.birth_time}`
-      : infant.birth_date ?? new Date().toISOString();
+    const bornAt =
+      infant.birth_date && infant.birth_time
+        ? `${infant.birth_date}T${infant.birth_time}`
+        : (infant.birth_date ?? new Date().toISOString());
 
     await upsertNewborn(db, {
       journeyId,

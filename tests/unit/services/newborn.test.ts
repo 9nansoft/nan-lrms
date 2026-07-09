@@ -218,11 +218,26 @@ describe('Newborn Service', () => {
         birthWeightG: 3000,
       };
       // Jul 13 — inside month-to-date.
-      await upsertNewborn(db, { ...base, journeyId: journeyId1, infantNumber: 1, bornAt: daysAgo(2) });
+      await upsertNewborn(db, {
+        ...base,
+        journeyId: journeyId1,
+        infantNumber: 1,
+        bornAt: daysAgo(2),
+      });
       // Jun 25 — outside MTD, inside 30 days.
-      await upsertNewborn(db, { ...base, journeyId: journeyId2, infantNumber: 1, bornAt: daysAgo(20) });
+      await upsertNewborn(db, {
+        ...base,
+        journeyId: journeyId2,
+        infantNumber: 1,
+        bornAt: daysAgo(20),
+      });
       // Apr — outside both.
-      await upsertNewborn(db, { ...base, journeyId: journeyId2, infantNumber: 2, bornAt: daysAgo(100) });
+      await upsertNewborn(db, {
+        ...base,
+        journeyId: journeyId2,
+        infantNumber: 2,
+        bornAt: daysAgo(100),
+      });
 
       expect((await getNewbornKPIs(db, { range: 'mtd' }, NOW)).totalBirths).toBe(1);
       expect((await getNewbornKPIs(db, { range: '30d' }, NOW)).totalBirths).toBe(2);
