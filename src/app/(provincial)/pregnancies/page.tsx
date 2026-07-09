@@ -273,7 +273,10 @@ export default function PregnanciesPage() {
   return (
     <div style={{ color: 'var(--ink-navy)', background: 'var(--surface-cool)' }}>
       {/* Page header strip */}
-      <div className="bg-white px-5 py-2.5" style={{ borderBottom: '1px solid var(--rule-strong)' }}>
+      <div
+        className="bg-white px-5 py-2.5"
+        style={{ borderBottom: '1px solid var(--rule-strong)' }}
+      >
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">

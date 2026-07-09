@@ -178,9 +178,9 @@ describe('PregnanciesPage — rows', () => {
   it('flags teen and advanced-maternal-age pregnancies', async () => {
     renderPage();
 
-    expect(
-      (await screen.findByTestId('journey-row-j-overdue')).getAttribute('data-age-flag'),
-    ).toBe('teen');
+    expect((await screen.findByTestId('journey-row-j-overdue')).getAttribute('data-age-flag')).toBe(
+      'teen',
+    );
     expect(screen.getByTestId('journey-row-j-warn').getAttribute('data-age-flag')).toBe('ama');
     expect(screen.getByTestId('journey-row-j-ok').getAttribute('data-age-flag')).toBeNull();
   });

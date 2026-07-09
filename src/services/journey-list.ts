@@ -26,12 +26,7 @@ import type {
  *  'ltfu' is special: it swaps the 60-day last-ANC freshness gate for the
  *  60→ltfuWindowDays window so recently-dropped women become a worklist. */
 export type JourneyCohort =
-  | 'due_soon'
-  | 'overdue_edc'
-  | 'anc_stale'
-  | 'low_visits'
-  | 'near_term'
-  | 'ltfu';
+  'due_soon' | 'overdue_edc' | 'anc_stale' | 'low_visits' | 'near_term' | 'ltfu';
 
 export type JourneySort = 'due' | 'ga' | 'last_anc' | 'newest';
 

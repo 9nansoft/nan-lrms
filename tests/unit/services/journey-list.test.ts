@@ -251,15 +251,40 @@ describe('journey-list service', () => {
   describe('ops counts, cohort filters, sort (province ANC board)', () => {
     it('opsCounts summarise the gated PREGNANCY set independent of risk/q filters', async () => {
       // dueSoon + nearTerm
-      await insertJourney(db, { gaWeeks: 38, edc: daysAheadIso(5), ancVisitCount: 6, lastAncDate: daysAgoIso(5) });
+      await insertJourney(db, {
+        gaWeeks: 38,
+        edc: daysAheadIso(5),
+        ancVisitCount: 6,
+        lastAncDate: daysAgoIso(5),
+      });
       // dueSoon + overdueEdc + nearTerm (EDC passed but inside the 14d grace)
-      await insertJourney(db, { gaWeeks: 40, edc: daysAgoIso(3), ancVisitCount: 5, lastAncDate: daysAgoIso(10) });
+      await insertJourney(db, {
+        gaWeeks: 40,
+        edc: daysAgoIso(3),
+        ancVisitCount: 5,
+        lastAncDate: daysAgoIso(10),
+      });
       // ancStale (last visit 40 days ago — inside gate, past warn threshold)
-      await insertJourney(db, { gaWeeks: 20, edc: daysAheadIso(60), ancVisitCount: 1, lastAncDate: daysAgoIso(40) });
+      await insertJourney(db, {
+        gaWeeks: 20,
+        edc: daysAheadIso(60),
+        ancVisitCount: 1,
+        lastAncDate: daysAgoIso(40),
+      });
       // lowVisits (GA >= 32 with < 5 visits), not nearTerm
-      await insertJourney(db, { gaWeeks: 33, edc: daysAheadIso(40), ancVisitCount: 3, lastAncDate: daysAgoIso(10) });
+      await insertJourney(db, {
+        gaWeeks: 33,
+        edc: daysAheadIso(40),
+        ancVisitCount: 3,
+        lastAncDate: daysAgoIso(10),
+      });
       // LTFU — outside the 60d gate but inside the 120d worklist window
-      await insertJourney(db, { gaWeeks: 30, edc: daysAheadIso(30), ancVisitCount: 2, lastAncDate: daysAgoIso(80) });
+      await insertJourney(db, {
+        gaWeeks: 30,
+        edc: daysAheadIso(30),
+        ancVisitCount: 2,
+        lastAncDate: daysAgoIso(80),
+      });
       // Other stage — never counted
       await insertJourney(db, { careStage: 'LABOR', gaWeeks: 39, edc: daysAheadIso(2) });
 
@@ -278,7 +303,10 @@ describe('journey-list service', () => {
     it('cohort=due_soon returns only women whose EDC falls within the window', async () => {
       const dueA = await insertJourney(db, { edc: daysAheadIso(5), lastAncDate: daysAgoIso(5) });
       const dueB = await insertJourney(db, { edc: daysAgoIso(3), lastAncDate: daysAgoIso(5) });
-      await insertJourney(db, { edc: daysAheadIso(ANC_OPS.dueSoonDays + 10), lastAncDate: daysAgoIso(5) });
+      await insertJourney(db, {
+        edc: daysAheadIso(ANC_OPS.dueSoonDays + 10),
+        lastAncDate: daysAgoIso(5),
+      });
 
       const result = await listJourneys(db, { stage: 'PREGNANCY', cohort: 'due_soon' });
 
