@@ -51,7 +51,7 @@ function buildMilestones(r: ReferralDetail): Milestone[] {
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+    <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
       {children}
     </div>
   );
@@ -73,10 +73,10 @@ export function ReferralDetailDialog({
     <Dialog open={referralId !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-lg" style={{ color: 'var(--ink-navy)' }}>
         <DialogHeader>
-          <DialogTitle className="flex flex-wrap items-center gap-2 text-[15px]">
+          <DialogTitle className="flex flex-wrap items-center gap-2 text-[17px]">
             รายละเอียดการส่งต่อ
             {referral?.referNumber && (
-              <span className="font-mono text-[12px] font-normal text-[var(--ink-navy-dim)]">
+              <span className="font-mono text-[14px] font-normal text-[var(--ink-navy-dim)]">
                 {referral.referNumber}
               </span>
             )}
@@ -104,16 +104,16 @@ export function ReferralDetailDialog({
             <div>
               <SectionHeading>PATIENT</SectionHeading>
               <div className="mt-1 flex items-center gap-1.5">
-                <span className="text-[14px] font-medium">{maskName(referral.patientName)}</span>
+                <span className="text-[16px] font-medium">{maskName(referral.patientName)}</span>
                 <RiskChip level={referral.ancRiskLevel} />
               </div>
-              <div className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+              <div className="font-mono text-[13px] text-[var(--ink-navy-muted)]">
                 HN {referral.hn || '—'}
                 {referral.gaWeeks != null && <> · GA {referral.gaWeeks}</>}
               </div>
               <Link
                 href={`/pregnancies/${referral.journeyId}`}
-                className="mt-1 inline-flex items-center gap-1 font-mono text-[11px] text-[var(--accent-navy)] hover:underline"
+                className="mt-1 inline-flex items-center gap-1 font-mono text-[13px] text-[var(--accent-navy)] hover:underline"
               >
                 <ExternalLink className="h-3 w-3" />
                 ดูประวัติผู้ป่วย
@@ -123,13 +123,13 @@ export function ReferralDetailDialog({
             {/* Route */}
             <div>
               <SectionHeading>ROUTE</SectionHeading>
-              <div className="mt-1 text-[13px]">
+              <div className="mt-1 text-[15px]">
                 {referral.fromHospital}
                 <span className="mx-1.5 text-[var(--ink-navy-muted)]">→</span>
                 <span className="font-medium">{referral.toHospital}</span>
               </div>
               {referral.suggestedAlternativeHospital && (
-                <div className="mt-0.5 text-[12px] text-[var(--ink-navy-dim)]">
+                <div className="mt-0.5 text-[14px] text-[var(--ink-navy-dim)]">
                   แนะนำส่งต่อ: {referral.suggestedAlternativeHospital}
                 </div>
               )}
@@ -138,9 +138,9 @@ export function ReferralDetailDialog({
             {/* Clinical */}
             <div>
               <SectionHeading>REASON / DX</SectionHeading>
-              <div className="mt-1 text-[13px]">{referral.reason || '—'}</div>
+              <div className="mt-1 text-[15px]">{referral.reason || '—'}</div>
               {referral.diagnosisCode && (
-                <div className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
+                <div className="font-mono text-[13px] text-[var(--ink-navy-dim)]">
                   ICD-10: {referral.diagnosisCode}
                 </div>
               )}
@@ -180,18 +180,18 @@ export function ReferralDetailDialog({
                           <span
                             className={
                               done
-                                ? 'text-[13px] font-medium'
-                                : 'text-[13px] text-[var(--ink-navy-muted)]'
+                                ? 'text-[15px] font-medium'
+                                : 'text-[15px] text-[var(--ink-navy-muted)]'
                             }
                           >
                             {m.label}
                           </span>
-                          <span className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-dim)]">
+                          <span className="font-mono text-[13px] tabular-nums text-[var(--ink-navy-dim)]">
                             {m.at ? `${formatThaiDate(m.at)} ${formatThaiTime(m.at)}` : '—'}
                           </span>
                         </div>
                         {m.detail && (
-                          <div className="text-[12px] text-[var(--ink-navy-dim)]">{m.detail}</div>
+                          <div className="text-[14px] text-[var(--ink-navy-dim)]">{m.detail}</div>
                         )}
                       </div>
                     </div>

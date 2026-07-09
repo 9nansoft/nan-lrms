@@ -79,7 +79,7 @@ function SyncCell({ hospital }: { hospital: DashboardHospital }) {
         : formatRelativeAge(hospital.lastSyncAt, 'th');
   return (
     <span
-      className="inline-flex items-center gap-1.5 font-mono text-[11px] tabular-nums"
+      className="inline-flex items-center gap-1.5 font-mono text-[13px] tabular-nums"
       style={{ color: health === 'ok' ? 'var(--ink-navy-muted)' : meta.color }}
       title={hospital.syncBlockedReason ?? undefined}
     >
@@ -92,7 +92,7 @@ function SyncCell({ hospital }: { hospital: DashboardHospital }) {
   );
 }
 
-const ROSTER_GRID = '50px 1fr 52px 52px 84px 14px';
+const ROSTER_GRID = '58px 1fr 60px 60px 96px 16px';
 
 interface RosterRowProps {
   hospital: DashboardHospital;
@@ -133,16 +133,16 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
       }}
     >
       <div
-        className="font-mono text-[12px] tabular-nums"
+        className="font-mono text-[14px] tabular-nums"
         style={{ color: 'var(--ink-navy-muted)' }}
       >
         {hospital.hcode}
       </div>
-      <div className="min-w-0 truncate text-[14px] font-medium text-[var(--ink-navy)]">
+      <div className="min-w-0 truncate text-[16px] font-medium text-[var(--ink-navy)]">
         {hospital.name}
         {hospital.counts.high > 0 && (
           <span
-            className="ml-2 border px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-[0.06em]"
+            className="ml-2 border px-1.5 py-0.5 align-middle font-mono text-[12px] font-semibold tracking-[0.06em]"
             style={{ color: 'var(--risk-high)', borderColor: 'var(--risk-high)' }}
           >
             HR
@@ -150,7 +150,7 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
         )}
         {hospital.ancCounts.hr3 > 0 && (
           <span
-            className="ml-2 border px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-[0.06em]"
+            className="ml-2 border px-1.5 py-0.5 align-middle font-mono text-[12px] font-semibold tracking-[0.06em]"
             style={{ color: 'var(--risk-medium)', borderColor: 'var(--risk-medium)' }}
             title={`ครรภ์เสี่ยงสูง (HR3) ${hospital.ancCounts.hr3} ราย`}
           >
@@ -159,7 +159,7 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
         )}
       </div>
       <div
-        className="text-right font-mono text-[13px] font-semibold tabular-nums"
+        className="text-right font-mono text-[15px] font-semibold tabular-nums"
         style={{
           color: hospital.ancCounts.total > 0 ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
         }}
@@ -167,7 +167,7 @@ function RosterRow({ hospital, isSelected, onSelect, onOpen }: RosterRowProps) {
         {hospital.ancCounts.total > 0 ? hospital.ancCounts.total : '—'}
       </div>
       <div
-        className="text-right font-mono text-[13px] font-semibold tabular-nums"
+        className="text-right font-mono text-[15px] font-semibold tabular-nums"
         style={{
           color: hospital.counts.total > 0 ? 'var(--ink-navy)' : 'var(--ink-navy-muted)',
         }}
@@ -199,7 +199,7 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
         style={{ borderColor: 'var(--rule-strong)' }}
       >
         <Building2 className="mx-auto mb-2 h-8 w-8 text-[var(--ink-navy-muted)] opacity-50" />
-        <p className="font-mono text-[12px] text-[var(--ink-navy-muted)]">
+        <p className="font-mono text-[14px] text-[var(--ink-navy-muted)]">
           ไม่พบโรงพยาบาลที่ตรงกับการค้นหา
         </p>
       </div>
@@ -210,7 +210,7 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
     <div className="space-y-3">
       {/* Column legend — mirrors the row grid so numbers read as columns. */}
       <div
-        className="grid gap-3 px-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]"
+        className="grid gap-3 px-3 font-mono text-[12px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]"
         style={{ gridTemplateColumns: ROSTER_GRID }}
       >
         <div>CODE</div>
@@ -239,17 +239,17 @@ function RosterList({ hospitals, selected, onSelect }: RosterListProps) {
               style={{ borderBottom: '1px solid var(--rule-strong)' }}
             >
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--ink-navy-dim)]">
+                <span className="font-mono text-[13px] uppercase tracking-[0.14em] text-[var(--ink-navy-dim)]">
                   {config?.nameTh ?? level}
                 </span>
                 <span
-                  className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-[var(--ink-navy-dim)]"
+                  className="rounded-sm border px-1.5 py-0.5 font-mono text-[13px] tabular-nums text-[var(--ink-navy-dim)]"
                   style={{ borderColor: 'var(--rule-strong)' }}
                 >
                   {levelHospitals.length}
                 </span>
               </div>
-              <div className="flex items-center gap-3 font-mono text-[11px] tracking-[0.06em] text-[var(--ink-navy-muted)]">
+              <div className="flex items-center gap-3 font-mono text-[13px] tracking-[0.06em] text-[var(--ink-navy-muted)]">
                 <span>
                   ANC{' '}
                   <span className="font-semibold tabular-nums text-[var(--accent-navy)]">
@@ -374,17 +374,17 @@ export default function HospitalsPage() {
         style={{ borderBottom: '1px solid var(--rule-strong)' }}
       >
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
             PROVINCIAL REGISTRY · HOSPITALS · GEOGRAPHIC VIEW
           </div>
           <h1
-            className="mt-0.5 text-[24px] font-bold leading-tight tracking-tight"
+            className="mt-0.5 text-[26px] font-bold leading-tight tracking-tight"
             style={{ color: 'var(--ink-navy)' }}
           >
             โรงพยาบาล จังหวัดขอนแก่น
           </h1>
         </div>
-        <p className="ml-auto font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
+        <p className="ml-auto font-mono text-[12px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
           อัปเดตล่าสุด{' '}
           <span className="tabular-nums text-[var(--ink-navy-dim)]">
             {updatedAt ? formatThaiTime(updatedAt) : '—'}
@@ -402,40 +402,40 @@ export default function HospitalsPage() {
         }}
       >
         <div className="border-r border-[var(--rule-strong)] px-5 py-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             ROSTER
           </div>
           <div
-            className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
+            className="mt-1 font-mono text-[32px] font-semibold leading-none tabular-nums"
             style={{ color: 'var(--ink-navy)', letterSpacing: '-0.02em' }}
           >
             {tabHospitals.length}
-            <span className="ml-2 font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
+            <span className="ml-2 font-mono text-[14px] font-normal text-[var(--ink-navy-muted)]">
               โรงพยาบาล
             </span>
           </div>
-          <div className="mt-1 font-mono text-[11px] text-[var(--ink-navy-dim)]">
+          <div className="mt-1 font-mono text-[13px] text-[var(--ink-navy-dim)]">
             มีผู้ป่วยในระบบ {withWorkload} / {tabHospitals.length} แห่ง
           </div>
         </div>
 
         <div className="border-r border-[var(--rule-strong)] px-5 py-3" data-testid="kpi-sync">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             DATA SYNC
           </div>
           <div
-            className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
+            className="mt-1 font-mono text-[32px] font-semibold leading-none tabular-nums"
             style={{
               color: syncAttention === 0 ? 'var(--ink-navy)' : 'var(--risk-medium)',
               letterSpacing: '-0.02em',
             }}
           >
             <span>{syncBreakdown.ok}</span>
-            <span className="ml-1 font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
+            <span className="ml-1 font-mono text-[14px] font-normal text-[var(--ink-navy-muted)]">
               /{tabHospitals.length} ข้อมูลสด
             </span>
           </div>
-          <div className="mt-1 font-mono text-[11px] text-[var(--ink-navy-dim)]">
+          <div className="mt-1 font-mono text-[13px] text-[var(--ink-navy-dim)]">
             ช้า {syncBreakdown.stale + syncBreakdown.critical} · ยังไม่ซิงก์ {syncBreakdown.never} ·{' '}
             <span style={{ color: syncBreakdown.blocked > 0 ? 'var(--risk-high)' : undefined }}>
               ถูกบล็อก {syncBreakdown.blocked}
@@ -444,33 +444,33 @@ export default function HospitalsPage() {
         </div>
 
         <div className="border-r border-[var(--rule-strong)] px-5 py-3" data-testid="kpi-anc">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             ANC REGISTRY
           </div>
           <div
-            className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
+            className="mt-1 font-mono text-[32px] font-semibold leading-none tabular-nums"
             style={{ color: 'var(--accent-navy)', letterSpacing: '-0.02em' }}
           >
             <span>{totalAnc}</span>
-            <span className="ml-2 font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
+            <span className="ml-2 font-mono text-[14px] font-normal text-[var(--ink-navy-muted)]">
               หญิงตั้งครรภ์
             </span>
           </div>
-          <div className="mt-1 font-mono text-[11px]" style={{ color: 'var(--risk-high)' }}>
+          <div className="mt-1 font-mono text-[13px]" style={{ color: 'var(--risk-high)' }}>
             HR3 {totalAncHr3} ราย
           </div>
         </div>
 
         <div className="px-5 py-3" data-testid="kpi-labor">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             LABOR WARD
           </div>
           <div
-            className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums"
+            className="mt-1 font-mono text-[32px] font-semibold leading-none tabular-nums"
             style={{ color: 'var(--ink-navy)', letterSpacing: '-0.02em' }}
           >
             <span>{totalActive}</span>
-            <span className="ml-2 font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
+            <span className="ml-2 font-mono text-[14px] font-normal text-[var(--ink-navy-muted)]">
               ผู้คลอด{totalHigh > 0 ? ` · เสี่ยงสูง ${totalHigh}` : ''}
             </span>
           </div>
@@ -499,7 +499,7 @@ export default function HospitalsPage() {
               />
             </div>
           ) : (
-            <div className="mt-1 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+            <div className="mt-1 font-mono text-[13px] text-[var(--ink-navy-muted)]">
               ไม่มีผู้คลอดที่กำลังรอคลอด
             </div>
           )}
@@ -539,7 +539,7 @@ export default function HospitalsPage() {
                   setSelected(null);
                 }}
                 className={cn(
-                  'inline-flex items-center gap-1.5 px-3 py-1.5 font-mono text-[12px] tracking-[0.06em] transition-colors',
+                  'inline-flex items-center gap-1.5 px-3 py-1.5 font-mono text-[14px] tracking-[0.06em] transition-colors',
                   active ? 'font-semibold' : 'font-normal hover:bg-[var(--accent-navy-soft)]',
                 )}
                 style={{
@@ -551,7 +551,7 @@ export default function HospitalsPage() {
                 <Icon className="h-3.5 w-3.5" />
                 {t.label}
                 <span
-                  className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] tabular-nums"
+                  className="rounded-sm border px-1.5 py-0.5 font-mono text-[13px] tabular-nums"
                   style={{
                     borderColor: active ? 'var(--accent-navy)' : 'var(--rule-strong)',
                     color: active ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
@@ -571,7 +571,7 @@ export default function HospitalsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="ค้นหาชื่อหรือรหัส…"
-            className="h-8 w-full rounded-sm border bg-white pl-8 pr-3 text-[13px] focus:border-[var(--accent-navy)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-navy-soft)]"
+            className="h-8 w-full rounded-sm border bg-white pl-8 pr-3 text-[15px] focus:border-[var(--accent-navy)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-navy-soft)]"
             style={{ borderColor: 'var(--rule-strong)' }}
           />
         </div>

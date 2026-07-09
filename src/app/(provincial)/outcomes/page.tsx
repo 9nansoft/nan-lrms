@@ -28,7 +28,7 @@ const RANGE_OPTIONS: Array<{ value: string; label: string }> = [
 function FlagChip({ color, children }: { color: string; children: React.ReactNode }) {
   return (
     <span
-      className="inline-block border px-1 py-px font-mono text-[10px] font-semibold tracking-[0.04em]"
+      className="inline-block border px-1 py-px font-mono text-[12px] font-semibold tracking-[0.04em]"
       style={{ color, borderColor: color, background: 'transparent' }}
     >
       {children}
@@ -169,20 +169,20 @@ export default function OutcomesPage() {
         style={{ borderBottom: '1px solid var(--rule-strong)' }}
       >
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
             PROVINCIAL REGISTRY · NEONATAL OUTCOMES
           </div>
           <h1
-            className="mt-0.5 text-[24px] font-bold leading-tight tracking-tight"
+            className="mt-0.5 text-[26px] font-bold leading-tight tracking-tight"
             style={{ color: 'var(--ink-navy)' }}
           >
             ผลลัพธ์ทารก
           </h1>
         </div>
-        <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+        <p className="font-mono text-[13px] text-[var(--ink-navy-muted)]">
           ตัวชี้วัดทารกแรกเกิดทั้งจังหวัด · ช่วง{rangeLabel}
         </p>
-        <p className="ml-auto font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
+        <p className="ml-auto font-mono text-[12px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
           อัปเดตล่าสุด{' '}
           <span className="tabular-nums text-[var(--ink-navy-dim)]">
             {lastUpdated ? formatThaiTime(lastUpdated) : '—'}
@@ -197,7 +197,7 @@ export default function OutcomesPage() {
         style={{ borderBottom: '1px solid var(--rule-strong)' }}
       >
         <div className="flex items-center gap-1">
-          <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
+          <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
             PERIOD:
           </span>
           {RANGE_OPTIONS.map((opt) => {
@@ -207,7 +207,7 @@ export default function OutcomesPage() {
                 key={opt.value}
                 onClick={() => setRange(opt.value)}
                 className={cn(
-                  'rounded-sm border bg-white px-2.5 py-1 font-mono text-[11px] tracking-[0.06em] transition-colors',
+                  'rounded-sm border bg-white px-2.5 py-1 font-mono text-[13px] tracking-[0.06em] transition-colors',
                   active ? 'font-semibold' : 'font-normal',
                 )}
                 style={{
@@ -223,14 +223,14 @@ export default function OutcomesPage() {
         </div>
 
         <div className="flex items-center gap-1">
-          <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
+          <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
             HOSPITAL:
           </span>
           <select
             data-testid="filter-hospital"
             value={hospitalFilter}
             onChange={(e) => setHospitalFilter(e.target.value)}
-            className="h-7 max-w-[240px] rounded-sm border bg-white px-1.5 font-mono text-[11px] focus:border-[var(--accent-navy)] focus:outline-none"
+            className="h-7 max-w-[240px] rounded-sm border bg-white px-1.5 font-mono text-[13px] focus:border-[var(--accent-navy)] focus:outline-none"
             style={{
               borderColor: hospitalFilter ? 'var(--accent-navy)' : 'var(--rule-strong)',
               color: hospitalFilter ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
@@ -265,20 +265,20 @@ export default function OutcomesPage() {
             >
               <div className="flex items-center gap-2" style={{ color: t.color }}>
                 <Icon className="h-3.5 w-3.5" />
-                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   {t.labelEn}
                 </div>
               </div>
               <div className="flex items-baseline gap-2">
                 <span
-                  className="font-mono text-[28px] font-semibold leading-none tabular-nums"
+                  className="font-mono text-[32px] font-semibold leading-none tabular-nums"
                   style={{ color: t.color, letterSpacing: '-0.02em' }}
                 >
                   {t.value}
                 </span>
-                <span className="font-mono text-[10px] text-[var(--ink-navy-dim)]">{t.sub}</span>
+                <span className="font-mono text-[12px] text-[var(--ink-navy-dim)]">{t.sub}</span>
               </div>
-              <div className="text-[11px] text-[var(--ink-navy-dim)]">{t.label}</div>
+              <div className="text-[13px] text-[var(--ink-navy-dim)]">{t.label}</div>
             </div>
           );
         })}
@@ -287,7 +287,7 @@ export default function OutcomesPage() {
       {/* Honest empty state while the newborn sync backfills */}
       {noDataYet && (
         <div
-          className="bg-white px-5 py-3 text-[12px]"
+          className="bg-white px-5 py-3 text-[14px]"
           style={{ borderBottom: '1px solid var(--rule-strong)', color: 'var(--ink-navy-dim)' }}
         >
           ยังไม่มีข้อมูลทารกจากการซิงก์ HOSxP ในช่วงที่เลือก —
@@ -302,13 +302,13 @@ export default function OutcomesPage() {
       >
         {/* Six-month trend */}
         <div className="bg-white px-5 py-3" data-testid="outcome-trend">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             BIRTHS · LAST 6 MONTHS
           </div>
           <div className="mt-2 flex h-[96px] items-end gap-2">
             {kpis.trend.map((t) => (
               <div key={t.month} className="flex flex-1 flex-col items-center gap-0.5">
-                <span className="font-mono text-[10px] tabular-nums text-[var(--ink-navy-dim)]">
+                <span className="font-mono text-[12px] tabular-nums text-[var(--ink-navy-dim)]">
                   {t.births > 0 ? t.births : ''}
                 </span>
                 <div
@@ -318,11 +318,11 @@ export default function OutcomesPage() {
                     background: t.births > 0 ? 'var(--accent-navy)' : 'var(--surface-cool)',
                   }}
                 />
-                <span className="font-mono text-[9px] tabular-nums text-[var(--ink-navy-muted)]">
+                <span className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-muted)]">
                   {t.month.slice(5)}/{t.month.slice(2, 4)}
                 </span>
                 <span
-                  className="font-mono text-[9px] tabular-nums"
+                  className="font-mono text-[11px] tabular-nums"
                   style={{ color: t.lbw > 0 ? 'var(--risk-medium)' : 'var(--ink-navy-muted)' }}
                 >
                   {t.lbw > 0 ? `LBW ${t.lbw}` : '·'}
@@ -334,13 +334,13 @@ export default function OutcomesPage() {
 
         {/* Per-hospital breakdown */}
         <div className="bg-white px-5 py-3" data-testid="hospital-outcomes">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             BY HOSPITAL · {rangeLabel}
           </div>
           <div className="mt-2">
             <div
-              className="grid gap-2 border-b border-[var(--rule-strong)] pb-1 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
-              style={{ gridTemplateColumns: '1fr 64px 90px 80px' }}
+              className="grid gap-2 border-b border-[var(--rule-strong)] pb-1 font-mono text-[12px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
+              style={{ gridTemplateColumns: '1fr 72px 104px 92px' }}
             >
               <div>HOSPITAL</div>
               <div className="text-right">BIRTHS</div>
@@ -348,7 +348,7 @@ export default function OutcomesPage() {
               <div className="text-right">APGAR&lt;7</div>
             </div>
             {kpis.byHospital.length === 0 ? (
-              <p className="py-4 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]">
+              <p className="py-4 text-center font-mono text-[13px] text-[var(--ink-navy-muted)]">
                 — ไม่มีข้อมูลในช่วงที่เลือก —
               </p>
             ) : (
@@ -358,22 +358,22 @@ export default function OutcomesPage() {
                   data-testid={`hospital-outcome-${h.hcode}`}
                   className="grid items-center gap-2 border-b py-1.5"
                   style={{
-                    gridTemplateColumns: '1fr 64px 90px 80px',
+                    gridTemplateColumns: '1fr 72px 104px 92px',
                     borderColor: 'var(--rule-hair)',
                   }}
                 >
-                  <div className="truncate text-[12px] text-[var(--ink-navy)]">{h.name}</div>
-                  <div className="text-right font-mono text-[12px] font-semibold tabular-nums">
+                  <div className="truncate text-[14px] text-[var(--ink-navy)]">{h.name}</div>
+                  <div className="text-right font-mono text-[14px] font-semibold tabular-nums">
                     {h.births}
                   </div>
                   <div
-                    className="text-right font-mono text-[11px] tabular-nums"
+                    className="text-right font-mono text-[13px] tabular-nums"
                     style={{ color: h.lbw > 0 ? 'var(--risk-medium)' : 'var(--ink-navy-muted)' }}
                   >
                     {h.lbw} ({h.births > 0 ? ((h.lbw / h.births) * 100).toFixed(1) : '0.0'}%)
                   </div>
                   <div
-                    className="text-right font-mono text-[11px] tabular-nums"
+                    className="text-right font-mono text-[13px] tabular-nums"
                     style={{
                       color: h.lowApgar > 0 ? 'var(--risk-high)' : 'var(--ink-navy-muted)',
                     }}
@@ -401,10 +401,10 @@ export default function OutcomesPage() {
         </SectionLabel>
         <div className="mt-2 border bg-white" style={{ borderColor: 'var(--rule-strong)' }}>
           <div className="overflow-x-auto">
-            <div className="min-w-[860px]">
+            <div className="min-w-[980px]">
               <div
-                className="grid gap-2 border-b border-[var(--rule-strong)] px-3 py-2 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
-                style={{ gridTemplateColumns: '1.4fr 90px 130px 110px 90px 150px 1fr' }}
+                className="grid gap-2 border-b border-[var(--rule-strong)] px-3 py-2 font-mono text-[12px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
+                style={{ gridTemplateColumns: '1.4fr 100px 148px 125px 100px 172px 1fr' }}
               >
                 <div>MOTHER</div>
                 <div>INFANT</div>
@@ -417,7 +417,7 @@ export default function OutcomesPage() {
               {kpis.recent.length === 0 ? (
                 <div className="px-3 py-10 text-center">
                   <Baby className="mx-auto mb-2 h-8 w-8 text-[var(--ink-navy-muted)] opacity-50" />
-                  <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                  <p className="font-mono text-[13px] text-[var(--ink-navy-muted)]">
                     ไม่มีการเกิดในช่วงที่เลือก
                   </p>
                 </div>
@@ -442,24 +442,24 @@ function BirthRow({ birth: b }: { birth: RecentBirthEntry }) {
       data-low-apgar={lowApgar ? 'true' : 'false'}
       className="grid cursor-pointer items-center gap-2 border-b px-3 py-2 transition-colors hover:bg-[var(--accent-navy-soft)]"
       style={{
-        gridTemplateColumns: '1.4fr 90px 130px 110px 90px 150px 1fr',
+        gridTemplateColumns: '1.4fr 100px 148px 125px 100px 172px 1fr',
         borderColor: 'var(--rule-hair)',
         borderLeft: `3px solid ${lowApgar ? 'var(--risk-high)' : 'transparent'}`,
         minHeight: 44,
       }}
     >
-      <div className="truncate text-[13px] font-medium text-[var(--ink-navy)]">
+      <div className="truncate text-[15px] font-medium text-[var(--ink-navy)]">
         {maskName(b.motherName)}
       </div>
-      <div className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
+      <div className="font-mono text-[13px] text-[var(--ink-navy-dim)]">
         #{b.infantNumber} · {b.sex ?? '—'}
       </div>
-      <div className="flex items-center gap-1.5 font-mono text-[12px] tabular-nums">
+      <div className="flex items-center gap-1.5 font-mono text-[14px] tabular-nums">
         {b.birthWeightG != null ? `${b.birthWeightG.toLocaleString()} g` : '—'}
         {lbw && <FlagChip color="var(--risk-medium)">LBW</FlagChip>}
       </div>
       <div
-        className="font-mono text-[12px] tabular-nums"
+        className="font-mono text-[14px] tabular-nums"
         style={{ color: lowApgar ? 'var(--risk-high)' : 'var(--ink-navy-dim)' }}
       >
         {b.apgar1min ?? '—'} / {b.apgar5min ?? '—'}
@@ -468,13 +468,13 @@ function BirthRow({ birth: b }: { birth: RecentBirthEntry }) {
         {b.resuscitated ? (
           <FlagChip color="var(--risk-medium)">กู้ชีพ</FlagChip>
         ) : (
-          <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">—</span>
+          <span className="font-mono text-[13px] text-[var(--ink-navy-muted)]">—</span>
         )}
       </div>
-      <div className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-dim)]">
+      <div className="font-mono text-[13px] tabular-nums text-[var(--ink-navy-dim)]">
         {formatThaiDate(b.bornAt)} {formatThaiTime(b.bornAt)}
       </div>
-      <div className="truncate text-[11px] text-[var(--ink-navy-dim)]">{b.hospitalName}</div>
+      <div className="truncate text-[13px] text-[var(--ink-navy-dim)]">{b.hospitalName}</div>
     </Link>
   );
 }

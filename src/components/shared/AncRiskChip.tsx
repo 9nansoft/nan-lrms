@@ -9,7 +9,7 @@ export function AncRiskChip({ level }: { level: string }) {
   return (
     <span
       data-risk={level}
-      className="inline-block border px-1 py-px font-mono text-[10px] font-semibold tracking-[0.04em]"
+      className="inline-block border px-1 py-px font-mono text-[12px] font-semibold tracking-[0.04em]"
       style={{ color, borderColor: color, background: 'transparent' }}
     >
       {level}

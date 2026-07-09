@@ -36,7 +36,7 @@ export function Pill({ meta, fallback }: { meta: StatusMeta | undefined; fallbac
   const m = meta ?? { color: 'var(--ink-navy-muted)', label: fallback };
   return (
     <span
-      className="inline-block border px-1.5 py-0.5 text-center font-mono text-[10px] font-semibold tracking-[0.06em]"
+      className="inline-block border px-1.5 py-0.5 text-center font-mono text-[12px] font-semibold tracking-[0.06em]"
       style={{ color: m.color, borderColor: m.color, background: 'transparent' }}
     >
       {m.label}
@@ -50,7 +50,7 @@ export function AgeChip({ age, initiatedAt }: { age: ReferralAgeClass; initiated
   const m = AGE_META[age];
   return (
     <span
-      className="inline-block border px-1 py-px font-mono text-[10px] font-semibold tracking-[0.04em]"
+      className="inline-block border px-1 py-px font-mono text-[12px] font-semibold tracking-[0.04em]"
       style={{ color: m.color, borderColor: m.color }}
     >
       {m.label} {formatRelativeAge(initiatedAt, 'th')}
