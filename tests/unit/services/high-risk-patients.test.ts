@@ -25,7 +25,7 @@ describe('getHighRiskPatients', () => {
     expect(result).toEqual([]);
   });
 
-  it('should return only HIGH and MEDIUM risk patients', async () => {
+  it('returns ALL active patients — high first, LOW included, unscored last', async () => {
     const hospitals = await db.query<{ id: string }>(
       "SELECT id FROM hospitals WHERE hcode = '10670'",
     );
@@ -61,13 +61,20 @@ describe('getHighRiskPatients', () => {
       [uuidv4(), patHigh, 12, 'HIGH', now, now],
     );
 
+    // A fourth ACTIVE patient with no CPD score at all — must still appear
+    // (the INNER JOIN used to silently drop her), sorted last.
+    await db.execute(
+      'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, ga_weeks, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [uuidv4(), hospitalId, 'HN-U1', 'AN-U1', 'enc-name', 30, 36, now, 'ACTIVE', now, now, now],
+    );
+
     const result = await getHighRiskPatients(db);
-    expect(result).toHaveLength(2);
-    // HIGH risk first (score 12), then MEDIUM (score 7)
-    expect(result[0].riskLevel).toBe('HIGH');
+    expect(result).toHaveLength(4);
+    // Score DESC: HIGH (12), MEDIUM (7), LOW (2), then unscored.
+    expect(result.map((r) => r.riskLevel)).toEqual(['HIGH', 'MEDIUM', 'LOW', 'UNSCORED']);
     expect(result[0].cpdScore).toBe(12);
-    expect(result[1].riskLevel).toBe('MEDIUM');
-    expect(result[1].cpdScore).toBe(7);
+    expect(result[3].cpdScore).toBe(0);
+    expect(result[3].an).toBe('AN-U1');
   });
 
   it('should order by score DESC (highest risk first)', async () => {

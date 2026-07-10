@@ -263,8 +263,12 @@ interface HighRiskRow {
 
 export async function getHighRiskPatients(
   db: DatabaseAdapter,
-  limit: number = 20,
+  limit: number = 50,
 ): Promise<HighRiskPatient[]> {
+  // The province-wide ACTIVE labor roster, high risk first. LEFT JOIN, not
+  // INNER: the panel's "ALL ACTIVE" tab must show LOW-risk and not-yet-scored
+  // women too — the old HIGH/MEDIUM pre-filter meant "all active" showed one
+  // patient on a calm ward and silently hid unscored admissions.
   const rows = await db.query<HighRiskRow>(
     `
     SELECT
@@ -282,17 +286,15 @@ export async function getHighRiskPatients(
       cp.partograph_alert_count,
       (SELECT MAX(cv.measured_at) FROM cached_vital_signs cv WHERE cv.patient_id = cp.id) AS last_vital_at
     FROM cached_patients cp
-    INNER JOIN cpd_scores cs ON cs.patient_id = cp.id
-      AND cs.id = (
+    LEFT JOIN cpd_scores cs ON cs.id = (
         SELECT cs2.id FROM cpd_scores cs2
         WHERE cs2.patient_id = cp.id
         ORDER BY cs2.calculated_at DESC LIMIT 1
       )
     INNER JOIN hospitals h ON h.id = cp.hospital_id
     WHERE cp.labor_status = 'ACTIVE'
-      AND cs.risk_level IN ('HIGH', 'MEDIUM')
       AND h.is_active = true
-    ORDER BY cs.score DESC
+    ORDER BY CASE WHEN cs.score IS NULL THEN 1 ELSE 0 END, cs.score DESC
     LIMIT ?
   `,
     [limit],
@@ -304,8 +306,8 @@ export async function getHighRiskPatients(
     name: decryptSafe(row.name),
     age: row.age,
     gaWeeks: row.ga_weeks,
-    cpdScore: row.cpd_score,
-    riskLevel: row.risk_level,
+    cpdScore: row.cpd_score == null ? 0 : Number(row.cpd_score),
+    riskLevel: row.risk_level ?? 'UNSCORED',
     hospital: row.hospital_name,
     hcode: row.hcode,
     admitDate: row.admit_date,
