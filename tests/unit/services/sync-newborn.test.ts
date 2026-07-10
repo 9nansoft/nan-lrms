@@ -408,6 +408,35 @@ describe('newborn polling sync', () => {
     expect(journeys[0].care_stage).toBe('DELIVERED');
   });
 
+  it('normalizes Buddhist-Era birth dates and drops implausible future rows', async () => {
+    const result = await syncNewbornsFromRows(db, HOSPITAL_ID, [
+      // BE year 2569 = CE 2026 — must ingest with the converted date.
+      makeInfantRow('AN001', 1, { birth_date: '2569-07-01' }),
+      // Still in the future after conversion — must be dropped, not cached.
+      makeInfantRow('AN001', 2, { birth_date: '2570-01-01' }),
+    ]);
+
+    expect(result.upserted).toBe(1);
+    const rows = await db.query<{ born_at: string }>(
+      `SELECT born_at FROM cached_newborns WHERE journey_id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].born_at.slice(0, 10)).toBe('2026-07-01');
+  });
+
+  it('cutoff never exceeds today even when a poisoned born_at slipped into the cache', async () => {
+    const now = new Date('2026-07-10T12:00:00Z');
+    const iso = now.toISOString();
+    await db.execute(
+      `INSERT INTO cached_newborns (id, journey_id, infant_number, born_at, synced_at, created_at)
+       VALUES ('nb-poison', ?, 9, '2556-11-03', ?, ?)`,
+      [JOURNEY_ID, iso, iso],
+    );
+    const cutoff = await newbornSyncCutoffDate(db, HOSPITAL_ID, now);
+    expect(cutoff <= '2026-07-10').toBe(true);
+  });
+
   it('cutoff: 365-day backfill window when nothing is cached for the hospital', async () => {
     const now = new Date('2026-07-09T12:00:00+07:00');
     const cutoff = await newbornSyncCutoffDate(db, HOSPITAL_ID, now);

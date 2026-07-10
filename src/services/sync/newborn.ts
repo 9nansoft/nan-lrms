@@ -6,6 +6,7 @@ import { encrypt, getEncryptionKey } from '@/lib/encryption';
 import { isValidThaiCidChecksum } from '@/lib/cid';
 import { createHash, randomUUID } from 'crypto';
 import { logger } from '@/lib/logger';
+import { normalizeHosxpDate, isPlausibleEventDate } from '@/lib/hosxp-date';
 import { transitionToDelivered } from '@/services/journey';
 
 export async function syncNewbornData(
@@ -105,7 +106,9 @@ export async function newbornSyncCutoffDate(
   const baseMs = maxBorn
     ? new Date(maxBorn).getTime() - REFRESH_OVERLAP_DAYS * DAY_MS
     : now.getTime() - BACKFILL_LOOKBACK_DAYS * DAY_MS;
-  return new Date(baseMs).toISOString().slice(0, 10);
+  // Never let a poisoned future born_at push the cutoff past today — that
+  // would make every subsequent HOSxP query return nothing, forever.
+  return new Date(Math.min(baseMs, now.getTime())).toISOString().slice(0, 10);
 }
 
 interface BirthResolutionItem {
@@ -291,8 +294,21 @@ export async function syncNewbornsFromRows(
   };
   if (rows.length === 0) return result;
 
+  // Date hygiene: convert Buddhist-Era years, drop rows whose birth date is
+  // still in the future afterwards — one poisoned date would wedge the
+  // MAX(born_at) cutoff and freeze the hospital's incremental sync.
+  const sanitized = rows
+    .map((row) => ({ ...row, birth_date: normalizeHosxpDate(row.birth_date) }))
+    .filter((row) => row.birth_date == null || isPlausibleEventDate(row.birth_date));
+  if (sanitized.length < rows.length) {
+    logger.warn('newborn_rows_dropped_bad_date', {
+      hospitalId,
+      dropped: rows.length - sanitized.length,
+    });
+  }
+
   const byAn = new Map<string, HosxpLabourInfantRow[]>();
-  for (const row of rows) {
+  for (const row of sanitized) {
     const an = String(row.an);
     const list = byAn.get(an) ?? [];
     list.push(row);
@@ -364,8 +380,9 @@ export async function syncNewbornsFromPregnancyRows(
   // (labor_date NULL) carry no outcome yet.
   const byAn = new Map<string, HosxpIptPregnancyRow>();
   for (const row of rows) {
-    if (row.labor_date == null) continue;
-    byAn.set(String(row.an), row);
+    const laborDate = normalizeHosxpDate(row.labor_date);
+    if (laborDate == null || !isPlausibleEventDate(laborDate)) continue;
+    byAn.set(String(row.an), { ...row, labor_date: laborDate });
   }
   if (byAn.size === 0) return result;
 
