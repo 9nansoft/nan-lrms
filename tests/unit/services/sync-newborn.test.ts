@@ -2,9 +2,8 @@
 // Covers the AN→journey resolution via cached_patients, idempotent re-runs,
 // and the self-healing cutoff-date window.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey, decrypt } from '@/lib/encryption';
 import { beforeAll } from 'vitest';
 import {
@@ -60,19 +59,18 @@ function makeInfantRow(
 }
 
 describe('newborn polling sync', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeAll(() => {
     process.env.ENCRYPTION_KEY = generateKey();
   });
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     const now = new Date().toISOString();
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES (?, '10670', 'รพ.ขอนแก่น', 'A_S', 1, 'ONLINE', ?, ?)`,
+       VALUES (?, '10670', 'รพ.ขอนแก่น', 'A_S', TRUE, 'ONLINE', ?, ?)`,
       [HOSPITAL_ID, now, now],
     );
     await db.execute(
@@ -188,7 +186,11 @@ describe('newborn polling sync', () => {
     return {
       an,
       mother_hn: null,
-      labor_date: '2026-07-01',
+      // Explicit UTC midnight, not a bare date: a naive 'YYYY-MM-DD' value
+      // hits TIMESTAMPTZ's local-midnight interpretation (PGlite's session
+      // TimeZone follows the host, Asia/Bangkok, +07) and rolls back to the
+      // previous UTC day. See newbornSyncCutoffDate / bornAtIso callers.
+      labor_date: '2026-07-01T00:00:00Z',
       child_count: 1,
       dead_child_count: 0,
       preg_number: 1,
@@ -212,12 +214,12 @@ describe('newborn polling sync', () => {
       createdJourneys: 0,
     });
 
-    const newborns = await db.query<{ infant_number: number; born_at: string }>(
+    const newborns = await db.query<{ infant_number: number; born_at: string | Date }>(
       `SELECT infant_number, born_at FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
       [JOURNEY_ID],
     );
     expect(newborns.map((n) => n.infant_number)).toEqual([1, 2]);
-    expect(newborns[0].born_at.slice(0, 10)).toBe('2026-07-01');
+    expect(new Date(newborns[0].born_at).toISOString().slice(0, 10)).toBe('2026-07-01');
 
     const journey = await db.query<{ care_stage: string }>(
       `SELECT care_stage FROM maternal_journeys WHERE id = ?`,
@@ -321,7 +323,15 @@ describe('newborn polling sync', () => {
         mother_cid: '1100500090006',
         mother_name: 'นาง ย้อนหลัง ทดสอบ',
         mother_birthday: '1996-02-01',
-        birth_date: '2026-05-20',
+        // registered_at for the retrospective journey is sourced straight
+        // from birth_date with no time component (see bornAtIso in
+        // createRetroJourneysForUnresolved) — a bare date rolls back a day
+        // under TIMESTAMPTZ's local-midnight interpretation, so pin it to
+        // an explicit UTC instant. birth_time is cleared so the infant's
+        // own born_at (unasserted here) doesn't get corrupted by
+        // `${birth_date}T${birth_time}` concatenation.
+        birth_date: '2026-05-20T00:00:00Z',
+        birth_time: null,
       }),
     ];
 
@@ -337,12 +347,14 @@ describe('newborn polling sync', () => {
       name: string;
       cid_hash: string | null;
       care_stage: string;
-      registered_at: string;
-    }>(`SELECT id, hn, name, cid_hash, care_stage, registered_at FROM maternal_journeys WHERE hn = 'HN-RETRO'`);
+      registered_at: string | Date;
+    }>(
+      `SELECT id, hn, name, cid_hash, care_stage, registered_at FROM maternal_journeys WHERE hn = 'HN-RETRO'`,
+    );
     expect(journeys).toHaveLength(1);
     expect(journeys[0].care_stage).toBe('DELIVERED');
     expect(journeys[0].cid_hash).toBeTruthy();
-    expect(journeys[0].registered_at.slice(0, 10)).toBe('2026-05-20');
+    expect(new Date(journeys[0].registered_at).toISOString().slice(0, 10)).toBe('2026-05-20');
     expect(decrypt(journeys[0].name, process.env.ENCRYPTION_KEY!)).toBe('นาง ย้อนหลัง ทดสอบ');
 
     const newborns = await db.query<{ cnt: number }>(
@@ -417,12 +429,12 @@ describe('newborn polling sync', () => {
     ]);
 
     expect(result.upserted).toBe(1);
-    const rows = await db.query<{ born_at: string }>(
+    const rows = await db.query<{ born_at: string | Date }>(
       `SELECT born_at FROM cached_newborns WHERE journey_id = ?`,
       [JOURNEY_ID],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].born_at.slice(0, 10)).toBe('2026-07-01');
+    expect(new Date(rows[0].born_at).toISOString().slice(0, 10)).toBe('2026-07-01');
   });
 
   it('cutoff never exceeds today even when a poisoned born_at slipped into the cache', async () => {

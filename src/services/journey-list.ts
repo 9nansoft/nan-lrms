@@ -5,6 +5,7 @@
 // service → NextResponse). All SQL is parameterised and every user-facing name
 // is passed through decryptSafe at the response boundary.
 import type { DatabaseAdapter } from '@/db/adapter';
+import { toIsoString } from '@/lib/dates';
 import { decryptSafe } from '@/lib/encryption';
 import { CareStage } from '@/types/domain';
 import { ancFreshnessCutoffs, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
@@ -177,15 +178,15 @@ function mapJourneyListItem(r: Record<string, unknown>, decryptedName?: string):
     gravida: r.gravida as number,
     para: r.para as number,
     gaWeeks: effectiveGaWeeks(r.ga_weeks as number | null, r.edc as string | null),
-    lmp: r.lmp as string | null,
-    edc: r.edc as string | null,
+    lmp: toIsoString(r.lmp as string | Date | null),
+    edc: toIsoString(r.edc as string | Date | null),
     careStage: r.care_stage as string,
     ancRiskLevel: r.anc_risk_level as string,
     ancVisitCount: r.anc_visit_count as number,
-    lastAncDate: r.last_anc_date as string | null,
+    lastAncDate: toIsoString(r.last_anc_date as string | Date | null),
     hospitalName: r.hospital_name as string,
     hcode: r.hcode as string,
-    registeredAt: r.registered_at as string,
+    registeredAt: toIsoString(r.registered_at as string | Date) ?? '',
   };
 }
 
@@ -518,8 +519,8 @@ export async function getJourneyReferrals(
     reason: ref.reason as string,
     diagnosisCode: (ref.diagnosis_code as string | null) ?? null,
     urgencyLevel: ref.urgency_level as string,
-    initiatedAt: ref.initiated_at as string,
-    arrivedAt: ref.arrived_at as string | null,
+    initiatedAt: toIsoString(ref.initiated_at as string | Date) ?? '',
+    arrivedAt: toIsoString(ref.arrived_at as string | Date | null),
   }));
 }
 
@@ -538,7 +539,7 @@ export async function getJourneyNewborns(
     birthWeightG: nb.birth_weight_g as number | null,
     apgar1min: nb.apgar_1min as number | null,
     apgar5min: nb.apgar_5min as number | null,
-    bornAt: nb.born_at as string,
+    bornAt: toIsoString(nb.born_at as string | Date) ?? '',
   }));
 }
 
@@ -583,7 +584,7 @@ export async function getJourneyDetail(
     [journeyId],
   );
   const ancVisits: AncVisitEntry[] = visitRows.map((v) => ({
-    visitDate: v.visit_date as string,
+    visitDate: toIsoString(v.visit_date as string | Date) ?? '',
     visitNumber: v.visit_number as number,
     hospitalName: (v.visit_hospital_name as string | null) ?? null,
     hcode: (v.visit_hcode as string | null) ?? null,
@@ -630,7 +631,7 @@ export async function getJourneyDetail(
       ? {
           riskLevel: riskRows[0].risk_level as string,
           triggeredRules: parseJson<string[]>(riskRows[0].triggered_rules) ?? [],
-          screenedAt: riskRows[0].screened_at as string,
+          screenedAt: toIsoString(riskRows[0].screened_at as string | Date) ?? '',
           recommendedFacility: riskRows[0].recommended_facility as string | null,
         }
       : null;
@@ -655,7 +656,9 @@ export async function getJourneyDetail(
           an: laborRows[0].an as string,
           hcode: laborRows[0].hcode as string,
           laborStatus: laborRows[0].labor_status as string,
-          admitDate: laborRows[0].admit_date as string,
+          // pg returns timestamptz columns as Date objects, SQLite as
+          // strings — normalize to ISO so the API shape stays a string.
+          admitDate: toIsoString(laborRows[0].admit_date as string | Date) ?? '',
         }
       : null;
 
@@ -668,15 +671,15 @@ export async function getJourneyDetail(
       gravida: r.gravida as number,
       para: r.para as number,
       gaWeeks: r.ga_weeks as number | null,
-      lmp: r.lmp as string | null,
-      edc: r.edc as string | null,
+      lmp: toIsoString(r.lmp as string | Date | null),
+      edc: toIsoString(r.edc as string | Date | null),
       careStage: r.care_stage as string,
       ancRiskLevel: r.anc_risk_level as string,
       ancVisitCount: r.anc_visit_count as number,
-      lastAncDate: r.last_anc_date as string | null,
+      lastAncDate: toIsoString(r.last_anc_date as string | Date | null),
       hospitalName: r.hospital_name as string,
       hcode: r.hcode as string,
-      registeredAt: r.registered_at as string,
+      registeredAt: toIsoString(r.registered_at as string | Date) ?? '',
       currentHospitalName: r.current_hospital_name as string,
       currentHcode: r.current_hcode as string,
       heightCm: r.height_cm as number | null,

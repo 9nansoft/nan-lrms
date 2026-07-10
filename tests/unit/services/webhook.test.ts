@@ -1,8 +1,7 @@
 // Webhook service tests — API key management, payload validation, processing pipeline
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import {
   generateApiKey,
   hashApiKey,
@@ -519,18 +518,17 @@ describe('Webhook Service', () => {
   // ─── DB-dependent tests ───
 
   describe('API Key CRUD (with DB)', () => {
-    let db: SqliteAdapter;
+    let db: DatabaseAdapter;
     const hospitalId = 'hosp-webhook-1';
 
     beforeEach(async () => {
-      db = new SqliteAdapter(':memory:');
-      await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+      db = await createTestDb();
 
       const now = new Date().toISOString();
       await db.execute(
         `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [hospitalId, '99901', 'รพ.ทดสอบ Webhook', 'F1', 1, 'UNKNOWN', now, now],
+        [hospitalId, '99901', 'รพ.ทดสอบ Webhook', 'F1', true, 'UNKNOWN', now, now],
       );
     });
 
@@ -546,14 +544,14 @@ describe('Webhook Service', () => {
       expect(result.id).toBeTruthy();
 
       // Verify stored in DB (hashed, not raw)
-      const rows = await db.query<{ key_hash: string; label: string; is_active: number }>(
+      const rows = await db.query<{ key_hash: string; label: string; is_active: boolean }>(
         'SELECT key_hash, label, is_active FROM webhook_api_keys WHERE id = ?',
         [result.id],
       );
       expect(rows).toHaveLength(1);
       expect(rows[0].key_hash).toBe(hashApiKey(result.rawKey));
       expect(rows[0].label).toBe('Test Key');
-      expect(rows[0].is_active).toBeTruthy();
+      expect(rows[0].is_active).toBe(true);
     });
 
     it('validateApiKey returns hospitalId for valid key', async () => {
@@ -595,11 +593,11 @@ describe('Webhook Service', () => {
 
       await revokeApiKey(db, id);
 
-      const rows = await db.query<{ is_active: number; revoked_at: string | null }>(
+      const rows = await db.query<{ is_active: boolean; revoked_at: string | null }>(
         'SELECT is_active, revoked_at FROM webhook_api_keys WHERE id = ?',
         [id],
       );
-      expect(rows[0].is_active).toBeFalsy();
+      expect(rows[0].is_active).toBe(false);
       expect(rows[0].revoked_at).not.toBeNull();
     });
 
@@ -623,7 +621,7 @@ describe('Webhook Service', () => {
       await db.execute(
         `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['hosp-other', '99902', 'รพ.อื่น', 'F2', 1, 'UNKNOWN', now, now],
+        ['hosp-other', '99902', 'รพ.อื่น', 'F2', true, 'UNKNOWN', now, now],
       );
       await createApiKey(db, hospitalId, 'Hospital 1 Key');
       await createApiKey(db, 'hosp-other', 'Hospital 2 Key');

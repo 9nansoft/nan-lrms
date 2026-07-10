@@ -1,19 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { getStageKPIs, getDashboardAlerts } from '@/services/dashboard';
 
 describe('Dashboard Journey Extensions', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   const hospitalId = 'hosp-001';
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES (?, '10670', 'รพ.ขอนแก่น', 'A_S', 1, 'ONLINE', datetime('now'), datetime('now'))`,
+       VALUES (?, '10670', 'รพ.ขอนแก่น', 'A_S', TRUE, 'ONLINE', NOW(), NOW())`,
       [hospitalId],
     );
   });

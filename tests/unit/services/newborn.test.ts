@@ -1,29 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { upsertNewborn, getNewbornKPIs, getOutcomes } from '@/services/newborn';
 
 describe('Newborn Service', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   const hospitalId = 'hosp-001';
   const journeyId1 = 'journey-001';
   const journeyId2 = 'journey-002';
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES ('${hospitalId}', '10670', 'รพ.ขอนแก่น', 'A_S', 1, 'ONLINE', datetime('now'), datetime('now'))`,
+       VALUES ('${hospitalId}', '10670', 'รพ.ขอนแก่น', 'A_S', TRUE, 'ONLINE', NOW(), NOW())`,
     );
     await db.execute(
       `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
-       VALUES ('${journeyId1}', '${hospitalId}', '${hospitalId}', '12345', 'Test1', 'enc_cid', 'cidhash_test', 28, 1, 0, 'DELIVERED', 'LOW', 5, datetime('now'), datetime('now'), datetime('now'), datetime('now'), datetime('now'))`,
+       VALUES ('${journeyId1}', '${hospitalId}', '${hospitalId}', '12345', 'Test1', 'enc_cid', 'cidhash_test', 28, 1, 0, 'DELIVERED', 'LOW', 5, NOW(), NOW(), NOW(), NOW(), NOW())`,
     );
     await db.execute(
       `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
-       VALUES ('${journeyId2}', '${hospitalId}', '${hospitalId}', '12346', 'Test2', 'enc_cid', 'cidhash_test', 30, 2, 1, 'DELIVERED', 'LOW', 4, datetime('now'), datetime('now'), datetime('now'), datetime('now'), datetime('now'))`,
+       VALUES ('${journeyId2}', '${hospitalId}', '${hospitalId}', '12346', 'Test2', 'enc_cid', 'cidhash_test', 30, 2, 1, 'DELIVERED', 'LOW', 4, NOW(), NOW(), NOW(), NOW(), NOW())`,
     );
   });
 
@@ -169,12 +167,12 @@ describe('Newborn Service', () => {
       const otherHospId = 'hosp-other';
       await db.execute(
         `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-         VALUES ('${otherHospId}', '11004', 'รพ.พล', 'F2', 1, 'ONLINE', datetime('now'), datetime('now'))`,
+         VALUES ('${otherHospId}', '11004', 'รพ.พล', 'F2', TRUE, 'ONLINE', NOW(), NOW())`,
       );
       const otherJourneyId = 'journey-other';
       await db.execute(
         `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
-         VALUES ('${otherJourneyId}', '${otherHospId}', '${otherHospId}', '99999', 'Other', 'enc_cid', 'cidhash_test', 25, 1, 0, 'DELIVERED', 'LOW', 3, datetime('now'), datetime('now'), datetime('now'), datetime('now'), datetime('now'))`,
+         VALUES ('${otherJourneyId}', '${otherHospId}', '${otherHospId}', '99999', 'Other', 'enc_cid', 'cidhash_test', 25, 1, 0, 'DELIVERED', 'LOW', 3, NOW(), NOW(), NOW(), NOW(), NOW())`,
       );
 
       await upsertNewborn(db, {

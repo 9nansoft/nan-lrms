@@ -1,18 +1,21 @@
 // T046: Dashboard service tests — write FIRST (TDD)
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
-import { getProvinceDashboard, getSummaryTotals, getHospitalPatientList , getHospitalPartographAudit } from '@/services/dashboard';
+import {
+  getProvinceDashboard,
+  getSummaryTotals,
+  getHospitalPatientList,
+  getHospitalPartographAudit,
+} from '@/services/dashboard';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('Dashboard Service', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await new SeedOrchestrator().run(db);
   });
 
@@ -80,8 +83,19 @@ describe('Dashboard Service', () => {
     const insertPatient = (id: string, an: string, admitDaysAgo: number) =>
       db.execute(
         'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, hospitalId, `HN-${an}`, an, 'enc', 28, iso(admitDaysAgo), 'ACTIVE',
-         iso(0), iso(0), iso(0)],
+        [
+          id,
+          hospitalId,
+          `HN-${an}`,
+          an,
+          'enc',
+          28,
+          iso(admitDaysAgo),
+          'ACTIVE',
+          iso(0),
+          iso(0),
+          iso(0),
+        ],
       );
     // Two admissions inside the window (one charted), one outside it.
     await insertPatient('pq-1', 'PQ001', 2);
@@ -115,8 +129,19 @@ describe('Dashboard Service', () => {
     const insertPatient = (id: string, an: string, admitDaysAgo: number) =>
       db.execute(
         'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, hospitalId, `HN-${an}`, an, 'enc', 28, iso(admitDaysAgo), 'ACTIVE',
-         iso(0), iso(0), iso(0)],
+        [
+          id,
+          hospitalId,
+          `HN-${an}`,
+          an,
+          'enc',
+          28,
+          iso(admitDaysAgo),
+          'ACTIVE',
+          iso(0),
+          iso(0),
+          iso(0),
+        ],
       );
     await insertPatient('pa-1', 'PA001', 2); // charted
     await insertPatient('pa-2', 'PA002', 5); // never charted
@@ -166,16 +191,25 @@ describe('Dashboard Service', () => {
   });
 
   // T105: Date range filtering tests
+  it('getHospitalPatientList returns lastSyncAt as an ISO string, not a pg Date', async () => {
+    await db.execute("UPDATE hospitals SET last_sync_at = ? WHERE hcode = '10670'", [
+      '2026-07-01T02:30:00.000Z',
+    ]);
+    const result = await getHospitalPatientList(db, '10670', { status: 'active' });
+    expect(result).not.toBeNull();
+    // pg returns TIMESTAMPTZ as a Date object; the API type declares string.
+    expect(result?.hospital?.lastSyncAt).toBe('2026-07-01T02:30:00.000Z');
+  });
+
   describe('getHospitalPatientList — date range filtering', () => {
     let hospitalId: string;
     const hcode = '10670';
 
     beforeEach(async () => {
       // Get hospital ID for test data
-      const hospitals = await db.query<{ id: string }>(
-        "SELECT id FROM hospitals WHERE hcode = ?",
-        [hcode],
-      );
+      const hospitals = await db.query<{ id: string }>('SELECT id FROM hospitals WHERE hcode = ?', [
+        hcode,
+      ]);
       hospitalId = hospitals[0].id;
 
       // Insert patients with different admit_date values

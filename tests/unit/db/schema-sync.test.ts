@@ -1,14 +1,16 @@
 // T021: SchemaSync tests
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
+import { PgliteAdapter, createPglite } from '@/db/pglite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import type { TableDefinition } from '@/db/table-definition';
 
 describe('SchemaSync', () => {
-  let db: SqliteAdapter;
+  let db: PgliteAdapter;
 
   beforeEach(() => {
-    db = new SqliteAdapter(':memory:');
+    // Fresh instance per test: these tests exercise DDL from a blank
+    // database, so the shared truncate-reset harness doesn't apply.
+    db = new PgliteAdapter(createPglite());
   });
 
   afterEach(async () => {
@@ -27,7 +29,7 @@ describe('SchemaSync', () => {
       },
     ];
 
-    await SchemaSync.sync(db, tables, 'sqlite');
+    await SchemaSync.sync(db, tables, 'postgresql');
     const tableNames = await db.getTableNames();
     expect(tableNames).toContain('users');
 
@@ -51,7 +53,7 @@ describe('SchemaSync', () => {
       },
     ];
 
-    await SchemaSync.sync(db, tables, 'sqlite');
+    await SchemaSync.sync(db, tables, 'postgresql');
     const cols = await db.getColumnInfo('items');
     expect(cols.map((c) => c.name)).toContain('price');
   });
@@ -69,7 +71,7 @@ describe('SchemaSync', () => {
       },
     ];
 
-    await SchemaSync.sync(db, tables, 'sqlite');
+    await SchemaSync.sync(db, tables, 'postgresql');
 
     // Verify table exists and has correct columns
     const cols = await db.getColumnInfo('logs');
@@ -88,9 +90,9 @@ describe('SchemaSync', () => {
       },
     ];
 
-    await SchemaSync.sync(db, tables, 'sqlite');
+    await SchemaSync.sync(db, tables, 'postgresql');
     // Second run should not throw
-    await SchemaSync.sync(db, tables, 'sqlite');
+    await SchemaSync.sync(db, tables, 'postgresql');
 
     const tableNames = await db.getTableNames();
     expect(tableNames).toContain('settings');
@@ -108,7 +110,7 @@ describe('SchemaSync', () => {
       },
     ];
 
-    await SchemaSync.sync(db, tables, 'sqlite');
+    await SchemaSync.sync(db, tables, 'postgresql');
 
     // Insert with defaults
     await db.execute("INSERT INTO records (id) VALUES (?)", ['test-1']);
@@ -137,7 +139,7 @@ describe('SchemaSync', () => {
       },
     ];
 
-    await SchemaSync.sync(db, tables, 'sqlite');
+    await SchemaSync.sync(db, tables, 'postgresql');
     const cols = await db.getColumnInfo('all_types');
     expect(cols).toHaveLength(9);
   });

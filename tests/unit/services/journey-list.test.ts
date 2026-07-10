@@ -2,9 +2,8 @@
 // Covers freshness gates (PREGNANCY-only), q search (HN + decrypted name),
 // DB-wide counts (page-independent), hospital scoping, and detail lookup.
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { encrypt, generateKey } from '@/lib/encryption';
 import {
   ANC_MAX_GA_WEEKS,
@@ -41,7 +40,7 @@ interface JourneySeed {
   ancVisitCount?: number;
 }
 
-async function insertJourney(db: SqliteAdapter, seed: JourneySeed = {}): Promise<string> {
+async function insertJourney(db: DatabaseAdapter, seed: JourneySeed = {}): Promise<string> {
   seq += 1;
   const id = `j-${seq}`;
   const hospitalId = seed.hospitalId ?? HOSP_A;
@@ -100,7 +99,7 @@ describe('anc-freshness config', () => {
 });
 
 describe('journey-list service', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let prevKey: string | undefined;
 
   beforeAll(() => {
@@ -115,16 +114,15 @@ describe('journey-list service', () => {
 
   beforeEach(async () => {
     seq = 0;
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES (?, '10670', 'รพ.A', 'A_S', 1, 'ONLINE', datetime('now'), datetime('now'))`,
+       VALUES (?, '10670', 'รพ.A', 'A_S', TRUE, 'ONLINE', NOW(), NOW())`,
       [HOSP_A],
     );
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES (?, '10671', 'รพ.B', 'F2', 1, 'ONLINE', datetime('now'), datetime('now'))`,
+       VALUES (?, '10671', 'รพ.B', 'F2', TRUE, 'ONLINE', NOW(), NOW())`,
       [HOSP_B],
     );
   });

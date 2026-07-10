@@ -1,8 +1,7 @@
 // Journey API route logic tests — tests the SQL queries and data mapping used by journey routes
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { createJourney } from '@/services/journey';
 import { getJourneyById } from '@/services/journey';
 import { AncRiskLevel } from '@/types/domain';
@@ -16,23 +15,22 @@ import type {
 } from '@/types/api';
 
 describe('Journey API Logic', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   const hospitalId = 'hosp-api-001';
   const hospital2Id = 'hosp-api-002';
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     // Insert two test hospitals
     const now = new Date().toISOString();
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES (?, '10670', 'รพ.ขอนแก่น', 'A_S', 1, 'ONLINE', ?, ?)`,
+       VALUES (?, '10670', 'รพ.ขอนแก่น', 'A_S', TRUE, 'ONLINE', ?, ?)`,
       [hospitalId, now, now],
     );
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES (?, '11000', 'รพ.น้ำพอง', 'F2', 1, 'ONLINE', ?, ?)`,
+       VALUES (?, '11000', 'รพ.น้ำพอง', 'F2', TRUE, 'ONLINE', ?, ?)`,
       [hospital2Id, now, now],
     );
   });
@@ -385,7 +383,7 @@ describe('Journey API Logic', () => {
 
       const latestRisk: AncRiskEntry = {
         riskLevel: riskRows[0].risk_level as string,
-        triggeredRules: JSON.parse((riskRows[0].triggered_rules as string) || '[]'),
+        triggeredRules: (riskRows[0].triggered_rules as string[] | null) ?? [],
         screenedAt: riskRows[0].screened_at as string,
         recommendedFacility: riskRows[0].recommended_facility as string | null,
       };

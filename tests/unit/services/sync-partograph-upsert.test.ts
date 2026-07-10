@@ -1,20 +1,18 @@
 // T17: upsertPartographObservations — UPSERT, delete, severity roll-up
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import {
   upsertPartographObservations,
   type PartographRow,
 } from '@/services/sync/partograph';
 
-let db: SqliteAdapter;
+let db: DatabaseAdapter;
 const HOSPITAL_ID = 'h-1';
 const PATIENT_ID = 'p-1';
 
 beforeEach(async () => {
-  db = new SqliteAdapter(':memory:');
-  await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+  db = await createTestDb();
   await db.execute(
     `INSERT INTO hospitals (id, hcode, name, level, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,

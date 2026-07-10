@@ -1,8 +1,7 @@
 // T013: ANC sync, journey-labor linking, and newborn sync tests (TDD — write FIRST)
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { syncAncData, linkJourneyToLabor, syncNewbornData } from '@/services/sync';
 import type {
@@ -18,12 +17,11 @@ import { createJourney } from '@/services/journey';
 const ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 describe('Sync Journey Extension', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let hospitalId: string;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await new SeedOrchestrator().run(db);
 
     // Get seeded hospital ID

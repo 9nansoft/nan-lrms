@@ -80,24 +80,24 @@ export async function syncAncData(
 
     const fullName = `${anc.pname}${anc.fname} ${anc.lname}`.trim();
     const encryptedName = encrypt(fullName, encryptionKey);
-    const cidHash = anc.cid
-      ? createHash('sha256').update(anc.cid).digest('hex')
-      : null;
+    const cidHash = anc.cid ? createHash('sha256').update(anc.cid).digest('hex') : null;
     const encryptedCid = anc.cid ? encrypt(anc.cid, encryptionKey) : null;
     const age = calculateAge(anc.birthday);
 
-    let journey = (cidHash ? await getActiveJourneyByCid(db, cidHash) : null)
-      ?? await getJourneyByHn(db, anc.hn, hospitalId);
+    let journey =
+      (cidHash ? await getActiveJourneyByCid(db, cidHash) : null) ??
+      (await getJourneyByHn(db, anc.hn, hospitalId));
 
     // Same Date-vs-string trap as in webhook.ts:processAncWebhook —
     // journey.lmp is a Date at runtime even though the type says string,
     // so raw `!==` always fires and creates a fresh journey every cycle.
     // Normalise to "YYYY-MM-DD" before comparing.
-    const isNewPregnancy = journey && (
-      (anc.preg_no > journey.gravida) ||
-      (anc.lmp != null && journey.lmp != null && !isoDatesEqual(anc.lmp, journey.lmp))
-    );
-    const existingIsActive = journey && (journey.careStage === 'PREGNANCY' || journey.careStage === 'LABOR');
+    const isNewPregnancy =
+      journey &&
+      (anc.preg_no > journey.gravida ||
+        (anc.lmp != null && journey.lmp != null && !isoDatesEqual(anc.lmp, journey.lmp)));
+    const existingIsActive =
+      journey && (journey.careStage === 'PREGNANCY' || journey.careStage === 'LABOR');
 
     if (isNewPregnancy && existingIsActive && journey) {
       const daysSinceUpdate = Math.floor(
@@ -144,7 +144,18 @@ export async function syncAncData(
       const now = new Date().toISOString();
       await db.execute(
         `UPDATE maternal_journeys SET name = ?, cid = ?, cid_hash = ?, age = ?, lmp = ?, edc = ?, person_anc_id = ?, synced_at = ?, updated_at = ? WHERE id = ?`,
-        [encryptedName, encryptedCid, cidHash, age, anc.lmp, anc.edc, anc.person_anc_id, now, now, journey!.id],
+        [
+          encryptedName,
+          encryptedCid,
+          cidHash,
+          age,
+          anc.lmp,
+          anc.edc,
+          anc.person_anc_id,
+          now,
+          now,
+          journey!.id,
+        ],
       );
     }
 
@@ -168,9 +179,10 @@ export async function syncAncData(
     }
 
     const now = new Date().toISOString();
-    const lastVisit = visits.length > 0
-      ? visits.sort((a, b) => a.service_date.localeCompare(b.service_date)).at(-1)
-      : null;
+    const lastVisit =
+      visits.length > 0
+        ? visits.sort((a, b) => a.service_date.localeCompare(b.service_date)).at(-1)
+        : null;
     await db.execute(
       `UPDATE maternal_journeys SET anc_visit_count = ?, last_anc_date = ?, updated_at = ? WHERE id = ?`,
       [visits.length, lastVisit?.service_date ?? null, now, currentJourney.id],
@@ -184,9 +196,8 @@ export async function syncAncData(
     const heightCm = firstVisitWithHeight?.height ?? 160;
 
     const firstVisitWeight = visits.find((v) => v.bw != null)?.bw;
-    const prePregnancyBmi = (firstVisitWeight && heightCm > 0)
-      ? (firstVisitWeight / ((heightCm / 100) ** 2))
-      : 22;
+    const prePregnancyBmi =
+      firstVisitWeight && heightCm > 0 ? firstVisitWeight / (heightCm / 100) ** 2 : 22;
 
     const labFlags = {
       rhNegative: false,
@@ -261,11 +272,23 @@ async function upsertAncVisit(
        fundal_height_cm = ?, weight_kg = ?, bp_systolic = ?, bp_diastolic = ?,
        fetal_hr = ?, presentation = ?, engagement = ?, pass_quality = ?,
        provider_code = ?, synced_at = ? WHERE id = ?`,
-      [hospitalId, visit.anc_service_number, visit.pa_week, visit.pa_day,
-       visit.fundal_height, visit.bw, visit.bps, visit.bpd,
-       visit.fetal_heart_rate, visit.baby_position, visit.baby_lead,
-       visit.pass_quality === 'Y', visit.doctor_code, now,
-       existing[0].id],
+      [
+        hospitalId,
+        visit.anc_service_number,
+        visit.pa_week,
+        visit.pa_day,
+        visit.fundal_height,
+        visit.bw,
+        visit.bps,
+        visit.bpd,
+        visit.fetal_heart_rate,
+        visit.baby_position,
+        visit.baby_lead,
+        visit.pass_quality === 'Y',
+        visit.doctor_code,
+        now,
+        existing[0].id,
+      ],
     );
   } else {
     await db.execute(
@@ -273,11 +296,26 @@ async function upsertAncVisit(
        fundal_height_cm, weight_kg, bp_systolic, bp_diastolic, fetal_hr,
        presentation, engagement, pass_quality, provider_code, synced_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [uuidv4(), journeyId, hospitalId, visit.service_date, visit.anc_service_number,
-       visit.pa_week, visit.pa_day, visit.fundal_height, visit.bw,
-       visit.bps, visit.bpd, visit.fetal_heart_rate,
-       visit.baby_position, visit.baby_lead,
-       visit.pass_quality === 'Y', visit.doctor_code, now, now],
+      [
+        uuidv4(),
+        journeyId,
+        hospitalId,
+        visit.service_date,
+        visit.anc_service_number,
+        visit.pa_week,
+        visit.pa_day,
+        visit.fundal_height,
+        visit.bw,
+        visit.bps,
+        visit.bpd,
+        visit.fetal_heart_rate,
+        visit.baby_position,
+        visit.baby_lead,
+        visit.pass_quality === 'Y',
+        visit.doctor_code,
+        now,
+        now,
+      ],
     );
   }
 }
@@ -285,7 +323,11 @@ async function upsertAncVisit(
 async function upsertAncRisk(
   db: DatabaseAdapter,
   journeyId: string,
-  riskResult: { level: AncRiskLevel; triggeredRules: string[]; recommendation: { facilityTh: string; providerTh: string } },
+  riskResult: {
+    level: AncRiskLevel;
+    triggeredRules: string[];
+    recommendation: { facilityTh: string; providerTh: string };
+  },
   _riskInput: AncRiskInput,
 ): Promise<void> {
   const now = new Date().toISOString();
@@ -293,10 +335,17 @@ async function upsertAncRisk(
     `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors,
      recommended_facility, recommended_provider, screened_at, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [uuidv4(), journeyId, riskResult.level,
-     JSON.stringify(riskResult.triggeredRules), JSON.stringify({}),
-     riskResult.recommendation.facilityTh, riskResult.recommendation.providerTh,
-     now, now],
+    [
+      uuidv4(),
+      journeyId,
+      riskResult.level,
+      JSON.stringify(riskResult.triggeredRules),
+      JSON.stringify({}),
+      riskResult.recommendation.facilityTh,
+      riskResult.recommendation.providerTh,
+      now,
+      now,
+    ],
   );
 }
 
@@ -308,14 +357,15 @@ export async function linkJourneyToLabor(
   cidHash?: string | null,
   encryptedCid?: string | null,
 ): Promise<string> {
-  let journey = (cidHash ? await getActiveJourneyByCid(db, cidHash) : null)
-    ?? await getJourneyByHn(db, patientHn, hospitalId);
+  let journey =
+    (cidHash ? await getActiveJourneyByCid(db, cidHash) : null) ??
+    (await getJourneyByHn(db, patientHn, hospitalId));
 
   if (journey) {
-    await db.execute(
-      `UPDATE cached_patients SET journey_id = ? WHERE id = ?`,
-      [journey.id, cachedPatientId],
-    );
+    await db.execute(`UPDATE cached_patients SET journey_id = ? WHERE id = ?`, [
+      journey.id,
+      cachedPatientId,
+    ]);
     if (journey.careStage === 'PREGNANCY') {
       await transitionToLabor(db, journey.id);
     }
@@ -339,10 +389,10 @@ export async function linkJourneyToLabor(
 
   await transitionToLabor(db, journey.id);
 
-  await db.execute(
-    `UPDATE cached_patients SET journey_id = ? WHERE id = ?`,
-    [journey.id, cachedPatientId],
-  );
+  await db.execute(`UPDATE cached_patients SET journey_id = ? WHERE id = ?`, [
+    journey.id,
+    cachedPatientId,
+  ]);
 
   return journey.id;
 }

@@ -25,7 +25,7 @@ KK-LRMS enables obstetricians and labor room nurses at **Khon Kaen Hospital** (h
 | Framework | Next.js 15 (App Router), React 19, TypeScript 5.x |
 | Styling | Tailwind CSS 4, shadcn/ui |
 | Auth | NextAuth.js v5 (BMS Session + JWT) |
-| Database | PostgreSQL 16+ (production), SQLite in-memory (tests) |
+| Database | PostgreSQL 16+ (production), pglite in-memory — embedded Postgres (tests) |
 | Real-time | Server-side polling (30s) → SSE broadcast → SWR client |
 | Charts | Recharts (partogram, vital signs, risk distribution) |
 | Testing | Vitest (unit/integration), Playwright (E2E) |
@@ -60,7 +60,7 @@ Edit `.env.local` with your values:
 NEXTAUTH_SECRET="$(openssl rand -base64 32)"
 ENCRYPTION_KEY="$(openssl rand -hex 32)"
 
-# Database (skip if using SQLite dev mode)
+# Database (skip if using pglite dev mode)
 DATABASE_URL="postgresql://kklrms:<password>@localhost:5432/kklrms"
 POSTGRES_PASSWORD="<strong-password>"
 
@@ -70,15 +70,15 @@ DEV_HOSPITAL_TUNNEL_URL="<your-tunnel-url>"
 
 # Development shortcuts
 DEV_AUTH_BYPASS="true"    # Accept any session ID as admin
-USE_SQLITE="true"         # Use SQLite instead of PostgreSQL
+USE_PGLITE="true"         # Use embedded Postgres (pglite) instead of a PostgreSQL server
 ```
 
 ### 3. Run Development Server
 
-**Option A: SQLite mode (no Docker needed)**
+**Option A: pglite mode (no Docker needed)**
 
 ```bash
-# Set USE_SQLITE=true in .env.local, then:
+# Set USE_PGLITE=true in .env.local, then:
 npm run dev
 ```
 
@@ -133,7 +133,7 @@ src/
 │   └── audit.ts            # PDPA audit logging
 ├── db/                     # Database abstraction layer
 │   ├── adapter.ts          # Abstract DatabaseAdapter interface
-│   ├── sqlite-adapter.ts   # SQLite (development + tests)
+│   ├── pglite-adapter.ts   # Embedded Postgres via pglite (development + tests)
 │   ├── postgres-adapter.ts # PostgreSQL (production)
 │   ├── schema-sync.ts      # Auto-migrate tables from definitions
 │   ├── tables/             # Table definitions (8 tables)
@@ -169,7 +169,7 @@ npm run test:e2e
 | Unit — Services | 8 | CPD score, sync, webhook, partogram, dashboard, audit, health |
 | Unit — Components | 19 | All dashboard, patient, chart, and shared components |
 | Unit — API Routes | 8 | Dashboard, patient, vitals, hospitals, admin, health |
-| Unit — Database | 5 | SQLite adapter, schema sync, query builder, seeds |
+| Unit — Database | 5 | pglite adapter, schema sync, test harness, seeds |
 | Unit — Libraries | 5 | Auth, BMS session, encryption, SSE, utils |
 | Unit — Pages | 2 | Login, error pages |
 | Integration | 3 | Full flow, sync pipeline, webhook pipeline |
@@ -269,7 +269,7 @@ https://kk-lrms.bmscloud.in.th/?bms-session-id=YOUR-SESSION-ID
 | `BMS_VALIDATE_URL` | Prod | BMS session validation endpoint |
 | `DEV_HOSPITAL_TUNNEL_URL` | Dev | HOSxP tunnel URL for development |
 | `DEV_AUTH_BYPASS` | Dev | Set `true` to skip BMS auth (any session ID → admin) |
-| `USE_SQLITE` | Dev | Set `true` to use SQLite instead of PostgreSQL |
+| `USE_PGLITE` | Dev | Set `true` to use embedded Postgres (pglite) instead of a server |
 
 ## Documentation
 

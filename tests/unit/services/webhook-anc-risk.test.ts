@@ -3,9 +3,8 @@
 // journey detail "Risk assessment" panel populates, deduped so unchanged
 // classifications don't grow the table on every push.
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey } from '@/lib/encryption';
 import { processAncWebhook, type WebhookAncPayload } from '@/services/webhook';
 import { ANC_RISK_CONFIGS } from '@/config/anc-risk-rules';
@@ -32,8 +31,8 @@ function payload(riskItemIds: number[] | undefined, riskLevel: string): WebhookA
         cid: '1100500090006', // checksum-valid synthetic CID
         birthday: '1994-02-01',
         pregNo: 1,
-        lmp: '2026-01-01',
-        edc: '2026-10-08',
+        lmp: '2026-01-01T00:00:00Z',
+        edc: '2026-10-08T00:00:00Z',
         riskLevel,
         riskItemIds,
       },
@@ -42,7 +41,7 @@ function payload(riskItemIds: number[] | undefined, riskLevel: string): WebhookA
 }
 
 describe('processAncWebhook — risk screening persistence', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let sse: SseManager;
 
   beforeAll(() => {
@@ -50,12 +49,11 @@ describe('processAncWebhook — risk screening persistence', () => {
   });
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     const now = new Date().toISOString();
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
-       VALUES (?, '99902', 'รพ.ทดสอบ Risk', 'F1', 1, 'ONLINE', ?, ?)`,
+       VALUES (?, '99902', 'รพ.ทดสอบ Risk', 'F1', true, 'ONLINE', ?, ?)`,
       [HOSPITAL_ID, now, now],
     );
     sse = asSse(new MockSseManager());
@@ -66,7 +64,7 @@ describe('processAncWebhook — risk screening persistence', () => {
   });
 
   async function riskRows(): Promise<
-    Array<{ risk_level: string; triggered_rules: string; recommended_facility: string | null }>
+    Array<{ risk_level: string; triggered_rules: string[]; recommended_facility: string | null }>
   > {
     return db.query(
       `SELECT risk_level, triggered_rules, recommended_facility
@@ -80,7 +78,8 @@ describe('processAncWebhook — risk screening persistence', () => {
     const rows = await riskRows();
     expect(rows).toHaveLength(1);
     expect(rows[0].risk_level).toBe('HR3');
-    const rules = JSON.parse(rows[0].triggered_rules) as string[];
+    // pg returns the JSONB column already parsed (a string[]) — no JSON.parse needed.
+    const rules = rows[0].triggered_rules;
     expect(rules.some((r) => /หัวใจ/.test(r))).toBe(true);
     expect(rows[0].recommended_facility).toBe(ANC_RISK_CONFIGS[AncRiskLevel.HR3].facilityTh);
   });

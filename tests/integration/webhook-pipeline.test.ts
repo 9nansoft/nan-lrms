@@ -1,9 +1,8 @@
 // Integration tests: webhook pipeline — external hospital data -> cached patients -> CPD -> dashboard
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { generateKey } from '@/lib/encryption';
 import type { SseManager } from '@/lib/sse';
@@ -47,13 +46,12 @@ function asSse(mock: MockSseManager): SseManager {
 }
 
 describe('Webhook Pipeline Integration', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let sseManager: MockSseManager;
   let webhookHospitalId: string;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await new SeedOrchestrator().run(db);
     sseManager = new MockSseManager();
 
@@ -63,7 +61,7 @@ describe('Webhook Pipeline Integration', () => {
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [webhookHospitalId, '99901', 'รพ.เอกชนทดสอบ (Webhook)', 'M2', 1, 'UNKNOWN', now, now],
+      [webhookHospitalId, '99901', 'รพ.เอกชนทดสอบ (Webhook)', 'M2', true, 'UNKNOWN', now, now],
     );
   });
 
@@ -1033,7 +1031,7 @@ describe('Webhook Pipeline Integration', () => {
       await db.execute(
         `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [hospitalB, '99902', 'รพ.รับส่งต่อ (B)', 'M2', 1, 'UNKNOWN', now, now],
+        [hospitalB, '99902', 'รพ.รับส่งต่อ (B)', 'M2', true, 'UNKNOWN', now, now],
       );
 
       const seed = (hospId: string, an: string, cidHash: string, status: string) =>

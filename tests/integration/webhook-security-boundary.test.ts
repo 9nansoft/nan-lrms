@@ -6,9 +6,8 @@
 // touched service tests would slip through unnoticed.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { generateKey } from '@/lib/encryption';
 import { createApiKey } from '@/services/webhook';
@@ -24,12 +23,11 @@ const HOSPITAL_A_HCODE = '99901';
 const HOSPITAL_B_HCODE = '99902';
 
 describe('Webhook Route — security boundaries', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let keyForHospitalA: string;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await new SeedOrchestrator().run(db);
 
     // Two distinct hospitals, each with their own HCODE.
@@ -37,12 +35,12 @@ describe('Webhook Route — security boundaries', () => {
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [HOSPITAL_A_ID, HOSPITAL_A_HCODE, 'Hospital A', 'M2', 1, 'UNKNOWN', now, now],
+      [HOSPITAL_A_ID, HOSPITAL_A_HCODE, 'Hospital A', 'M2', true, 'UNKNOWN', now, now],
     );
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [HOSPITAL_B_ID, HOSPITAL_B_HCODE, 'Hospital B', 'M2', 1, 'UNKNOWN', now, now],
+      [HOSPITAL_B_ID, HOSPITAL_B_HCODE, 'Hospital B', 'M2', true, 'UNKNOWN', now, now],
     );
 
     // API key bound to hospital A only — sending it with payload.hospitalCode = "B"

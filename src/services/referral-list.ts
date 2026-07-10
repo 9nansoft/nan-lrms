@@ -7,6 +7,7 @@
 // Postgres and SQLite. Patient names are decrypted at this boundary
 // (decryptSafe) and masked client-side at render (maskName).
 import type { DatabaseAdapter } from '@/db/adapter';
+import { toIsoString } from '@/lib/dates';
 import { decryptSafe } from '@/lib/encryption';
 import { bangkokStartOfToday } from '@/lib/bangkok-time';
 import { referralSlaCutoffs } from '@/config/referral-sla';
@@ -130,8 +131,8 @@ function mapReferralListItem(
     reason: r.reason as string,
     diagnosisCode: (r.diagnosis_code as string | null) ?? null,
     urgencyLevel: r.urgency_level as string,
-    initiatedAt: r.initiated_at as string,
-    arrivedAt: (r.arrived_at as string | null) ?? null,
+    initiatedAt: toIsoString(r.initiated_at as string | Date) ?? '',
+    arrivedAt: toIsoString(r.arrived_at as string | Date | null),
     patientName: decryptedName ?? decryptName(r.patient_name),
     hn: (r.patient_hn as string | null) ?? '',
     gaWeeks: r.patient_ga_weeks == null ? null : Number(r.patient_ga_weeks),
@@ -323,9 +324,9 @@ export async function getReferralDetail(
     ...mapReferralListItem(r),
     rejectionReason: (r.rejection_reason as string | null) ?? null,
     transportMode: (r.transport_mode as string | null) ?? null,
-    acceptedAt: (r.accepted_at as string | null) ?? null,
-    departedAt: (r.departed_at as string | null) ?? null,
-    rejectedAt: (r.rejected_at as string | null) ?? null,
+    acceptedAt: toIsoString(r.accepted_at as string | Date | null),
+    departedAt: toIsoString(r.departed_at as string | Date | null),
+    rejectedAt: toIsoString(r.rejected_at as string | Date | null),
     suggestedAlternativeHospital: (r.alt_hospital_name as string | null) ?? null,
   };
 }

@@ -142,7 +142,7 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
       name: h.name,
       level: h.level as HospitalLevel,
       connectionStatus: h.connection_status as ConnectionStatus,
-      lastSyncAt: h.last_sync_at,
+      lastSyncAt: h.last_sync_at ? new Date(h.last_sync_at).toISOString() : null,
       provinceCode: h.province_code,
       districtCode: h.district_code,
       lat: lat !== null && Number.isFinite(lat) ? lat : null,
@@ -310,8 +310,10 @@ export async function getHighRiskPatients(
     riskLevel: row.risk_level ?? 'UNSCORED',
     hospital: row.hospital_name,
     hcode: row.hcode,
-    admitDate: row.admit_date,
-    lastVitalAt: row.last_vital_at,
+    // pg returns timestamptz columns as Date objects, SQLite as strings —
+    // normalize to ISO so the API shape stays a string as declared.
+    admitDate: row.admit_date == null ? null : new Date(row.admit_date).toISOString(),
+    lastVitalAt: row.last_vital_at == null ? null : new Date(row.last_vital_at).toISOString(),
     partographSeverity: (row.partograph_severity as CdssSeverity | null) ?? null,
     partographAlertCount: row.partograph_alert_count ?? null,
   }));
@@ -378,7 +380,8 @@ export async function getHospitalPartographAudit(
       admitDate: new Date(r.admit_date).toISOString(),
       laborStatus: r.labor_status,
       observationCount: Number(r.obs_count) || 0,
-      lastObservedAt: r.last_observed_at == null ? null : new Date(r.last_observed_at).toISOString(),
+      lastObservedAt:
+        r.last_observed_at == null ? null : new Date(r.last_observed_at).toISOString(),
     }))
     .sort((a, b) => {
       const aCharted = a.observationCount > 0 ? 1 : 0;
@@ -437,7 +440,9 @@ export async function getHospitalPatientList(
     name: hospitalRow.name,
     level: hospitalRow.level,
     connectionStatus: hospitalRow.connection_status,
-    lastSyncAt: hospitalRow.last_sync_at,
+    // pg returns timestamptz as a Date object — normalize to the declared
+    // ISO-string API shape (same pattern as getProvinceDashboard above).
+    lastSyncAt: hospitalRow.last_sync_at ? new Date(hospitalRow.last_sync_at).toISOString() : null,
   };
 
   let whereClause = 'WHERE cp.hospital_id = ?';

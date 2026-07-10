@@ -1,18 +1,16 @@
 // High-risk patients service tests — TDD
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { getHighRiskPatients } from '@/services/dashboard';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('getHighRiskPatients', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await new SeedOrchestrator().run(db);
   });
 

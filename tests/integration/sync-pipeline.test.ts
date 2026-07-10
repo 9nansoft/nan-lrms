@@ -2,9 +2,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import {
   transformHosxpPatient,
@@ -24,12 +23,11 @@ import { RiskLevel } from '@/types/domain';
 const TEST_ENCRYPTION_KEY = generateKey();
 
 describe('Sync Pipeline Integration', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let hospitalId: string;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     await new SeedOrchestrator().run(db);
 
     // Get the first hospital ID for tests

@@ -3,9 +3,8 @@
 // patient context join, filters (urgency/hospital/range/q/overdue), and
 // emergency-first ordering.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { v4 as uuidv4 } from 'uuid';
 import { listReferrals, getReferralDetail, getReferralInsights } from '@/services/referral-list';
 import { REFERRAL_SLA } from '@/config/referral-sla';
@@ -24,7 +23,7 @@ interface SeededHospitals {
   hospCId: string;
 }
 
-async function seedHospitals(db: SqliteAdapter): Promise<SeededHospitals> {
+async function seedHospitals(db: DatabaseAdapter): Promise<SeededHospitals> {
   const now = new Date().toISOString();
   const hospAId = uuidv4();
   const hospBId = uuidv4();
@@ -38,7 +37,7 @@ async function seedHospitals(db: SqliteAdapter): Promise<SeededHospitals> {
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, hcode, name, level, 1, 'ONLINE', now, now],
+      [id, hcode, name, level, true, 'ONLINE', now, now],
     );
   }
   return { hospAId, hospBId, hospCId };
@@ -52,7 +51,7 @@ interface JourneyOpts {
 }
 
 async function seedJourney(
-  db: SqliteAdapter,
+  db: DatabaseAdapter,
   hospitalId: string,
   opts: JourneyOpts = {},
 ): Promise<string> {
@@ -101,7 +100,7 @@ interface ReferralOpts {
   now?: Date;
 }
 
-async function seedReferral(db: SqliteAdapter, opts: ReferralOpts): Promise<string> {
+async function seedReferral(db: DatabaseAdapter, opts: ReferralOpts): Promise<string> {
   const id = uuidv4();
   const nowMs = (opts.now ?? new Date()).getTime();
   const initiatedAt = new Date(nowMs - (opts.ageHours ?? 1) * 3600_000).toISOString();
@@ -127,13 +126,12 @@ async function seedReferral(db: SqliteAdapter, opts: ReferralOpts): Promise<stri
 }
 
 describe('listReferrals — pagination and status counts', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let hosp: SeededHospitals;
   let journeyId: string;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     hosp = await seedHospitals(db);
     journeyId = await seedJourney(db, hosp.hospAId);
   });
@@ -226,12 +224,11 @@ describe('listReferrals — pagination and status counts', () => {
 const NOW = new Date('2026-07-08T18:00:00+07:00');
 
 describe('listReferrals — patient context, filters, ordering, ops counts', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let hosp: SeededHospitals;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     hosp = await seedHospitals(db);
   });
 
@@ -513,17 +510,16 @@ describe('listReferrals — patient context, filters, ordering, ops counts', () 
 });
 
 describe('getReferralDetail — full referral with milestones and patient context', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let hosp: SeededHospitals;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     hosp = await seedHospitals(db);
     const now = new Date().toISOString();
     await db.execute(
       `INSERT INTO users (id, bms_user_name, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      ['doctor-007', 'doctor-007', 'NURSE', 1, now, now],
+      ['doctor-007', 'doctor-007', 'NURSE', true, now, now],
     );
   });
 
@@ -594,13 +590,12 @@ describe('getReferralDetail — full referral with milestones and patient contex
 });
 
 describe('getReferralInsights — corridors, daily volume, destinations', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
   let hosp: SeededHospitals;
   let journeyId: string;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
     hosp = await seedHospitals(db);
     journeyId = await seedJourney(db, hosp.hospAId);
   });

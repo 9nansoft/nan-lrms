@@ -1,8 +1,7 @@
 // T10: Referral API routes tests — TDD: tests cover service layer used by route handlers
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteAdapter } from '@/db/sqlite-adapter';
-import { SchemaSync } from '@/db/schema-sync';
-import { ALL_TABLES } from '@/db/tables/index';
+import { createTestDb } from '../../helpers/testDb';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { v4 as uuidv4 } from 'uuid';
 import {
   initiateReferral,
@@ -16,7 +15,7 @@ import {
 import { UrgencyLevel, ReferralStatus } from '@/types/domain';
 
 // Helper: seed two hospitals and a journey (minimal journey row)
-async function seedFixtures(db: SqliteAdapter) {
+async function seedFixtures(db: DatabaseAdapter) {
   const now = new Date().toISOString();
 
   const hospAId = uuidv4();
@@ -25,12 +24,12 @@ async function seedFixtures(db: SqliteAdapter) {
   await db.execute(
     `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [hospAId, '10670', 'รพ.A', 'M1', 1, 'ONLINE', now, now],
+    [hospAId, '10670', 'รพ.A', 'M1', true, 'ONLINE', now, now],
   );
   await db.execute(
     `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [hospBId, '11000', 'รพ.B', 'A_S', 1, 'ONLINE', now, now],
+    [hospBId, '11000', 'รพ.B', 'A_S', true, 'ONLINE', now, now],
   );
 
   const journeyId = uuidv4();
@@ -72,14 +71,14 @@ async function seedFixtures(db: SqliteAdapter) {
   ]) {
     await db.execute(
       `INSERT INTO users (id, bms_user_name, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, userId, 'NURSE', 1, now, now],
+      [userId, userId, 'NURSE', true, now, now],
     );
   }
 
   return { hospAId, hospBId, journeyId };
 }
 
-async function seedExtraJourney(db: SqliteAdapter, hospitalId: string): Promise<string> {
+async function seedExtraJourney(db: DatabaseAdapter, hospitalId: string): Promise<string> {
   const id = uuidv4();
   const now = new Date().toISOString();
   await db.execute(
@@ -110,11 +109,10 @@ async function seedExtraJourney(db: SqliteAdapter, hospitalId: string): Promise<
 }
 
 describe('Referral API — POST /api/referrals (initiateReferral)', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
   });
 
   afterEach(async () => {
@@ -184,11 +182,10 @@ describe('Referral API — POST /api/referrals (initiateReferral)', () => {
 });
 
 describe('Referral API — GET /api/referrals (getPendingReferrals)', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
   });
 
   afterEach(async () => {
@@ -247,11 +244,10 @@ describe('Referral API — GET /api/referrals (getPendingReferrals)', () => {
 });
 
 describe('Referral API — PATCH accept', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
   });
 
   afterEach(async () => {
@@ -277,11 +273,10 @@ describe('Referral API — PATCH accept', () => {
 });
 
 describe('Referral API — PATCH reject', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
   });
 
   afterEach(async () => {
@@ -312,7 +307,7 @@ describe('Referral API — PATCH reject', () => {
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [altHospId, '11002', 'รพ.C', 'M2', 1, 'ONLINE', now, now],
+      [altHospId, '11002', 'รพ.C', 'M2', true, 'ONLINE', now, now],
     );
 
     const ref = await initiateReferral(db, {
@@ -330,11 +325,10 @@ describe('Referral API — PATCH reject', () => {
 });
 
 describe('Referral API — full lifecycle INITIATED → ACCEPTED → IN_TRANSIT → ARRIVED', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
   });
 
   afterEach(async () => {
@@ -379,11 +373,10 @@ describe('Referral API — full lifecycle INITIATED → ACCEPTED → IN_TRANSIT 
 });
 
 describe('Dashboard Referrals — GET /api/dashboard/referrals', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
   });
 
   afterEach(async () => {
@@ -518,11 +511,10 @@ describe('Dashboard Referrals — GET /api/dashboard/referrals', () => {
 });
 
 describe('autoArriveReferrals — arrival inferred from journey ownership', () => {
-  let db: SqliteAdapter;
+  let db: DatabaseAdapter;
 
   beforeEach(async () => {
-    db = new SqliteAdapter(':memory:');
-    await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
+    db = await createTestDb();
   });
 
   afterEach(async () => {
