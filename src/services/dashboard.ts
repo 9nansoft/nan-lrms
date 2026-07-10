@@ -372,16 +372,19 @@ export async function getHospitalPartographAudit(
     .map((r) => ({
       an: r.an,
       name: decryptSafe(r.name),
-      admitDate: r.admit_date,
+      // pg returns timestamptz columns as Date objects, SQLite as strings —
+      // normalize to ISO so the API shape (and the sort below) is stable.
+      // .localeCompare on the raw value 500'd this route in production.
+      admitDate: new Date(r.admit_date).toISOString(),
       laborStatus: r.labor_status,
       observationCount: Number(r.obs_count) || 0,
-      lastObservedAt: r.last_observed_at,
+      lastObservedAt: r.last_observed_at == null ? null : new Date(r.last_observed_at).toISOString(),
     }))
     .sort((a, b) => {
       const aCharted = a.observationCount > 0 ? 1 : 0;
       const bCharted = b.observationCount > 0 ? 1 : 0;
       if (aCharted !== bCharted) return aCharted - bCharted;
-      return b.admitDate.localeCompare(a.admitDate);
+      return new Date(b.admitDate).getTime() - new Date(a.admitDate).getTime();
     });
 
   return {
