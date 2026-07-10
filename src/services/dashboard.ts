@@ -508,13 +508,22 @@ export async function getHospitalPatientList(
 
 // T14: Stage KPIs — pregnancy/labor/delivered counts by risk level
 export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageKPIs> {
-  // Pregnancy counts by ANC risk level
+  // Pregnancy counts by ANC risk level — over the SAME freshness-gated
+  // registry as the /pregnancies board and the alert bar, so the stage card
+  // and the board it links to can never show different totals (raw
+  // care_stage='PREGNANCY' includes lost-to-follow-up and silently-delivered
+  // rows the boards exclude).
+  const { edcOnOrAfter, lastAncOnOrAfter } = ancFreshnessCutoffs(new Date());
   const pregnancyCounts = await db.query<{ anc_risk_level: string; count: number }>(
     `SELECT anc_risk_level, COUNT(*) as count FROM maternal_journeys
      WHERE care_stage = 'PREGNANCY'
+       AND (ga_weeks IS NULL OR ga_weeks <= ${ANC_MAX_GA_WEEKS})
+       AND (edc IS NULL OR edc >= ?)
+       AND (last_anc_date IS NULL OR last_anc_date >= ?)
        AND (hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
             OR current_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})
      GROUP BY anc_risk_level`,
+    [edcOnOrAfter, lastAncOnOrAfter],
   );
 
   const pregnancy = { total: 0, low: 0, hr1: 0, hr2: 0, hr3: 0 };

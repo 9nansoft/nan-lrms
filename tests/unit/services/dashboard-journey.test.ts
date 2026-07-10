@@ -53,6 +53,24 @@ describe('Dashboard Journey Extensions', () => {
       expect(kpis.pregnancy.hr3).toBe(1);
     });
 
+    it('pregnancy counts use the same freshness gate as the /pregnancies board', async () => {
+      const now = new Date().toISOString();
+      const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+      const daysAhead = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString();
+      const insert = (id: string, lastAnc: string | null, edc: string | null) =>
+        db.execute(
+          `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, last_anc_date, edc, registered_at, stage_changed_at, synced_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'Test', 'enc_cid', 'cidhash', 25, 1, 0, 'PREGNANCY', 'LOW', 3, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, hospitalId, hospitalId, `HN-${id}`, lastAnc, edc, now, now, now, now, now],
+        );
+      await insert('g-fresh', daysAgo(5), daysAhead(30)); // inside the gate
+      await insert('g-ltfu', daysAgo(90), daysAhead(30)); // lost to follow-up
+      await insert('g-delivered-edc', daysAgo(5), daysAgo(40)); // EDC long past
+
+      const kpis = await getStageKPIs(db);
+      expect(kpis.pregnancy.total).toBe(1);
+    });
+
     it('delivered total counts journeys this month even before newborn records arrive', async () => {
       const now = new Date().toISOString();
       await db.execute(
