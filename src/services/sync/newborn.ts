@@ -2,6 +2,10 @@
 import type { DatabaseAdapter } from '@/db/adapter';
 import type { HosxpLabourInfantRow, HosxpIptPregnancyRow } from '@/types/hosxp';
 import { upsertNewborn } from '@/services/newborn';
+import { encrypt, getEncryptionKey } from '@/lib/encryption';
+import { isValidThaiCidChecksum } from '@/lib/cid';
+import { createHash, randomUUID } from 'crypto';
+import { logger } from '@/lib/logger';
 import { transitionToDelivered } from '@/services/journey';
 
 export async function syncNewbornData(
@@ -76,6 +80,8 @@ export interface NewbornSyncResult {
   upserted: number;
   journeys: number;
   skippedNoJourney: number;
+  /** Retrospective journeys created for pre-registry deliveries. */
+  createdJourneys: number;
 }
 
 /**
@@ -106,6 +112,107 @@ interface BirthResolutionItem {
   an: string;
   motherHn: string | null;
   bornMs: number;
+  /** ISO born timestamp — registered_at for retrospective journeys. */
+  bornAtIso?: string | null;
+  motherCid?: string | null;
+  motherName?: string | null;
+  motherBirthday?: string | null;
+  pregNumber?: number | null;
+}
+
+/**
+ * For births still unresolved after resolveJourneysForBirths: reuse a journey
+ * by the mother's CID hash (latest registered before the birth — matches the
+ * repeat-mother rule), else create a minimal retrospective DELIVERED journey
+ * so pre-registry deliveries are counted instead of skipped. Returns how many
+ * journeys were created. Births with no usable identity stay unresolved.
+ */
+async function createRetroJourneysForUnresolved(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  items: BirthResolutionItem[],
+  journeyByAn: Map<string, string>,
+): Promise<number> {
+  let created = 0;
+  const key = getEncryptionKey();
+  for (const item of items) {
+    if (journeyByAn.has(item.an)) continue;
+    const cid =
+      item.motherCid && isValidThaiCidChecksum(String(item.motherCid))
+        ? String(item.motherCid)
+        : null;
+    if (!cid && !item.motherHn) continue; // no identity — stays skipped
+
+    // cid_hash is NOT NULL. Real CIDs hash normally (unifying with any
+    // existing journey for the same woman); HN-only mothers get a
+    // deterministic namespaced hash — it can never equal a real CID hash,
+    // and a second historical birth by the same mother reuses one journey.
+    const cidHash = cid
+      ? createHash('sha256').update(cid).digest('hex')
+      : createHash('sha256').update(`retro-hn:${hospitalId}:${item.motherHn}`).digest('hex');
+    {
+      // Same person may already have a journey under another HN/hospital.
+      const existing = await db.query<{ id: string; registered_at: string }>(
+        `SELECT id, registered_at FROM maternal_journeys WHERE cid_hash = ?`,
+        [cidHash],
+      );
+      if (existing.length > 0) {
+        const sorted = existing
+          .map((j) => ({ id: j.id, regMs: new Date(j.registered_at).getTime() }))
+          .sort((a, b) => a.regMs - b.regMs);
+        const before = sorted.filter((j) => j.regMs <= item.bornMs);
+        journeyByAn.set(item.an, (before.length > 0 ? before[before.length - 1] : sorted[0]).id);
+        continue;
+      }
+    }
+
+    const bornIso = item.bornAtIso ?? new Date(item.bornMs).toISOString();
+    const now = new Date().toISOString();
+    const age = item.motherBirthday
+      ? Math.max(
+          0,
+          Math.floor(
+            (new Date(bornIso).getTime() - new Date(item.motherBirthday).getTime()) /
+              (365.25 * 86_400_000),
+          ),
+        )
+      : 0;
+    const id = randomUUID();
+    await db.execute(
+      `INSERT INTO maternal_journeys
+         (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age,
+          gravida, para, care_stage, anc_risk_level, anc_visit_count,
+          registered_at, stage_changed_at, synced_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'DELIVERED', 'LOW', 0, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        hospitalId,
+        hospitalId,
+        item.motherHn ?? '',
+        encrypt(item.motherName ?? 'ไม่ระบุชื่อ (บันทึกย้อนหลัง)', key),
+        // cid column is NOT NULL; unknown CID stores an encrypted empty
+        // string while cid_hash stays NULL (no fake hash to collide on).
+        encrypt(cid ?? '', key),
+        cidHash,
+        age,
+        item.pregNumber ?? 1,
+        bornIso,
+        bornIso,
+        now,
+        now,
+        now,
+      ],
+    );
+    logger.info('retrospective_journey_created', {
+      hospitalId,
+      an: item.an,
+      bornAt: bornIso.slice(0, 10),
+      hasCid: cid != null,
+    });
+    journeyByAn.set(item.an, id);
+    created += 1;
+  }
+  return created;
 }
 
 /**
@@ -180,6 +287,7 @@ export async function syncNewbornsFromRows(
     upserted: 0,
     journeys: 0,
     skippedNoJourney: 0,
+    createdJourneys: 0,
   };
   if (rows.length === 0) return result;
 
@@ -191,14 +299,21 @@ export async function syncNewbornsFromRows(
     byAn.set(an, list);
   }
 
-  const journeyByAn = await resolveJourneysForBirths(
+  const items: BirthResolutionItem[] = Array.from(byAn.entries()).map(([an, list]) => ({
+    an,
+    motherHn: list[0].mother_hn ? String(list[0].mother_hn) : null,
+    bornMs: list[0].birth_date ? new Date(list[0].birth_date).getTime() : Number.MAX_SAFE_INTEGER,
+    bornAtIso: list[0].birth_date ?? null,
+    motherCid: list[0].mother_cid ?? null,
+    motherName: list[0].mother_name ?? null,
+    motherBirthday: list[0].mother_birthday ?? null,
+  }));
+  const journeyByAn = await resolveJourneysForBirths(db, hospitalId, items);
+  result.createdJourneys = await createRetroJourneysForUnresolved(
     db,
     hospitalId,
-    Array.from(byAn.entries()).map(([an, list]) => ({
-      an,
-      motherHn: list[0].mother_hn ? String(list[0].mother_hn) : null,
-      bornMs: list[0].birth_date ? new Date(list[0].birth_date).getTime() : Number.MAX_SAFE_INTEGER,
-    })),
+    items,
+    journeyByAn,
   );
 
   for (const [an, infantRows] of byAn) {
@@ -242,6 +357,7 @@ export async function syncNewbornsFromPregnancyRows(
     journeys: 0,
     skippedNoJourney: 0,
     skippedHasDetail: 0,
+    createdJourneys: 0,
   };
 
   // an is ipt_pregnancy's PK, but dedupe defensively; undelivered admissions
@@ -253,14 +369,22 @@ export async function syncNewbornsFromPregnancyRows(
   }
   if (byAn.size === 0) return result;
 
-  const journeyByAn = await resolveJourneysForBirths(
+  const items: BirthResolutionItem[] = Array.from(byAn.entries()).map(([an, row]) => ({
+    an,
+    motherHn: row.mother_hn ? String(row.mother_hn) : null,
+    bornMs: new Date(row.labor_date as string).getTime() || Number.MAX_SAFE_INTEGER,
+    bornAtIso: row.labor_date,
+    motherCid: row.mother_cid ?? null,
+    motherName: row.mother_name ?? null,
+    motherBirthday: row.mother_birthday ?? null,
+    pregNumber: row.preg_number ?? null,
+  }));
+  const journeyByAn = await resolveJourneysForBirths(db, hospitalId, items);
+  result.createdJourneys = await createRetroJourneysForUnresolved(
     db,
     hospitalId,
-    Array.from(byAn.entries()).map(([an, row]) => ({
-      an,
-      motherHn: row.mother_hn ? String(row.mother_hn) : null,
-      bornMs: new Date(row.labor_date as string).getTime() || Number.MAX_SAFE_INTEGER,
-    })),
+    items,
+    journeyByAn,
   );
 
   for (const [an, row] of byAn) {

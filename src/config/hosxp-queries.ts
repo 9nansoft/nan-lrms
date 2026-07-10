@@ -325,10 +325,14 @@ export const LABOUR_INFANTS_SINCE: SqlQueryTemplate = {
              li.infant_check_feed_milk, li.infant_check_vitk, li.infant_check_eyepaste,
              li.infant_check_bcg, li.infant_check_hepb, li.infant_check_azt,
              li.infant_icd10, li.hn AS infant_hn, li.infant_an, li.infant_dchstts,
-             li.birth_date, li.birth_time, ip.hn AS mother_hn
+             li.birth_date, li.birth_time, ip.hn AS mother_hn,
+             pt.cid AS mother_cid,
+             CONCAT(pt.pname, pt.fname, ' ', pt.lname) AS mother_name,
+             pt.birthday AS mother_birthday
       FROM ipt_labour_infant li
       JOIN ipt_labour il ON il.ipt_labour_id = li.ipt_labour_id
       JOIN ipt ip ON ip.an = il.an
+      LEFT JOIN patient pt ON pt.hn = ip.hn
       WHERE li.birth_date >= '{{CUTOFF}}'`,
   mysql: `
       SELECT li.ipt_labour_infant_id, li.ipt_labour_id, il.an,
@@ -340,10 +344,14 @@ export const LABOUR_INFANTS_SINCE: SqlQueryTemplate = {
              li.infant_check_feed_milk, li.infant_check_vitk, li.infant_check_eyepaste,
              li.infant_check_bcg, li.infant_check_hepb, li.infant_check_azt,
              li.infant_icd10, li.hn AS infant_hn, li.infant_an, li.infant_dchstts,
-             li.birth_date, li.birth_time, ip.hn AS mother_hn
+             li.birth_date, li.birth_time, ip.hn AS mother_hn,
+             pt.cid AS mother_cid,
+             CONCAT(pt.pname, pt.fname, ' ', pt.lname) AS mother_name,
+             pt.birthday AS mother_birthday
       FROM ipt_labour_infant li
       JOIN ipt_labour il ON il.ipt_labour_id = li.ipt_labour_id
       JOIN ipt ip ON ip.an = il.an
+      LEFT JOIN patient pt ON pt.hn = ip.hn
       WHERE li.birth_date >= '{{CUTOFF}}'`,
 };
 
@@ -355,15 +363,23 @@ export const LABOUR_INFANTS_SINCE: SqlQueryTemplate = {
 export const IPT_PREGNANCY_DELIVERIES_SINCE: SqlQueryTemplate = {
   postgresql: `
       SELECT ipr.an, ip.hn AS mother_hn, ipr.labor_date,
-             ipr.child_count, ipr.dead_child_count, ipr.preg_number, ipr.ga
+             ipr.child_count, ipr.dead_child_count, ipr.preg_number, ipr.ga,
+             pt.cid AS mother_cid,
+             CONCAT(pt.pname, pt.fname, ' ', pt.lname) AS mother_name,
+             pt.birthday AS mother_birthday
       FROM ipt_pregnancy ipr
       JOIN ipt ip ON ip.an = ipr.an
+      LEFT JOIN patient pt ON pt.hn = ip.hn
       WHERE ipr.labor_date IS NOT NULL AND ipr.labor_date >= '{{CUTOFF}}'`,
   mysql: `
       SELECT ipr.an, ip.hn AS mother_hn, ipr.labor_date,
-             ipr.child_count, ipr.dead_child_count, ipr.preg_number, ipr.ga
+             ipr.child_count, ipr.dead_child_count, ipr.preg_number, ipr.ga,
+             pt.cid AS mother_cid,
+             CONCAT(pt.pname, pt.fname, ' ', pt.lname) AS mother_name,
+             pt.birthday AS mother_birthday
       FROM ipt_pregnancy ipr
       JOIN ipt ip ON ip.an = ipr.an
+      LEFT JOIN patient pt ON pt.hn = ip.hn
       WHERE ipr.labor_date IS NOT NULL AND ipr.labor_date >= '{{CUTOFF}}'`,
 };
 

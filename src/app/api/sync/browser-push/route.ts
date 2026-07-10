@@ -340,6 +340,7 @@ export async function POST(request: NextRequest) {
           upserted: r.infants.upserted,
           journeys: r.infants.journeys,
           skippedNoJourney: r.infants.skippedNoJourney,
+          createdJourneys: r.infants.createdJourneys + r.fallback.createdJourneys,
           fallbackRows: r.fallback.rowsRead,
           fallbackUpserted: r.fallback.upserted,
           fallbackJourneys: r.fallback.journeys,

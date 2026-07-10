@@ -5,6 +5,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqliteAdapter } from '@/db/sqlite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables';
+import { generateKey, decrypt } from '@/lib/encryption';
+import { beforeAll } from 'vitest';
 import {
   syncNewbornsFromRows,
   syncNewbornsFromPregnancyRows,
@@ -60,6 +62,10 @@ function makeInfantRow(
 describe('newborn polling sync', () => {
   let db: SqliteAdapter;
 
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = generateKey();
+  });
+
   beforeEach(async () => {
     db = new SqliteAdapter(':memory:');
     await SchemaSync.sync(db, ALL_TABLES, 'sqlite');
@@ -94,7 +100,13 @@ describe('newborn polling sync', () => {
 
     const result = await syncNewbornsFromRows(db, HOSPITAL_ID, rows);
 
-    expect(result).toEqual({ rowsRead: 3, upserted: 2, journeys: 1, skippedNoJourney: 1 });
+    expect(result).toEqual({
+      rowsRead: 3,
+      upserted: 2,
+      journeys: 1,
+      skippedNoJourney: 1,
+      createdJourneys: 0,
+    });
 
     const newborns = await db.query<{ infant_number: number }>(
       `SELECT infant_number FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
@@ -197,6 +209,7 @@ describe('newborn polling sync', () => {
       journeys: 1,
       skippedNoJourney: 1,
       skippedHasDetail: 0,
+      createdJourneys: 0,
     });
 
     const newborns = await db.query<{ infant_number: number; born_at: string }>(
@@ -293,6 +306,106 @@ describe('newborn polling sync', () => {
     const result = await processBrowserNewborns(db, HOSPITAL_ID, {});
     expect(result.infants.rowsRead).toBe(0);
     expect(result.fallback.rowsRead).toBe(0);
+  });
+
+  // ── Retrospective journeys ─────────────────────────────────────────────
+  // Historical births whose mothers were never registered (pre-kk-lrms
+  // deliveries found during backfill) get a minimal DELIVERED journey built
+  // from the mother identity the delivery queries now carry — instead of
+  // being skipped and lost to the outcomes board.
+
+  it('creates a retrospective DELIVERED journey when no journey exists but identity does', async () => {
+    const rows = [
+      makeInfantRow('AN-RETRO', 1, {
+        mother_hn: 'HN-RETRO',
+        mother_cid: '1100500090006',
+        mother_name: 'นาง ย้อนหลัง ทดสอบ',
+        mother_birthday: '1996-02-01',
+        birth_date: '2026-05-20',
+      }),
+    ];
+
+    const result = await syncNewbornsFromRows(db, HOSPITAL_ID, rows);
+
+    expect(result.createdJourneys).toBe(1);
+    expect(result.skippedNoJourney).toBe(0);
+    expect(result.upserted).toBe(1);
+
+    const journeys = await db.query<{
+      id: string;
+      hn: string;
+      name: string;
+      cid_hash: string | null;
+      care_stage: string;
+      registered_at: string;
+    }>(`SELECT id, hn, name, cid_hash, care_stage, registered_at FROM maternal_journeys WHERE hn = 'HN-RETRO'`);
+    expect(journeys).toHaveLength(1);
+    expect(journeys[0].care_stage).toBe('DELIVERED');
+    expect(journeys[0].cid_hash).toBeTruthy();
+    expect(journeys[0].registered_at.slice(0, 10)).toBe('2026-05-20');
+    expect(decrypt(journeys[0].name, process.env.ENCRYPTION_KEY!)).toBe('นาง ย้อนหลัง ทดสอบ');
+
+    const newborns = await db.query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
+      [journeys[0].id],
+    );
+    expect(Number(newborns[0].cnt)).toBe(1);
+  });
+
+  it('reuses an existing journey by mother CID before creating a new one', async () => {
+    // Journey exists at this hospital under a DIFFERENT HN but same CID hash.
+    const { createHash } = await import('crypto');
+    const cidHash = createHash('sha256').update('1100500090006').digest('hex');
+    const old = new Date(Date.now() - 300 * 86_400_000).toISOString();
+    await db.execute(
+      `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
+       VALUES ('journey-cid', ?, ?, 'HN-OTHER', 'enc', 'enc_cid', ?, 29, 1, 0, 'PREGNANCY', 'LOW', 3, ?, ?, ?, ?, ?)`,
+      [HOSPITAL_ID, HOSPITAL_ID, cidHash, old, old, old, old, old],
+    );
+
+    const result = await syncNewbornsFromRows(db, HOSPITAL_ID, [
+      makeInfantRow('AN-CIDMATCH', 1, {
+        mother_hn: 'HN-UNSEEN',
+        mother_cid: '1100500090006',
+        mother_name: 'นาง ซีไอดี ทดสอบ',
+        birth_date: '2026-06-01',
+      }),
+    ]);
+
+    expect(result.createdJourneys).toBe(0);
+    expect(result.skippedNoJourney).toBe(0);
+    const newborns = await db.query<{ journey_id: string }>(
+      `SELECT journey_id FROM cached_newborns WHERE infant_hn = 'NB-AN-CIDMATCH-1'`,
+    );
+    expect(newborns[0].journey_id).toBe('journey-cid');
+  });
+
+  it('still skips births with no identity at all', async () => {
+    const result = await syncNewbornsFromRows(db, HOSPITAL_ID, [
+      makeInfantRow('AN-GHOST', 1, { mother_hn: null, birth_date: '2026-05-01' }),
+    ]);
+    expect(result.createdJourneys).toBe(0);
+    expect(result.skippedNoJourney).toBe(1);
+  });
+
+  it('fallback path also creates retrospective journeys from delivery summaries', async () => {
+    const result = await syncNewbornsFromPregnancyRows(db, HOSPITAL_ID, [
+      makePregnancyRow('AN-RETRO-P', {
+        mother_hn: 'HN-RETRO-P',
+        mother_cid: null,
+        mother_name: 'นาง สรุปคลอด ทดสอบ',
+        child_count: 2,
+        labor_date: '2026-04-15',
+      }),
+    ]);
+
+    expect(result.createdJourneys).toBe(1);
+    expect(result.upserted).toBe(2);
+    const journeys = await db.query<{ care_stage: string }>(
+      `SELECT care_stage FROM maternal_journeys WHERE hn = 'HN-RETRO-P'`,
+    );
+    expect(journeys).toHaveLength(1);
+    expect(journeys[0].care_stage).toBe('DELIVERED');
   });
 
   it('cutoff: 365-day backfill window when nothing is cached for the hospital', async () => {

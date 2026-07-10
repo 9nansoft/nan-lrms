@@ -45,6 +45,9 @@ export interface HosxpPregnancyRow {
 export interface HosxpIptPregnancyRow {
   an: string;
   mother_hn: string | null;
+  mother_cid?: string | null;
+  mother_name?: string | null;
+  mother_birthday?: string | null;
   labor_date: string | null;
   child_count: number | null;
   dead_child_count: number | null;
@@ -153,6 +156,11 @@ export interface HosxpAncClassifyingRow {
 }
 
 export interface HosxpLabourInfantRow {
+  /** Mother identity (patient table via ipt join) — lets the sync create
+   *  retrospective journeys for pre-registry deliveries. */
+  mother_cid?: string | null;
+  mother_name?: string | null;
+  mother_birthday?: string | null;
   ipt_labour_infant_id: number;
   ipt_labour_id: number;
   an: string;

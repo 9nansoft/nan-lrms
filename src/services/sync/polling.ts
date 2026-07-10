@@ -1309,6 +1309,7 @@ export async function pollHospital(
         journeys: 0,
         skippedNoJourney: 0,
         skippedHasDetail: 0,
+        createdJourneys: 0,
       };
       let fallbackError: string | null = null;
       try {
@@ -1339,6 +1340,7 @@ export async function pollHospital(
         upserted: newbornResult.upserted,
         journeys: newbornResult.journeys,
         skippedNoJourney: newbornResult.skippedNoJourney,
+        createdJourneys: newbornResult.createdJourneys,
         fallbackRows: fallback.rowsRead,
         fallbackUpserted: fallback.upserted,
         fallbackJourneys: fallback.journeys,
