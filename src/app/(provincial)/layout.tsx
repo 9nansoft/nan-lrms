@@ -1,5 +1,6 @@
 import { SessionProvider } from 'next-auth/react';
 import { BmsSessionProvider } from '@/contexts/BmsSessionContext';
+import { CallProvider } from '@/components/calls/CallProvider';
 import { TopNavBarSlot } from '@/components/layout/TopNavBarSlot';
 import { ContentFrameSlot } from '@/components/layout/ContentFrameSlot';
 import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
@@ -15,15 +16,17 @@ export default function ProvincialLayout({ children }: { children: React.ReactNo
   return (
     <SessionProvider>
       <BmsSessionProvider>
-        <BreadcrumbProvider>
-          <div className="flex min-h-screen flex-col bg-slate-50/50">
-            <DbHealthBanner />
-            <TopNavBarSlot />
-            <main className="flex-1">
-              <ContentFrameSlot>{children}</ContentFrameSlot>
-            </main>
-          </div>
-        </BreadcrumbProvider>
+        <CallProvider>
+          <BreadcrumbProvider>
+            <div className="flex min-h-screen flex-col bg-slate-50/50">
+              <DbHealthBanner />
+              <TopNavBarSlot />
+              <main className="flex-1">
+                <ContentFrameSlot>{children}</ContentFrameSlot>
+              </main>
+            </div>
+          </BreadcrumbProvider>
+        </CallProvider>
       </BmsSessionProvider>
     </SessionProvider>
   );

@@ -12,6 +12,7 @@ import { useSession, signOut } from 'next-auth/react';
 import { LogOut, Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS, ROLE_LABELS, filterNavByRole } from '@/config/nav';
+import { CallDirectoryButton } from '@/components/calls/CallDirectoryButton';
 
 export type TopNavBarVariant = 'hospital' | 'provincial';
 
@@ -193,6 +194,7 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
               {roleLabel && <span className="text-[10px] text-white/60">{roleLabel}</span>}
             </div>
           )}
+          <CallDirectoryButton />
           <button
             onClick={handleLogout}
             className="rounded-sm p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"

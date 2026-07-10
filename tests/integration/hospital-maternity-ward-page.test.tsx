@@ -32,7 +32,7 @@ vi.mock('next-auth/react', () => ({
   }),
   signOut: vi.fn(),
 }));
-vi.mock('next/navigation', () => ({ usePathname: () => '/hospital-maternity-ward' }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/hospital-maternity-ward', useRouter: () => ({ push: () => {}, back: () => {}, replace: () => {}, prefetch: () => {} }) }));
 
 vi.mock('@/services/maternity-ward', () => ({
   listMaternityWards: vi.fn(),
