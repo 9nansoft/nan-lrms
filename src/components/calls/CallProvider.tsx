@@ -1,29 +1,21 @@
 'use client';
 
 // CallProvider — mounts once per authenticated layout. Owns the per-user
-// signaling stream (/api/sse/calls), the incoming/outgoing call state and the
-// global call UI (ring toast, outgoing overlay, directory dialog). Business
-// rules live server-side in src/services/video-call.ts; this component only
-// reflects signaling events.
+// signaling stream (/api/sse/calls), the incoming-ring state and the global
+// call UI (ring toast + directory). The caller no longer waits behind an
+// overlay: creating a call navigates straight into the room, where the
+// participant strip shows who is ringing/joined/declined.
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { IncomingCallToast } from './IncomingCallToast';
-import { OutgoingCallOverlay, type OutgoingPhase } from './OutgoingCallOverlay';
 import { CallDirectoryDialog, type DirectoryCallTarget } from './CallDirectoryDialog';
 
 interface IncomingCall {
   callId: string;
   roomId: string;
-  caller: { userId: string; name: string; hospitalCode: string; hospitalName: string };
-}
-
-interface OutgoingCall {
-  callId: string | null;
-  peerName: string;
-  peerHospitalName: string;
-  phase: OutgoingPhase;
-  errorMessage?: string | null;
+  inviter: { userId: string; name: string; hospitalCode: string; hospitalName: string };
+  participantCount?: number;
 }
 
 interface CallContextValue {
@@ -96,7 +88,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const userId = session?.user?.id;
 
   const [incoming, setIncoming] = useState<IncomingCall | null>(null);
-  const [outgoing, setOutgoing] = useState<OutgoingCall | null>(null);
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -122,81 +113,43 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
     const clearIncoming = (event: MessageEvent) => {
       const data = parse<{ callId: string }>(event);
-      setIncoming((current) => (current && data && current.callId === data.callId ? null : current));
-    };
-    const onAccepted = (event: MessageEvent) => {
-      const data = parse<{ callId: string }>(event);
-      if (!data) return;
-      setOutgoing((current) => {
-        if (current?.callId === data.callId) {
-          router.push(`/calls/${data.callId}`);
-          return null;
-        }
-        return current;
-      });
-    };
-    const outgoingPhase = (phase: OutgoingPhase) => (event: MessageEvent) => {
-      const data = parse<{ callId: string }>(event);
-      if (!data) return;
-      setOutgoing((current) =>
-        current?.callId === data.callId ? { ...current, phase } : current,
+      setIncoming((current) =>
+        current && data && current.callId === data.callId ? null : current,
       );
     };
 
     source.addEventListener('call:invite', onInvite);
     source.addEventListener('call:cancelled', clearIncoming);
     source.addEventListener('call:resolved', clearIncoming);
-    source.addEventListener('call:accepted', onAccepted);
-    source.addEventListener('call:declined', outgoingPhase('declined'));
-    source.addEventListener('call:missed', outgoingPhase('missed'));
 
     return () => {
       source.close();
     };
-  }, [userId, router]);
+  }, [userId]);
 
-  const placeCall = useCallback(async (target: DirectoryCallTarget) => {
-    setDirectoryOpen(false);
-    setOutgoing({
-      callId: null,
-      peerName: target.name,
-      peerHospitalName: target.hospitalName,
-      phase: 'ringing',
-    });
-    try {
-      const res = await fetch('/api/calls', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ calleeUserId: target.userId }),
-      });
-      const body = (await res.json()) as { callId?: string; message?: string };
-      if (res.ok && body.callId) {
-        setOutgoing((current) =>
-          current ? { ...current, callId: body.callId ?? null } : current,
-        );
-      } else {
-        setOutgoing((current) =>
-          current
-            ? {
-                ...current,
-                phase: 'failed',
-                errorMessage: body.message ?? 'ไม่สามารถโทรออกได้ กรุณาลองใหม่อีกครั้ง',
-              }
-            : current,
-        );
+  // Start a call: on success the creator goes straight into the room; the
+  // participant strip there shows ringing/declined/missed states live.
+  const placeCall = useCallback(
+    async (targets: DirectoryCallTarget[]): Promise<string | null> => {
+      try {
+        const res = await fetch('/api/calls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ calleeUserIds: targets.map((t) => t.userId) }),
+        });
+        const body = (await res.json()) as { callId?: string; message?: string };
+        if (res.ok && body.callId) {
+          setDirectoryOpen(false);
+          router.push(`/calls/${body.callId}`);
+          return null;
+        }
+        return body.message ?? 'ไม่สามารถโทรออกได้ กรุณาลองใหม่อีกครั้ง';
+      } catch {
+        return 'เกิดข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่อีกครั้ง';
       }
-    } catch {
-      setOutgoing((current) =>
-        current
-          ? {
-              ...current,
-              phase: 'failed',
-              errorMessage: 'เกิดข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่อีกครั้ง',
-            }
-          : current,
-      );
-    }
-  }, []);
+    },
+    [router],
+  );
 
   const acceptIncoming = useCallback(async () => {
     if (!incoming || actionBusy) return;
@@ -206,7 +159,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (result.ok) {
       router.push(`/calls/${incoming.callId}`);
     }
-    // Failure means the call was cancelled/timed out — the matching
+    // Failure means the ring was revoked/timed out — the matching
     // call:cancelled / call:resolved event clears the toast; do it here too
     // in case that event was missed during a reconnect.
     setIncoming(null);
@@ -220,13 +173,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setIncoming(null);
   }, [incoming, actionBusy]);
 
-  const cancelOutgoing = useCallback(async () => {
-    if (outgoing?.callId) {
-      await postCallAction(`/api/calls/${outgoing.callId}/cancel`);
-    }
-    setOutgoing(null);
-  }, [outgoing]);
-
   const openDirectory = useCallback(() => setDirectoryOpen(true), []);
 
   return (
@@ -239,21 +185,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       />
       {incoming && (
         <IncomingCallToast
-          callerName={incoming.caller.name}
-          callerHospitalName={incoming.caller.hospitalName}
+          callerName={incoming.inviter.name}
+          callerHospitalName={incoming.inviter.hospitalName}
+          groupSize={incoming.participantCount}
           onAccept={() => void acceptIncoming()}
           onDecline={() => void declineIncoming()}
           busy={actionBusy}
-        />
-      )}
-      {outgoing && (
-        <OutgoingCallOverlay
-          peerName={outgoing.peerName}
-          peerHospitalName={outgoing.peerHospitalName}
-          phase={outgoing.phase}
-          errorMessage={outgoing.errorMessage}
-          onCancel={() => void cancelOutgoing()}
-          onDismiss={() => setOutgoing(null)}
         />
       )}
     </CallContext.Provider>

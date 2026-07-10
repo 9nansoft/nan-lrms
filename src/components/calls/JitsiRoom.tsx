@@ -92,9 +92,7 @@ export function JitsiRoom({ roomId, displayName, onLeft }: JitsiRoomProps) {
     return (
       <div className="grid h-full place-items-center p-6 text-center">
         <div>
-          <p className="text-[15px] font-semibold text-white">
-            ไม่สามารถโหลดระบบวิดีโอคอลได้
-          </p>
+          <p className="text-[15px] font-semibold text-white">ไม่สามารถโหลดระบบวิดีโอคอลได้</p>
           <p className="mt-1 text-[13px] text-white/70">
             กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต หรือเปิดห้องสนทนาโดยตรง
           </p>

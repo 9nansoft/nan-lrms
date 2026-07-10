@@ -20,6 +20,7 @@ import { tambonsTable } from './tambons';
 import { mophHospitalsTable } from './moph-hospitals';
 import { systemConfigTable } from './system-config';
 import { videoCallsTable } from './video-calls';
+import { videoCallParticipantsTable } from './video-call-participants';
 
 export {
   hospitalsTable,
@@ -43,6 +44,7 @@ export {
   mophHospitalsTable,
   systemConfigTable,
   videoCallsTable,
+  videoCallParticipantsTable,
 };
 
 // All tables in creation order (respects foreign key dependencies)
@@ -68,4 +70,5 @@ export const ALL_TABLES: TableDefinition[] = [
   cachedReferralsTable,
   cachedNewbornsTable,
   videoCallsTable,
+  videoCallParticipantsTable,
 ];

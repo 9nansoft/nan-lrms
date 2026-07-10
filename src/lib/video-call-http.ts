@@ -10,8 +10,7 @@ import { logger } from '@/lib/logger';
 import { VideoCallError, type CallActor, type VideoCallErrorCode } from '@/services/video-call';
 
 const STATUS_BY_CODE: Record<VideoCallErrorCode, number> = {
-  SELF_CALL: 400,
-  CALLEE_OFFLINE: 409,
+  NO_INVITEES: 409,
   BUSY: 409,
   NOT_FOUND: 404,
   FORBIDDEN: 403,
@@ -44,6 +43,25 @@ export function videoCallErrorResponse(error: unknown, logContext: string): Next
     },
     { status: 500 },
   );
+}
+
+/** Body parser shared by POST /api/calls and /api/calls/[id]/invite:
+ *  { calleeUserIds: string[] }, with the 1:1-era { calleeUserId: string }
+ *  accepted and wrapped. Returns [] for anything malformed. */
+export async function parseCalleeUserIds(request: Request): Promise<string[]> {
+  let body: { calleeUserIds?: unknown; calleeUserId?: unknown } | null = null;
+  try {
+    body = await request.json();
+  } catch {
+    return [];
+  }
+  if (Array.isArray(body?.calleeUserIds)) {
+    return body.calleeUserIds.filter((id): id is string => typeof id === 'string' && id !== '');
+  }
+  if (typeof body?.calleeUserId === 'string' && body.calleeUserId !== '') {
+    return [body.calleeUserId];
+  }
+  return [];
 }
 
 type CallTransition = (db: DatabaseAdapter, callId: string, actor: CallActor) => Promise<unknown>;

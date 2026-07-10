@@ -2,6 +2,7 @@
 import { getDatabase, closeDatabase, isPgliteEnabled } from '@/db/connection';
 import { SchemaSync } from '@/db/schema-sync';
 import { migrateAuditLogsActor } from '@/db/migrations/audit-logs-actor';
+import { migrateVideoCallsGroupModel } from '@/db/migrations/video-calls-group';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { SseManager } from '@/lib/sse';
@@ -26,6 +27,12 @@ export async function initializeApp(): Promise<void> {
     // 1. Connect to database
     const db = await getDatabase();
     logger.info('database_connected', { driver: 'postgresql' });
+
+    // 1a. Rename the 1:1-era video_calls table aside so SchemaSync can create
+    // the group-model header + participants tables under the original name.
+    // Must run BEFORE the sync — SchemaSync only ADDs columns and would
+    // otherwise bolt group columns onto the old shape.
+    await migrateVideoCallsGroupModel(db);
 
     // 2. Sync schema
     await SchemaSync.sync(db, ALL_TABLES, 'postgresql');

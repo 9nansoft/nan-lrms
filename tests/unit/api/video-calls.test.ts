@@ -1,5 +1,5 @@
-// Video-call API routes — TDD: auth guards, participant guards, HTTP mapping
-// of VideoCallError codes, presence-backed directory, and per-user SSE stream.
+// Group video-call API routes — auth guards, participant guards, HTTP mapping
+// of VideoCallError codes, invite/leave lifecycle, directory, SSE stream.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Session } from 'next-auth';
 import { createTestDb } from '../../helpers/testDb';
@@ -26,13 +26,13 @@ import { POST as createCallRoute } from '@/app/api/calls/route';
 import { GET as getCallRoute } from '@/app/api/calls/[id]/route';
 import { POST as acceptRoute } from '@/app/api/calls/[id]/accept/route';
 import { POST as declineRoute } from '@/app/api/calls/[id]/decline/route';
-import { POST as cancelRoute } from '@/app/api/calls/[id]/cancel/route';
-import { POST as endRoute } from '@/app/api/calls/[id]/end/route';
+import { POST as leaveRoute } from '@/app/api/calls/[id]/leave/route';
+import { POST as inviteRoute } from '@/app/api/calls/[id]/invite/route';
 import { GET as directoryRoute } from '@/app/api/calls/directory/route';
 import { GET as callsSseRoute } from '@/app/api/sse/calls/route';
 
-const CALLER_USER = {
-  id: 'user-caller',
+const CREATOR_USER = {
+  id: 'user-creator',
   name: 'พญ.ต้นทาง ทดสอบ',
   role: 'user',
   hospitalCode: '10670',
@@ -40,26 +40,34 @@ const CALLER_USER = {
   authProvider: 'test',
   accessMode: 'full',
 };
-const CALLEE_USER = {
-  id: 'user-callee',
-  name: 'นพ.ปลายทาง ทดสอบ',
+const INVITEE_USER = {
+  id: 'user-b',
+  name: 'นพ.สอง ทดสอบ',
   role: 'user',
   hospitalCode: '11004',
   hospitalName: 'รพ.น้ำพอง',
   authProvider: 'test',
   accessMode: 'full',
 };
+const THIRD_USER = {
+  id: 'user-c',
+  name: 'นส.สาม ทดสอบ',
+  role: 'user',
+  hospitalCode: '11005',
+  hospitalName: 'รพ.ชนบท',
+  authProvider: 'test',
+  accessMode: 'full',
+};
 
-function sessionFor(user: typeof CALLER_USER): Session {
+function sessionFor(user: typeof CREATOR_USER): Session {
   return {
     user: { ...user },
     expires: new Date(Date.now() + 3_600_000).toISOString(),
   } as unknown as Session;
 }
 
-async function bothOnline(): Promise<void> {
-  await recordOnlineUser(sessionFor(CALLER_USER));
-  await recordOnlineUser(sessionFor(CALLEE_USER));
+async function online(...users: (typeof CREATOR_USER)[]): Promise<void> {
+  for (const user of users) await recordOnlineUser(sessionFor(user));
 }
 
 function postJson(url: string, body?: unknown): Request {
@@ -74,16 +82,16 @@ function params(id: string): { params: Promise<{ id: string }> } {
   return { params: Promise.resolve({ id }) };
 }
 
-async function placeCall(): Promise<{ callId: string; roomId: string }> {
-  mockSessionUser = CALLER_USER;
-  const res = await createCallRoute(
-    postJson('http://test/api/calls', { calleeUserId: CALLEE_USER.id }) as never,
-  );
+async function placeCall(
+  calleeUserIds: string[],
+): Promise<{ callId: string; roomId: string; invited: unknown[]; skipped: unknown[] }> {
+  mockSessionUser = CREATOR_USER;
+  const res = await createCallRoute(postJson('http://test/api/calls', { calleeUserIds }) as never);
   expect(res.status).toBe(201);
   return res.json();
 }
 
-describe('video-call API routes', () => {
+describe('group video-call API routes', () => {
   beforeEach(async () => {
     db = await createTestDb();
     SseManager.resetForTests();
@@ -95,181 +103,182 @@ describe('video-call API routes', () => {
   describe('POST /api/calls', () => {
     it('401 without a session', async () => {
       const res = await createCallRoute(
-        postJson('http://test/api/calls', { calleeUserId: 'x' }) as never,
+        postJson('http://test/api/calls', { calleeUserIds: ['x'] }) as never,
       );
       expect(res.status).toBe(401);
     });
 
-    it('400 when calleeUserId is missing', async () => {
-      mockSessionUser = CALLER_USER;
-      const res = await createCallRoute(postJson('http://test/api/calls', {}) as never);
-      expect(res.status).toBe(400);
+    it('400 when no callee ids are provided', async () => {
+      mockSessionUser = CREATOR_USER;
+      const empty = await createCallRoute(
+        postJson('http://test/api/calls', { calleeUserIds: [] }) as never,
+      );
+      expect(empty.status).toBe(400);
+      const missing = await createCallRoute(postJson('http://test/api/calls', {}) as never);
+      expect(missing.status).toBe(400);
+      expect((await missing.json()).message).toMatch(/[ก-๙]/);
+    });
+
+    it('creates a group call and reports invited + skipped', async () => {
+      await online(CREATOR_USER, INVITEE_USER, THIRD_USER);
+      const body = await placeCall([INVITEE_USER.id, THIRD_USER.id, 'user-ghost']);
+      expect(body.callId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(body.roomId).toMatch(/^kklrms-/);
+      expect(body.invited).toHaveLength(2);
+      expect(body.skipped).toEqual([{ userId: 'user-ghost', reason: 'offline' }]);
+    });
+
+    it('accepts the legacy single calleeUserId string', async () => {
+      await online(CREATOR_USER, INVITEE_USER);
+      mockSessionUser = CREATOR_USER;
+      const res = await createCallRoute(
+        postJson('http://test/api/calls', { calleeUserId: INVITEE_USER.id }) as never,
+      );
+      expect(res.status).toBe(201);
+      expect((await res.json()).invited).toHaveLength(1);
+    });
+
+    it('409 NO_INVITEES with Thai message when nobody is invitable', async () => {
+      await online(CREATOR_USER);
+      mockSessionUser = CREATOR_USER;
+      const res = await createCallRoute(
+        postJson('http://test/api/calls', { calleeUserIds: ['user-ghost'] }) as never,
+      );
+      expect(res.status).toBe(409);
       const body = await res.json();
+      expect(body.code).toBe('NO_INVITEES');
       expect(body.message).toMatch(/[ก-๙]/);
-    });
-
-    it('creates a call and returns callId + roomId', async () => {
-      await bothOnline();
-      const { callId, roomId } = await placeCall();
-      expect(callId).toMatch(/^[0-9a-f-]{36}$/);
-      expect(roomId).toMatch(/^kklrms-/);
-    });
-
-    it('409 with Thai message when the callee is offline', async () => {
-      await recordOnlineUser(sessionFor(CALLER_USER));
-      mockSessionUser = CALLER_USER;
-      const res = await createCallRoute(
-        postJson('http://test/api/calls', { calleeUserId: CALLEE_USER.id }) as never,
-      );
-      expect(res.status).toBe(409);
-      const body = await res.json();
-      expect(body.code).toBe('CALLEE_OFFLINE');
-      expect(body.message).toMatch(/ออนไลน์/);
-    });
-
-    it('409 BUSY when the callee is already ringing', async () => {
-      await bothOnline();
-      await placeCall();
-      const third = { ...CALLER_USER, id: 'user-third', name: 'นส.สาม ทดสอบ' };
-      await recordOnlineUser(sessionFor(third));
-      mockSessionUser = third;
-      const res = await createCallRoute(
-        postJson('http://test/api/calls', { calleeUserId: CALLEE_USER.id }) as never,
-      );
-      expect(res.status).toBe(409);
-      expect((await res.json()).code).toBe('BUSY');
     });
   });
 
-  describe('call lifecycle routes', () => {
-    it('accept: 401 unauthenticated, 403 for the caller, 200 with roomId for the callee', async () => {
-      await bothOnline();
-      const { callId, roomId } = await placeCall();
+  describe('accept / decline / leave', () => {
+    it('accept: 401 unauthenticated, 403 stranger, 200 with roomId for the invitee', async () => {
+      await online(CREATOR_USER, INVITEE_USER);
+      const { callId, roomId } = await placeCall([INVITEE_USER.id]);
 
       mockSessionUser = null;
       expect((await acceptRoute(postJson('http://t') as never, params(callId))).status).toBe(401);
 
-      mockSessionUser = CALLER_USER;
+      mockSessionUser = THIRD_USER;
       expect((await acceptRoute(postJson('http://t') as never, params(callId))).status).toBe(403);
 
-      mockSessionUser = CALLEE_USER;
+      mockSessionUser = INVITEE_USER;
       const res = await acceptRoute(postJson('http://t') as never, params(callId));
       expect(res.status).toBe(200);
       expect((await res.json()).roomId).toBe(roomId);
     });
 
-    it('accept: 404 for unknown call, 409 for non-ringing call', async () => {
-      mockSessionUser = CALLEE_USER;
-      const unknown = await acceptRoute(
+    it('decline resolves the ring; leave by the last joined participant ends the call', async () => {
+      await online(CREATOR_USER, INVITEE_USER);
+      const { callId } = await placeCall([INVITEE_USER.id]);
+
+      mockSessionUser = INVITEE_USER;
+      expect((await declineRoute(postJson('http://t') as never, params(callId))).status).toBe(200);
+
+      mockSessionUser = CREATOR_USER;
+      expect((await leaveRoute(postJson('http://t') as never, params(callId))).status).toBe(200);
+
+      const header = await db.query<{ status: string }>(
+        'SELECT status FROM video_calls WHERE id = ?',
+        [callId],
+      );
+      expect(header[0].status).toBe('ended');
+    });
+
+    it('404 for unknown call ids', async () => {
+      mockSessionUser = INVITEE_USER;
+      const res = await acceptRoute(
         postJson('http://t') as never,
         params('00000000-0000-4000-8000-000000000000'),
       );
-      expect(unknown.status).toBe(404);
+      expect(res.status).toBe(404);
+    });
+  });
 
-      await bothOnline();
-      const { callId } = await placeCall();
-      mockSessionUser = CALLEE_USER;
-      await acceptRoute(postJson('http://t') as never, params(callId));
-      const again = await acceptRoute(postJson('http://t') as never, params(callId));
-      expect(again.status).toBe(409);
+  describe('POST /api/calls/[id]/invite', () => {
+    it('lets a joined participant ring more people; forbids non-joined callers', async () => {
+      await online(CREATOR_USER, INVITEE_USER, THIRD_USER);
+      const { callId } = await placeCall([INVITEE_USER.id]);
+
+      // Still ringing — cannot invite yet.
+      mockSessionUser = INVITEE_USER;
+      const early = await inviteRoute(
+        postJson('http://t', { calleeUserIds: [THIRD_USER.id] }) as never,
+        params(callId),
+      );
+      expect(early.status).toBe(403);
+
+      mockSessionUser = CREATOR_USER;
+      const res = await inviteRoute(
+        postJson('http://t', { calleeUserIds: [THIRD_USER.id] }) as never,
+        params(callId),
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.invited).toHaveLength(1);
+
+      const rows = await db.query<{ status: string }>(
+        'SELECT status FROM video_call_participants WHERE call_id = ? AND user_id = ?',
+        [callId, THIRD_USER.id],
+      );
+      expect(rows[0].status).toBe('ringing');
     });
 
-    it('decline / cancel / end map to the service transitions', async () => {
-      await bothOnline();
-      const first = await placeCall();
-      mockSessionUser = CALLEE_USER;
-      expect((await declineRoute(postJson('http://t') as never, params(first.callId))).status).toBe(
-        200,
-      );
-
-      const second = await placeCall();
-      mockSessionUser = CALLER_USER;
-      expect((await cancelRoute(postJson('http://t') as never, params(second.callId))).status).toBe(
-        200,
-      );
-
-      const third = await placeCall();
-      mockSessionUser = CALLEE_USER;
-      await acceptRoute(postJson('http://t') as never, params(third.callId));
-      mockSessionUser = CALLER_USER;
-      expect((await endRoute(postJson('http://t') as never, params(third.callId))).status).toBe(
-        200,
-      );
-
-      const statuses = await db.query<{ id: string; status: string }>(
-        'SELECT id, status FROM video_calls',
-      );
-      const byId = new Map(statuses.map((r) => [r.id, r.status]));
-      expect(byId.get(first.callId)).toBe('declined');
-      expect(byId.get(second.callId)).toBe('cancelled');
-      expect(byId.get(third.callId)).toBe('ended');
+    it('400 when calleeUserIds is missing', async () => {
+      await online(CREATOR_USER, INVITEE_USER);
+      const { callId } = await placeCall([INVITEE_USER.id]);
+      mockSessionUser = CREATOR_USER;
+      const res = await inviteRoute(postJson('http://t', {}) as never, params(callId));
+      expect(res.status).toBe(400);
     });
   });
 
   describe('GET /api/calls/[id]', () => {
-    it('returns the call to a participant and 403 to strangers', async () => {
-      await bothOnline();
-      const { callId, roomId } = await placeCall();
+    it('returns header + participants to participants, 403 to strangers', async () => {
+      await online(CREATOR_USER, INVITEE_USER);
+      const { callId, roomId } = await placeCall([INVITEE_USER.id]);
 
-      mockSessionUser = CALLEE_USER;
+      mockSessionUser = INVITEE_USER;
       const res = await getCallRoute(new Request('http://t') as never, params(callId));
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.roomId).toBe(roomId);
-      expect(body.callerName).toBe(CALLER_USER.name);
+      expect(body.participants).toHaveLength(2);
+      expect(body.createdByName).toBe(CREATOR_USER.name);
 
-      mockSessionUser = { ...CALLER_USER, id: 'user-stranger' };
+      mockSessionUser = THIRD_USER;
       const forbidden = await getCallRoute(new Request('http://t') as never, params(callId));
       expect(forbidden.status).toBe(403);
     });
   });
 
   describe('GET /api/calls/directory', () => {
-    it('401 without a session', async () => {
-      const res = await directoryRoute();
-      expect(res.status).toBe(401);
-    });
+    it('401 without a session; groups online users excluding the requester', async () => {
+      expect((await directoryRoute()).status).toBe(401);
 
-    it('groups online users by hospital and excludes the requester', async () => {
-      await bothOnline();
-      const colleague = { ...CALLER_USER, id: 'user-colleague', name: 'นางเพื่อน ร่วมงาน' };
-      await recordOnlineUser(sessionFor(colleague));
-
-      mockSessionUser = CALLER_USER;
+      await online(CREATOR_USER, INVITEE_USER, THIRD_USER);
+      mockSessionUser = CREATOR_USER;
       const res = await directoryRoute();
       expect(res.status).toBe(200);
       const body = await res.json();
-
       const allUserIds = body.hospitals.flatMap((h: { users: { userId: string }[] }) =>
         h.users.map((u) => u.userId),
       );
-      expect(allUserIds).toContain(CALLEE_USER.id);
-      expect(allUserIds).toContain('user-colleague');
-      expect(allUserIds).not.toContain(CALLER_USER.id);
-
-      const khonKaen = body.hospitals.find(
-        (h: { hospitalCode: string }) => h.hospitalCode === '10670',
-      );
-      expect(khonKaen.hospitalName).toBe('รพ.ขอนแก่น');
-      expect(khonKaen.users).toHaveLength(1);
+      expect(allUserIds).toContain(INVITEE_USER.id);
+      expect(allUserIds).toContain(THIRD_USER.id);
+      expect(allUserIds).not.toContain(CREATOR_USER.id);
     });
   });
 
   describe('GET /api/sse/calls', () => {
-    it('401 without a session', async () => {
-      const res = await callsSseRoute();
-      expect(res.status).toBe(401);
-    });
+    it('401 without a session; registers the stream under the session user', async () => {
+      expect((await callsSseRoute()).status).toBe(401);
 
-    it('opens a per-user event stream targetable by sendToUser', async () => {
-      mockSessionUser = CALLEE_USER;
+      mockSessionUser = INVITEE_USER;
       const res = await callsSseRoute();
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('text/event-stream');
-
-      // The stream must be registered under the session user id.
-      const delivered = SseManager.getInstance().sendToUser(CALLEE_USER.id, 'call:test', {});
-      expect(delivered).toBe(1);
+      expect(SseManager.getInstance().sendToUser(INVITEE_USER.id, 'call:test', {})).toBe(1);
     });
   });
 });

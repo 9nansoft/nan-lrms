@@ -1,7 +1,9 @@
 'use client';
 
-// Directory of online users grouped by hospital — pick a person to call.
-// Data comes from /api/calls/directory (Redis presence, requester excluded).
+// Multi-select directory of online users grouped by hospital. Used both to
+// start a group call (TopNavBar) and to add participants mid-call (room
+// page). onCall resolves to a Thai error/notice string (shown inline, dialog
+// stays open) or null (done — parent navigated or list refreshed).
 import { useCallback, useEffect, useState } from 'react';
 import { Building2, Loader2, RefreshCw, Video } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -22,13 +24,24 @@ interface DirectoryHospital {
 interface CallDirectoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCall: (target: DirectoryCallTarget) => void;
+  onCall: (targets: DirectoryCallTarget[]) => Promise<string | null>;
+  title?: string;
+  actionLabel?: string;
 }
 
-export function CallDirectoryDialog({ open, onOpenChange, onCall }: CallDirectoryDialogProps) {
+export function CallDirectoryDialog({
+  open,
+  onOpenChange,
+  onCall,
+  title = 'โทรวิดีโอระหว่างโรงพยาบาล',
+  actionLabel = 'โทร',
+}: CallDirectoryDialogProps) {
   const [hospitals, setHospitals] = useState<DirectoryHospital[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [selected, setSelected] = useState<Map<string, DirectoryCallTarget>>(new Map());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -47,20 +60,50 @@ export function CallDirectoryDialog({ open, onOpenChange, onCall }: CallDirector
   }, []);
 
   useEffect(() => {
-    if (open) void load();
+    if (open) {
+      setSelected(new Map());
+      setActionError(null);
+      void load();
+    }
   }, [open, load]);
+
+  const toggle = (hospital: DirectoryHospital, user: DirectoryHospital['users'][number]) => {
+    setSelected((current) => {
+      const next = new Map(current);
+      if (next.has(user.userId)) {
+        next.delete(user.userId);
+      } else {
+        next.set(user.userId, {
+          userId: user.userId,
+          name: user.name,
+          role: user.role,
+          hospitalName: hospital.hospitalName,
+        });
+      }
+      return next;
+    });
+  };
+
+  const submit = async () => {
+    if (selected.size === 0 || submitting) return;
+    setSubmitting(true);
+    setActionError(null);
+    const message = await onCall(Array.from(selected.values()));
+    setSubmitting(false);
+    if (message) setActionError(message);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[16px]">
-            <Video className="h-4 w-4 text-emerald-600" /> โทรวิดีโอระหว่างโรงพยาบาล
+            <Video className="h-4 w-4 text-emerald-600" /> {title}
           </DialogTitle>
         </DialogHeader>
 
         <div className="flex items-center justify-between text-[12px] text-slate-500">
-          <span>แสดงเฉพาะผู้ใช้ที่ออนไลน์อยู่ขณะนี้</span>
+          <span>เลือกได้หลายคน — แสดงเฉพาะผู้ใช้ที่ออนไลน์</span>
           <button
             onClick={() => void load()}
             disabled={loading}
@@ -105,35 +148,53 @@ export function CallDirectoryDialog({ open, onOpenChange, onCall }: CallDirector
               </span>
             </div>
             <ul>
-              {hospital.users.map((user) => (
-                <li
-                  key={user.userId}
-                  className="flex items-center gap-2 px-3 py-2 not-last:border-b not-last:border-slate-100"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-slate-900">
-                      {user.name}
-                    </div>
-                    <div className="text-[11px] text-slate-500">{user.role}</div>
-                  </div>
-                  <button
-                    onClick={() =>
-                      onCall({
-                        userId: user.userId,
-                        name: user.name,
-                        role: user.role,
-                        hospitalName: hospital.hospitalName,
-                      })
-                    }
-                    className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-emerald-700"
-                  >
-                    <Video className="h-3.5 w-3.5" /> โทร
-                  </button>
-                </li>
-              ))}
+              {hospital.users.map((user) => {
+                const checked = selected.has(user.userId);
+                return (
+                  <li key={user.userId}>
+                    <button
+                      type="button"
+                      onClick={() => toggle(hospital, user)}
+                      className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition-colors ${
+                        checked ? 'bg-emerald-50' : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        readOnly
+                        tabIndex={-1}
+                        className="h-4 w-4 accent-emerald-600"
+                        aria-label={`เลือก ${user.name}`}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium text-slate-900">
+                          {user.name}
+                        </span>
+                        <span className="block text-[11px] text-slate-500">{user.role}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}
+
+        {actionError && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-800">
+            {actionError}
+          </div>
+        )}
+
+        <button
+          onClick={() => void submit()}
+          disabled={selected.size === 0 || submitting}
+          className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
+          {actionLabel} ({selected.size})
+        </button>
       </DialogContent>
     </Dialog>
   );

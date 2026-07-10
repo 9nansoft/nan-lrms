@@ -1,20 +1,24 @@
-// Video-call signaling service — all business logic for hospital-to-hospital
-// person-to-person calls (Constitution IV: business rules live in services).
+// Video-call signaling service — unified group model (Constitution IV:
+// business rules live in services). A 1:1 call is a group call with one
+// invitee.
 //
-// Media never touches this server: both participants join a Jitsi room on
-// jitsi1.hosxp.net whose name is an unguessable UUID (the Jitsi instance is
+// Media never touches this server: participants join a Jitsi room on
+// jitsi1.hosxp.net whose name is an unguessable UUID (the instance is
 // anonymous-join, so room-name entropy IS the access control). This service
-// only manages the call lifecycle and pushes signaling over SSE:
+// manages the call/participant lifecycle and pushes signaling over SSE.
 //
-//   ringing ──accept──▶ accepted ──end──▶ ended
-//      │──decline──▶ declined
-//      │──cancel───▶ cancelled
-//      └──timeout──▶ missed
+//   header:      active ──(last joined participant leaves)──▶ ended
+//   creator:     joined ──▶ left
+//   invitee:     ringing ──accept──▶ joined ──▶ left
+//                   │──decline──▶ declined
+//                   │──timeout──▶ missed
+//                   └──call ends─▶ cancelled
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { SseManager } from '@/lib/sse';
-import { listOnlineUsers } from '@/lib/presence';
+import { listOnlineUsers, type OnlineUserSnapshot } from '@/lib/presence';
 import { logger } from '@/lib/logger';
+import { MAX_CALL_PARTICIPANTS } from '@/config/video-call';
 
 export interface CallActor {
   userId: string;
@@ -24,8 +28,7 @@ export interface CallActor {
 }
 
 export type VideoCallErrorCode =
-  | 'SELF_CALL'
-  | 'CALLEE_OFFLINE'
+  | 'NO_INVITEES'
   | 'BUSY'
   | 'NOT_FOUND'
   | 'FORBIDDEN'
@@ -41,44 +44,71 @@ export class VideoCallError extends Error {
   }
 }
 
-export interface CreatedCall {
+export type SkipReason = 'self' | 'duplicate' | 'offline' | 'busy' | 'limit';
+
+export interface SkippedInvitee {
+  userId: string;
+  reason: SkipReason;
+}
+
+export interface InviteResult {
+  invited: CallActor[];
+  skipped: SkippedInvitee[];
+}
+
+export interface CreatedCall extends InviteResult {
   callId: string;
   roomId: string;
-  callee: CallActor;
+}
+
+export interface CallParticipantView {
+  userId: string;
+  name: string;
+  hospitalCode: string;
+  hospitalName: string;
+  role: string;
+  status: string;
 }
 
 export interface VideoCallView {
   callId: string;
   roomId: string;
   status: string;
-  callerUserId: string;
-  callerName: string;
-  callerHospitalCode: string;
-  calleeUserId: string;
-  calleeName: string;
-  calleeHospitalCode: string;
+  createdByUserId: string;
+  createdByName: string;
+  participants: CallParticipantView[];
 }
 
-interface VideoCallRow {
+interface CallHeaderRow {
   id: string;
   room_id: string;
   status: string;
-  caller_user_id: string;
-  caller_name: string;
-  caller_hospital_code: string;
-  callee_user_id: string;
-  callee_name: string;
-  callee_hospital_code: string;
+  created_by_user_id: string;
+  created_by_name: string;
+}
+
+interface ParticipantRow {
+  id: string;
+  call_id: string;
+  user_id: string;
+  name: string;
+  hospital_code: string;
+  hospital_name: string;
+  role: string;
+  status: string;
 }
 
 const DEFAULT_RING_TIMEOUT_MS = 45_000;
-// A ringing row older than this has lost its in-process timer (server
-// restart/redeploy mid-ring). Treat as missed so nobody stays "busy" forever.
+// A ring older than this has lost its in-process timer (redeploy mid-ring).
 const STALE_RING_MS = 2 * 60_000;
+// A joined participant absent from Redis presence for this long is gone
+// (crashed browser / closed laptop) — they must not hold the call open.
+// The room page sends its own presence heartbeats to stay visible.
+const STALE_JOIN_MS = 3 * 60_000;
 
 // Ring timers must survive Next.js bundle duplication/HMR just like the DB
 // singleton, otherwise accept() in one bundle can't clear the timer armed by
-// createCall() in another.
+// createCall() in another. Keyed by `${callId}:${userId}`.
 const _global = globalThis as unknown as { __videoCallTimers?: Map<string, NodeJS.Timeout> };
 const _timers: Map<string, NodeJS.Timeout> = _global.__videoCallTimers ?? new Map();
 if (!_global.__videoCallTimers) _global.__videoCallTimers = _timers;
@@ -90,187 +120,231 @@ export function clearCallTimersForTests(): void {
 
 export async function createCall(
   db: DatabaseAdapter,
-  caller: CallActor,
-  calleeUserId: string,
+  creator: CallActor,
+  calleeUserIds: string[],
   options: { ringTimeoutMs?: number } = {},
 ): Promise<CreatedCall> {
-  if (calleeUserId === caller.userId) {
-    throw new VideoCallError('SELF_CALL', 'ไม่สามารถโทรหาตัวเองได้ กรุณาเลือกผู้ใช้ท่านอื่น');
-  }
+  await sweepStaleParticipants(db);
 
-  const online = await listOnlineUsers();
-  const calleePresence = online.find((user) => user.userId === calleeUserId);
-  if (!calleePresence) {
+  if (await isBusy(db, creator.userId)) {
     throw new VideoCallError(
-      'CALLEE_OFFLINE',
-      'ผู้รับสายไม่ออนไลน์อยู่ในระบบขณะนี้ กรุณาลองใหม่เมื่อผู้รับสายกลับมาออนไลน์',
+      'BUSY',
+      'คุณมีสายที่กำลังสนทนาหรือกำลังเรียกอยู่ กรุณาวางสายเดิมก่อนเริ่มสายใหม่',
     );
   }
 
-  await expireStaleRings(db);
-
-  const active = await db.query<{ id: string }>(
-    `SELECT id FROM video_calls
-      WHERE status IN ('ringing', 'accepted')
-        AND (caller_user_id IN (?, ?) OR callee_user_id IN (?, ?))
-      LIMIT 1`,
-    [caller.userId, calleeUserId, caller.userId, calleeUserId],
-  );
-  if (active.length > 0) {
-    throw new VideoCallError('BUSY', 'สายไม่ว่าง — มีการสนทนาค้างอยู่ กรุณาลองใหม่ภายหลัง');
+  const evaluation = await evaluateInvitees(db, creator.userId, null, calleeUserIds, 1);
+  if (evaluation.candidates.length === 0) {
+    throw new VideoCallError(
+      'NO_INVITEES',
+      'ไม่มีผู้ใช้ที่สามารถเชิญได้ — ผู้ที่เลือกอาจออฟไลน์ สายไม่ว่าง หรือเป็นตัวคุณเอง',
+    );
   }
 
   const callId = uuidv4();
   const roomId = `kklrms-${uuidv4()}`;
   await db.execute(
     `INSERT INTO video_calls
-       (id, room_id, caller_user_id, caller_name, caller_hospital_code,
-        callee_user_id, callee_name, callee_hospital_code, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ringing', NOW())`,
+       (id, room_id, created_by_user_id, created_by_name, created_by_hospital_code, status, created_at)
+     VALUES (?, ?, ?, ?, ?, 'active', NOW())`,
+    [callId, roomId, creator.userId, creator.name, creator.hospitalCode],
+  );
+  await db.execute(
+    `INSERT INTO video_call_participants
+       (id, call_id, user_id, name, hospital_code, hospital_name, role, status,
+        invited_by_user_id, invited_at, joined_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'creator', 'joined', ?, NOW(), NOW())`,
     [
+      uuidv4(),
       callId,
-      roomId,
-      caller.userId,
-      caller.name,
-      caller.hospitalCode,
-      calleeUserId,
-      calleePresence.name,
-      calleePresence.hospitalCode,
+      creator.userId,
+      creator.name,
+      creator.hospitalCode,
+      creator.hospitalName,
+      creator.userId,
     ],
   );
 
-  const ringTimeoutMs = options.ringTimeoutMs ?? DEFAULT_RING_TIMEOUT_MS;
-  const timer = setTimeout(() => {
-    timeoutCall(db, callId).catch((error) => {
-      logger.warn('video_call_timeout_failed', { callId, error });
-    });
-  }, ringTimeoutMs);
-  // Don't let a pending ring timer hold the process open (tests, shutdown).
-  timer.unref?.();
-  _timers.set(callId, timer);
+  const invited = await ringCandidates(
+    db,
+    { id: callId, roomId },
+    creator,
+    evaluation.candidates,
+    options.ringTimeoutMs ?? DEFAULT_RING_TIMEOUT_MS,
+  );
 
-  SseManager.getInstance().sendToUser(calleeUserId, 'call:invite', {
-    callId,
-    roomId,
-    caller,
-  });
-
-  return {
-    callId,
-    roomId,
-    callee: {
-      userId: calleeUserId,
-      name: calleePresence.name,
-      hospitalCode: calleePresence.hospitalCode,
-      hospitalName: calleePresence.hospitalName,
-    },
-  };
+  return { callId, roomId, invited, skipped: evaluation.skipped };
 }
 
-export async function acceptCall(
+export async function inviteToCall(
+  db: DatabaseAdapter,
+  callId: string,
+  actor: CallActor,
+  calleeUserIds: string[],
+  options: { ringTimeoutMs?: number } = {},
+): Promise<InviteResult> {
+  await sweepStaleParticipants(db);
+
+  const header = await loadHeader(db, callId);
+  if (header.status !== 'active') {
+    throw new VideoCallError('INVALID_STATE', 'สายนี้สิ้นสุดแล้ว ไม่สามารถเชิญผู้เข้าร่วมเพิ่มได้');
+  }
+  const me = await loadParticipant(db, callId, actor.userId);
+  if (!me || me.status !== 'joined') {
+    throw new VideoCallError('FORBIDDEN', 'ต้องเข้าร่วมสายนี้อยู่จึงจะเชิญผู้อื่นได้');
+  }
+
+  const current = await countActiveParticipants(db, callId);
+  const evaluation = await evaluateInvitees(db, actor.userId, callId, calleeUserIds, current);
+  const invited =
+    evaluation.candidates.length > 0
+      ? await ringCandidates(
+          db,
+          { id: header.id, roomId: header.room_id },
+          actor,
+          evaluation.candidates,
+          options.ringTimeoutMs ?? DEFAULT_RING_TIMEOUT_MS,
+        )
+      : [];
+  return { invited, skipped: evaluation.skipped };
+}
+
+export async function acceptInvite(
   db: DatabaseAdapter,
   callId: string,
   actor: CallActor,
 ): Promise<{ roomId: string }> {
-  const call = await loadCall(db, callId);
-  if (call.callee_user_id !== actor.userId) {
-    throw new VideoCallError('FORBIDDEN', 'เฉพาะผู้รับสายเท่านั้นที่สามารถรับสายนี้ได้');
+  const header = await loadHeader(db, callId);
+  if (header.status !== 'active') {
+    throw new VideoCallError('INVALID_STATE', 'สายนี้สิ้นสุดแล้ว ไม่สามารถรับสายได้');
   }
-  requireStatus(call, 'ringing', 'รับสาย');
+  const me = await requireParticipant(db, callId, actor.userId);
+  if (me.status !== 'ringing') {
+    throw new VideoCallError('INVALID_STATE', `ไม่สามารถรับสายได้ — สถานะของคุณคือ "${me.status}"`);
+  }
 
-  clearRingTimer(callId);
-  await db.execute(`UPDATE video_calls SET status = 'accepted', answered_at = NOW() WHERE id = ?`, [
+  clearRingTimer(callId, actor.userId);
+  await db.execute(
+    `UPDATE video_call_participants
+        SET status = 'joined', joined_at = NOW(), left_at = NULL
+      WHERE id = ?`,
+    [me.id],
+  );
+
+  await notifyJoined(
+    db,
     callId,
-  ]);
-
-  const sse = SseManager.getInstance();
-  sse.sendToUser(call.caller_user_id, 'call:accepted', { callId, roomId: call.room_id });
-  sse.sendToUser(call.callee_user_id, 'call:resolved', { callId, status: 'accepted' });
-  return { roomId: call.room_id };
+    'call:participant-joined',
+    { callId, userId: actor.userId, name: me.name },
+    actor.userId,
+  );
+  SseManager.getInstance().sendToUser(actor.userId, 'call:resolved', {
+    callId,
+    status: 'joined',
+  });
+  return { roomId: header.room_id };
 }
 
-export async function declineCall(
+export async function declineInvite(
   db: DatabaseAdapter,
   callId: string,
   actor: CallActor,
 ): Promise<void> {
-  const call = await loadCall(db, callId);
-  if (call.callee_user_id !== actor.userId) {
-    throw new VideoCallError('FORBIDDEN', 'เฉพาะผู้รับสายเท่านั้นที่สามารถปฏิเสธสายนี้ได้');
+  const header = await loadHeader(db, callId);
+  if (header.status !== 'active') {
+    throw new VideoCallError('INVALID_STATE', 'สายนี้สิ้นสุดแล้ว');
   }
-  requireStatus(call, 'ringing', 'ปฏิเสธสาย');
+  const me = await requireParticipant(db, callId, actor.userId);
+  if (me.status !== 'ringing') {
+    throw new VideoCallError(
+      'INVALID_STATE',
+      `ไม่สามารถปฏิเสธสายได้ — สถานะของคุณคือ "${me.status}"`,
+    );
+  }
 
-  clearRingTimer(callId);
-  await db.execute(`UPDATE video_calls SET status = 'declined', ended_at = NOW() WHERE id = ?`, [
+  clearRingTimer(callId, actor.userId);
+  await db.execute(
+    `UPDATE video_call_participants SET status = 'declined', left_at = NOW() WHERE id = ?`,
+    [me.id],
+  );
+
+  await notifyJoined(
+    db,
     callId,
-  ]);
-
-  const sse = SseManager.getInstance();
-  sse.sendToUser(call.caller_user_id, 'call:declined', { callId });
-  sse.sendToUser(call.callee_user_id, 'call:resolved', { callId, status: 'declined' });
+    'call:participant-declined',
+    { callId, userId: actor.userId, name: me.name },
+    actor.userId,
+  );
+  SseManager.getInstance().sendToUser(actor.userId, 'call:resolved', {
+    callId,
+    status: 'declined',
+  });
 }
 
-export async function cancelCall(
+export async function leaveCall(
   db: DatabaseAdapter,
   callId: string,
   actor: CallActor,
 ): Promise<void> {
-  const call = await loadCall(db, callId);
-  if (call.caller_user_id !== actor.userId) {
-    throw new VideoCallError('FORBIDDEN', 'เฉพาะผู้โทรเท่านั้นที่สามารถยกเลิกสายนี้ได้');
+  const header = await loadHeader(db, callId);
+  const me = await requireParticipant(db, callId, actor.userId);
+  if (me.status !== 'joined') {
+    throw new VideoCallError('INVALID_STATE', 'คุณไม่ได้อยู่ในสายนี้แล้ว');
   }
-  requireStatus(call, 'ringing', 'ยกเลิกสาย');
 
-  clearRingTimer(callId);
-  await db.execute(`UPDATE video_calls SET status = 'cancelled', ended_at = NOW() WHERE id = ?`, [
-    callId,
-  ]);
+  await db.execute(
+    `UPDATE video_call_participants SET status = 'left', left_at = NOW() WHERE id = ?`,
+    [me.id],
+  );
 
-  SseManager.getInstance().sendToUser(call.callee_user_id, 'call:cancelled', { callId });
+  const remaining = await countJoined(db, callId);
+  if (remaining === 0) {
+    await endCall(db, header);
+  } else {
+    await notifyJoined(
+      db,
+      callId,
+      'call:participant-left',
+      { callId, userId: actor.userId, name: me.name },
+      actor.userId,
+    );
+  }
 }
 
-export async function endCall(
-  db: DatabaseAdapter,
-  callId: string,
-  actor: CallActor,
-): Promise<void> {
-  const call = await loadCall(db, callId);
-  const isParticipant =
-    call.caller_user_id === actor.userId || call.callee_user_id === actor.userId;
-  if (!isParticipant) {
-    throw new VideoCallError('FORBIDDEN', 'เฉพาะผู้ร่วมสนทนาเท่านั้นที่สามารถวางสายนี้ได้');
-  }
-  requireStatus(call, 'accepted', 'วางสาย');
-
-  await db.execute(`UPDATE video_calls SET status = 'ended', ended_at = NOW() WHERE id = ?`, [
-    callId,
-  ]);
-
-  const peerUserId =
-    call.caller_user_id === actor.userId ? call.callee_user_id : call.caller_user_id;
-  SseManager.getInstance().sendToUser(peerUserId, 'call:ended', { callId });
-}
-
-/** Participant-guarded read used by the room page to resolve room + peer. */
+/** Participant-guarded read for the room page: header + everyone's status.
+ *  Only ringing/joined participants may look — the room id is the Jitsi
+ *  access control and must not leak to declined/left users or strangers. */
 export async function getCall(
   db: DatabaseAdapter,
   callId: string,
   userId: string,
 ): Promise<VideoCallView> {
-  const call = await loadCall(db, callId);
-  if (call.caller_user_id !== userId && call.callee_user_id !== userId) {
-    throw new VideoCallError('FORBIDDEN', 'คุณไม่ใช่ผู้ร่วมสนทนาของสายนี้');
+  const header = await loadHeader(db, callId);
+  const me = await loadParticipant(db, callId, userId);
+  if (!me || (me.status !== 'ringing' && me.status !== 'joined')) {
+    throw new VideoCallError(
+      'FORBIDDEN',
+      'คุณไม่ใช่ผู้ร่วมสนทนาของสายนี้ หรือสายนี้สิ้นสุดแล้วสำหรับคุณ',
+    );
   }
+  const participants = await db.query<ParticipantRow>(
+    `SELECT * FROM video_call_participants WHERE call_id = ? ORDER BY invited_at, user_id`,
+    [callId],
+  );
   return {
-    callId: call.id,
-    roomId: call.room_id,
-    status: call.status,
-    callerUserId: call.caller_user_id,
-    callerName: call.caller_name,
-    callerHospitalCode: call.caller_hospital_code,
-    calleeUserId: call.callee_user_id,
-    calleeName: call.callee_name,
-    calleeHospitalCode: call.callee_hospital_code,
+    callId: header.id,
+    roomId: header.room_id,
+    status: header.status,
+    createdByUserId: header.created_by_user_id,
+    createdByName: header.created_by_name,
+    participants: participants.map((row) => ({
+      userId: row.user_id,
+      name: row.name,
+      hospitalCode: row.hospital_code,
+      hospitalName: row.hospital_name,
+      role: row.role,
+      status: row.status,
+    })),
   };
 }
 
@@ -308,55 +382,338 @@ export async function getCallDirectory(requestingUserId: string): Promise<Direct
     .sort((a, b) => a.hospitalName.localeCompare(b.hospitalName, 'th'));
 }
 
-async function timeoutCall(db: DatabaseAdapter, callId: string): Promise<void> {
-  _timers.delete(callId);
-  // Only transition if still ringing — accept/decline/cancel may have won.
-  const rows = await db.query<VideoCallRow>(
-    `SELECT * FROM video_calls WHERE id = ? AND status = 'ringing'`,
+// ---------------------------------------------------------------------------
+// internals
+
+interface EvaluatedInvitees {
+  candidates: OnlineUserSnapshot[];
+  skipped: SkippedInvitee[];
+}
+
+async function evaluateInvitees(
+  db: DatabaseAdapter,
+  inviterUserId: string,
+  callId: string | null,
+  calleeUserIds: string[],
+  currentCount: number,
+): Promise<EvaluatedInvitees> {
+  const online = new Map((await listOnlineUsers()).map((user) => [user.userId, user]));
+  const busy = await findBusyUsers(db, calleeUserIds, callId);
+  const alreadyInCall = callId ? await activeUserIdsInCall(db, callId) : new Set<string>();
+
+  const seen = new Set<string>();
+  const skipped: SkippedInvitee[] = [];
+  const candidates: OnlineUserSnapshot[] = [];
+  let count = currentCount;
+
+  for (const userId of calleeUserIds) {
+    if (userId === inviterUserId) {
+      skipped.push({ userId, reason: 'self' });
+      continue;
+    }
+    if (seen.has(userId) || alreadyInCall.has(userId)) {
+      skipped.push({ userId, reason: 'duplicate' });
+      continue;
+    }
+    seen.add(userId);
+    const presence = online.get(userId);
+    if (!presence) {
+      skipped.push({ userId, reason: 'offline' });
+      continue;
+    }
+    if (busy.has(userId)) {
+      skipped.push({ userId, reason: 'busy' });
+      continue;
+    }
+    if (count >= MAX_CALL_PARTICIPANTS) {
+      skipped.push({ userId, reason: 'limit' });
+      continue;
+    }
+    count += 1;
+    candidates.push(presence);
+  }
+  return { candidates, skipped };
+}
+
+async function ringCandidates(
+  db: DatabaseAdapter,
+  call: { id: string; roomId: string },
+  inviter: CallActor,
+  candidates: OnlineUserSnapshot[],
+  ringTimeoutMs: number,
+): Promise<CallActor[]> {
+  const invited: CallActor[] = [];
+  for (const presence of candidates) {
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM video_call_participants WHERE call_id = ? AND user_id = ?`,
+      [call.id, presence.userId],
+    );
+    if (existing.length > 0) {
+      // Re-invite after decline/miss/leave: flip the same row back to ringing.
+      await db.execute(
+        `UPDATE video_call_participants
+            SET status = 'ringing', invited_by_user_id = ?, invited_at = NOW(),
+                joined_at = NULL, left_at = NULL
+          WHERE id = ?`,
+        [inviter.userId, existing[0].id],
+      );
+    } else {
+      await db.execute(
+        `INSERT INTO video_call_participants
+           (id, call_id, user_id, name, hospital_code, hospital_name, role, status,
+            invited_by_user_id, invited_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'invitee', 'ringing', ?, NOW())`,
+        [
+          uuidv4(),
+          call.id,
+          presence.userId,
+          presence.name,
+          presence.hospitalCode,
+          presence.hospitalName,
+          inviter.userId,
+        ],
+      );
+    }
+    armRingTimer(db, call.id, presence.userId, ringTimeoutMs);
+    invited.push({
+      userId: presence.userId,
+      name: presence.name,
+      hospitalCode: presence.hospitalCode,
+      hospitalName: presence.hospitalName,
+    });
+  }
+
+  const participantCount = await countActiveParticipants(db, call.id);
+  const sse = SseManager.getInstance();
+  for (const target of invited) {
+    sse.sendToUser(target.userId, 'call:invite', {
+      callId: call.id,
+      roomId: call.roomId,
+      inviter,
+      participantCount,
+    });
+  }
+  return invited;
+}
+
+function armRingTimer(
+  db: DatabaseAdapter,
+  callId: string,
+  userId: string,
+  ringTimeoutMs: number,
+): void {
+  const key = `${callId}:${userId}`;
+  const existing = _timers.get(key);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    ringTimeout(db, callId, userId).catch((error) => {
+      logger.warn('video_call_ring_timeout_failed', { callId, userId, error });
+    });
+  }, ringTimeoutMs);
+  timer.unref?.();
+  _timers.set(key, timer);
+}
+
+async function ringTimeout(db: DatabaseAdapter, callId: string, userId: string): Promise<void> {
+  _timers.delete(`${callId}:${userId}`);
+  const rows = await db.query<ParticipantRow>(
+    `SELECT p.* FROM video_call_participants p
+       JOIN video_calls c ON c.id = p.call_id AND c.status = 'active'
+      WHERE p.call_id = ? AND p.user_id = ? AND p.status = 'ringing'`,
+    [callId, userId],
+  );
+  if (rows.length === 0) return; // answered/declined/cancelled first
+
+  await db.execute(
+    `UPDATE video_call_participants SET status = 'missed', left_at = NOW() WHERE id = ?`,
+    [rows[0].id],
+  );
+  await notifyJoined(db, callId, 'call:participant-missed', {
+    callId,
+    userId,
+    name: rows[0].name,
+  });
+  SseManager.getInstance().sendToUser(userId, 'call:resolved', { callId, status: 'missed' });
+  await endCallIfEmpty(db, callId);
+}
+
+async function endCall(db: DatabaseAdapter, header: CallHeaderRow): Promise<void> {
+  await db.execute(`UPDATE video_calls SET status = 'ended', ended_at = NOW() WHERE id = ?`, [
+    header.id,
+  ]);
+  const stillRinging = await db.query<{ id: string; user_id: string }>(
+    `SELECT id, user_id FROM video_call_participants WHERE call_id = ? AND status = 'ringing'`,
+    [header.id],
+  );
+  const sse = SseManager.getInstance();
+  for (const ring of stillRinging) {
+    clearRingTimer(header.id, ring.user_id);
+    await db.execute(
+      `UPDATE video_call_participants SET status = 'cancelled', left_at = NOW() WHERE id = ?`,
+      [ring.id],
+    );
+    sse.sendToUser(ring.user_id, 'call:cancelled', { callId: header.id });
+  }
+}
+
+async function endCallIfEmpty(db: DatabaseAdapter, callId: string): Promise<void> {
+  const active = await countActiveParticipants(db, callId);
+  if (active === 0) {
+    await db.execute(
+      `UPDATE video_calls SET status = 'ended', ended_at = NOW() WHERE id = ? AND status = 'active'`,
+      [callId],
+    );
+  }
+}
+
+// Self-healing: release participants whose browser/server died so nobody
+// stays "busy" (or keeps a call open) forever.
+async function sweepStaleParticipants(db: DatabaseAdapter): Promise<void> {
+  await db.execute(
+    `UPDATE video_call_participants SET status = 'missed', left_at = NOW()
+      WHERE status = 'ringing'
+        AND invited_at < NOW() - INTERVAL '${STALE_RING_MS / 1000} seconds'`,
+  );
+
+  const staleJoined = await db.query<{ id: string; user_id: string }>(
+    `SELECT p.id, p.user_id FROM video_call_participants p
+       JOIN video_calls c ON c.id = p.call_id AND c.status = 'active'
+      WHERE p.status = 'joined'
+        AND p.joined_at < NOW() - INTERVAL '${STALE_JOIN_MS / 1000} seconds'`,
+  );
+  if (staleJoined.length > 0) {
+    const online = new Set((await listOnlineUsers()).map((user) => user.userId));
+    for (const row of staleJoined) {
+      if (online.has(row.user_id)) continue;
+      await db.execute(
+        `UPDATE video_call_participants SET status = 'left', left_at = NOW() WHERE id = ?`,
+        [row.id],
+      );
+    }
+  }
+
+  // Calls with nobody joined and nobody ringing are over.
+  await db.execute(
+    `UPDATE video_calls SET status = 'ended', ended_at = NOW()
+      WHERE status = 'active'
+        AND NOT EXISTS (
+          SELECT 1 FROM video_call_participants p
+           WHERE p.call_id = video_calls.id AND p.status IN ('ringing', 'joined'))`,
+  );
+}
+
+async function isBusy(db: DatabaseAdapter, userId: string): Promise<boolean> {
+  const busy = await findBusyUsers(db, [userId], null);
+  return busy.has(userId);
+}
+
+/** Users with a live (ringing/joined) participation on any active call.
+ *  excludeCallId: participations on that call are handled as 'duplicate'. */
+async function findBusyUsers(
+  db: DatabaseAdapter,
+  userIds: string[],
+  excludeCallId: string | null,
+): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const placeholders = userIds.map(() => '?').join(', ');
+  const params: unknown[] = [...userIds];
+  let excludeClause = '';
+  if (excludeCallId) {
+    excludeClause = 'AND p.call_id != ?';
+    params.push(excludeCallId);
+  }
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT DISTINCT p.user_id
+       FROM video_call_participants p
+       JOIN video_calls c ON c.id = p.call_id AND c.status = 'active'
+      WHERE p.status IN ('ringing', 'joined')
+        AND p.user_id IN (${placeholders}) ${excludeClause}`,
+    params,
+  );
+  return new Set(rows.map((row) => row.user_id));
+}
+
+async function activeUserIdsInCall(db: DatabaseAdapter, callId: string): Promise<Set<string>> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM video_call_participants
+      WHERE call_id = ? AND status IN ('ringing', 'joined')`,
     [callId],
   );
-  if (rows.length === 0) return;
-  const call = rows[0];
-
-  await db.execute(`UPDATE video_calls SET status = 'missed', ended_at = NOW() WHERE id = ?`, [
-    callId,
-  ]);
-  const sse = SseManager.getInstance();
-  sse.sendToUser(call.caller_user_id, 'call:missed', { callId });
-  sse.sendToUser(call.callee_user_id, 'call:resolved', { callId, status: 'missed' });
+  return new Set(rows.map((row) => row.user_id));
 }
 
-// Rings whose in-process timer died with a previous server process would
-// otherwise keep both parties BUSY forever. Sweep them into `missed` before
-// every busy check.
-async function expireStaleRings(db: DatabaseAdapter): Promise<void> {
-  await db.execute(
-    `UPDATE video_calls SET status = 'missed', ended_at = NOW()
-      WHERE status = 'ringing' AND created_at < NOW() - INTERVAL '${STALE_RING_MS / 1000} seconds'`,
+async function countActiveParticipants(db: DatabaseAdapter, callId: string): Promise<number> {
+  const rows = await db.query<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM video_call_participants
+      WHERE call_id = ? AND status IN ('ringing', 'joined')`,
+    [callId],
   );
+  return Number(rows[0]?.n ?? 0);
 }
 
-async function loadCall(db: DatabaseAdapter, callId: string): Promise<VideoCallRow> {
-  const rows = await db.query<VideoCallRow>('SELECT * FROM video_calls WHERE id = ?', [callId]);
+async function countJoined(db: DatabaseAdapter, callId: string): Promise<number> {
+  const rows = await db.query<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM video_call_participants WHERE call_id = ? AND status = 'joined'`,
+    [callId],
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+async function notifyJoined(
+  db: DatabaseAdapter,
+  callId: string,
+  event: string,
+  payload: Record<string, unknown>,
+  excludeUserId?: string,
+): Promise<void> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM video_call_participants WHERE call_id = ? AND status = 'joined'`,
+    [callId],
+  );
+  const sse = SseManager.getInstance();
+  for (const row of rows) {
+    if (row.user_id === excludeUserId) continue;
+    sse.sendToUser(row.user_id, event, payload);
+  }
+}
+
+async function loadHeader(db: DatabaseAdapter, callId: string): Promise<CallHeaderRow> {
+  const rows = await db.query<CallHeaderRow>('SELECT * FROM video_calls WHERE id = ?', [callId]);
   if (rows.length === 0) {
     throw new VideoCallError('NOT_FOUND', 'ไม่พบข้อมูลสายนี้ อาจถูกยกเลิกไปแล้ว');
   }
   return rows[0];
 }
 
-function requireStatus(call: VideoCallRow, expected: string, actionThai: string): void {
-  if (call.status !== expected) {
-    throw new VideoCallError(
-      'INVALID_STATE',
-      `ไม่สามารถ${actionThai}ได้ — สายนี้อยู่ในสถานะ "${call.status}" แล้ว`,
-    );
-  }
+async function loadParticipant(
+  db: DatabaseAdapter,
+  callId: string,
+  userId: string,
+): Promise<ParticipantRow | null> {
+  const rows = await db.query<ParticipantRow>(
+    'SELECT * FROM video_call_participants WHERE call_id = ? AND user_id = ?',
+    [callId, userId],
+  );
+  return rows[0] ?? null;
 }
 
-function clearRingTimer(callId: string): void {
-  const timer = _timers.get(callId);
+async function requireParticipant(
+  db: DatabaseAdapter,
+  callId: string,
+  userId: string,
+): Promise<ParticipantRow> {
+  const participant = await loadParticipant(db, callId, userId);
+  if (!participant) {
+    throw new VideoCallError('FORBIDDEN', 'คุณไม่ใช่ผู้ร่วมสนทนาของสายนี้');
+  }
+  return participant;
+}
+
+function clearRingTimer(callId: string, userId: string): void {
+  const key = `${callId}:${userId}`;
+  const timer = _timers.get(key);
   if (timer) {
     clearTimeout(timer);
-    _timers.delete(callId);
+    _timers.delete(key);
   }
 }

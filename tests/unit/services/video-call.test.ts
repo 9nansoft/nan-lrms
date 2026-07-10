@@ -1,6 +1,6 @@
-// Video-call service state machine: ringing → accepted | declined | cancelled |
-// missed; accepted → ended. Uses real PGlite, real in-memory presence (no
-// REDIS_URL in tests) and the real SseManager with captured stream controllers.
+// Unified group-call service: header (active → ended) + per-participant
+// lifecycle (ringing → joined/declined/missed/cancelled → left). Real PGlite,
+// real in-memory presence, real SseManager with captured controllers.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Session } from 'next-auth';
 import { createTestDb } from '../../helpers/testDb';
@@ -8,29 +8,36 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { SseManager } from '@/lib/sse';
 import { recordOnlineUser } from '@/lib/presence';
 import { cacheDelPattern } from '@/lib/cache';
+import { MAX_CALL_PARTICIPANTS } from '@/config/video-call';
 import {
   createCall,
-  acceptCall,
-  declineCall,
-  cancelCall,
-  endCall,
+  inviteToCall,
+  acceptInvite,
+  declineInvite,
+  leaveCall,
   getCall,
   VideoCallError,
   clearCallTimersForTests,
   type CallActor,
 } from '@/services/video-call';
 
-const CALLER: CallActor = {
-  userId: 'user-caller',
+const CREATOR: CallActor = {
+  userId: 'user-creator',
   name: 'พญ.ต้นทาง ทดสอบ',
   hospitalCode: '10670',
   hospitalName: 'รพ.ขอนแก่น',
 };
-const CALLEE: CallActor = {
-  userId: 'user-callee',
-  name: 'นพ.ปลายทาง ทดสอบ',
+const INVITEE_B: CallActor = {
+  userId: 'user-b',
+  name: 'นพ.สอง ทดสอบ',
   hospitalCode: '11004',
   hospitalName: 'รพ.น้ำพอง',
+};
+const INVITEE_C: CallActor = {
+  userId: 'user-c',
+  name: 'นส.สาม ทดสอบ',
+  hospitalCode: '11005',
+  hospitalName: 'รพ.ชนบท',
 };
 
 function fakeSession(actor: CallActor): Session {
@@ -53,7 +60,6 @@ interface CapturedEvent {
   data: Record<string, unknown>;
 }
 
-// Register a fake browser tab on the real SseManager and decode what it receives.
 function connectTab(userId: string, tabId: string) {
   const chunks: Uint8Array[] = [];
   const controller = {
@@ -79,12 +85,30 @@ function connectTab(userId: string, tabId: string) {
   };
 }
 
-async function bothOnline(): Promise<void> {
-  await recordOnlineUser(fakeSession(CALLER));
-  await recordOnlineUser(fakeSession(CALLEE));
+async function allOnline(...actors: CallActor[]): Promise<void> {
+  for (const actor of actors) await recordOnlineUser(fakeSession(actor));
 }
 
-describe('video-call service', () => {
+async function participantStatus(
+  db: DatabaseAdapter,
+  callId: string,
+  userId: string,
+): Promise<string | undefined> {
+  const rows = await db.query<{ status: string }>(
+    'SELECT status FROM video_call_participants WHERE call_id = ? AND user_id = ?',
+    [callId, userId],
+  );
+  return rows[0]?.status;
+}
+
+async function headerStatus(db: DatabaseAdapter, callId: string): Promise<string | undefined> {
+  const rows = await db.query<{ status: string }>('SELECT status FROM video_calls WHERE id = ?', [
+    callId,
+  ]);
+  return rows[0]?.status;
+}
+
+describe('group video-call service', () => {
   let db: DatabaseAdapter;
 
   beforeEach(async () => {
@@ -95,286 +119,310 @@ describe('video-call service', () => {
   });
 
   describe('createCall', () => {
-    it('inserts a ringing row with caller/callee snapshots and an unguessable room id', async () => {
-      await bothOnline();
-      const call = await createCall(db, CALLER, CALLEE.userId);
+    it('creates an active header, joined creator, ringing invitees', async () => {
+      await allOnline(CREATOR, INVITEE_B, INVITEE_C);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId, INVITEE_C.userId]);
 
-      expect(call.callId).toMatch(/^[0-9a-f-]{36}$/);
       expect(call.roomId).toMatch(/^kklrms-[0-9a-f-]{36}$/);
-      expect(call.callee.name).toBe(CALLEE.name);
+      expect(call.invited.map((i) => i.userId).sort()).toEqual(['user-b', 'user-c']);
+      expect(call.skipped).toEqual([]);
 
-      const rows = await db.query<Record<string, unknown>>(
-        'SELECT * FROM video_calls WHERE id = ?',
-        [call.callId],
-      );
-      expect(rows).toHaveLength(1);
-      expect(rows[0].status).toBe('ringing');
-      expect(rows[0].caller_name).toBe(CALLER.name);
-      expect(rows[0].caller_hospital_code).toBe(CALLER.hospitalCode);
-      expect(rows[0].callee_name).toBe(CALLEE.name);
-      expect(rows[0].callee_hospital_code).toBe(CALLEE.hospitalCode);
-      expect(rows[0].answered_at).toBeNull();
+      expect(await headerStatus(db, call.callId)).toBe('active');
+      expect(await participantStatus(db, call.callId, CREATOR.userId)).toBe('joined');
+      expect(await participantStatus(db, call.callId, INVITEE_B.userId)).toBe('ringing');
+      expect(await participantStatus(db, call.callId, INVITEE_C.userId)).toBe('ringing');
     });
 
-    it('rings every tab of the callee with caller identity and room id', async () => {
-      await bothOnline();
-      const tab1 = connectTab(CALLEE.userId, 'callee-tab-1');
-      const tab2 = connectTab(CALLEE.userId, 'callee-tab-2');
-      const callerTab = connectTab(CALLER.userId, 'caller-tab-1');
+    it('rings every invitee tab with inviter identity and room id', async () => {
+      await allOnline(CREATOR, INVITEE_B, INVITEE_C);
+      const tabB = connectTab(INVITEE_B.userId, 'tab-b');
+      const tabC = connectTab(INVITEE_C.userId, 'tab-c');
 
-      const call = await createCall(db, CALLER, CALLEE.userId);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId, INVITEE_C.userId]);
 
-      for (const tab of [tab1, tab2]) {
+      for (const tab of [tabB, tabC]) {
         const invites = tab.events().filter((e) => e.event === 'call:invite');
         expect(invites).toHaveLength(1);
         expect(invites[0].data.callId).toBe(call.callId);
         expect(invites[0].data.roomId).toBe(call.roomId);
-        expect((invites[0].data.caller as CallActor).name).toBe(CALLER.name);
-        expect((invites[0].data.caller as CallActor).hospitalName).toBe(CALLER.hospitalName);
+        expect((invites[0].data.inviter as CallActor).name).toBe(CREATOR.name);
+        expect(invites[0].data.participantCount).toBe(3);
       }
-      expect(callerTab.events()).toHaveLength(0);
     });
 
-    it('rejects an offline callee with an actionable Thai error', async () => {
-      await recordOnlineUser(fakeSession(CALLER)); // callee NOT online
-      await expect(createCall(db, CALLER, CALLEE.userId)).rejects.toMatchObject({
-        code: 'CALLEE_OFFLINE',
-      });
-      await expect(createCall(db, CALLER, CALLEE.userId)).rejects.toThrowError(/ออนไลน์/);
+    it('throws NO_INVITEES when every target is busy, offline, duplicate or self', async () => {
+      await allOnline(CREATOR, INVITEE_B, INVITEE_C);
+      await createCall(db, INVITEE_C, [INVITEE_B.userId]); // B now ringing-busy
+      await expect(
+        createCall(db, CREATOR, [
+          INVITEE_B.userId, // busy
+          'user-ghost', // offline
+          INVITEE_B.userId, // duplicate
+          CREATOR.userId, // self
+        ]),
+      ).rejects.toMatchObject({ code: 'NO_INVITEES' });
     });
 
-    it('rejects when the callee is already in a call', async () => {
-      await bothOnline();
-      await createCall(db, CALLER, CALLEE.userId);
+    it('partially invites: online user in, offline user skipped with reason', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId, 'user-ghost']);
 
-      const thirdUser: CallActor = {
-        userId: 'user-third',
-        name: 'นส.สาม ทดสอบ',
-        hospitalCode: '11005',
-        hospitalName: 'รพ.ชนบท',
-      };
-      await recordOnlineUser(fakeSession(thirdUser));
-      await expect(createCall(db, thirdUser, CALLEE.userId)).rejects.toMatchObject({
+      expect(call.invited.map((i) => i.userId)).toEqual([INVITEE_B.userId]);
+      expect(call.skipped).toEqual([{ userId: 'user-ghost', reason: 'offline' }]);
+    });
+
+    it('rejects a busy creator', async () => {
+      await allOnline(CREATOR, INVITEE_B, INVITEE_C);
+      await createCall(db, CREATOR, [INVITEE_B.userId]);
+      await expect(createCall(db, CREATOR, [INVITEE_C.userId])).rejects.toMatchObject({
         code: 'BUSY',
       });
     });
 
-    it('rejects when the caller already has an active call', async () => {
-      await bothOnline();
-      const thirdUser: CallActor = {
-        userId: 'user-third',
-        name: 'นส.สาม ทดสอบ',
-        hospitalCode: '11005',
-        hospitalName: 'รพ.ชนบท',
-      };
-      await recordOnlineUser(fakeSession(thirdUser));
-      await createCall(db, CALLER, CALLEE.userId);
-      await expect(createCall(db, CALLER, thirdUser.userId)).rejects.toMatchObject({
-        code: 'BUSY',
-      });
+    it('caps participants at MAX_CALL_PARTICIPANTS and skips the excess as limit', async () => {
+      const extras: CallActor[] = Array.from({ length: MAX_CALL_PARTICIPANTS }, (_, i) => ({
+        userId: `user-extra-${i}`,
+        name: `ผู้ใช้ ${i}`,
+        hospitalCode: '11004',
+        hospitalName: 'รพ.น้ำพอง',
+      }));
+      await allOnline(CREATOR, ...extras);
+
+      const call = await createCall(
+        db,
+        CREATOR,
+        extras.map((e) => e.userId),
+      );
+      // creator + invitees ≤ MAX ⇒ MAX-1 invited, 1 skipped for the limit.
+      expect(call.invited).toHaveLength(MAX_CALL_PARTICIPANTS - 1);
+      expect(call.skipped).toEqual([
+        { userId: `user-extra-${MAX_CALL_PARTICIPANTS - 1}`, reason: 'limit' },
+      ]);
     });
 
-    it('rejects calling yourself', async () => {
-      await bothOnline();
-      await expect(createCall(db, CALLER, CALLER.userId)).rejects.toMatchObject({
-        code: 'SELF_CALL',
-      });
-    });
-
-    it('does not let a stale ringing row (dead server timer) block new calls forever', async () => {
-      await bothOnline();
-      // Simulate a ring orphaned by a server restart: older than any live timer.
+    it('self-heals: stale rings and presence-dead joined participants stop blocking calls', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      // Stale ring: dead-timer row older than the sweep threshold.
       await db.execute(
-        `INSERT INTO video_calls
-           (id, room_id, caller_user_id, caller_name, caller_hospital_code,
-            callee_user_id, callee_name, callee_hospital_code, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ringing', NOW() - INTERVAL '10 minutes')`,
-        [
-          'aaaaaaaa-0000-4000-8000-000000000001',
-          'kklrms-stale',
-          CALLER.userId,
-          CALLER.name,
-          CALLER.hospitalCode,
-          CALLEE.userId,
-          CALLEE.name,
-          CALLEE.hospitalCode,
-        ],
+        `INSERT INTO video_calls (id, room_id, created_by_user_id, created_by_name, created_by_hospital_code, status, created_at)
+         VALUES ('aaaaaaaa-0000-4000-8000-00000000000a', 'kklrms-stale', 'user-x', 'X', '11004', 'active', NOW() - INTERVAL '10 minutes')`,
+      );
+      await db.execute(
+        `INSERT INTO video_call_participants (id, call_id, user_id, name, hospital_code, hospital_name, role, status, invited_by_user_id, invited_at, joined_at)
+         VALUES
+          ('aaaaaaaa-0000-4000-8000-00000000000b', 'aaaaaaaa-0000-4000-8000-00000000000a', 'user-x', 'X', '11004', 'รพ.น้ำพอง', 'creator', 'joined', 'user-x', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes'),
+          ('aaaaaaaa-0000-4000-8000-00000000000c', 'aaaaaaaa-0000-4000-8000-00000000000a', ?, ?, ?, ?, 'invitee', 'ringing', 'user-x', NOW() - INTERVAL '10 minutes', NULL)`,
+        [INVITEE_B.userId, INVITEE_B.name, INVITEE_B.hospitalCode, INVITEE_B.hospitalName],
       );
 
-      const call = await createCall(db, CALLER, CALLEE.userId);
-      expect(call.callId).toBeTruthy();
+      // user-x is offline (no presence) and INVITEE_B's ring is stale — both
+      // must be released so this call can go through.
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+      expect(call.invited.map((i) => i.userId)).toEqual([INVITEE_B.userId]);
 
-      const stale = await db.query<{ status: string }>(
-        'SELECT status FROM video_calls WHERE id = ?',
-        ['aaaaaaaa-0000-4000-8000-000000000001'],
+      expect(
+        await participantStatus(db, 'aaaaaaaa-0000-4000-8000-00000000000a', INVITEE_B.userId),
+      ).toBe('missed');
+      expect(await participantStatus(db, 'aaaaaaaa-0000-4000-8000-00000000000a', 'user-x')).toBe(
+        'left',
       );
-      expect(stale[0].status).toBe('missed');
+      expect(await headerStatus(db, 'aaaaaaaa-0000-4000-8000-00000000000a')).toBe('ended');
     });
   });
 
-  describe('accept / decline / cancel / end', () => {
-    it('accept: marks accepted, notifies caller with room id, resolves callee tabs', async () => {
-      await bothOnline();
-      const callerTab = connectTab(CALLER.userId, 'caller-tab');
-      const call = await createCall(db, CALLER, CALLEE.userId);
-      const calleeTab = connectTab(CALLEE.userId, 'callee-tab-late');
+  describe('accept / decline', () => {
+    it('accept joins the invitee, notifies joined peers, resolves own tabs', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const creatorTab = connectTab(CREATOR.userId, 'tab-creator');
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+      const inviteeOtherTab = connectTab(INVITEE_B.userId, 'tab-b2');
 
-      const result = await acceptCall(db, call.callId, CALLEE);
+      const result = await acceptInvite(db, call.callId, INVITEE_B);
       expect(result.roomId).toBe(call.roomId);
+      expect(await participantStatus(db, call.callId, INVITEE_B.userId)).toBe('joined');
 
-      const rows = await db.query<{ status: string; answered_at: Date | null }>(
-        'SELECT status, answered_at FROM video_calls WHERE id = ?',
-        [call.callId],
-      );
-      expect(rows[0].status).toBe('accepted');
-      expect(rows[0].answered_at).not.toBeNull();
+      const joinedEvents = creatorTab.events().filter((e) => e.event === 'call:participant-joined');
+      expect(joinedEvents).toHaveLength(1);
+      expect(joinedEvents[0].data.userId).toBe(INVITEE_B.userId);
 
-      const accepted = callerTab.events().filter((e) => e.event === 'call:accepted');
-      expect(accepted).toHaveLength(1);
-      expect(accepted[0].data.roomId).toBe(call.roomId);
-
-      const resolved = calleeTab.events().filter((e) => e.event === 'call:resolved');
+      const resolved = inviteeOtherTab.events().filter((e) => e.event === 'call:resolved');
       expect(resolved).toHaveLength(1);
-      expect(resolved[0].data.status).toBe('accepted');
     });
 
-    it('only the callee may accept', async () => {
-      await bothOnline();
-      const call = await createCall(db, CALLER, CALLEE.userId);
-      await expect(acceptCall(db, call.callId, CALLER)).rejects.toMatchObject({
+    it('only a ringing participant may accept; double-accept is INVALID_STATE', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+
+      await expect(acceptInvite(db, call.callId, INVITEE_C)).rejects.toMatchObject({
         code: 'FORBIDDEN',
       });
-    });
-
-    it('accept on a non-ringing call is an invalid state', async () => {
-      await bothOnline();
-      const call = await createCall(db, CALLER, CALLEE.userId);
-      await acceptCall(db, call.callId, CALLEE);
-      await expect(acceptCall(db, call.callId, CALLEE)).rejects.toMatchObject({
+      await acceptInvite(db, call.callId, INVITEE_B);
+      await expect(acceptInvite(db, call.callId, INVITEE_B)).rejects.toMatchObject({
         code: 'INVALID_STATE',
       });
     });
 
-    it('decline: marks declined and notifies the caller', async () => {
-      await bothOnline();
-      const callerTab = connectTab(CALLER.userId, 'caller-tab');
-      const call = await createCall(db, CALLER, CALLEE.userId);
+    it('decline marks the participant declined and notifies joined peers', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const creatorTab = connectTab(CREATOR.userId, 'tab-creator');
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
 
-      await declineCall(db, call.callId, CALLEE);
+      await declineInvite(db, call.callId, INVITEE_B);
+      expect(await participantStatus(db, call.callId, INVITEE_B.userId)).toBe('declined');
+      expect(creatorTab.events().some((e) => e.event === 'call:participant-declined')).toBe(true);
+      // Call stays active — the creator is still in the room deciding what to do.
+      expect(await headerStatus(db, call.callId)).toBe('active');
+    });
+  });
 
-      const rows = await db.query<{ status: string }>(
-        'SELECT status FROM video_calls WHERE id = ?',
-        [call.callId],
-      );
-      expect(rows[0].status).toBe('declined');
-      expect(callerTab.events().some((e) => e.event === 'call:declined')).toBe(true);
+  describe('leave', () => {
+    it('a joined participant leaving notifies peers; the call stays active', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+      await acceptInvite(db, call.callId, INVITEE_B);
+      const creatorTab = connectTab(CREATOR.userId, 'tab-creator');
+
+      await leaveCall(db, call.callId, INVITEE_B);
+      expect(await participantStatus(db, call.callId, INVITEE_B.userId)).toBe('left');
+      expect(await headerStatus(db, call.callId)).toBe('active');
+      expect(creatorTab.events().some((e) => e.event === 'call:participant-left')).toBe(true);
     });
 
-    it('cancel: only the caller, stops the callee ring', async () => {
-      await bothOnline();
-      const calleeTab = connectTab(CALLEE.userId, 'callee-tab');
-      const call = await createCall(db, CALLER, CALLEE.userId);
+    it('the last joined participant leaving ends the call and revokes pending rings', async () => {
+      await allOnline(CREATOR, INVITEE_B, INVITEE_C);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId, INVITEE_C.userId]);
+      const ringingTab = connectTab(INVITEE_C.userId, 'tab-c');
 
-      await expect(cancelCall(db, call.callId, CALLEE)).rejects.toMatchObject({
+      await leaveCall(db, call.callId, CREATOR);
+
+      expect(await headerStatus(db, call.callId)).toBe('ended');
+      expect(await participantStatus(db, call.callId, INVITEE_B.userId)).toBe('cancelled');
+      expect(await participantStatus(db, call.callId, INVITEE_C.userId)).toBe('cancelled');
+      expect(ringingTab.events().some((e) => e.event === 'call:cancelled')).toBe(true);
+    });
+
+    it('only joined participants can leave', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+      await expect(leaveCall(db, call.callId, INVITEE_B)).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+      });
+      await expect(leaveCall(db, call.callId, INVITEE_C)).rejects.toMatchObject({
         code: 'FORBIDDEN',
       });
-      await cancelCall(db, call.callId, CALLER);
-
-      const rows = await db.query<{ status: string; ended_at: Date | null }>(
-        'SELECT status, ended_at FROM video_calls WHERE id = ?',
-        [call.callId],
-      );
-      expect(rows[0].status).toBe('cancelled');
-      expect(rows[0].ended_at).not.toBeNull();
-      expect(calleeTab.events().some((e) => e.event === 'call:cancelled')).toBe(true);
-    });
-
-    it('end: either participant ends an accepted call and the peer is notified', async () => {
-      await bothOnline();
-      const call = await createCall(db, CALLER, CALLEE.userId);
-      await acceptCall(db, call.callId, CALLEE);
-      const calleeTab = connectTab(CALLEE.userId, 'callee-tab');
-
-      await endCall(db, call.callId, CALLER);
-
-      const rows = await db.query<{ status: string; ended_at: Date | null }>(
-        'SELECT status, ended_at FROM video_calls WHERE id = ?',
-        [call.callId],
-      );
-      expect(rows[0].status).toBe('ended');
-      expect(rows[0].ended_at).not.toBeNull();
-      expect(calleeTab.events().some((e) => e.event === 'call:ended')).toBe(true);
-    });
-
-    it('acting on an unknown call id is NOT_FOUND', async () => {
-      await expect(
-        acceptCall(db, '00000000-0000-4000-8000-000000000000', CALLEE),
-      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
 
   describe('ring timeout', () => {
-    it('marks an unanswered call missed and tells the caller', async () => {
-      await bothOnline();
-      const callerTab = connectTab(CALLER.userId, 'caller-tab');
-      const call = await createCall(db, CALLER, CALLEE.userId, { ringTimeoutMs: 60 });
+    it('marks an unanswered invitee missed and notifies joined peers', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const creatorTab = connectTab(CREATOR.userId, 'tab-creator');
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId], { ringTimeoutMs: 60 });
 
       await vi.waitFor(
         async () => {
-          const rows = await db.query<{ status: string }>(
-            'SELECT status FROM video_calls WHERE id = ?',
-            [call.callId],
-          );
-          expect(rows[0].status).toBe('missed');
+          expect(await participantStatus(db, call.callId, INVITEE_B.userId)).toBe('missed');
         },
         { timeout: 5000, interval: 25 },
       );
-      expect(callerTab.events().some((e) => e.event === 'call:missed')).toBe(true);
+      expect(creatorTab.events().some((e) => e.event === 'call:participant-missed')).toBe(true);
+      // Creator remains in the room.
+      expect(await headerStatus(db, call.callId)).toBe('active');
     });
 
-    it('accepting clears the timer so the call is not later marked missed', async () => {
-      await bothOnline();
-      const call = await createCall(db, CALLER, CALLEE.userId, { ringTimeoutMs: 60 });
-      await acceptCall(db, call.callId, CALLEE);
-
+    it('accepting clears the timer', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId], { ringTimeoutMs: 60 });
+      await acceptInvite(db, call.callId, INVITEE_B);
       await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(await participantStatus(db, call.callId, INVITEE_B.userId)).toBe('joined');
+    });
+  });
 
-      const rows = await db.query<{ status: string }>(
-        'SELECT status FROM video_calls WHERE id = ?',
-        [call.callId],
+  describe('inviteToCall (mid-call add)', () => {
+    it('a joined participant rings a new person into the active call', async () => {
+      await allOnline(CREATOR, INVITEE_B, INVITEE_C);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+      await acceptInvite(db, call.callId, INVITEE_B);
+      const tabC = connectTab(INVITEE_C.userId, 'tab-c');
+
+      const result = await inviteToCall(db, call.callId, INVITEE_B, [INVITEE_C.userId]);
+      expect(result.invited.map((i) => i.userId)).toEqual([INVITEE_C.userId]);
+      expect(await participantStatus(db, call.callId, INVITEE_C.userId)).toBe('ringing');
+
+      const invites = tabC.events().filter((e) => e.event === 'call:invite');
+      expect(invites).toHaveLength(1);
+      expect((invites[0].data.inviter as CallActor).userId).toBe(INVITEE_B.userId);
+    });
+
+    it('re-inviting someone who declined flips their row back to ringing', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+      await declineInvite(db, call.callId, INVITEE_B);
+
+      const result = await inviteToCall(db, call.callId, CREATOR, [INVITEE_B.userId]);
+      expect(result.invited.map((i) => i.userId)).toEqual([INVITEE_B.userId]);
+      expect(await participantStatus(db, call.callId, INVITEE_B.userId)).toBe('ringing');
+
+      const rows = await db.query<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM video_call_participants WHERE call_id = ? AND user_id = ?',
+        [call.callId, INVITEE_B.userId],
       );
-      expect(rows[0].status).toBe('accepted');
+      expect(Number(rows[0].n)).toBe(1);
+    });
+
+    it('only joined participants may invite; ended calls reject invites', async () => {
+      await allOnline(CREATOR, INVITEE_B, INVITEE_C);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+
+      // Still ringing — not yet joined — cannot invite.
+      await expect(
+        inviteToCall(db, call.callId, INVITEE_B, [INVITEE_C.userId]),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+      await leaveCall(db, call.callId, CREATOR); // ends the call
+      await expect(
+        inviteToCall(db, call.callId, CREATOR, [INVITEE_C.userId]),
+      ).rejects.toMatchObject({ code: 'INVALID_STATE' });
     });
   });
 
   describe('getCall', () => {
-    it('returns the call to participants and hides it from strangers', async () => {
-      await bothOnline();
-      const call = await createCall(db, CALLER, CALLEE.userId);
+    it('returns header + participants to ringing/joined participants only', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
 
-      const forCaller = await getCall(db, call.callId, CALLER.userId);
-      expect(forCaller.roomId).toBe(call.roomId);
-      expect(forCaller.status).toBe('ringing');
-      expect(forCaller.callerName).toBe(CALLER.name);
-      expect(forCaller.calleeName).toBe(CALLEE.name);
+      const forCreator = await getCall(db, call.callId, CREATOR.userId);
+      expect(forCreator.roomId).toBe(call.roomId);
+      expect(forCreator.participants).toHaveLength(2);
+      const invitee = forCreator.participants.find((p) => p.userId === INVITEE_B.userId);
+      expect(invitee?.status).toBe('ringing');
+      expect(invitee?.hospitalName).toBe(INVITEE_B.hospitalName);
 
+      // Ringing invitee may look (they hold the invite payload anyway).
+      const forInvitee = await getCall(db, call.callId, INVITEE_B.userId);
+      expect(forInvitee.roomId).toBe(call.roomId);
+
+      await declineInvite(db, call.callId, INVITEE_B);
+      await expect(getCall(db, call.callId, INVITEE_B.userId)).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
       await expect(getCall(db, call.callId, 'user-stranger')).rejects.toMatchObject({
         code: 'FORBIDDEN',
       });
       await expect(
-        getCall(db, '00000000-0000-4000-8000-000000000000', CALLER.userId),
+        getCall(db, '00000000-0000-4000-8000-000000000000', CREATOR.userId),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
 
-  it('VideoCallError carries Thai, actionable messages', async () => {
-    await recordOnlineUser(fakeSession(CALLER));
+  it('errors carry Thai actionable messages', async () => {
+    await allOnline(CREATOR);
     try {
-      await createCall(db, CALLER, CALLEE.userId);
+      await createCall(db, CREATOR, ['user-ghost']);
       expect.unreachable('should have thrown');
     } catch (error) {
       expect(error).toBeInstanceOf(VideoCallError);
-      // Thai script + a hint about what to do next
       expect((error as Error).message).toMatch(/[ก-๙]/);
     }
   });

@@ -2,7 +2,7 @@
 
 // Global incoming-call ring card: fixed bottom-right, survives page
 // navigation because CallProvider mounts it at the layout level.
-import { Phone, PhoneOff, Video } from 'lucide-react';
+import { Phone, PhoneOff, Users, Video } from 'lucide-react';
 
 interface IncomingCallToastProps {
   callerName: string;
@@ -10,6 +10,8 @@ interface IncomingCallToastProps {
   onAccept: () => void;
   onDecline: () => void;
   busy?: boolean;
+  /** Ringing+joined people already on the call — >2 means a group call. */
+  groupSize?: number;
 }
 
 export function IncomingCallToast({
@@ -18,7 +20,9 @@ export function IncomingCallToast({
   onAccept,
   onDecline,
   busy = false,
+  groupSize,
 }: IncomingCallToastProps) {
+  const isGroup = (groupSize ?? 0) > 2;
   return (
     <div
       role="dialog"
@@ -30,6 +34,11 @@ export function IncomingCallToast({
           <Video className="h-4 w-4 animate-pulse" />
         </span>
         สายเรียกเข้า (วิดีโอ)
+        {isGroup && (
+          <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+            <Users className="h-3 w-3" /> สายกลุ่ม · {groupSize} คน
+          </span>
+        )}
       </div>
       <div className="mt-2">
         <div className="text-[15px] font-bold text-slate-900">{callerName}</div>

@@ -1,11 +1,15 @@
-// POST /api/calls — place a video call to a specific online user.
-// Auth: any signed-in session. The service enforces presence, busy and
-// self-call rules; media is carried by Jitsi, not this server.
+// POST /api/calls — start a (group) video call: ring one or more online
+// users. Auth: any signed-in session. The service enforces presence, busy,
+// self, duplicate and size rules per invitee; media is carried by Jitsi.
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { getDatabase } from '@/db/connection';
 import { createCall } from '@/services/video-call';
-import { actorFromSession, videoCallErrorResponse } from '@/lib/video-call-http';
+import {
+  actorFromSession,
+  parseCalleeUserIds,
+  videoCallErrorResponse,
+} from '@/lib/video-call-http';
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -13,19 +17,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { calleeUserId?: unknown } | null = null;
-  try {
-    body = await request.json();
-  } catch {
-    body = null;
-  }
-  const calleeUserId = typeof body?.calleeUserId === 'string' ? body.calleeUserId : '';
-  if (!calleeUserId) {
+  const calleeUserIds = await parseCalleeUserIds(request);
+  if (calleeUserIds.length === 0) {
     return NextResponse.json(
       {
-        error: 'calleeUserId is required',
-        code: 'CALLEE_REQUIRED',
-        message: 'กรุณาเลือกผู้รับสายจากรายชื่อผู้ใช้ที่ออนไลน์',
+        error: 'calleeUserIds is required',
+        code: 'CALLEES_REQUIRED',
+        message: 'กรุณาเลือกผู้รับสายอย่างน้อย 1 คนจากรายชื่อผู้ใช้ที่ออนไลน์',
       },
       { status: 400 },
     );
@@ -33,7 +31,7 @@ export async function POST(request: Request) {
 
   try {
     const db = await getDatabase();
-    const call = await createCall(db, actorFromSession(session), calleeUserId);
+    const call = await createCall(db, actorFromSession(session), calleeUserIds);
     return NextResponse.json(call, { status: 201 });
   } catch (error) {
     return videoCallErrorResponse(error, 'video_call_create_failed');

@@ -1,6 +1,8 @@
-// CallDirectoryDialog — hospital → online-user picker that starts a call.
+// CallDirectoryDialog — multi-select picker used both to start a group call
+// and to add participants mid-call. onCall receives the selected targets and
+// resolves to a Thai error string (dialog stays open) or null (success).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CallDirectoryDialog } from '@/components/calls/CallDirectoryDialog';
 
 const DIRECTORY = {
@@ -35,7 +37,7 @@ describe('CallDirectoryDialog', () => {
   });
 
   it('lists online users grouped under their hospital', async () => {
-    render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={() => {}} />);
+    render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={async () => null} />);
 
     expect(await screen.findByText('รพ.น้ำพอง')).toBeTruthy();
     expect(screen.getByText('รพ.ชนบท')).toBeTruthy();
@@ -43,17 +45,42 @@ describe('CallDirectoryDialog', () => {
     expect(screen.getByText('นางเพื่อน ร่วมงาน')).toBeTruthy();
   });
 
-  it('starts a call with the picked user', async () => {
-    const onCall = vi.fn();
+  it('multi-selects users and calls onCall with every picked target', async () => {
+    const onCall = vi.fn(
+      async (_targets: { userId: string; hospitalName: string }[]): Promise<string | null> =>
+        null,
+    );
     render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={onCall} />);
 
-    await screen.findByText('นพ.ปลายทาง ทดสอบ');
-    const callButtons = screen.getAllByRole('button', { name: /โทร/ });
-    fireEvent.click(callButtons[0]);
+    fireEvent.click(await screen.findByText('นพ.ปลายทาง ทดสอบ'));
+    fireEvent.click(screen.getByText('นางเพื่อน ร่วมงาน'));
 
-    expect(onCall).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-callee', name: 'นพ.ปลายทาง ทดสอบ' }),
-    );
+    const action = screen.getByRole('button', { name: /โทร \(2\)/ });
+    fireEvent.click(action);
+
+    await waitFor(() => expect(onCall).toHaveBeenCalledTimes(1));
+    const targets = onCall.mock.calls[0][0];
+    expect(targets.map((t) => t.userId).sort()).toEqual(['user-callee', 'user-other']);
+    expect(targets.find((t) => t.userId === 'user-callee')?.hospitalName).toBe('รพ.น้ำพอง');
+  });
+
+  it('disables the action button until someone is selected', async () => {
+    render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={async () => null} />);
+    await screen.findByText('นพ.ปลายทาง ทดสอบ');
+    const action = screen.getByRole('button', { name: /โทร/ });
+    expect(action.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('shows the Thai error returned by onCall and stays open', async () => {
+    const onCall = vi.fn(async () => 'สายไม่ว่าง — มีการสนทนาค้างอยู่');
+    render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={onCall} />);
+
+    fireEvent.click(await screen.findByText('นพ.ปลายทาง ทดสอบ'));
+    fireEvent.click(screen.getByRole('button', { name: /โทร \(1\)/ }));
+
+    expect(await screen.findByText(/สายไม่ว่าง/)).toBeTruthy();
+    // Still open: the list is still rendered.
+    expect(screen.getByText('นพ.ปลายทาง ทดสอบ')).toBeTruthy();
   });
 
   it('shows an empty state when nobody else is online', async () => {
@@ -63,7 +90,7 @@ describe('CallDirectoryDialog', () => {
       json: async () => ({ hospitals: [], updatedAt: DIRECTORY.updatedAt }),
     })) as unknown as typeof fetch;
 
-    render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={() => {}} />);
+    render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={async () => null} />);
     expect(await screen.findByText(/ไม่มีผู้ใช้ท่านอื่นออนไลน์/)).toBeTruthy();
   });
 
@@ -72,7 +99,7 @@ describe('CallDirectoryDialog', () => {
       throw new Error('network down');
     }) as unknown as typeof fetch;
 
-    render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={() => {}} />);
+    render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={async () => null} />);
     expect(await screen.findByText(/ไม่สามารถโหลดรายชื่อ/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /ลองใหม่/ })).toBeTruthy();
   });

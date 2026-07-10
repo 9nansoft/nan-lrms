@@ -36,4 +36,14 @@ describe('IncomingCallToast', () => {
     expect(screen.getByRole('button', { name: /รับสาย/ }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: /ปฏิเสธ/ }).hasAttribute('disabled')).toBe(true);
   });
+
+  it('shows a group hint when the call already has more than two participants', () => {
+    render(<IncomingCallToast {...baseProps} groupSize={4} />);
+    expect(screen.getByText(/สายกลุ่ม/)).toBeTruthy();
+  });
+
+  it('shows no group hint for a 1:1 call', () => {
+    render(<IncomingCallToast {...baseProps} groupSize={2} />);
+    expect(screen.queryByText(/สายกลุ่ม/)).toBeNull();
+  });
 });
