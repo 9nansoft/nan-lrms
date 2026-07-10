@@ -112,9 +112,10 @@ No patient data anywhere in call rows or payloads.
 ## Error handling
 
 - Callee offline / busy → immediate actionable Thai error to caller.
-- SSE drop → EventSource auto-reconnects; active-call state re-fetchable via
-  the call row (`GET /api/calls/[id]` not needed in v1 — the room page works
-  from the URL alone; ring loss on reconnect resolves via 45 s missed timer).
+- SSE drop → EventSource auto-reconnects; ring loss on reconnect resolves via
+  the 45 s missed timer. The room page resolves room id + peer through
+  `GET /api/calls/[id]` (participant-guarded), so a room URL alone leaks
+  nothing to non-participants.
 - Jitsi script load failure → room page shows Thai error + retry link to
   open jitsi1.hosxp.net room directly in a new tab.
 
