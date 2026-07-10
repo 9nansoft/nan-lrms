@@ -110,6 +110,41 @@ describe('Journey Lifecycle Service', () => {
       );
       expect(rows[0].care_stage).toBe(CareStage.DELIVERED);
     });
+
+    it('is idempotent — re-transitioning does not re-stamp stage_changed_at', async () => {
+      // The newborn sync calls transitionToDelivered on every birth attach,
+      // including backfilled historical births. Re-stamping stage_changed_at
+      // pushed months-old deliveries into "delivered this month" (dashboard
+      // KPI inflation: 1,072 shown vs 28 real July births, 2026-07-10).
+      const journey = await createJourney(db, {
+        hospitalId, hn: '12346', personAncId: 101,
+        name: 'Test2', cid: 'enc_test_121', cidHash: 'testhash00000000000000000000000000000000000000000000000000000121',
+        age: 25, gravida: 1, para: 0,
+        lmp: '2025-06-01', edc: '2026-03-08',
+        ancRiskLevel: AncRiskLevel.LOW,
+      });
+      await transitionToDelivered(db, journey.id);
+      const first = await db.query<{ stage_changed_at: string }>(
+        `SELECT stage_changed_at FROM maternal_journeys WHERE id = ?`,
+        [journey.id],
+      );
+
+      // Backdate the stamp, then re-transition — the stamp must survive.
+      const past = new Date(Date.now() - 90 * 86_400_000).toISOString();
+      await db.execute(`UPDATE maternal_journeys SET stage_changed_at = ? WHERE id = ?`, [
+        past,
+        journey.id,
+      ]);
+      await transitionToDelivered(db, journey.id);
+
+      const rows = await db.query<{ care_stage: string; stage_changed_at: string }>(
+        `SELECT care_stage, stage_changed_at FROM maternal_journeys WHERE id = ?`,
+        [journey.id],
+      );
+      expect(rows[0].care_stage).toBe(CareStage.DELIVERED);
+      expect(new Date(rows[0].stage_changed_at).getTime()).toBe(new Date(past).getTime());
+      expect(first).toBeDefined();
+    });
   });
 
   describe('getActiveJourneys', () => {

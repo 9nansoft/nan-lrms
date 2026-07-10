@@ -103,9 +103,14 @@ export async function transitionToLabor(db: DatabaseAdapter, journeyId: string):
 
 export async function transitionToDelivered(db: DatabaseAdapter, journeyId: string): Promise<void> {
   const now = new Date().toISOString();
+  // Idempotent: the newborn sync calls this on every birth attach (including
+  // backfilled historical births). Re-stamping stage_changed_at on an
+  // already-DELIVERED journey pushed months-old deliveries into the
+  // "delivered this month" dashboard KPI.
   await db.execute(
-    `UPDATE maternal_journeys SET care_stage = ?, stage_changed_at = ?, updated_at = ? WHERE id = ?`,
-    [CareStage.DELIVERED, now, now, journeyId],
+    `UPDATE maternal_journeys SET care_stage = ?, stage_changed_at = ?, updated_at = ?
+      WHERE id = ? AND care_stage <> ?`,
+    [CareStage.DELIVERED, now, now, journeyId, CareStage.DELIVERED],
   );
 }
 
