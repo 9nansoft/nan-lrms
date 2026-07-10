@@ -17,16 +17,10 @@ import { logger } from '@/lib/logger';
 
 /**
  * Drop the legacy `audit_logs_user_id_fkey` FK and the NOT NULL on
- * `audit_logs.user_id`. Postgres-only: SQLite doesn't support these ALTERs
- * and doesn't enforce FKs, and fresh SQLite/PGlite tables are already created
- * in the corrected shape, so there is nothing to migrate there.
+ * `audit_logs.user_id`. Fresh databases (including pglite) already create
+ * the table in the corrected shape, so on them both ALTERs are no-ops.
  */
-export async function migrateAuditLogsActor(
-  db: DatabaseAdapter,
-  driver: 'sqlite' | 'postgresql',
-): Promise<void> {
-  if (driver !== 'postgresql') return;
-
+export async function migrateAuditLogsActor(db: DatabaseAdapter): Promise<void> {
   // `ALTER TABLE IF EXISTS` guards the case where the table isn't present yet
   // (it always is post-schema-sync, but this keeps the migration order-safe).
   await db.execute(

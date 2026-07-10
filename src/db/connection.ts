@@ -1,4 +1,10 @@
-// T023: Connection factory — NODE_ENV-based routing
+// T023: Connection factory — environment-based routing.
+//
+// Every adapter speaks the PostgreSQL dialect: PostgresAdapter (pg.Pool)
+// in production, embedded pglite (@electric-sql/pglite) for dev mode and
+// tests. The SQLite driver was removed — its dialect differences (TEXT
+// dates, INTEGER booleans, string NUMERIC) kept masking production-only
+// bugs in the test suite.
 
 import type { DatabaseAdapter } from './adapter';
 import { logger } from '@/lib/logger';
@@ -17,12 +23,6 @@ const _global = global as unknown as { __dbSingleton?: DbSingleton };
 const _singleton: DbSingleton = _global.__dbSingleton ?? { instance: null };
 if (!_global.__dbSingleton) _global.__dbSingleton = _singleton;
 
-// Named without the `use` prefix on purpose — eslint react-hooks rules
-// would otherwise flag every caller as misusing a React Hook.
-export function isSqliteEnabled(): boolean {
-  return process.env.NODE_ENV === 'test' || process.env.USE_SQLITE === 'true';
-}
-
 // In-process Postgres dev mode via @electric-sql/pglite. Useful when you
 // want real Postgres dialect without standing up a server. Persists to a
 // local directory so data survives restarts.
@@ -30,35 +30,29 @@ export function isPgliteEnabled(): boolean {
   return process.env.USE_PGLITE === 'true';
 }
 
-// Schema dialect for whichever adapter getDatabase() will pick. Must mirror
-// its precedence: PGlite is a real Postgres engine, so it needs the
-// postgresql dialect even when NODE_ENV=test or USE_SQLITE would otherwise
-// force sqlite — a sqlite-dialect schema (boolean -> INTEGER) inside PGlite
-// makes every boolean bind fail with `invalid input syntax for type integer`.
-export function getDriverType(): 'sqlite' | 'postgresql' {
-  if (isPgliteEnabled()) return 'postgresql';
-  return isSqliteEnabled() ? 'sqlite' : 'postgresql';
+// Schema dialect for whichever adapter getDatabase() will pick. Constant
+// since the SQLite driver was removed, but kept as a function so schema-sync
+// call sites stay explicit about where the dialect comes from.
+export function getDriverType(): 'postgresql' {
+  return 'postgresql';
 }
 
 export async function getDatabase(): Promise<DatabaseAdapter> {
   if (_singleton.instance) return _singleton.instance;
 
   if (isPgliteEnabled()) {
-    const { PgliteAdapter } = await import('./pglite-adapter');
-    const { PGlite } = await import('@electric-sql/pglite');
+    const { PgliteAdapter, createPglite } = await import('./pglite-adapter');
     const path = process.env.PGLITE_PATH ?? './.pglite-data';
-    _singleton.instance = new PgliteAdapter(new PGlite(path));
+    _singleton.instance = new PgliteAdapter(createPglite(path));
     if (process.env.NODE_ENV !== 'test') {
       logger.info('pglite_connected', { path });
     }
-  } else if (isSqliteEnabled()) {
-    const { SqliteAdapter } = await import('./sqlite-adapter');
-    const path =
-      process.env.NODE_ENV === 'test' ? ':memory:' : (process.env.SQLITE_PATH ?? 'dev.sqlite');
-    _singleton.instance = new SqliteAdapter(path);
-    if (process.env.NODE_ENV !== 'test') {
-      logger.info('sqlite_connected', { path });
-    }
+  } else if (process.env.NODE_ENV === 'test') {
+    // Tests get an in-memory pglite so they never require a running server.
+    // Most suites use tests/helpers/testDb.ts directly; this path covers
+    // code that reaches getDatabase() itself.
+    const { PgliteAdapter, createPglite } = await import('./pglite-adapter');
+    _singleton.instance = new PgliteAdapter(createPglite());
   } else {
     const { PostgresAdapter } = await import('./postgres-adapter');
     const url = process.env.DATABASE_URL;

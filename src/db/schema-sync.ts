@@ -3,20 +3,12 @@
 import type { DatabaseAdapter } from './adapter';
 import type { TableDefinition, FieldDefinition, AbstractFieldType } from './table-definition';
 
-type DriverType = 'sqlite' | 'postgresql';
+// PostgreSQL is the only dialect: PostgresAdapter in production, pglite
+// (a real Postgres engine) in dev/test. The SQLite mapping was removed with
+// the SQLite driver.
+type DriverType = 'postgresql';
 
 const TYPE_MAP: Record<DriverType, Record<AbstractFieldType, string>> = {
-  sqlite: {
-    uuid: 'TEXT',
-    string: 'TEXT',
-    text: 'TEXT',
-    integer: 'INTEGER',
-    decimal: 'REAL',
-    boolean: 'INTEGER',
-    datetime: 'TEXT',
-    json: 'TEXT',
-    'string[]': 'TEXT',
-  },
   postgresql: {
     uuid: 'VARCHAR(36)',
     string: 'VARCHAR',
@@ -36,7 +28,7 @@ const TYPE_MAP: Record<DriverType, Record<AbstractFieldType, string>> = {
 
 function mapFieldType(field: FieldDefinition, driver: DriverType): string {
   const baseType = TYPE_MAP[driver][field.type];
-  if (field.type === 'string' && field.maxLength && driver === 'postgresql') {
+  if (field.type === 'string' && field.maxLength) {
     return `VARCHAR(${field.maxLength})`;
   }
   return baseType;
@@ -61,12 +53,6 @@ function buildColumnDef(field: FieldDefinition, driver: DriverType): string {
     const val = field.defaultValue;
     if (typeof val === 'string') {
       parts.push(`DEFAULT '${val}'`);
-    } else if (typeof val === 'boolean') {
-      if (driver === 'sqlite') {
-        parts.push(`DEFAULT ${val ? 1 : 0}`);
-      } else {
-        parts.push(`DEFAULT ${val}`);
-      }
     } else {
       parts.push(`DEFAULT ${val}`);
     }

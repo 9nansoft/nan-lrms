@@ -47,32 +47,26 @@ describe('migrateAuditLogsActor', () => {
   });
 
   it('lets a BMS-session actor be audited AFTER the migration (FK dropped)', async () => {
-    await migrateAuditLogsActor(db, 'postgresql');
+    await migrateAuditLogsActor(db);
     await insertAudit('bms-session-with-no-users-row');
     const rows = await db.query<{ c: number }>(`SELECT COUNT(*)::int AS c FROM audit_logs`);
     expect(Number(rows[0].c)).toBe(1);
   });
 
   it('allows a NULL user_id after the migration (NOT NULL dropped)', async () => {
-    await migrateAuditLogsActor(db, 'postgresql');
+    await migrateAuditLogsActor(db);
     await insertAudit(null);
     const rows = await db.query<{ c: number }>(`SELECT COUNT(*)::int AS c FROM audit_logs`);
     expect(Number(rows[0].c)).toBe(1);
   });
 
   it('is idempotent — safe to run on every boot', async () => {
-    await migrateAuditLogsActor(db, 'postgresql');
-    await migrateAuditLogsActor(db, 'postgresql');
+    await migrateAuditLogsActor(db);
+    await migrateAuditLogsActor(db);
     // The second run neither throws nor re-adds the constraint: an insert still
     // succeeds afterwards.
     await insertAudit('again');
     const rows = await db.query<{ c: number }>(`SELECT COUNT(*)::int AS c FROM audit_logs`);
     expect(Number(rows[0].c)).toBe(1);
-  });
-
-  it('is a no-op on sqlite (no ALTER support; fresh tables already correct)', async () => {
-    await expect(migrateAuditLogsActor(db, 'sqlite')).resolves.toBeUndefined();
-    // Because we did NOT migrate, the FK is still enforced.
-    await expect(insertAudit('still-no-user')).rejects.toThrow();
   });
 });

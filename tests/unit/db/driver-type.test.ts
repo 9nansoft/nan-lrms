@@ -1,39 +1,41 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { getDriverType } from '@/db/connection';
+import { getDriverType, getDatabase, resetDatabaseInstance } from '@/db/connection';
 
-// getDriverType must mirror getDatabase()'s adapter precedence: PGlite is a
-// real Postgres engine, so it needs the postgresql dialect even when
-// USE_SQLITE (or NODE_ENV=test) would otherwise force sqlite. Regression for
-// the boot crash "invalid input syntax for type integer: \"true\"" — schema
-// created with sqlite INTEGER booleans inside PGlite.
+// SQLite was removed from the codebase: every adapter now speaks the
+// PostgreSQL dialect (PostgresAdapter in production, PGlite in dev/test).
+// getDriverType therefore has a single answer, and getDatabase() in the
+// test environment must boot an in-memory PGlite — not require DATABASE_URL.
 describe('getDriverType', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('returns postgresql for PGlite even when USE_SQLITE is also set', () => {
-    vi.stubEnv('USE_PGLITE', 'true');
-    vi.stubEnv('USE_SQLITE', 'true');
+  it('returns postgresql in the test environment', () => {
     expect(getDriverType()).toBe('postgresql');
   });
 
-  it('returns postgresql for PGlite in test env (NODE_ENV=test forces sqlite otherwise)', () => {
+  it('returns postgresql for PGlite dev mode', () => {
     vi.stubEnv('USE_PGLITE', 'true');
     expect(getDriverType()).toBe('postgresql');
   });
 
-  it('returns sqlite when only USE_SQLITE is set', () => {
-    vi.stubEnv('NODE_ENV', 'development');
-    vi.stubEnv('USE_SQLITE', 'true');
-    expect(getDriverType()).toBe('sqlite');
-  });
-
-  it('returns sqlite in test env with no overrides (matches getDatabase)', () => {
-    expect(getDriverType()).toBe('sqlite');
-  });
-
-  it('returns postgresql when nothing forces an embedded driver', () => {
+  it('returns postgresql for production', () => {
     vi.stubEnv('NODE_ENV', 'production');
     expect(getDriverType()).toBe('postgresql');
+  });
+});
+
+describe('getDatabase in the test environment', () => {
+  afterEach(async () => {
+    resetDatabaseInstance();
+  });
+
+  it('boots an in-memory pglite adapter without DATABASE_URL', async () => {
+    resetDatabaseInstance();
+    const db = await getDatabase();
+    const rows = await db.query<{ ok: number }>('SELECT 1 AS ok');
+    expect(rows[0].ok).toBe(1);
+    const { PgliteAdapter } = await import('@/db/pglite-adapter');
+    expect(db).toBeInstanceOf(PgliteAdapter);
   });
 });
