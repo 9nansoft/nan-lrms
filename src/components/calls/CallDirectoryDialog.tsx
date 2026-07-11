@@ -192,7 +192,11 @@ export function CallDirectoryDialog({
           disabled={selected.size === 0 || submitting}
           className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
+          {submitting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Video className="h-4 w-4" />
+          )}
           {actionLabel} ({selected.size})
         </button>
       </DialogContent>

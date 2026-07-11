@@ -47,8 +47,7 @@ describe('CallDirectoryDialog', () => {
 
   it('multi-selects users and calls onCall with every picked target', async () => {
     const onCall = vi.fn(
-      async (_targets: { userId: string; hospitalName: string }[]): Promise<string | null> =>
-        null,
+      async (_targets: { userId: string; hospitalName: string }[]): Promise<string | null> => null,
     );
     render(<CallDirectoryDialog open onOpenChange={() => {}} onCall={onCall} />);
 
