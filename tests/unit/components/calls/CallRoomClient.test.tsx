@@ -66,7 +66,7 @@ describe('CallRoomClient', () => {
 
   beforeEach(() => {
     routerBack.mockClear();
-    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/calls/call-1') && !url.includes('/leave')) {
         return { ok: true, status: 200, json: async () => CALL_VIEW };
@@ -91,18 +91,36 @@ describe('CallRoomClient', () => {
     expect(screen.getByRole('button', { name: /เพิ่มผู้เข้าร่วม/ })).toBeTruthy();
   });
 
-  it('วางสาย posts leave and navigates back', async () => {
+  it('วางสาย posts leave with keepalive and navigates back', async () => {
     render(<CallRoomClient callId="call-1" />);
     await screen.findByTestId('jitsi-room');
 
     fireEvent.click(screen.getByRole('button', { name: /วางสาย/ }));
 
     await waitFor(() => {
-      expect(
-        fetchMock.mock.calls.some((call) => String(call[0]).includes('/api/calls/call-1/leave')),
-      ).toBe(true);
+      const leaveCall = fetchMock.mock.calls.find((call) =>
+        String(call[0]).includes('/api/calls/call-1/leave'),
+      );
+      expect(leaveCall).toBeTruthy();
+      // Navigation right after the fetch can abort it — keepalive lets the
+      // browser finish the request (the prod stuck-call incident).
+      expect((leaveCall?.[1] as RequestInit | undefined)?.keepalive).toBe(true);
     });
     expect(routerBack).toHaveBeenCalled();
+  });
+
+  it('closing the tab fires a leave beacon (pagehide)', async () => {
+    const sendBeacon = vi.fn((_url: string, _data?: BodyInit | null) => true);
+    Object.defineProperty(navigator, 'sendBeacon', { value: sendBeacon, configurable: true });
+
+    render(<CallRoomClient callId="call-1" />);
+    await screen.findByTestId('jitsi-room');
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(
+      sendBeacon.mock.calls.some((call) => String(call[0]).includes('/api/calls/call-1/leave')),
+    ).toBe(true);
   });
 
   it('shows the ended state instead of the room for finished calls', async () => {

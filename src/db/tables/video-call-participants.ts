@@ -28,6 +28,10 @@ export const videoCallParticipantsTable: TableDefinition = {
     { name: 'joined_at', type: 'datetime', nullable: true },
     // Stamps every terminal transition: left, declined, missed, cancelled.
     { name: 'left_at', type: 'datetime', nullable: true },
+    // Room liveness: refreshed by getCall (the room page polls every 15 s).
+    // The stale-join sweep releases joined rows whose liveness went quiet —
+    // presence alone can't tell "left the room" from "browsing the app".
+    { name: 'last_seen_at', type: 'datetime', nullable: true },
   ],
   indexes: [
     { name: 'idx_vcp_call', columns: ['call_id'] },

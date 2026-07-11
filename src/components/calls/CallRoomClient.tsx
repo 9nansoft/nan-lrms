@@ -116,10 +116,24 @@ export function CallRoomClient({ callId }: { callId: string }) {
   const leave = useCallback(() => {
     if (leftRef.current) return;
     leftRef.current = true;
-    // Best-effort: the presence sweep ends abandoned calls anyway.
-    void fetch(`/api/calls/${callId}/leave`, { method: 'POST' }).catch(() => {});
+    // keepalive: router.back() navigates immediately and a plain fetch would
+    // be aborted mid-flight — the leave then never reaches the server and the
+    // participant stays "joined"/busy (2026-07-11 incident).
+    void fetch(`/api/calls/${callId}/leave`, { method: 'POST', keepalive: true }).catch(() => {});
     router.back();
   }, [callId, router]);
+
+  // Tab close / navigation away without pressing วางสาย: pagehide is the
+  // last reliable moment to tell the server; sendBeacon survives unload.
+  useEffect(() => {
+    const onPageHide = () => {
+      if (leftRef.current) return;
+      leftRef.current = true;
+      navigator.sendBeacon?.(`/api/calls/${callId}/leave`);
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [callId]);
 
   const inviteMore = useCallback(
     async (targets: DirectoryCallTarget[]): Promise<string | null> => {

@@ -200,23 +200,33 @@ describe('group video-call service', () => {
       ]);
     });
 
-    it('self-heals: stale rings and presence-dead joined participants stop blocking calls', async () => {
-      await allOnline(CREATOR, INVITEE_B);
-      // Stale ring: dead-timer row older than the sweep threshold.
+    it('self-heals: stale rings and liveness-dead joined participants stop blocking calls', async () => {
+      // user-x stays ONLINE (presence) — the prod incident: a user whose
+      // leave was lost stayed "joined" on an active call forever because the
+      // old sweep only released offline users. Liveness (last_seen_at,
+      // stamped by the room page's 15 s poll) is the authority now.
+      const userX: CallActor = {
+        userId: 'user-x',
+        name: 'X',
+        hospitalCode: '11004',
+        hospitalName: 'รพ.น้ำพอง',
+      };
+      await allOnline(CREATOR, INVITEE_B, userX);
       await db.execute(
         `INSERT INTO video_calls (id, room_id, created_by_user_id, created_by_name, created_by_hospital_code, status, created_at)
          VALUES ('aaaaaaaa-0000-4000-8000-00000000000a', 'kklrms-stale', 'user-x', 'X', '11004', 'active', NOW() - INTERVAL '10 minutes')`,
       );
       await db.execute(
-        `INSERT INTO video_call_participants (id, call_id, user_id, name, hospital_code, hospital_name, role, status, invited_by_user_id, invited_at, joined_at)
+        `INSERT INTO video_call_participants (id, call_id, user_id, name, hospital_code, hospital_name, role, status, invited_by_user_id, invited_at, joined_at, last_seen_at)
          VALUES
-          ('aaaaaaaa-0000-4000-8000-00000000000b', 'aaaaaaaa-0000-4000-8000-00000000000a', 'user-x', 'X', '11004', 'รพ.น้ำพอง', 'creator', 'joined', 'user-x', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes'),
-          ('aaaaaaaa-0000-4000-8000-00000000000c', 'aaaaaaaa-0000-4000-8000-00000000000a', ?, ?, ?, ?, 'invitee', 'ringing', 'user-x', NOW() - INTERVAL '10 minutes', NULL)`,
+          ('aaaaaaaa-0000-4000-8000-00000000000b', 'aaaaaaaa-0000-4000-8000-00000000000a', 'user-x', 'X', '11004', 'รพ.น้ำพอง', 'creator', 'joined', 'user-x', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', NULL),
+          ('aaaaaaaa-0000-4000-8000-00000000000c', 'aaaaaaaa-0000-4000-8000-00000000000a', ?, ?, ?, ?, 'invitee', 'ringing', 'user-x', NOW() - INTERVAL '10 minutes', NULL, NULL)`,
         [INVITEE_B.userId, INVITEE_B.name, INVITEE_B.hospitalCode, INVITEE_B.hospitalName],
       );
 
-      // user-x is offline (no presence) and INVITEE_B's ring is stale — both
-      // must be released so this call can go through.
+      // user-x has no room liveness (last_seen_at NULL, joined long ago) and
+      // INVITEE_B's ring is stale — both must be released even though user-x
+      // is still online elsewhere in the app.
       const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
       expect(call.invited.map((i) => i.userId)).toEqual([INVITEE_B.userId]);
 
@@ -227,6 +237,32 @@ describe('group video-call service', () => {
         'left',
       );
       expect(await headerStatus(db, 'aaaaaaaa-0000-4000-8000-00000000000a')).toBe('ended');
+    });
+
+    it('does not sweep joined participants with fresh room liveness', async () => {
+      const userX: CallActor = {
+        userId: 'user-x',
+        name: 'X',
+        hospitalCode: '11004',
+        hospitalName: 'รพ.น้ำพอง',
+      };
+      await allOnline(CREATOR, INVITEE_B, userX);
+      await db.execute(
+        `INSERT INTO video_calls (id, room_id, created_by_user_id, created_by_name, created_by_hospital_code, status, created_at)
+         VALUES ('bbbbbbbb-0000-4000-8000-00000000000a', 'kklrms-live', 'user-x', 'X', '11004', 'active', NOW() - INTERVAL '10 minutes')`,
+      );
+      await db.execute(
+        `INSERT INTO video_call_participants (id, call_id, user_id, name, hospital_code, hospital_name, role, status, invited_by_user_id, invited_at, joined_at, last_seen_at)
+         VALUES ('bbbbbbbb-0000-4000-8000-00000000000b', 'bbbbbbbb-0000-4000-8000-00000000000a', 'user-x', 'X', '11004', 'รพ.น้ำพอง', 'creator', 'joined', 'user-x', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', NOW())`,
+      );
+
+      // user-x's room page polled recently (last_seen_at fresh) → still in
+      // the call → busy → inviting them is skipped.
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId, 'user-x']);
+      expect(call.skipped).toEqual([{ userId: 'user-x', reason: 'busy' }]);
+      expect(await participantStatus(db, 'bbbbbbbb-0000-4000-8000-00000000000a', 'user-x')).toBe(
+        'joined',
+      );
     });
   });
 
@@ -388,6 +424,18 @@ describe('group video-call service', () => {
   });
 
   describe('getCall', () => {
+    it('stamps room liveness (last_seen_at) for a joined requester', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const call = await createCall(db, CREATOR, [INVITEE_B.userId]);
+
+      await getCall(db, call.callId, CREATOR.userId);
+      const rows = await db.query<{ last_seen_at: Date | null }>(
+        'SELECT last_seen_at FROM video_call_participants WHERE call_id = ? AND user_id = ?',
+        [call.callId, CREATOR.userId],
+      );
+      expect(rows[0].last_seen_at).not.toBeNull();
+    });
+
     it('returns header + participants to ringing/joined participants only', async () => {
       await allOnline(CREATOR, INVITEE_B);
       const call = await createCall(db, CREATOR, [INVITEE_B.userId]);

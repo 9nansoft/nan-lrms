@@ -59,6 +59,7 @@ describe('video_calls header table', () => {
       'invited_at',
       'joined_at',
       'left_at',
+      'last_seen_at',
     ]) {
       expect(byName.has(required), `missing participant column ${required}`).toBe(true);
     }

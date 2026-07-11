@@ -9,6 +9,7 @@
 import NextAuth from 'next-auth';
 import { authConfig } from '@/lib/auth.config';
 import { isAdminAuthorized } from '@/lib/admin-access';
+import { addSecurityHeaders } from '@/lib/security-headers';
 import { NextResponse } from 'next/server';
 
 const { auth } = NextAuth(authConfig);
@@ -43,25 +44,8 @@ const READONLY_BLOCKED_API_PREFIXES = [
 // curl them without a NextAuth cookie. No-op in prod because the guard fires first.
 const DEV_ONLY_API_PATHS = ['/api/dev/simulate', '/api/dev/smoke-tab-update'];
 
-// T108: Add security headers to all responses
-//
-// NOTE: X-Frame-Options is intentionally NOT set, and CSP frame-ancestors is
-// wide open (*) so KK-LRMS can be embedded inside HOSxP / marketplace / other
-// partner hospital portals. Product requirement, not a misconfiguration.
-// Clickjacking mitigations (session binding to bms-session-id, no destructive
-// one-click actions without confirm) live at the app layer instead.
-function addSecurityHeaders(response: NextResponse): NextResponse {
-  response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('X-XSS-Protection', '1; mode=block');
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  response.headers.set('Content-Security-Policy', 'frame-ancestors *');
-  // HSTS - only in production
-  if (process.env.NODE_ENV === 'production') {
-    response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  }
-  return response;
-}
+// T108: security headers for all responses — policy + rationale live in
+// src/lib/security-headers.ts (NextAuth-free so unit tests can import it).
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;

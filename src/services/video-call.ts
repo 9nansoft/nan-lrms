@@ -28,11 +28,7 @@ export interface CallActor {
 }
 
 export type VideoCallErrorCode =
-  | 'NO_INVITEES'
-  | 'BUSY'
-  | 'NOT_FOUND'
-  | 'FORBIDDEN'
-  | 'INVALID_STATE';
+  'NO_INVITEES' | 'BUSY' | 'NOT_FOUND' | 'FORBIDDEN' | 'INVALID_STATE';
 
 export class VideoCallError extends Error {
   constructor(
@@ -327,6 +323,14 @@ export async function getCall(
       'คุณไม่ใช่ผู้ร่วมสนทนาของสายนี้ หรือสายนี้สิ้นสุดแล้วสำหรับคุณ',
     );
   }
+  if (me.status === 'joined') {
+    // Room liveness: the room page polls this endpoint every 15 s. The
+    // stale-join sweep releases joined rows whose liveness went quiet, so a
+    // lost leave (aborted fetch, crashed browser) can't hold anyone "busy".
+    await db.execute(`UPDATE video_call_participants SET last_seen_at = NOW() WHERE id = ?`, [
+      me.id,
+    ]);
+  }
   const participants = await db.query<ParticipantRow>(
     `SELECT * FROM video_call_participants WHERE call_id = ? ORDER BY invited_at, user_id`,
     [callId],
@@ -575,22 +579,17 @@ async function sweepStaleParticipants(db: DatabaseAdapter): Promise<void> {
         AND invited_at < NOW() - INTERVAL '${STALE_RING_MS / 1000} seconds'`,
   );
 
-  const staleJoined = await db.query<{ id: string; user_id: string }>(
-    `SELECT p.id, p.user_id FROM video_call_participants p
-       JOIN video_calls c ON c.id = p.call_id AND c.status = 'active'
-      WHERE p.status = 'joined'
-        AND p.joined_at < NOW() - INTERVAL '${STALE_JOIN_MS / 1000} seconds'`,
+  // Joined rows with quiet room liveness are gone: the room page stamps
+  // last_seen_at via its 15 s getCall poll, so several minutes of silence
+  // means the room tab is closed/crashed — even if the user is still online
+  // elsewhere in the app (the 2026-07-11 stuck-busy incident).
+  await db.execute(
+    `UPDATE video_call_participants SET status = 'left', left_at = NOW()
+      WHERE status = 'joined'
+        AND joined_at < NOW() - INTERVAL '${STALE_JOIN_MS / 1000} seconds'
+        AND (last_seen_at IS NULL OR last_seen_at < NOW() - INTERVAL '${STALE_JOIN_MS / 1000} seconds')
+        AND call_id IN (SELECT id FROM video_calls WHERE status = 'active')`,
   );
-  if (staleJoined.length > 0) {
-    const online = new Set((await listOnlineUsers()).map((user) => user.userId));
-    for (const row of staleJoined) {
-      if (online.has(row.user_id)) continue;
-      await db.execute(
-        `UPDATE video_call_participants SET status = 'left', left_at = NOW() WHERE id = ?`,
-        [row.id],
-      );
-    }
-  }
 
   // Calls with nobody joined and nobody ringing are over.
   await db.execute(
