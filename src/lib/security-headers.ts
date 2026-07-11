@@ -15,14 +15,15 @@
 import type { NextResponse } from 'next/server';
 import { JITSI_DOMAIN } from '@/config/video-call';
 
+// Exported so the Playwright media smoke test can serve its harness page with
+// the EXACT production policy — a regression to camera=() fails that test too.
+export const PERMISSIONS_POLICY = `camera=(self "https://${JITSI_DOMAIN}"), microphone=(self "https://${JITSI_DOMAIN}"), geolocation=()`;
+
 export function addSecurityHeaders(response: NextResponse): NextResponse {
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('X-XSS-Protection', '1; mode=block');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  response.headers.set(
-    'Permissions-Policy',
-    `camera=(self "https://${JITSI_DOMAIN}"), microphone=(self "https://${JITSI_DOMAIN}"), geolocation=()`,
-  );
+  response.headers.set('Permissions-Policy', PERMISSIONS_POLICY);
   response.headers.set('Content-Security-Policy', 'frame-ancestors *');
   // HSTS - only in production
   if (process.env.NODE_ENV === 'production') {
