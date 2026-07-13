@@ -3,7 +3,7 @@
 // behavior: debounced fetch and re-seeding when the parent commits a new
 // value. Must pass against both the pre-refactor and post-refactor code.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { LookupAutocomplete } from '@/components/maternity/shared/LookupAutocomplete';
 
 // Mirror the component's actual LookupItem shape when writing these items.
@@ -27,7 +27,9 @@ describe('LookupAutocomplete', () => {
     );
     fireEvent.change(screen.getByLabelText('ค้นหายา'), { target: { value: 'Para' } });
     expect(fetchFn).not.toHaveBeenCalled(); // debounce window
-    vi.advanceTimersByTime(350);
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
     await waitFor(() => expect(fetchFn).toHaveBeenCalledWith('Para'));
   });
 

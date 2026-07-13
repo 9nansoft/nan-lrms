@@ -2,7 +2,7 @@
 // KPI strips must come from the API's DB-wide counts, EDC/due and follow-up
 // aging must render per anc-ops config, and patient identity stays masked.
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import type { JourneyListResponse } from '@/types/api';
 import PregnanciesPage from '@/app/(provincial)/pregnancies/page';
@@ -125,8 +125,10 @@ describe('PregnanciesPage — KPI strips', () => {
 
     fireEvent.click(await screen.findByTestId('kpi-due-soon'));
 
-    const urls = fetcher.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes('cohort=due_soon'))).toBe(true);
+    await waitFor(() => {
+      const urls = fetcher.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('cohort=due_soon'))).toBe(true);
+    });
   });
 
   it('clicking the LTFU cell requests the lost-to-follow-up worklist', async () => {
@@ -134,8 +136,10 @@ describe('PregnanciesPage — KPI strips', () => {
 
     fireEvent.click(await screen.findByTestId('kpi-ltfu'));
 
-    const urls = fetcher.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes('cohort=ltfu'))).toBe(true);
+    await waitFor(() => {
+      const urls = fetcher.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('cohort=ltfu'))).toBe(true);
+    });
   });
 
   it('risk strip cells are clickable filters fed by DB-wide counts', async () => {
@@ -145,8 +149,10 @@ describe('PregnanciesPage — KPI strips', () => {
     expect(within(hr3).getByText('106')).toBeInTheDocument();
 
     fireEvent.click(hr3);
-    const urls = fetcher.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes('risk_level=HR3'))).toBe(true);
+    await waitFor(() => {
+      const urls = fetcher.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('risk_level=HR3'))).toBe(true);
+    });
   });
 
   it('shows a last-updated stamp and the gating footnote', async () => {
@@ -203,8 +209,10 @@ describe('PregnanciesPage — sort and hospital filter', () => {
     expect(urls.some((u) => u.includes('sort=due'))).toBe(true);
 
     fireEvent.change(select, { target: { value: 'last_anc' } });
-    urls = fetcher.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes('sort=last_anc'))).toBe(true);
+    await waitFor(() => {
+      urls = fetcher.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('sort=last_anc'))).toBe(true);
+    });
   });
 
   it('lists hospitals from hospitalCounts and applies hospital_id', async () => {
@@ -214,8 +222,10 @@ describe('PregnanciesPage — sort and hospital filter', () => {
     expect(within(select).getByText(/รพ.ชุมแพ \(83\)/)).toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: 'h-chumphae' } });
-    const urls = fetcher.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes('hospital_id=h-chumphae'))).toBe(true);
+    await waitFor(() => {
+      const urls = fetcher.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('hospital_id=h-chumphae'))).toBe(true);
+    });
   });
 });
 

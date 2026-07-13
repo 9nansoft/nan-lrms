@@ -3,7 +3,7 @@
 // hospital filters must hit the API, names stay masked, and an empty table
 // states honestly that no sync data exists yet.
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import type { OutcomesResponse } from '@/types/api';
 import OutcomesPage from '@/app/(provincial)/outcomes/page';
@@ -88,8 +88,10 @@ describe('OutcomesPage — KPI tiles', () => {
     expect(urls.some((u) => u.includes('range=mtd'))).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: /30 วัน/ }));
-    urls = fetcher.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes('range=30d'))).toBe(true);
+    await waitFor(() => {
+      urls = fetcher.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('range=30d'))).toBe(true);
+    });
   });
 
   it('filters by hospital from the byHospital facet', async () => {
@@ -99,8 +101,10 @@ describe('OutcomesPage — KPI tiles', () => {
     expect(within(select).getByText(/รพ.ขอนแก่น \(30\)/)).toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: 'h-kkh' } });
-    const urls = fetcher.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes('hospital_id=h-kkh'))).toBe(true);
+    await waitFor(() => {
+      const urls = fetcher.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('hospital_id=h-kkh'))).toBe(true);
+    });
   });
 
   it('shows a last-updated stamp', async () => {

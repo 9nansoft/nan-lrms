@@ -2,7 +2,7 @@
 // KPI strips must come from the API's DB-wide counts (never the visible page),
 // patient identity must render masked, and INITIATED rows must show SLA aging.
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import type {
   ReferralDetailResponse,
@@ -236,8 +236,10 @@ describe('ReferralsPage — insights panel and destination filter', () => {
 
     fireEvent.change(select, { target: { value: 'h-kkh' } });
 
-    const urls = fetcher.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.includes('to_hospital_id=h-kkh'))).toBe(true);
+    await waitFor(() => {
+      const urls = fetcher.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('to_hospital_id=h-kkh'))).toBe(true);
+    });
   });
 });
 

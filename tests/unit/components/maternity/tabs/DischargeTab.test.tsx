@@ -88,8 +88,11 @@ beforeEach(() => {
 });
 
 describe('DischargeTab', () => {
-  it('shows admitted message + admit timestamp when occupant present', () => {
+  it('shows admitted message + admit timestamp when occupant present', async () => {
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
+    // Settle the mount-time SWR fetches (dchtype/dchstts/specialty/severity
+    // masters + referout/ipt-discharge hydration) before asserting.
+    await waitFor(() => {});
     expect(screen.getByText(/ยังไม่มีการจำหน่าย/)).toBeInTheDocument();
     expect(screen.getByText(/2026-04-19/)).toBeInTheDocument();
   });
@@ -101,8 +104,9 @@ describe('DischargeTab', () => {
 });
 
 describe('DischargeTab CRUD', () => {
-  it('shows the discharge form with date/time/type/status inputs', () => {
+  it('shows the discharge form with date/time/type/status inputs', async () => {
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
+    await waitFor(() => {});
     expect(screen.getByLabelText('dchdate')).toBeInTheDocument();
     expect(screen.getByLabelText('dchtime')).toBeInTheDocument();
     expect(screen.getByLabelText('dchtype')).toBeInTheDocument();
@@ -129,8 +133,9 @@ describe('DischargeTab CRUD', () => {
     fireEvent.blur(el);
   }
 
-  it('blocks save when date is empty (Thai validation message)', () => {
+  it('blocks save when date is empty (Thai validation message)', async () => {
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
+    await waitFor(() => {});
     flipConfirmToggleOn();
     // The form now auto-fills today/now on mount as a UX accelerator — clear
     // both (blank text + blur commits '' back to the draft) to exercise the
@@ -172,10 +177,11 @@ describe('DischargeTab CRUD', () => {
     window.confirm = origConfirm;
   });
 
-  it('does not fire dischargePatient when confirm returns false', () => {
+  it('does not fire dischargePatient when confirm returns false', async () => {
     const origConfirm = window.confirm;
     window.confirm = vi.fn().mockReturnValue(false);
     render(<DischargeTab occupant={baseOccupant} />, { wrapper });
+    await waitFor(() => {});
     flipConfirmToggleOn();
     fireEvent.change(screen.getByLabelText('dchdate'), { target: { value: '2026-04-19' } });
     fireEvent.change(screen.getByLabelText('dchtime'), { target: { value: '14:30:00' } });

@@ -90,7 +90,7 @@ describe('Hospital route shell', () => {
         <HospitalMaternityWardPage />
       </HospitalLayout>,
     );
-    expect(screen.getByText('ห้องคลอด')).toBeInTheDocument();
+    expect(await screen.findByText('ห้องคลอด')).toBeInTheDocument();
     for (const label of ['แดชบอร์ด', 'ฝากครรภ์', 'โรงพยาบาล', 'ส่งต่อ', 'ผลลัพธ์ทารก']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
