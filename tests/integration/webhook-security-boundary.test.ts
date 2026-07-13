@@ -235,8 +235,17 @@ describe('Webhook Route — security boundaries', () => {
       keyC = (await createApiKey(db, hospC.id, 'boundary-c')).rawKey;
 
       const journey = await createJourney(db, {
-        hospitalId: hospA.id, hn: 'HN-A7', personAncId: null, name: '', cid: '',
-        cidHash: 'hash-a7', age: 30, gravida: 1, para: 0, lmp: null, edc: null,
+        hospitalId: hospA.id,
+        hn: 'HN-A7',
+        personAncId: null,
+        name: '',
+        cid: '',
+        cidHash: 'hash-a7',
+        age: 30,
+        gravida: 1,
+        para: 0,
+        lmp: null,
+        edc: null,
         ancRiskLevel: AncRiskLevel.LOW,
       });
       journeyId = journey.id;
@@ -266,22 +275,33 @@ describe('Webhook Route — security boundaries', () => {
       const res = await postWebhook(keyC, updatePayload('REJECTED'));
       expect(res.status).toBe(404);
       const rows = await db.query<{ status: string }>(
-        'SELECT status FROM cached_referrals WHERE id = ?', [referralId]);
+        'SELECT status FROM cached_referrals WHERE id = ?',
+        [referralId],
+      );
       expect(rows[0].status).toBe('INITIATED');
       expect(sseSpy).not.toHaveBeenCalled();
     });
 
     it('404s the SOURCE hospital sending a status update (destination-only)', async () => {
+      const sseSpy = vi.spyOn(SseManager.getInstance(), 'broadcast');
       const keyA = (await createApiKey(db, hospA.id, 'boundary-a')).rawKey;
       const res = await postWebhook(keyA, updatePayload('ACCEPTED'));
       expect(res.status).toBe(404);
+      const rows = await db.query<{ status: string }>(
+        'SELECT status FROM cached_referrals WHERE id = ?',
+        [referralId],
+      );
+      expect(rows[0].status).toBe('INITIATED');
+      expect(sseSpy).not.toHaveBeenCalled();
     });
 
     it('allows the destination hospital to accept', async () => {
       const res = await postWebhook(keyB, updatePayload('ACCEPTED'));
       expect(res.status).toBe(200);
       const rows = await db.query<{ status: string }>(
-        'SELECT status FROM cached_referrals WHERE id = ?', [referralId]);
+        'SELECT status FROM cached_referrals WHERE id = ?',
+        [referralId],
+      );
       expect(rows[0].status).toBe('ACCEPTED');
     });
 
@@ -290,17 +310,21 @@ describe('Webhook Route — security boundaries', () => {
       const res = await postWebhook(keyB, updatePayload('TOTALLY_FAKE'));
       expect(res.status).toBe(400);
       const rows = await db.query<{ status: string }>(
-        'SELECT status FROM cached_referrals WHERE id = ?', [referralId]);
+        'SELECT status FROM cached_referrals WHERE id = ?',
+        [referralId],
+      );
       expect(rows[0].status).toBe('INITIATED');
       expect(sseSpy).not.toHaveBeenCalled();
     });
 
     it('rejects a third hospital deleting the referral; parties may delete', async () => {
+      const sseSpy = vi.spyOn(SseManager.getInstance(), 'broadcast');
       const resC = await postWebhook(keyC, updatePayload('', { action: 'delete' }));
       expect(resC.status).toBe(404);
       expect(
         (await db.query('SELECT id FROM cached_referrals WHERE id = ?', [referralId])).length,
       ).toBe(1);
+      expect(sseSpy).not.toHaveBeenCalled();
 
       const resB = await postWebhook(keyB, updatePayload('', { action: 'delete' }));
       expect(resB.status).toBe(200);

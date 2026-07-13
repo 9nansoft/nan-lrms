@@ -1533,7 +1533,8 @@ export async function processReferralCreate(
 
 export class WebhookReferralError extends Error {
   constructor(
-    public readonly code: 'REFERRAL_NOT_FOUND' | 'INVALID_REFERRAL_STATUS' | 'INVALID_REFERRAL_ACTION',
+    public readonly code:
+      'REFERRAL_NOT_FOUND' | 'INVALID_REFERRAL_STATUS' | 'INVALID_REFERRAL_ACTION',
     message: string,
   ) {
     super(message);
@@ -1543,7 +1544,7 @@ export class WebhookReferralError extends Error {
 
 // Single status whitelist derived from the domain enum (constitution IV —
 // INITIATED is never a valid inbound update).
-const REFERRAL_UPDATE_STATUSES: ReadonlySet<string> = new Set([
+export const REFERRAL_UPDATE_STATUSES: ReadonlySet<string> = new Set([
   ReferralStatus.ACCEPTED,
   ReferralStatus.REJECTED,
   ReferralStatus.IN_TRANSIT,
@@ -1563,10 +1564,16 @@ export async function processReferralUpdate(
 ): Promise<WebhookReferralResult> {
   const action = payload.action ?? 'update';
   if (action !== 'update' && action !== 'delete') {
-    throw new WebhookReferralError('INVALID_REFERRAL_ACTION', `action "${payload.action}" ไม่ถูกต้อง`);
+    throw new WebhookReferralError(
+      'INVALID_REFERRAL_ACTION',
+      `action "${payload.action}" ไม่ถูกต้อง`,
+    );
   }
   if (action === 'update' && !REFERRAL_UPDATE_STATUSES.has(payload.status)) {
-    throw new WebhookReferralError('INVALID_REFERRAL_STATUS', `status "${payload.status}" ไม่ถูกต้อง`);
+    throw new WebhookReferralError(
+      'INVALID_REFERRAL_STATUS',
+      `status "${payload.status}" ไม่ถูกต้อง`,
+    );
   }
 
   // Resolve the sending hospital (fromHospitalCode) for compound key lookup
@@ -1585,7 +1592,8 @@ export async function processReferralUpdate(
     );
     if (
       delRows.length === 0 ||
-      (authenticatedHospitalId !== fromHospital.id && authenticatedHospitalId !== delRows[0].to_hospital_id)
+      (authenticatedHospitalId !== fromHospital.id &&
+        authenticatedHospitalId !== delRows[0].to_hospital_id)
     ) {
       throw new WebhookReferralError('REFERRAL_NOT_FOUND', 'ไม่พบใบส่งต่อที่ระบุ');
     }
