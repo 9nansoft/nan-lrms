@@ -36,5 +36,9 @@ export const videoCallParticipantsTable: TableDefinition = {
   indexes: [
     { name: 'idx_vcp_call', columns: ['call_id'] },
     { name: 'idx_vcp_user_status', columns: ['user_id', 'status'] },
+    // Backs persistRingRows' ON CONFLICT (call_id, user_id) DO UPDATE —
+    // one ring row per person per call, race-safe. Existing databases get
+    // it (after deduping) from migrateVideoCallParticipantsUnique.
+    { name: 'uq_vcp_call_user', columns: ['call_id', 'user_id'], unique: true },
   ],
 };

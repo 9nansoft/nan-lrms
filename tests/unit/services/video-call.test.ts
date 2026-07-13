@@ -9,6 +9,7 @@ import { SseManager } from '@/lib/sse';
 import { recordOnlineUser } from '@/lib/presence';
 import { cacheDelPattern } from '@/lib/cache';
 import { MAX_CALL_PARTICIPANTS } from '@/config/video-call';
+import { FailingAdapter } from '../../helpers/failingDb';
 import {
   createCall,
   inviteToCall,
@@ -473,5 +474,70 @@ describe('group video-call service', () => {
       expect(error).toBeInstanceOf(VideoCallError);
       expect((error as Error).message).toMatch(/[ก-๙]/);
     }
+  });
+
+  describe('concurrency (Release C task C2)', () => {
+    async function createRingingCallTo(invitee: CallActor): Promise<{ callId: string }> {
+      await allOnline(CREATOR, invitee);
+      const call = await createCall(db, CREATOR, [invitee.userId]);
+      return { callId: call.callId };
+    }
+
+    async function createJoinedCallWith(invitee: CallActor): Promise<{ callId: string }> {
+      const { callId } = await createRingingCallTo(invitee);
+      await acceptInvite(db, callId, invitee);
+      return { callId };
+    }
+
+    it('concurrent accept + decline: exactly one terminal participant state', async () => {
+      const { callId } = await createRingingCallTo(INVITEE_B);
+      const results = await Promise.allSettled([
+        acceptInvite(db, callId, INVITEE_B),
+        declineInvite(db, callId, INVITEE_B),
+      ]);
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      expect(fulfilled.length).toBe(1);
+      expect(['joined', 'declined']).toContain(await participantStatus(db, callId, INVITEE_B.userId));
+    });
+
+    it('two concurrent createCall by the same creator produce exactly one active call', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const results = await Promise.allSettled([
+        createCall(db, CREATOR, [INVITEE_B.userId]),
+        createCall(db, CREATOR, [INVITEE_B.userId]),
+      ]);
+      const wins = results.filter((r) => r.status === 'fulfilled');
+      const busy = results.filter(
+        (r) => r.status === 'rejected' && (r.reason as { code?: string }).code === 'BUSY',
+      );
+      expect(wins.length).toBe(1);
+      expect(busy.length).toBe(1);
+      const calls = await db.query(`SELECT id FROM video_calls WHERE status = 'active'`);
+      expect(calls.length).toBe(1);
+    });
+
+    it('a failed ring INSERT rolls back the whole call (no creator-less/ghost call)', async () => {
+      await allOnline(CREATOR, INVITEE_B);
+      const failing = new FailingAdapter(db, /'invitee', 'ringing'/);
+      await expect(createCall(failing, CREATOR, [INVITEE_B.userId])).rejects.toThrow(
+        /injected failure/,
+      );
+      const calls = await db.query(`SELECT id FROM video_calls`);
+      expect(calls.length).toBe(0);
+    });
+
+    it('duplicate concurrent invites of one user leave exactly one participant row', async () => {
+      await allOnline(CREATOR, INVITEE_B, INVITEE_C);
+      const { callId } = await createJoinedCallWith(INVITEE_B);
+      await Promise.allSettled([
+        inviteToCall(db, callId, INVITEE_B, [INVITEE_C.userId]),
+        inviteToCall(db, callId, INVITEE_B, [INVITEE_C.userId]),
+      ]);
+      const rows = await db.query(
+        `SELECT id FROM video_call_participants WHERE call_id = ? AND user_id = ?`,
+        [callId, INVITEE_C.userId],
+      );
+      expect(rows.length).toBe(1);
+    });
   });
 });

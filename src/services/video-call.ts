@@ -122,13 +122,6 @@ export async function createCall(
 ): Promise<CreatedCall> {
   await sweepStaleParticipants(db);
 
-  if (await isBusy(db, creator.userId)) {
-    throw new VideoCallError(
-      'BUSY',
-      'คุณมีสายที่กำลังสนทนาหรือกำลังเรียกอยู่ กรุณาวางสายเดิมก่อนเริ่มสายใหม่',
-    );
-  }
-
   const evaluation = await evaluateInvitees(db, creator.userId, null, calleeUserIds, 1);
   if (evaluation.candidates.length === 0) {
     throw new VideoCallError(
@@ -139,29 +132,44 @@ export async function createCall(
 
   const callId = uuidv4();
   const roomId = `kklrms-${uuidv4()}`;
-  await db.execute(
-    `INSERT INTO video_calls
-       (id, room_id, created_by_user_id, created_by_name, created_by_hospital_code, status, created_at)
-     VALUES (?, ?, ?, ?, ?, 'active', NOW())`,
-    [callId, roomId, creator.userId, creator.name, creator.hospitalCode],
-  );
-  await db.execute(
-    `INSERT INTO video_call_participants
-       (id, call_id, user_id, name, hospital_code, hospital_name, role, status,
-        invited_by_user_id, invited_at, joined_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'creator', 'joined', ?, NOW(), NOW())`,
-    [
-      uuidv4(),
-      callId,
-      creator.userId,
-      creator.name,
-      creator.hospitalCode,
-      creator.hospitalName,
-      creator.userId,
-    ],
-  );
+  await db.transaction(async (tx) => {
+    // Serialize per-creator creation: concurrent createCall() calls for the
+    // same user queue on this xact-scoped advisory lock instead of both
+    // passing the isBusy check and each creating an active call.
+    await tx.query(`SELECT pg_advisory_xact_lock(hashtext(?))`, [creator.userId]);
+    if (await isBusy(tx, creator.userId)) {
+      throw new VideoCallError(
+        'BUSY',
+        'คุณมีสายที่กำลังสนทนาหรือกำลังเรียกอยู่ กรุณาวางสายเดิมก่อนเริ่มสายใหม่',
+      );
+    }
+    await tx.execute(
+      `INSERT INTO video_calls
+         (id, room_id, created_by_user_id, created_by_name, created_by_hospital_code, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'active', NOW())`,
+      [callId, roomId, creator.userId, creator.name, creator.hospitalCode],
+    );
+    await tx.execute(
+      `INSERT INTO video_call_participants
+         (id, call_id, user_id, name, hospital_code, hospital_name, role, status,
+          invited_by_user_id, invited_at, joined_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'creator', 'joined', ?, NOW(), NOW())`,
+      [
+        uuidv4(),
+        callId,
+        creator.userId,
+        creator.name,
+        creator.hospitalCode,
+        creator.hospitalName,
+        creator.userId,
+      ],
+    );
+    await persistRingRows(tx, callId, creator, evaluation.candidates);
+  });
 
-  const invited = await ringCandidates(
+  // Timers/SSE only after the transaction commits — a rolled-back call must
+  // never arm a ring timer or notify anyone.
+  const invited = await announceRings(
     db,
     { id: callId, roomId },
     creator,
@@ -192,16 +200,20 @@ export async function inviteToCall(
 
   const current = await countActiveParticipants(db, callId);
   const evaluation = await evaluateInvitees(db, actor.userId, callId, calleeUserIds, current);
-  const invited =
-    evaluation.candidates.length > 0
-      ? await ringCandidates(
-          db,
-          { id: header.id, roomId: header.room_id },
-          actor,
-          evaluation.candidates,
-          options.ringTimeoutMs ?? DEFAULT_RING_TIMEOUT_MS,
-        )
-      : [];
+  if (evaluation.candidates.length === 0) {
+    return { invited: [], skipped: evaluation.skipped };
+  }
+
+  await db.transaction(async (tx) => {
+    await persistRingRows(tx, callId, actor, evaluation.candidates);
+  });
+  const invited = await announceRings(
+    db,
+    { id: header.id, roomId: header.room_id },
+    actor,
+    evaluation.candidates,
+    options.ringTimeoutMs ?? DEFAULT_RING_TIMEOUT_MS,
+  );
   return { invited, skipped: evaluation.skipped };
 }
 
@@ -214,24 +226,28 @@ export async function acceptInvite(
   if (header.status !== 'active') {
     throw new VideoCallError('INVALID_STATE', 'สายนี้สิ้นสุดแล้ว ไม่สามารถรับสายได้');
   }
-  const me = await requireParticipant(db, callId, actor.userId);
-  if (me.status !== 'ringing') {
-    throw new VideoCallError('INVALID_STATE', `ไม่สามารถรับสายได้ — สถานะของคุณคือ "${me.status}"`);
-  }
 
-  clearRingTimer(callId, actor.userId);
-  await db.execute(
+  const won = await db.query<{ id: string; name: string }>(
     `UPDATE video_call_participants
         SET status = 'joined', joined_at = NOW(), left_at = NULL
-      WHERE id = ?`,
-    [me.id],
+      WHERE call_id = ? AND user_id = ? AND status = 'ringing'
+      RETURNING id, name`,
+    [callId, actor.userId],
   );
+  if (won.length === 0) {
+    // Covers both a stranger (no participant row → FORBIDDEN) and a
+    // participant whose state already moved on (double-accept, decline,
+    // timeout, cancel → INVALID_STATE).
+    const me = await requireParticipant(db, callId, actor.userId);
+    throw new VideoCallError('INVALID_STATE', `ไม่สามารถรับสายได้ — สถานะของคุณคือ "${me.status}"`);
+  }
+  clearRingTimer(callId, actor.userId); // ONLY after the DB transition wins
 
   await notifyJoined(
     db,
     callId,
     'call:participant-joined',
-    { callId, userId: actor.userId, name: me.name },
+    { callId, userId: actor.userId, name: won[0].name },
     actor.userId,
   );
   SseManager.getInstance().sendToUser(actor.userId, 'call:resolved', {
@@ -250,25 +266,29 @@ export async function declineInvite(
   if (header.status !== 'active') {
     throw new VideoCallError('INVALID_STATE', 'สายนี้สิ้นสุดแล้ว');
   }
-  const me = await requireParticipant(db, callId, actor.userId);
-  if (me.status !== 'ringing') {
+
+  const won = await db.query<{ id: string; name: string }>(
+    `UPDATE video_call_participants
+        SET status = 'declined', left_at = NOW()
+      WHERE call_id = ? AND user_id = ? AND status = 'ringing'
+      RETURNING id, name`,
+    [callId, actor.userId],
+  );
+  if (won.length === 0) {
+    const me = await requireParticipant(db, callId, actor.userId);
+    if (me.status === 'declined') return; // idempotent duplicate
     throw new VideoCallError(
       'INVALID_STATE',
       `ไม่สามารถปฏิเสธสายได้ — สถานะของคุณคือ "${me.status}"`,
     );
   }
-
-  clearRingTimer(callId, actor.userId);
-  await db.execute(
-    `UPDATE video_call_participants SET status = 'declined', left_at = NOW() WHERE id = ?`,
-    [me.id],
-  );
+  clearRingTimer(callId, actor.userId); // ONLY after the DB transition wins
 
   await notifyJoined(
     db,
     callId,
     'call:participant-declined',
-    { callId, userId: actor.userId, name: me.name },
+    { callId, userId: actor.userId, name: won[0].name },
     actor.userId,
   );
   SseManager.getInstance().sendToUser(actor.userId, 'call:resolved', {
@@ -283,15 +303,19 @@ export async function leaveCall(
   actor: CallActor,
 ): Promise<void> {
   const header = await loadHeader(db, callId);
-  const me = await requireParticipant(db, callId, actor.userId);
-  if (me.status !== 'joined') {
+
+  const won = await db.query<{ id: string; name: string }>(
+    `UPDATE video_call_participants
+        SET status = 'left', left_at = NOW()
+      WHERE call_id = ? AND user_id = ? AND status = 'joined'
+      RETURNING id, name`,
+    [callId, actor.userId],
+  );
+  if (won.length === 0) {
+    const me = await requireParticipant(db, callId, actor.userId);
+    if (me.status === 'left') return; // idempotent duplicate
     throw new VideoCallError('INVALID_STATE', 'คุณไม่ได้อยู่ในสายนี้แล้ว');
   }
-
-  await db.execute(
-    `UPDATE video_call_participants SET status = 'left', left_at = NOW() WHERE id = ?`,
-    [me.id],
-  );
 
   const remaining = await countJoined(db, callId);
   if (remaining === 0) {
@@ -301,7 +325,7 @@ export async function leaveCall(
       db,
       callId,
       'call:participant-left',
-      { callId, userId: actor.userId, name: me.name },
+      { callId, userId: actor.userId, name: won[0].name },
       actor.userId,
     );
   }
@@ -439,7 +463,48 @@ async function evaluateInvitees(
   return { candidates, skipped };
 }
 
-async function ringCandidates(
+// DB half of ringing a batch of candidates: one atomic upsert per candidate,
+// race-safe against a concurrent identical invite via the unique
+// (call_id, user_id) index (migrateVideoCallParticipantsUnique /
+// uq_vcp_call_user). Must run inside the caller's transaction — no
+// timers/SSE here, those only fire after commit (see announceRings).
+async function persistRingRows(
+  tx: DatabaseAdapter,
+  callId: string,
+  inviter: CallActor,
+  candidates: OnlineUserSnapshot[],
+): Promise<void> {
+  for (const presence of candidates) {
+    // Re-invite after decline/miss/leave (or a duplicate concurrent invite)
+    // flips the same row back to ringing instead of inserting a second one.
+    await tx.execute(
+      `INSERT INTO video_call_participants
+         (id, call_id, user_id, name, hospital_code, hospital_name, role, status,
+          invited_by_user_id, invited_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'invitee', 'ringing', ?, NOW())
+       ON CONFLICT (call_id, user_id) DO UPDATE SET
+         status = 'ringing',
+         invited_by_user_id = EXCLUDED.invited_by_user_id,
+         invited_at = NOW(),
+         joined_at = NULL,
+         left_at = NULL`,
+      [
+        uuidv4(),
+        callId,
+        presence.userId,
+        presence.name,
+        presence.hospitalCode,
+        presence.hospitalName,
+        inviter.userId,
+      ],
+    );
+  }
+}
+
+// Post-commit half: arm ring timers and fan out SSE invites. Takes the
+// caller's outer `db` (never a tx adapter — these fire well after the
+// transaction that persisted the rows has committed or rolled back).
+async function announceRings(
   db: DatabaseAdapter,
   call: { id: string; roomId: string },
   inviter: CallActor,
@@ -448,36 +513,6 @@ async function ringCandidates(
 ): Promise<CallActor[]> {
   const invited: CallActor[] = [];
   for (const presence of candidates) {
-    const existing = await db.query<{ id: string }>(
-      `SELECT id FROM video_call_participants WHERE call_id = ? AND user_id = ?`,
-      [call.id, presence.userId],
-    );
-    if (existing.length > 0) {
-      // Re-invite after decline/miss/leave: flip the same row back to ringing.
-      await db.execute(
-        `UPDATE video_call_participants
-            SET status = 'ringing', invited_by_user_id = ?, invited_at = NOW(),
-                joined_at = NULL, left_at = NULL
-          WHERE id = ?`,
-        [inviter.userId, existing[0].id],
-      );
-    } else {
-      await db.execute(
-        `INSERT INTO video_call_participants
-           (id, call_id, user_id, name, hospital_code, hospital_name, role, status,
-            invited_by_user_id, invited_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'invitee', 'ringing', ?, NOW())`,
-        [
-          uuidv4(),
-          call.id,
-          presence.userId,
-          presence.name,
-          presence.hospitalCode,
-          presence.hospitalName,
-          inviter.userId,
-        ],
-      );
-    }
     armRingTimer(db, call.id, presence.userId, ringTimeoutMs);
     invited.push({
       userId: presence.userId,
@@ -520,31 +555,34 @@ function armRingTimer(
 
 async function ringTimeout(db: DatabaseAdapter, callId: string, userId: string): Promise<void> {
   _timers.delete(`${callId}:${userId}`);
-  const rows = await db.query<ParticipantRow>(
-    `SELECT p.* FROM video_call_participants p
-       JOIN video_calls c ON c.id = p.call_id AND c.status = 'active'
-      WHERE p.call_id = ? AND p.user_id = ? AND p.status = 'ringing'`,
+  const won = await db.query<{ id: string; name: string }>(
+    `UPDATE video_call_participants AS p
+        SET status = 'missed', left_at = NOW()
+       FROM video_calls c
+      WHERE c.id = p.call_id AND c.status = 'active'
+        AND p.call_id = ? AND p.user_id = ? AND p.status = 'ringing'
+      RETURNING p.id, p.name`,
     [callId, userId],
   );
-  if (rows.length === 0) return; // answered/declined/cancelled first
+  if (won.length === 0) return; // answered/declined/cancelled first
 
-  await db.execute(
-    `UPDATE video_call_participants SET status = 'missed', left_at = NOW() WHERE id = ?`,
-    [rows[0].id],
-  );
   await notifyJoined(db, callId, 'call:participant-missed', {
     callId,
     userId,
-    name: rows[0].name,
+    name: won[0].name,
   });
   SseManager.getInstance().sendToUser(userId, 'call:resolved', { callId, status: 'missed' });
   await endCallIfEmpty(db, callId);
 }
 
 async function endCall(db: DatabaseAdapter, header: CallHeaderRow): Promise<void> {
-  await db.execute(`UPDATE video_calls SET status = 'ended', ended_at = NOW() WHERE id = ?`, [
-    header.id,
-  ]);
+  const won = await db.query<{ id: string }>(
+    `UPDATE video_calls SET status = 'ended', ended_at = NOW()
+      WHERE id = ? AND status = 'active' RETURNING id`,
+    [header.id],
+  );
+  if (won.length === 0) return; // a concurrent leaver/timeout already ended it
+
   const stillRinging = await db.query<{ id: string; user_id: string }>(
     `SELECT id, user_id FROM video_call_participants WHERE call_id = ? AND status = 'ringing'`,
     [header.id],

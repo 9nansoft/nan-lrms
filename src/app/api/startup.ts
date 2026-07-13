@@ -4,6 +4,7 @@ import { SchemaSync } from '@/db/schema-sync';
 import { migrateAuditLogsActor } from '@/db/migrations/audit-logs-actor';
 import { migrateCachedReferralsActor } from '@/db/migrations/cached-referrals-actor';
 import { migrateMaternalJourneysActiveUnique } from '@/db/migrations/maternal-journeys-active-unique';
+import { migrateVideoCallParticipantsUnique } from '@/db/migrations/video-call-participants-unique';
 import { migrateVideoCallsGroupModel } from '@/db/migrations/video-calls-group';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
@@ -56,6 +57,13 @@ export async function initializeApp(): Promise<void> {
     // 2a-2. One-shot idempotent migration: partial unique index guaranteeing a
     // single active journey per hospital+hn (fails safe on dirty data).
     await migrateMaternalJourneysActiveUnique(db);
+
+    // 2a-3. One-shot idempotent migration: dedupe (keep newest) then unique
+    // index on video_call_participants (call_id, user_id) — the old racy
+    // SELECT-then-INSERT ring logic could leave duplicate rows. Backs
+    // persistRingRows' ON CONFLICT DO UPDATE (fresh DBs get the index
+    // directly from the table definition via SchemaSync above).
+    await migrateVideoCallParticipantsUnique(db);
 
     // 2b. One-shot idempotent backfill for cached_anc_visits.hospital_id —
     // the column was added after data already existed; populate from the
