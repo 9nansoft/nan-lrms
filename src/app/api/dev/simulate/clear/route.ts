@@ -33,8 +33,8 @@ import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 
 export async function POST() {
-  const guard = simulationGuard();
-  if (guard) return guard;
+  const guard = await simulationGuard();
+  if (guard instanceof NextResponse) return guard;
 
   // 1. ALWAYS clear the in-memory API-key cache first.
   //

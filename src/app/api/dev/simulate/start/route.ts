@@ -6,8 +6,8 @@ import { simulationOrchestrator } from '@/services/dev-simulation/orchestrator';
 import type { SimulationConfig } from '@/services/dev-simulation/types';
 
 export async function POST(request: NextRequest) {
-  const guard = simulationGuard();
-  if (guard) return guard;
+  const guard = await simulationGuard();
+  if (guard instanceof NextResponse) return guard;
 
   let body: Partial<SimulationConfig>;
   try {

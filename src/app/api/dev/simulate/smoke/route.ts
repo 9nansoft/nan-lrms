@@ -74,8 +74,8 @@ function missingFields(parsed: unknown, fields: string[]): string[] {
 }
 
 export async function GET() {
-  const guard = simulationGuard();
-  if (guard) return guard;
+  const guard = await simulationGuard();
+  if (guard instanceof NextResponse) return guard;
 
   // Picks a profile with strong clinical constraints so the evaluator has real
   // work to do. preeclampsia_severe requires BP ≥160/100 + heavy proteinuria —

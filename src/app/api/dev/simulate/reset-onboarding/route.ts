@@ -47,8 +47,8 @@ const FK_DEPENDENT_TABLES = [
 ] as const;
 
 export async function POST() {
-  const guard = simulationGuard();
-  if (guard) return guard;
+  const guard = await simulationGuard();
+  if (guard instanceof NextResponse) return guard;
 
   // Drop in-memory key cache + stop orchestrator before touching the DB so a
   // running sim tick can't re-create rows mid-wipe.

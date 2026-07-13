@@ -29,8 +29,8 @@ async function safeQuery<T>(
 }
 
 export async function GET(request: Request) {
-  const guard = simulationGuard();
-  if (guard) return guard;
+  const guard = await simulationGuard();
+  if (guard instanceof NextResponse) return guard;
 
   const url = new URL(request.url);
   const targetAn = url.searchParams.get('an');

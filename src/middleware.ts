@@ -38,6 +38,7 @@ const READONLY_BLOCKED_API_PREFIXES = [
   '/api/sync/trigger',
   '/api/referrals',
   '/api/hospital/audit-log',
+  '/api/dev',
 ];
 // Dev-only API routes. In production isSimulationEnabled() is hard-false and
 // every handler 404s via simulationGuard(); this unauthenticated middleware
