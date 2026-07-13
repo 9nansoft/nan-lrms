@@ -27,9 +27,11 @@ export const cachedReferralsTable: TableDefinition = {
     { name: 'rejected_at', type: 'datetime', nullable: true },
     // Inline actor snapshot (name or synthesized session id) — no users FK;
     // BMS/ProviderID sessions have no users row (same pattern as audit_logs
-    // actor, bc31704).
-    { name: 'initiated_by', type: 'uuid', nullable: true },
-    { name: 'accepted_by', type: 'uuid', nullable: true },
+    // actor, bc31704). string/255, not uuid/36: session.user.name is a Thai
+    // display name (often with title/honorific prefixes) that can exceed 36
+    // chars — sizing this like a uuid truncation-fails real names.
+    { name: 'initiated_by', type: 'string', maxLength: 255, nullable: true },
+    { name: 'accepted_by', type: 'string', maxLength: 255, nullable: true },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },
   ],

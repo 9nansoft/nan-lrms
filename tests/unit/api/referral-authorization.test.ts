@@ -219,6 +219,28 @@ describe('referral session-hospital binding', () => {
     expect(journeyRows[0].current_hospital_id).toBe(await hospitalId(HCODE_A));
   });
 
+  it('accepts a session actor name longer than 36 chars without truncation or error', async () => {
+    // Thai names commonly carry title + honorific prefixes and easily exceed
+    // 36 chars — initiated_by/accepted_by must not be sized to a uuid.
+    const LONG_NAME = 'นางสาวสมหญิง ทองดีมีสุขสวัสดิ์วงศ์ ณ อยุธยา'; // 43 chars
+    mockSessionUser = testSessionUser({ hospitalCode: HCODE_A, name: LONG_NAME });
+    const journeyId = await seedJourneyAt(HCODE_A);
+    const res = await createRoute(
+      jsonRequest('http://test/api/referrals', {
+        journeyId,
+        toHospitalId: await hospitalId(HCODE_B),
+        reason: 'ส่งต่อทดสอบชื่อยาว',
+        urgencyLevel: 'URGENT',
+      }) as never,
+    );
+    expect(res.status).toBe(201);
+    const rows = await db.query<{ initiated_by: string }>(
+      'SELECT initiated_by FROM cached_referrals WHERE journey_id = ?',
+      [journeyId],
+    );
+    expect(rows[0].initiated_by).toBe(LONG_NAME);
+  });
+
   it('GET list is scoped to the session hospital and ignores ?hospital', async () => {
     const journeyId = await seedJourneyAt(HCODE_A);
     await initiateReferral(db, {
