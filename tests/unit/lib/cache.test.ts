@@ -36,16 +36,16 @@ describe('cache Redis recovery', () => {
     vi.stubEnv('REDIS_URL', 'redis://test:6379');
     mockClient.connect.mockRejectedValue(new Error('ECONNREFUSED'));
 
-    await cacheSetJson('k', 1, 60);          // attempt #1 fails -> memory
-    await cacheSetJson('k', 2, 60);          // inside backoff window: NO new attempt
+    await cacheSetJson('k', 1, 60); // attempt #1 fails -> memory
+    await cacheSetJson('k', 2, 60); // inside backoff window: NO new attempt
     expect(mockClient.connect).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(6 * 60_000);      // past max backoff
+    vi.advanceTimersByTime(6 * 60_000); // past max backoff
     mockClient.connect.mockImplementation(async () => {
       mockClient.isOpen = true;
     });
     mockClient.set.mockResolvedValue('OK');
-    await cacheSetJson('k', 3, 60);          // attempt #2 succeeds -> redis again
+    await cacheSetJson('k', 3, 60); // attempt #2 succeeds -> redis again
     expect(mockClient.connect).toHaveBeenCalledTimes(2);
     const status = await cacheStatus();
     expect(status.backend).toBe('redis');
