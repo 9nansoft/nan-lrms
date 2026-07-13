@@ -10,6 +10,7 @@ import NextAuth from 'next-auth';
 import { authConfig } from '@/lib/auth.config';
 import { isAdminAuthorized } from '@/lib/admin-access';
 import { addSecurityHeaders } from '@/lib/security-headers';
+import { isRequestOriginTrusted } from '@/lib/request-origin';
 import { logger } from '@/lib/logger';
 import { NextResponse } from 'next/server';
 
@@ -67,6 +68,28 @@ export default auth((req) => {
     DEV_ONLY_API_PATHS.some((p) => pathname.startsWith(p))
   ) {
     return addSecurityHeaders(NextResponse.next());
+  }
+
+  // CSRF: cookie-authenticated mutations must come from a trusted origin.
+  // Public paths (webhooks, /api/auth) never reach this point.
+  if (
+    !isRequestOriginTrusted({
+      method: req.method,
+      origin: req.headers.get('origin'),
+      secFetchSite: req.headers.get('sec-fetch-site'),
+      requestOrigin: req.nextUrl.origin,
+    })
+  ) {
+    return addSecurityHeaders(
+      NextResponse.json(
+        {
+          error: 'csrf_origin_rejected',
+          message: 'คำขอถูกปฏิเสธ: ต้นทางของคำขอ (Origin) ไม่ได้รับอนุญาต',
+          suggestedAction: 'โปรดใช้งานผ่านหน้าเว็บ KK-LRMS โดยตรง',
+        },
+        { status: 403 },
+      ),
+    );
   }
 
   // Check authentication
