@@ -36,7 +36,10 @@ export function parseAdminAllowedCids(
  * The /admin authorization rule. Three gates, all must pass:
  *   1. role === 'ADMIN'  (BMS-derived; may be promoted by DEV_AUTH_BYPASS).
  *   2. accessMode !== 'readonly'  (ProviderID read-only sessions never admin).
- *   3. when the allow-list is non-empty, userCid must be on it.
+ *   3. when the allow-list is non-empty, userCid must be on it; when it is
+ *      EMPTY, production fails closed (no CID-authorized administrators) and
+ *      only outside production does the role-only gate survive, for local
+ *      dev/test back-compat.
  *
  * The CID gate exists because (a) mapPositionToRole grants ADMIN to any BMS
  * position containing "director"/"ผู้อำนวยการ", and (b) DEV_AUTH_BYPASS promotes
@@ -46,12 +49,15 @@ export function parseAdminAllowedCids(
 export function isAdminAuthorized(
   identity: AdminIdentity,
   allowedCids: string[] = parseAdminAllowedCids(),
+  isProduction: boolean = process.env.NODE_ENV === 'production',
 ): boolean {
   if (identity.role !== UserRole.ADMIN) return false;
   if (identity.accessMode === 'readonly') return false;
-  if (allowedCids.length > 0) {
-    const cid = identity.userCid ?? '';
-    if (!cid || !allowedCids.includes(cid)) return false;
+  if (allowedCids.length === 0) {
+    // Fail closed: production with no allow-list has NO CID-authorized
+    // administrators. The role-only gate survives only outside production.
+    return !isProduction;
   }
-  return true;
+  const cid = identity.userCid ?? '';
+  return Boolean(cid) && allowedCids.includes(cid);
 }

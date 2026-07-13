@@ -48,8 +48,8 @@ describe('parseAdminAllowedCids', () => {
 
 describe('isAdminAuthorized', () => {
   describe('role gate', () => {
-    it('accepts an ADMIN when the allow-list is empty', () => {
-      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '1' }, [])).toBe(true);
+    it('accepts an ADMIN with an empty allow-list OUTSIDE production only', () => {
+      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '1' }, [], false)).toBe(true);
     });
 
     it('rejects non-admin roles regardless of CID', () => {
@@ -85,9 +85,17 @@ describe('isAdminAuthorized', () => {
       expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: null }, LIST)).toBe(false);
     });
 
-    it('ignores the CID entirely when the allow-list is empty', () => {
-      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '' }, [])).toBe(true);
-      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: undefined }, [])).toBe(true);
+    it('rejects an ADMIN with an empty allow-list IN production (fail closed)', () => {
+      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '1' }, [], true)).toBe(false);
+      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '' }, [], true)).toBe(false);
+      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: undefined }, [], true)).toBe(
+        false,
+      );
+    });
+
+    it('still enforces the CID gate in production when the list is non-empty', () => {
+      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '1' }, ['1'], true)).toBe(true);
+      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '2' }, ['1'], true)).toBe(false);
     });
   });
 

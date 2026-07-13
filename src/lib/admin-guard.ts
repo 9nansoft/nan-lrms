@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server';
 import type { Session } from 'next-auth';
 import { auth } from '@/lib/auth';
 import { isAdminAuthorized } from '@/lib/admin-access';
+import { logger } from '@/lib/logger';
 
 // Actionable Thai error bodies (Constitution V): say what went wrong AND what
 // to do. Shape matches the ad-hoc `{ error }` bodies the admin UI already reads.
@@ -54,6 +55,12 @@ export async function requireAdmin(): Promise<Session | NextResponse> {
       accessMode: session.user.accessMode,
     })
   ) {
+    logger.warn('admin_access_denied', {
+      role: session.user.role,
+      accessMode: session.user.accessMode,
+      userIdLast4: session.user.userCid?.slice(-4) ?? '',
+      hospitalCode: session.user.hospitalCode,
+    });
     return NextResponse.json(FORBIDDEN_BODY, { status: 403 });
   }
   return session;

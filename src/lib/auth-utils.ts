@@ -2,9 +2,14 @@
 import { UserRole } from '@/types/domain';
 import { logger } from '@/lib/logger';
 
+// Subordinate leadership titles must not inherit the director's ADMIN role.
+const DIRECTOR_EXCLUSIONS = ['deputy', 'assistant', 'vice', 'รอง', 'ผู้ช่วย'];
+
 export function mapPositionToRole(position: string): UserRole {
   const lower = position.toLowerCase();
-  if (lower.includes('director') || lower.includes('ผู้อำนวยการ')) {
+  const isDirector = lower.includes('director') || lower.includes('ผู้อำนวยการ');
+  const isSubordinate = DIRECTOR_EXCLUSIONS.some((p) => lower.includes(p));
+  if (isDirector && !isSubordinate) {
     return UserRole.ADMIN;
   }
   if (lower.includes('doctor') || lower.includes('แพทย์') || lower.includes('สูติ')) {

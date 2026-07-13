@@ -10,6 +10,7 @@ import NextAuth from 'next-auth';
 import { authConfig } from '@/lib/auth.config';
 import { isAdminAuthorized } from '@/lib/admin-access';
 import { addSecurityHeaders } from '@/lib/security-headers';
+import { logger } from '@/lib/logger';
 import { NextResponse } from 'next/server';
 
 const { auth } = NextAuth(authConfig);
@@ -115,6 +116,12 @@ export default auth((req) => {
         accessMode: session.user.accessMode,
       })
     ) {
+      logger.warn('admin_access_denied_middleware', {
+        pathname,
+        role: session.user.role,
+        accessMode: session.user.accessMode,
+        userIdLast4: session.user.userCid?.slice(-4) ?? '',
+      });
       return addSecurityHeaders(NextResponse.redirect(new URL('/', req.url)));
     }
   }

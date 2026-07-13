@@ -19,6 +19,13 @@ describe('BMS Session Auth', () => {
       expect(mapPositionToRole('ผู้อำนวยการ')).toBe(UserRole.ADMIN);
     });
 
+    it('does not promote subordinate director titles to ADMIN', () => {
+      expect(mapPositionToRole('Deputy Director')).not.toBe(UserRole.ADMIN);
+      expect(mapPositionToRole('Assistant Director')).not.toBe(UserRole.ADMIN);
+      expect(mapPositionToRole('รองผู้อำนวยการ')).not.toBe(UserRole.ADMIN);
+      expect(mapPositionToRole('ผู้ช่วยผู้อำนวยการ')).not.toBe(UserRole.ADMIN);
+    });
+
     it('maps doctor/obstetrician to OBSTETRICIAN', () => {
       expect(mapPositionToRole('doctor')).toBe(UserRole.OBSTETRICIAN);
       expect(mapPositionToRole('สูติแพทย์')).toBe(UserRole.OBSTETRICIAN);
