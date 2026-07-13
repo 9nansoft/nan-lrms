@@ -11,6 +11,7 @@ import { authConfig } from '@/lib/auth.config';
 import { isAdminAuthorized } from '@/lib/admin-access';
 import { addSecurityHeaders } from '@/lib/security-headers';
 import { isRequestOriginTrusted } from '@/lib/request-origin';
+import { apiError } from '@/lib/api-errors';
 import { logger } from '@/lib/logger';
 import { NextResponse } from 'next/server';
 
@@ -81,14 +82,7 @@ export default auth((req) => {
     })
   ) {
     return addSecurityHeaders(
-      NextResponse.json(
-        {
-          error: 'csrf_origin_rejected',
-          message: 'คำขอถูกปฏิเสธ: ต้นทางของคำขอ (Origin) ไม่ได้รับอนุญาต',
-          suggestedAction: 'โปรดใช้งานผ่านหน้าเว็บ KK-LRMS โดยตรง',
-        },
-        { status: 403 },
-      ),
+      NextResponse.json(apiError('CSRF_ORIGIN_REJECTED'), { status: 403 }),
     );
   }
 

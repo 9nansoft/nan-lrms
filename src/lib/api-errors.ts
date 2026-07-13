@@ -71,6 +71,12 @@ export const ApiErrors = {
     message: 'เกิดข้อผิดพลาดภายในระบบ',
     suggestedAction: 'กรุณาลองใหม่อีกครั้ง หากปัญหายังคงอยู่ติดต่อผู้ดูแลระบบ',
   },
+  CSRF_ORIGIN_REJECTED: {
+    error: 'Cross-site request rejected',
+    code: 'CSRF_ORIGIN_REJECTED',
+    message: 'คำขอถูกปฏิเสธ: ต้นทางของคำขอ (Origin) ไม่ได้รับอนุญาต',
+    suggestedAction: 'โปรดใช้งานผ่านหน้าเว็บ KK-LRMS โดยตรง',
+  },
 } as const;
 
 export type ApiErrorKey = keyof typeof ApiErrors;
