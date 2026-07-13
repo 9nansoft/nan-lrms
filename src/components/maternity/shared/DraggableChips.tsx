@@ -82,7 +82,7 @@ export function DraggableChip({
   chip, selected, onPick, step, isFloat, range,
 }: DraggableChipProps) {
   const [drag, setDrag] = useState<
-    { startX: number; startVal: number; preview: string; clamped: boolean } | null
+    { startX: number; startVal: number; preview: string; clamped: boolean; moved: boolean } | null
   >(null);
   const movedRef = useRef(false);
   const fmt = (n: number): string => (isFloat ? n.toFixed(1) : String(Math.round(n)));
@@ -106,7 +106,7 @@ export function DraggableChip({
         if (!Number.isFinite(startVal)) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         movedRef.current = false;
-        setDrag({ startX: e.clientX, startVal, preview: chip.value, clamped: false });
+        setDrag({ startX: e.clientX, startVal, preview: chip.value, clamped: false, moved: false });
       }}
       onPointerMove={(e) => {
         if (!drag) return;
@@ -119,7 +119,7 @@ export function DraggableChip({
         const wasClamped = clamped !== raw;
         const preview = fmt(clamped);
         if (preview !== drag.preview || wasClamped !== drag.clamped) {
-          setDrag({ ...drag, preview, clamped: wasClamped });
+          setDrag({ ...drag, preview, clamped: wasClamped, moved: true });
         }
       }}
       onPointerUp={(e) => {
@@ -140,8 +140,8 @@ export function DraggableChip({
       className={cn(
         'min-w-[48px] cursor-ew-resize touch-none select-none rounded-md border px-3 py-1.5 text-[13px] font-semibold tabular-nums transition-all',
         isSelected ? toneClasses.selected : toneClasses.unselected,
-        drag && movedRef.current && !drag.clamped && 'scale-110 shadow-lg ring-2 ring-cyan-400',
-        drag && movedRef.current && drag.clamped && 'scale-110 shadow-lg ring-2 ring-amber-400 cursor-not-allowed',
+        drag && drag.moved && !drag.clamped && 'scale-110 shadow-lg ring-2 ring-cyan-400',
+        drag && drag.moved && drag.clamped && 'scale-110 shadow-lg ring-2 ring-amber-400 cursor-not-allowed',
       )}
     >
       {displayLabel}

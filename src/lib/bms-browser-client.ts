@@ -831,7 +831,6 @@ export async function probeLocalApi(
     if (response.ok) {
       const data = (await response.json()) as SqlApiResponse;
       if (data.MessageCode === 200) {
-        // eslint-disable-next-line no-console
         console.info(
           `[bms-browser-client] Local API detected at ${LOCAL_API_URL} — swapping apiUrl for browser-side calls`,
         );

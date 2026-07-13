@@ -36,7 +36,9 @@ export function AnchoredDropdown({
   // avoids a flash of the dropdown at (0,0) on first open.
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) {
-      setPos(null);
+      // No sync setState here (react-hooks/set-state-in-effect): the render
+      // guard `if (!open || !pos) return null` hides the closed dropdown, and
+      // reopening re-measures below before paint, so stale pos never shows.
       return;
     }
     const measure = () => {

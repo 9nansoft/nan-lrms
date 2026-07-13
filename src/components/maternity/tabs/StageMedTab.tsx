@@ -101,20 +101,24 @@ interface LookupPickerProps {
   onPick: (item: LookupItem) => void;
 }
 
+// TODO(constitution-III): consolidate onto shared/LookupAutocomplete — see
+// docs/superpowers/plans/2026-07-13-robustness-c-concurrency-ops-quality.md C7
 function LookupPicker({ ariaLabel, placeholder, initialQuery, fetch, onPick }: LookupPickerProps) {
   const [query, setQuery] = useState(initialQuery);
   const [items, setItems] = useState<LookupItem[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const lastPickedRef = useRef<string>(initialQuery);
+  const [lastPicked, setLastPicked] = useState(initialQuery);
+
+  // Derived visible list — search is "active" only when there's a trimmed
+  // query that doesn't equal the last picked value; no effect-driven clear.
+  const trimmed = query.trim();
+  const searchActive = trimmed.length > 0 && trimmed !== lastPicked;
+  const visibleItems = searchActive ? items : [];
 
   useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length === 0 || trimmed === lastPickedRef.current) {
-      setItems([]);
-      return;
-    }
+    if (!searchActive) return;
     let cancelled = false;
     const timer = setTimeout(() => {
       setLoading(true);
@@ -133,7 +137,7 @@ function LookupPicker({ ariaLabel, placeholder, initialQuery, fetch, onPick }: L
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, fetch]);
+  }, [trimmed, searchActive, fetch]);
 
   return (
     <>
@@ -151,20 +155,20 @@ function LookupPicker({ ariaLabel, placeholder, initialQuery, fetch, onPick }: L
         className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
       />
       <AnchoredDropdown
-        open={open && (items.length > 0 || loading)}
+        open={open && (visibleItems.length > 0 || loading)}
         anchorRef={inputRef}
         onDismiss={() => setOpen(false)}
       >
-        {loading && items.length === 0 && (
+        {loading && visibleItems.length === 0 && (
           <div className="px-3 py-2 text-[12px] text-slate-500">กำลังค้นหา…</div>
         )}
-        {items.map((it, idx) => (
+        {visibleItems.map((it, idx) => (
           <button
             key={`${it.payload}-${idx}`}
             type="button"
             onClick={() => {
               onPick(it);
-              lastPickedRef.current = it.primary;
+              setLastPicked(it.primary);
               setQuery(it.primary);
               setOpen(false);
               setItems([]);

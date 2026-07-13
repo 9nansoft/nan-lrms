@@ -228,7 +228,6 @@ export async function POST(request: NextRequest) {
   const restResults: ProbeResult[] = [];
   for (const spec of PROBES) {
     // sequential — keeps log output ordered + avoids hammering the tunnel
-    // eslint-disable-next-line no-await-in-loop
     restResults.push(await probeOne(spec, config, identity.jwt, body.an));
   }
 

@@ -17,7 +17,7 @@
 //     Add is disabled and points at the Pre-labour / Stage tabs.
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useBmsSession } from '@/hooks/useBmsSession';
 import {
@@ -92,9 +92,14 @@ function ComplicationPicker({
     return options.find((o) => o.labour_complication_id === sid)?.name ?? '';
   }, [selectedId, options]);
 
-  useEffect(() => {
-    if (selectedName && query === '') setQuery(selectedName);
-  }, [selectedName, query]);
+  // Render-phase adjust (react.dev "you might not need an effect"): seed the
+  // search input with the resolved name the first time it becomes available
+  // for this selection, without clobbering subsequent user typing.
+  const [seededFor, setSeededFor] = useState('');
+  if (selectedName && selectedName !== seededFor && query === '') {
+    setSeededFor(selectedName);
+    setQuery(selectedName);
+  }
 
   const filtered = useMemo(() => {
     if (!options) return [];

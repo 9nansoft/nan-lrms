@@ -5,6 +5,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { cn, formatRelativeTime, buildPatientId } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import { RiskLevel } from '@/types/domain';
@@ -233,20 +234,20 @@ export function HighRiskPatientList({
             {ancFallback && (ancFallback.hr3 > 0 || ancFallback.dueSoon > 0) && (
               <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
                 <span>เฝ้าระวังล่วงหน้า:</span>
-                <a
+                <Link
                   href="/pregnancies?risk=HR3"
                   className="underline decoration-dotted underline-offset-2"
                   style={{ color: 'var(--risk-high)' }}
                 >
                   ครรภ์เสี่ยงสูง HR3 {ancFallback.hr3} ราย
-                </a>
-                <a
+                </Link>
+                <Link
                   href="/pregnancies?cohort=due_soon"
                   className="underline decoration-dotted underline-offset-2"
                   style={{ color: 'var(--risk-medium)' }}
                 >
                   ใกล้คลอด ≤14 วัน {ancFallback.dueSoon} ราย
-                </a>
+                </Link>
               </div>
             )}
           </div>
