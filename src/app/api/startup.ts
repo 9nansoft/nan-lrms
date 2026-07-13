@@ -1,6 +1,7 @@
 // T059: Startup sequence — DB init, schema sync, seed, start polling
 import { getDatabase, closeDatabase, isPgliteEnabled } from '@/db/connection';
 import { SchemaSync } from '@/db/schema-sync';
+import { validateStartupConfig } from '@/lib/startup-config';
 import { migrateAuditLogsActor } from '@/db/migrations/audit-logs-actor';
 import { migrateCachedReferralsActor } from '@/db/migrations/cached-referrals-actor';
 import { migrateMaternalJourneysActiveUnique } from '@/db/migrations/maternal-journeys-active-unique';
@@ -26,6 +27,10 @@ export async function initializeApp(): Promise<void> {
   try {
     const startTime = Date.now();
     logger.info('initialization_started', {});
+
+    // 0. Config validation — an invalid deployment must fail before any DB
+    // connection or clinical ingest (readiness stays 503 via ensureInit).
+    validateStartupConfig();
 
     // 1. Connect to database
     const db = await getDatabase();
