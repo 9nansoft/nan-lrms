@@ -597,22 +597,29 @@ export async function processWebhookPayload(
   );
   const existingAns = existing.map((r) => r.an);
 
-  // Handle deletes first — remove patients marked for deletion
+  // Handle deletes first — remove patients marked for deletion. All
+  // patient-owned tables (cpd_scores, cached_vital_signs,
+  // cached_partograph_observations) and the patient row commit or roll back
+  // together; a partial delete must never survive a failure.
   const toDelete = payload.patients.filter((p) => p.action === 'delete');
   let deletedCount = 0;
   for (const p of toDelete) {
-    await db.execute(
-      `DELETE FROM cpd_scores WHERE patient_id IN (SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?)`,
-      [hospitalId, p.an],
-    );
-    await db.execute(
-      `DELETE FROM cached_vital_signs WHERE patient_id IN (SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?)`,
-      [hospitalId, p.an],
-    );
-    await db.execute(`DELETE FROM cached_patients WHERE hospital_id = ? AND an = ?`, [
-      hospitalId,
-      p.an,
-    ]);
+    await db.transaction(async (tx) => {
+      for (const table of [
+        'cpd_scores',
+        'cached_vital_signs',
+        'cached_partograph_observations',
+      ]) {
+        await tx.execute(
+          `DELETE FROM ${table} WHERE patient_id IN (SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?)`,
+          [hospitalId, p.an],
+        );
+      }
+      await tx.execute(`DELETE FROM cached_patients WHERE hospital_id = ? AND an = ?`, [
+        hospitalId,
+        p.an,
+      ]);
+    });
     deletedCount++;
   }
 
@@ -938,15 +945,19 @@ export async function processAncWebhook(
         (await getActiveJourneyByCid(db, patientCidHash)) ??
         (patient.hn ? await getJourneyByHn(db, patient.hn, hospitalId) : null);
       if (existing) {
-        // Delete related records first
-        await db.execute(`DELETE FROM cached_anc_visits WHERE journey_id = ?`, [existing.id]);
-        await db.execute(`DELETE FROM cached_anc_risks WHERE journey_id = ?`, [existing.id]);
-        await db.execute(`DELETE FROM cached_newborns WHERE journey_id = ?`, [existing.id]);
-        await db.execute(`DELETE FROM cached_referrals WHERE journey_id = ?`, [existing.id]);
-        await db.execute(`UPDATE cached_patients SET journey_id = NULL WHERE journey_id = ?`, [
-          existing.id,
-        ]);
-        await db.execute(`DELETE FROM maternal_journeys WHERE id = ?`, [existing.id]);
+        // Delete related records first — one transaction so a mid-sequence
+        // failure never leaves an orphaned cached_anc_risks/newborns/referrals
+        // row pointing at a journey that no longer exists.
+        await db.transaction(async (tx) => {
+          await tx.execute(`DELETE FROM cached_anc_visits WHERE journey_id = ?`, [existing.id]);
+          await tx.execute(`DELETE FROM cached_anc_risks WHERE journey_id = ?`, [existing.id]);
+          await tx.execute(`DELETE FROM cached_newborns WHERE journey_id = ?`, [existing.id]);
+          await tx.execute(`DELETE FROM cached_referrals WHERE journey_id = ?`, [existing.id]);
+          await tx.execute(`UPDATE cached_patients SET journey_id = NULL WHERE journey_id = ?`, [
+            existing.id,
+          ]);
+          await tx.execute(`DELETE FROM maternal_journeys WHERE id = ?`, [existing.id]);
+        });
         deleted++;
 
         sseManager.broadcast('patient-update', {
@@ -1016,96 +1027,109 @@ export async function processAncWebhook(
     // journey write, the SSE broadcast, and the risk-screening record below.
     const canonicalRisk = resolveCanonicalAncRisk(patient.riskLevel, patient.riskItemIds);
 
-    let journeyId: string;
-    if (!shouldCreateNew && existing) {
-      // Update existing journey with latest data (same pregnancy)
-      const now = new Date().toISOString();
-      await db.execute(
-        `UPDATE maternal_journeys SET name = ?, cid = ?, cid_hash = ?, lmp = ?, edc = ?, anc_risk_level = ?, synced_at = ?, updated_at = ? WHERE id = ?`,
-        [
-          encryptedName,
-          encryptedCid,
+    // ONE transaction per patient (specs 3.2 + 3.3): journey update-or-create
+    // (including pregnancy rollover), location update, and the risk screening
+    // commit or roll back together. SSE fires only after commit.
+    const sseEvents: Array<Record<string, unknown>> = [];
+    const journeyId = await db.transaction(async (tx) => {
+      let id: string;
+      if (!shouldCreateNew && existing) {
+        // Update existing journey with latest data (same pregnancy)
+        const now = new Date().toISOString();
+        await tx.execute(
+          `UPDATE maternal_journeys SET name = ?, cid = ?, cid_hash = ?, lmp = ?, edc = ?, anc_risk_level = ?, synced_at = ?, updated_at = ? WHERE id = ?`,
+          [
+            encryptedName,
+            encryptedCid,
+            cidHash,
+            patient.lmp ?? existing.lmp,
+            patient.edc ?? existing.edc,
+            canonicalRisk ?? existing.ancRiskLevel,
+            now,
+            now,
+            existing.id,
+          ],
+        );
+        id = existing.id;
+
+        sseEvents.push({
+          type: 'journey_update',
+          hcode,
+          journeyId: existing.id,
+          careStage: existing.careStage,
+          ancRiskLevel: canonicalRisk ?? existing.ancRiskLevel ?? undefined,
+        });
+        updated++;
+      } else {
+        // If the prior journey is still PREGNANCY/LABOR for this hospital,
+        // close it before inserting the new pregnancy. Same reasoning as in
+        // services/sync/anc.ts: a new preg_no on the same HN means the old
+        // pregnancy ended in HOSxP, and without this transition the unique
+        // partial index uq_mj_hospital_hn_active rejects the INSERT below
+        // and the webhook returns a 500 to HOSxP.
+        // Rollover atomicity: closing the old pregnancy and creating the new
+        // one commit together — a crash can never leave zero active journeys.
+        if (isNewPregnancy && existingIsActive && existing) {
+          await transitionToDelivered(tx, existing.id);
+        }
+        // Create new journey (first pregnancy, or new pregnancy after previous)
+        const age = patient.birthday
+          ? Math.floor(
+              (Date.now() - new Date(patient.birthday).getTime()) / (365.25 * 24 * 60 * 60 * 1000),
+            )
+          : 0;
+        const journey = await createJourney(tx, {
+          hospitalId,
+          hn: patientHn ?? '', // null for community ANC patients not in hospital patient table
+          personAncId: null,
+          name: encryptedName,
+          cid: encryptedCid,
           cidHash,
-          patient.lmp ?? existing.lmp,
-          patient.edc ?? existing.edc,
-          canonicalRisk ?? existing.ancRiskLevel,
-          now,
-          now,
-          existing.id,
-        ],
-      );
-      journeyId = existing.id;
+          age,
+          gravida: patient.pregNo,
+          para: 0,
+          lmp: patient.lmp ?? null,
+          edc: patient.edc ?? null,
+          ancRiskLevel: canonicalRisk ?? AncRiskLevel.LOW,
+        });
+        id = journey.id;
 
-      sseManager.broadcast('patient-update', {
-        type: 'journey_update',
-        hcode,
-        journeyId: existing.id,
-        careStage: existing.careStage,
-        ancRiskLevel: canonicalRisk ?? existing.ancRiskLevel ?? undefined,
-      });
-      updated++;
-    } else {
-      // If the prior journey is still PREGNANCY/LABOR for this hospital,
-      // close it before inserting the new pregnancy. Same reasoning as in
-      // services/sync/anc.ts: a new preg_no on the same HN means the old
-      // pregnancy ended in HOSxP, and without this transition the unique
-      // partial index uq_mj_hospital_hn_active rejects the INSERT below
-      // and the webhook returns a 500 to HOSxP.
-      if (isNewPregnancy && existingIsActive && existing) {
-        await transitionToDelivered(db, existing.id);
+        sseEvents.push({
+          type: 'journey_update',
+          hcode,
+          journeyId: journey.id,
+          careStage: 'PREGNANCY',
+          ancRiskLevel: canonicalRisk ?? undefined,
+        });
+        created++;
       }
-      // Create new journey (first pregnancy, or new pregnancy after previous)
-      const age = patient.birthday
-        ? Math.floor(
-            (Date.now() - new Date(patient.birthday).getTime()) / (365.25 * 24 * 60 * 60 * 1000),
-          )
-        : 0;
-      const journey = await createJourney(db, {
-        hospitalId,
-        hn: patientHn ?? '', // null for community ANC patients not in hospital patient table
-        personAncId: null,
-        name: encryptedName,
-        cid: encryptedCid,
-        cidHash,
-        age,
-        gravida: patient.pregNo,
-        para: 0,
-        lmp: patient.lmp ?? null,
-        edc: patient.edc ?? null,
-        ancRiskLevel: canonicalRisk ?? AncRiskLevel.LOW,
-      });
-      journeyId = journey.id;
 
-      sseManager.broadcast('patient-update', {
-        type: 'journey_update',
-        hcode,
-        journeyId: journey.id,
-        careStage: 'PREGNANCY',
-        ancRiskLevel: canonicalRisk ?? undefined,
-      });
-      created++;
-    }
+      // Update patient location (province/district/sub-district) if provided
+      if (patient.changwatCode || patient.amphurCode || patient.tambonCode) {
+        const now3 = new Date().toISOString();
+        await tx.execute(
+          `UPDATE maternal_journeys SET changwat_code = ?, amphur_code = ?, tambon_code = ?, updated_at = ? WHERE id = ?`,
+          [
+            patient.changwatCode ?? null,
+            patient.amphurCode ?? null,
+            patient.tambonCode ?? null,
+            now3,
+            id,
+          ],
+        );
+      }
 
-    // Update patient location (province/district/sub-district) if provided
-    if (patient.changwatCode || patient.amphurCode || patient.tambonCode) {
-      const now3 = new Date().toISOString();
-      await db.execute(
-        `UPDATE maternal_journeys SET changwat_code = ?, amphur_code = ?, tambon_code = ?, updated_at = ? WHERE id = ?`,
-        [
-          patient.changwatCode ?? null,
-          patient.amphurCode ?? null,
-          patient.tambonCode ?? null,
-          now3,
-          journeyId,
-        ],
-      );
-    }
+      // Persist the risk screening (level + which criteria fired) when the
+      // client sends the checked classifying items. Legacy payloads without
+      // riskItemIds keep the old level-only behavior.
+      if (Array.isArray(patient.riskItemIds) && canonicalRisk) {
+        await recordAncRiskScreening(tx, id, canonicalRisk, patient.riskItemIds);
+      }
 
-    // Persist the risk screening (level + which criteria fired) when the
-    // client sends the checked classifying items. Legacy payloads without
-    // riskItemIds keep the old level-only behavior.
-    if (Array.isArray(patient.riskItemIds) && canonicalRisk) {
-      await recordAncRiskScreening(db, journeyId, canonicalRisk, patient.riskItemIds);
+      return id;
+    });
+    for (const event of sseEvents) {
+      sseManager.broadcast('patient-update', event);
     }
 
     // Persist ANC visit records — replace strategy (delete old, insert new).

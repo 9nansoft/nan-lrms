@@ -123,10 +123,11 @@ export async function syncAncData(
       // the INSERT below and the whole ANC sync cycle fails for the
       // hospital. Skip when there's no existing journey or it's already
       // past DELIVERED.
-      if (isNewPregnancy && existingIsActive && journey) {
-        await transitionToDelivered(db, journey.id);
-      }
-      journey = await createJourney(db, {
+      //
+      // Rollover atomicity: closing the old pregnancy and creating the new
+      // one commit together — a crash between the two statements can never
+      // strand a mother with zero active journeys.
+      const createInput = {
         hospitalId,
         hn: anc.hn,
         personAncId: anc.person_anc_id,
@@ -139,7 +140,14 @@ export async function syncAncData(
         lmp: anc.lmp,
         edc: anc.edc,
         ancRiskLevel: AncRiskLevel.LOW,
-      });
+      };
+      journey =
+        isNewPregnancy && existingIsActive && journey
+          ? await db.transaction(async (tx) => {
+              await transitionToDelivered(tx, journey!.id);
+              return createJourney(tx, createInput);
+            })
+          : await createJourney(db, createInput);
     } else {
       const now = new Date().toISOString();
       await db.execute(

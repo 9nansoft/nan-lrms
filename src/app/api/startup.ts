@@ -3,6 +3,7 @@ import { getDatabase, closeDatabase, isPgliteEnabled } from '@/db/connection';
 import { SchemaSync } from '@/db/schema-sync';
 import { migrateAuditLogsActor } from '@/db/migrations/audit-logs-actor';
 import { migrateCachedReferralsActor } from '@/db/migrations/cached-referrals-actor';
+import { migrateMaternalJourneysActiveUnique } from '@/db/migrations/maternal-journeys-active-unique';
 import { migrateVideoCallsGroupModel } from '@/db/migrations/video-calls-group';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
@@ -51,6 +52,10 @@ export async function initializeApp(): Promise<void> {
     // users row, so a hard FK made every referral create/accept fail
     // cached_referrals_initiated_by_fkey / _accepted_by_fkey.
     await migrateCachedReferralsActor(db);
+
+    // 2a-2. One-shot idempotent migration: partial unique index guaranteeing a
+    // single active journey per hospital+hn (fails safe on dirty data).
+    await migrateMaternalJourneysActiveUnique(db);
 
     // 2b. One-shot idempotent backfill for cached_anc_visits.hospital_id —
     // the column was added after data already existed; populate from the
