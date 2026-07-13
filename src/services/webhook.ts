@@ -19,7 +19,7 @@ import {
   createJourney,
   transitionToDelivered,
 } from '@/services/journey';
-import { AncRiskLevel } from '@/types/domain';
+import { AncRiskLevel, ReferralStatus } from '@/types/domain';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
 import { ANC_RISK_CONFIGS } from '@/config/anc-risk-rules';
 import { logger } from '@/lib/logger';
@@ -1531,35 +1531,70 @@ export async function processReferralCreate(
   return { referralId: payload.referralId, status: 'INITIATED' };
 }
 
-// UPDATE referral status — sent by receiving hospital (รพ.ปลายทาง)
+export class WebhookReferralError extends Error {
+  constructor(
+    public readonly code: 'REFERRAL_NOT_FOUND' | 'INVALID_REFERRAL_STATUS' | 'INVALID_REFERRAL_ACTION',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'WebhookReferralError';
+  }
+}
+
+// Single status whitelist derived from the domain enum (constitution IV —
+// INITIATED is never a valid inbound update).
+const REFERRAL_UPDATE_STATUSES: ReadonlySet<string> = new Set([
+  ReferralStatus.ACCEPTED,
+  ReferralStatus.REJECTED,
+  ReferralStatus.IN_TRANSIT,
+  ReferralStatus.ARRIVED,
+]);
+
+// UPDATE referral status — sent by receiving hospital (รพ.ปลายทาง). Status
+// transitions are destination-only; deletes may come from either party.
+// Ownership violations return the same non-disclosing REFERRAL_NOT_FOUND as
+// a nonexistent referral so third parties can't probe which hospitals a
+// referral is between.
 export async function processReferralUpdate(
   db: DatabaseAdapter,
-  _hospitalId: string,
+  authenticatedHospitalId: string,
   payload: WebhookReferralUpdatePayload,
   sseManager: SseManager,
 ): Promise<WebhookReferralResult> {
+  const action = payload.action ?? 'update';
+  if (action !== 'update' && action !== 'delete') {
+    throw new WebhookReferralError('INVALID_REFERRAL_ACTION', `action "${payload.action}" ไม่ถูกต้อง`);
+  }
+  if (action === 'update' && !REFERRAL_UPDATE_STATUSES.has(payload.status)) {
+    throw new WebhookReferralError('INVALID_REFERRAL_STATUS', `status "${payload.status}" ไม่ถูกต้อง`);
+  }
+
   // Resolve the sending hospital (fromHospitalCode) for compound key lookup
   const fromHospital = await resolveHospitalByHcode(db, payload.fromHospitalCode);
   if (!fromHospital) {
-    throw new Error(`ไม่พบโรงพยาบาลต้นทาง HCODE "${payload.fromHospitalCode}"`);
+    throw new WebhookReferralError('REFERRAL_NOT_FOUND', 'ไม่พบใบส่งต่อที่ระบุ');
   }
 
   const fromHcode = fromHospital.hcode;
 
   // Handle delete — compound key: fromHospitalCode + referralId
-  if (payload.action === 'delete') {
+  if (action === 'delete') {
     const delRows = await db.query<{ to_hospital_id: string }>(
       `SELECT to_hospital_id FROM cached_referrals WHERE from_hospital_id = ? AND refer_number = ?`,
       [fromHospital.id, payload.referralId],
     );
+    if (
+      delRows.length === 0 ||
+      (authenticatedHospitalId !== fromHospital.id && authenticatedHospitalId !== delRows[0].to_hospital_id)
+    ) {
+      throw new WebhookReferralError('REFERRAL_NOT_FOUND', 'ไม่พบใบส่งต่อที่ระบุ');
+    }
     const toHcode =
-      delRows.length > 0
-        ? ((
-            await db.query<{ hcode: string }>('SELECT hcode FROM hospitals WHERE id = ?', [
-              delRows[0].to_hospital_id,
-            ])
-          )[0]?.hcode ?? '')
-        : '';
+      (
+        await db.query<{ hcode: string }>('SELECT hcode FROM hospitals WHERE id = ?', [
+          delRows[0].to_hospital_id,
+        ])
+      )[0]?.hcode ?? '';
 
     await db.execute(
       `DELETE FROM cached_referrals WHERE from_hospital_id = ? AND refer_number = ?`,
@@ -1583,10 +1618,8 @@ export async function processReferralUpdate(
     [fromHospital.id, payload.referralId],
   );
 
-  if (existing.length === 0) {
-    throw new Error(
-      `ไม่พบใบส่งต่อ referralId "${payload.referralId}" จาก HCODE "${payload.fromHospitalCode}"`,
-    );
+  if (existing.length === 0 || existing[0].to_hospital_id !== authenticatedHospitalId) {
+    throw new WebhookReferralError('REFERRAL_NOT_FOUND', 'ไม่พบใบส่งต่อที่ระบุ');
   }
 
   const referralRow = existing[0];

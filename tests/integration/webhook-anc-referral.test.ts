@@ -1287,7 +1287,7 @@ describe('ANC/Referral Webhook Integration', () => {
 
       await expect(
         processReferralUpdate(db, destHospitalId, payload, asSse(sseManager)),
-      ).rejects.toThrow('ไม่พบใบส่งต่อ');
+      ).rejects.toMatchObject({ code: 'REFERRAL_NOT_FOUND' });
     });
   });
 

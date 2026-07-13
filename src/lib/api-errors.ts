@@ -67,6 +67,24 @@ export const ApiErrors = {
     message: 'ข้อมูลใบส่งต่อไม่ครบถ้วน',
     suggestedAction: 'ตรวจสอบ referralId, hn, cid, name, toHospitalCode, reason ให้ครบถ้วน',
   },
+  REFERRAL_NOT_FOUND: {
+    error: 'Referral not found',
+    code: 'REFERRAL_NOT_FOUND',
+    message: 'ไม่พบใบส่งต่อที่ระบุ หรือโรงพยาบาลของคุณไม่มีสิทธิ์ดำเนินการกับใบส่งต่อนี้',
+    suggestedAction: 'ตรวจสอบ referralId และ fromHospitalCode แล้วลองใหม่อีกครั้ง',
+  },
+  INVALID_REFERRAL_STATUS: {
+    error: 'Invalid referral status',
+    code: 'INVALID_REFERRAL_STATUS',
+    message: 'สถานะใบส่งต่อไม่ถูกต้อง ต้องเป็น ACCEPTED, IN_TRANSIT, ARRIVED หรือ REJECTED',
+    suggestedAction: 'แก้ไขค่า status ให้ตรงตามที่กำหนดแล้วส่งใหม่',
+  },
+  INVALID_REFERRAL_ACTION: {
+    error: 'Invalid referral action',
+    code: 'INVALID_REFERRAL_ACTION',
+    message: 'action ไม่ถูกต้อง ต้องเป็น update หรือ delete',
+    suggestedAction: 'แก้ไขค่า action ให้ตรงตามที่กำหนดแล้วส่งใหม่',
+  },
   INTERNAL_ERROR: {
     error: 'Internal server error',
     code: 'INTERNAL_ERROR',

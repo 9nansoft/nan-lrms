@@ -13,6 +13,7 @@ import {
   processReferralCreate,
   processReferralUpdate,
   processPartographWebhook,
+  WebhookReferralError,
 } from '@/services/webhook';
 import type {
   WebhookReferralCreatePayload,
@@ -128,6 +129,19 @@ export async function POST(request: NextRequest) {
       if (missing.length > 0) {
         return NextResponse.json(apiError('REFERRAL_FIELD_REQUIRED', { missing }), { status: 400 });
       }
+      if (
+        referralPayload.action !== undefined &&
+        referralPayload.action !== 'update' &&
+        referralPayload.action !== 'delete'
+      ) {
+        return NextResponse.json(apiError('INVALID_REFERRAL_ACTION', { received: referralPayload.action }), { status: 400 });
+      }
+      if (
+        referralPayload.action !== 'delete' &&
+        !['ACCEPTED', 'REJECTED', 'IN_TRANSIT', 'ARRIVED'].includes(referralPayload.status)
+      ) {
+        return NextResponse.json(apiError('INVALID_REFERRAL_STATUS', { received: referralPayload.status }), { status: 400 });
+      }
       const result = await processReferralUpdate(db, keyInfo.hospitalId, referralPayload, sseManager);
       return NextResponse.json({
         success: true,
@@ -177,6 +191,10 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
+    if (error instanceof WebhookReferralError) {
+      const status = error.code === 'REFERRAL_NOT_FOUND' ? 404 : 400;
+      return NextResponse.json(apiError(error.code), { status });
+    }
     logger.error('webhook_processing_failed', { error });
     return NextResponse.json(
       apiError('INTERNAL_ERROR'),
