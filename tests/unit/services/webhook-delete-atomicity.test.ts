@@ -102,9 +102,18 @@ describe('labor patient deletion atomicity', () => {
 
   it('deletes the patient AND all dependent clinical rows (incl. partograph)', async () => {
     const patientId = await seedLaborPatientWithClinicalData();
-    await processWebhookPayload(db, await hospitalId(), deletePayload as never, SseManager.getInstance());
+    await processWebhookPayload(
+      db,
+      await hospitalId(),
+      deletePayload as never,
+      SseManager.getInstance(),
+    );
 
-    for (const table of ['cached_patients', 'cached_vital_signs', 'cached_partograph_observations']) {
+    for (const table of [
+      'cached_patients',
+      'cached_vital_signs',
+      'cached_partograph_observations',
+    ]) {
       const col = table === 'cached_patients' ? 'id' : 'patient_id';
       const rows = await db.query(`SELECT ${col} FROM ${table} WHERE ${col} = ?`, [patientId]);
       expect(rows, table).toEqual([]);
@@ -116,16 +125,22 @@ describe('labor patient deletion atomicity', () => {
     const failing = new FailingAdapter(db, /DELETE FROM cached_patients/);
 
     await expect(
-      processWebhookPayload(failing, await hospitalId(), deletePayload as never, SseManager.getInstance()),
+      processWebhookPayload(
+        failing,
+        await hospitalId(),
+        deletePayload as never,
+        SseManager.getInstance(),
+      ),
     ).rejects.toThrow(/injected failure/);
 
     const vitals = await db.query('SELECT id FROM cached_vital_signs WHERE patient_id = ?', [
       patientId,
     ]);
     expect(vitals.length).toBe(1);
-    const obs = await db.query('SELECT id FROM cached_partograph_observations WHERE patient_id = ?', [
-      patientId,
-    ]);
+    const obs = await db.query(
+      'SELECT id FROM cached_partograph_observations WHERE patient_id = ?',
+      [patientId],
+    );
     expect(obs.length).toBe(1);
   });
 });
