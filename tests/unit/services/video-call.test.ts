@@ -497,7 +497,9 @@ describe('group video-call service', () => {
       ]);
       const fulfilled = results.filter((r) => r.status === 'fulfilled');
       expect(fulfilled.length).toBe(1);
-      expect(['joined', 'declined']).toContain(await participantStatus(db, callId, INVITEE_B.userId));
+      expect(['joined', 'declined']).toContain(
+        await participantStatus(db, callId, INVITEE_B.userId),
+      );
     });
 
     it('two concurrent createCall by the same creator produce exactly one active call', async () => {
