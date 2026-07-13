@@ -51,7 +51,14 @@ export async function POST(
       const sessionConfig = await client.validateSession(sessionId, validateUrl);
       jwt = sessionConfig.jwt;
       bmsUrl = sessionConfig.bmsUrl;
-      dbType = (await client.getDatabaseType(bmsUrl, jwt)) as DatabaseDialect;
+      const detectedDbType = await client.getDatabaseType(bmsUrl, jwt);
+      if (!detectedDbType) {
+        return NextResponse.json({
+          connected: false,
+          error: 'Could not detect the HOSxP database type (connection or version query failed).',
+        });
+      }
+      dbType = detectedDbType;
     }
 
     // Test: Get database version

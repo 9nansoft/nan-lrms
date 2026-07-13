@@ -752,7 +752,11 @@ export async function requestImmediateSync(
         const sessionConfig = await client.validateSession(sessionId, validateUrl);
         jwt = sessionConfig.jwt;
         bmsUrl = sessionConfig.bmsUrl;
-        dbType = (await client.getDatabaseType(bmsUrl, jwt)) as DatabaseDialect;
+        // getDatabaseType returns null when detection fails — keep the prior
+        // dbType rather than persisting a null/guessed dialect (matches C5:
+        // never overwrite a working database_type with an unconfirmed value).
+        const detectedDbType = await client.getDatabaseType(bmsUrl, jwt);
+        if (detectedDbType) dbType = detectedDbType;
 
         await db.execute(
           'UPDATE hospital_bms_config SET session_jwt = ?, database_type = ?, session_expires_at = ? WHERE hospital_id = ?',
@@ -1732,7 +1736,11 @@ export async function startPolling(db: DatabaseAdapter, sseManager: SseManager):
               const sessionConfig = await client.validateSession(sessionId, validateUrl);
               jwt = sessionConfig.jwt;
               bmsUrl = sessionConfig.bmsUrl;
-              dbType = (await client.getDatabaseType(bmsUrl, jwt)) as DatabaseDialect;
+              // See comment at the other getDatabaseType call site above —
+              // null means detection failed; keep the prior dbType instead
+              // of persisting an unconfirmed dialect.
+              const detectedDbType = await client.getDatabaseType(bmsUrl, jwt);
+              if (detectedDbType) dbType = detectedDbType;
 
               await db.execute(
                 'UPDATE hospital_bms_config SET session_jwt = ?, database_type = ?, session_expires_at = ? WHERE hospital_id = ?',
