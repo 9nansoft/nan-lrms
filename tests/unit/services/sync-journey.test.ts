@@ -261,10 +261,22 @@ describe('Sync Journey Extension', () => {
       const ancClassifying: HosxpAncClassifyingRow[] = [];
 
       await syncAncData(
-        db, hospitalId, ancPatients, ancServices, ancRisks, ancClassifying, ENCRYPTION_KEY,
+        db,
+        hospitalId,
+        ancPatients,
+        ancServices,
+        ancRisks,
+        ancClassifying,
+        ENCRYPTION_KEY,
       );
       await syncAncData(
-        db, hospitalId, ancPatients, ancServices, ancRisks, ancClassifying, ENCRYPTION_KEY,
+        db,
+        hospitalId,
+        ancPatients,
+        ancServices,
+        ancRisks,
+        ancClassifying,
+        ENCRYPTION_KEY,
       );
 
       const journeys = await db.query<{ id: string }>(
@@ -273,10 +285,9 @@ describe('Sync Journey Extension', () => {
       );
       expect(journeys).toHaveLength(1);
 
-      const rows = await db.query(
-        'SELECT id FROM cached_anc_risks WHERE journey_id = ?',
-        [journeys[0].id],
-      );
+      const rows = await db.query('SELECT id FROM cached_anc_risks WHERE journey_id = ?', [
+        journeys[0].id,
+      ]);
       expect(rows.length).toBe(1);
     });
   });

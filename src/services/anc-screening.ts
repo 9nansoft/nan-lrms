@@ -35,8 +35,15 @@ export async function insertAncScreeningIfChanged(
        recommended_facility, recommended_provider, screened_at, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      uuidv4(), journeyId, row.level, row.triggeredRulesJson, row.riskFactorsJson,
-      row.recommendedFacility, row.recommendedProvider, now, now,
+      uuidv4(),
+      journeyId,
+      row.level,
+      row.triggeredRulesJson,
+      row.riskFactorsJson,
+      row.recommendedFacility,
+      row.recommendedProvider,
+      now,
+      now,
     ],
   );
   return true;

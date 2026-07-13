@@ -6,10 +6,7 @@ const { analyzeCervix } = _internals;
 
 describe('analyzeCervix — rules 10/11 alert/action line', () => {
   it('on-track 1cm/h progression → no alert', () => {
-    const list = [
-      obs({ cervicalDilationCm: 4 }, tAt(0)),
-      obs({ cervicalDilationCm: 5 }, tAt(60)),
-    ];
+    const list = [obs({ cervicalDilationCm: 4 }, tAt(0)), obs({ cervicalDilationCm: 5 }, tAt(60))];
     expect(analyzeCervix(list)).toEqual([]);
   });
   it('4cm at 0h, 4.5cm at 1h → ALERT (Alert line)', () => {

@@ -15,14 +15,8 @@
 // stays correct.
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '@/db/adapter';
-import type {
-  CdssSeverity,
-  PartographObservationDto,
-} from '@/types/api';
-import {
-  analyzePartograph,
-  highestSeverity,
-} from '@/services/partogram';
+import type { CdssSeverity, PartographObservationDto } from '@/types/api';
+import { analyzePartograph, highestSeverity } from '@/services/partogram';
 
 export interface PartographRow {
   hospitalId: string;
@@ -167,10 +161,9 @@ async function upsertPartographObservationsTx(
         [hospitalId, row.sourceSystem, row.sourcePk],
       );
       if (existing.length > 0) {
-        await db.execute(
-          `DELETE FROM cached_partograph_observations WHERE id = ?`,
-          [existing[0].id],
-        );
+        await db.execute(`DELETE FROM cached_partograph_observations WHERE id = ?`, [
+          existing[0].id,
+        ]);
         deleted += 1;
         touchedPatients.set(row.patientId, true);
       }
@@ -226,17 +219,40 @@ async function upsertPartographObservationsTx(
          synced_at = EXCLUDED.synced_at,
          updated_at = EXCLUDED.updated_at`,
       [
-        uuidv4(), row.patientId, hospitalId, row.sourceSystem, row.sourcePk,
-        row.observeDatetime, row.hourNo,
-        row.fetalHeartRate, row.amnioticFluid, row.amnioticTypeId,
-        row.amnioticTypeName, row.moulding, row.cervicalDilationCm,
-        row.descentOfHead, row.contractionPer10Min,
-        row.contractionDurationSec, row.contractionStrength,
-        row.oxytocinUml, row.oxytocinDropsMin, row.drugsIvFluids,
-        row.pulse, row.bpSystolic, row.bpDiastolic, row.temperature,
-        row.urineVolumeMl, row.urineProtein, row.urineGlucose,
-        row.urineAcetone, row.note, row.entryStaff, row.entryDatetime,
-        now, now, now,
+        uuidv4(),
+        row.patientId,
+        hospitalId,
+        row.sourceSystem,
+        row.sourcePk,
+        row.observeDatetime,
+        row.hourNo,
+        row.fetalHeartRate,
+        row.amnioticFluid,
+        row.amnioticTypeId,
+        row.amnioticTypeName,
+        row.moulding,
+        row.cervicalDilationCm,
+        row.descentOfHead,
+        row.contractionPer10Min,
+        row.contractionDurationSec,
+        row.contractionStrength,
+        row.oxytocinUml,
+        row.oxytocinDropsMin,
+        row.drugsIvFluids,
+        row.pulse,
+        row.bpSystolic,
+        row.bpDiastolic,
+        row.temperature,
+        row.urineVolumeMl,
+        row.urineProtein,
+        row.urineGlucose,
+        row.urineAcetone,
+        row.note,
+        row.entryStaff,
+        row.entryDatetime,
+        now,
+        now,
+        now,
       ],
     );
 
@@ -258,8 +274,7 @@ async function upsertPartographObservationsTx(
     );
     if (patientRows.length === 0) continue;
     const an = patientRows[0].an;
-    const prevSeverity =
-      (patientRows[0].partograph_severity as CdssSeverity | null) ?? null;
+    const prevSeverity = (patientRows[0].partograph_severity as CdssSeverity | null) ?? null;
 
     const obsRows = await db.query<StoredObservationRow>(
       `SELECT id, observe_datetime, hour_no,

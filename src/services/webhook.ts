@@ -606,11 +606,7 @@ export async function processWebhookPayload(
   let deletedCount = 0;
   for (const p of toDelete) {
     await db.transaction(async (tx) => {
-      for (const table of [
-        'cpd_scores',
-        'cached_vital_signs',
-        'cached_partograph_observations',
-      ]) {
+      for (const table of ['cpd_scores', 'cached_vital_signs', 'cached_partograph_observations']) {
         await tx.execute(
           `DELETE FROM ${table} WHERE patient_id IN (SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?)`,
           [hospitalId, p.an],
