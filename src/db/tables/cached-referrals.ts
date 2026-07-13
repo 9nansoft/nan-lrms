@@ -13,7 +13,12 @@ export const cachedReferralsTable: TableDefinition = {
     { name: 'diagnosis_code', type: 'string', maxLength: 20, nullable: true },
     { name: 'urgency_level', type: 'string', maxLength: 20, defaultValue: 'ROUTINE' },
     { name: 'rejection_reason', type: 'text', nullable: true },
-    { name: 'suggested_alternative_id', type: 'uuid', nullable: true, references: { table: 'hospitals', column: 'id' } },
+    {
+      name: 'suggested_alternative_id',
+      type: 'uuid',
+      nullable: true,
+      references: { table: 'hospitals', column: 'id' },
+    },
     { name: 'transport_mode', type: 'string', maxLength: 50, nullable: true },
     { name: 'initiated_at', type: 'datetime' },
     { name: 'accepted_at', type: 'datetime', nullable: true },
