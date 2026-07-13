@@ -33,7 +33,14 @@ describe('TopNavBar — provincial variant (default)', () => {
   it('renders all 6 non-admin nav items for a NURSE', async () => {
     mockUseSession.mockReturnValue(baseSession);
     render(<TopNavBar />);
-    for (const label of ['แดชบอร์ด', 'ฝากครรภ์', 'โรงพยาบาล', 'ส่งต่อ', 'ผลลัพธ์ทารก', 'ห้องคลอด']) {
+    for (const label of [
+      'แดชบอร์ด',
+      'ฝากครรภ์',
+      'โรงพยาบาล',
+      'ส่งต่อ',
+      'ผลลัพธ์ทารก',
+      'ห้องคลอด',
+    ]) {
       expect(await screen.findByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByText('ตั้งค่า')).not.toBeInTheDocument();
