@@ -158,7 +158,11 @@ export async function POST() {
     const message = error instanceof Error ? error.message : String(error);
     logger.error('sim_data_clear_failed', { requestId, error: message });
     return NextResponse.json(
-      { ok: false, error: 'clear failed — no data was deleted (transaction rolled back)', requestId },
+      {
+        ok: false,
+        error: 'clear failed — no data was deleted (transaction rolled back)',
+        requestId,
+      },
       { status: 500 },
     );
   }

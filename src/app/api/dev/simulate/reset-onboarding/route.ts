@@ -81,6 +81,8 @@ export async function POST() {
 
       // HARD delete hospitals — registry truly empty after this. Re-add via
       // /admin → โรงพยาบาล tab (re-creates the row from MoPH master).
+      const beforeHospitals = await tx.query<{ n: number }>(`SELECT COUNT(*) as n FROM hospitals`);
+      counts['hospitals'] = Number(beforeHospitals[0]?.n ?? 0);
       await tx.execute('DELETE FROM hospitals');
     });
 

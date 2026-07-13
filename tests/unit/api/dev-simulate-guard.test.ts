@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
+import { randomUUID } from 'crypto';
 import { UserRole, AncRiskLevel } from '@/types/domain';
 import { testSessionUser } from '../../helpers/session';
 import { FailingAdapter } from '../../helpers/failingDb';
@@ -66,10 +67,9 @@ describe('simulation route authorization', () => {
   });
 
   async function seedOneJourney(target: DatabaseAdapter): Promise<string> {
-    const hosp = await target.query<{ id: string }>(
-      `SELECT id FROM hospitals WHERE hcode = ?`,
-      ['10670'],
-    );
+    const hosp = await target.query<{ id: string }>(`SELECT id FROM hospitals WHERE hcode = ?`, [
+      '10670',
+    ]);
     const journey = await createJourney(target, {
       hospitalId: hosp[0].id,
       hn: 'HN-A3',
@@ -90,18 +90,28 @@ describe('simulation route authorization', () => {
   it('rolls back the ENTIRE wipe when one DELETE fails', async () => {
     mockSessionUser = testSessionUser({ hospitalCode: '10670', role: UserRole.ADMIN });
     const real = db;
-    await seedOneJourney(real);
+    const journeyId = await seedOneJourney(real);
+    // cached_anc_risks is 4th in the delete order — BEFORE cached_patients
+    // (8th), where the failure is injected below. Its survival after the
+    // 500 is the actual rollback proof: maternal_journeys alone (9th, i.e.
+    // AFTER the failure point) would pass even with no transaction at all.
+    const now = new Date().toISOString();
+    await real.execute(
+      `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors, screened_at, created_at)
+       VALUES (?, ?, 'LOW', '[]', '{}', ?, ?)`,
+      [randomUUID(), journeyId, now, now],
+    );
     db = new FailingAdapter(real, /DELETE FROM cached_patients/);
 
     const res = await clearRoute();
     expect(res.status).toBe(500);
 
-    // cpd_scores/vitals DELETEs ran before the injected failure — the
+    // cpd_scores/anc_risks DELETEs ran before the injected failure — the
     // transaction must have rolled them back together with everything else.
-    const journeys = await real.query<{ n: number }>(
-      `SELECT COUNT(*) as n FROM maternal_journeys`,
-    );
+    const journeys = await real.query<{ n: number }>(`SELECT COUNT(*) as n FROM maternal_journeys`);
     expect(Number(journeys[0].n)).toBe(1);
+    const ancRisks = await real.query<{ n: number }>(`SELECT COUNT(*) as n FROM cached_anc_risks`);
+    expect(Number(ancRisks[0].n)).toBe(1);
     db = real;
   });
 
