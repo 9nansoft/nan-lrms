@@ -34,14 +34,22 @@ describe('LookupAutocomplete', () => {
   it('re-seeds the input when the parent commits a new value', async () => {
     const { rerender } = render(
       <LookupAutocomplete
-        ariaLabel="ค้นหายา" placeholder="" value="" valueLabel=""
-        fetch={async () => []} onPick={() => {}}
+        ariaLabel="ค้นหายา"
+        placeholder=""
+        value=""
+        valueLabel=""
+        fetch={async () => []}
+        onPick={() => {}}
       />,
     );
     rerender(
       <LookupAutocomplete
-        ariaLabel="ค้นหายา" placeholder="" value="42" valueLabel="Paracetamol"
-        fetch={async () => []} onPick={() => {}}
+        ariaLabel="ค้นหายา"
+        placeholder=""
+        value="42"
+        valueLabel="Paracetamol"
+        fetch={async () => []}
+        onPick={() => {}}
       />,
     );
     expect((screen.getByLabelText('ค้นหายา') as HTMLInputElement).value).toBe('Paracetamol');

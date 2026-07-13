@@ -8,7 +8,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { cn, formatRelativeTime, buildPatientId } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
-import { RiskLevel } from '@/types/domain';
 import type { CdssSeverity } from '@/types/api';
 import { PartographCell, SectionLabel } from './shared';
 

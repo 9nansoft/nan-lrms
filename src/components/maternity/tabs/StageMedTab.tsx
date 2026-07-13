@@ -29,14 +29,8 @@ import {
 import type { StageMedRow } from '@/types/maternity-ward';
 import type { ConnectionConfig } from '@/types/bms-browser';
 import { cn } from '@/lib/utils';
-import {
-  BeDateInput,
-  BeTimeInput,
-} from '@/components/maternity/shared/BeDateTimeInputs';
-import {
-  ChipRow as DraggableChipRow,
-  type ChipOption,
-} from '../shared/DraggableChips';
+import { BeDateInput, BeTimeInput } from '@/components/maternity/shared/BeDateTimeInputs';
+import { ChipRow as DraggableChipRow, type ChipOption } from '../shared/DraggableChips';
 import { AnchoredDropdown } from '../shared/AnchoredDropdown';
 
 // ─── Types & helpers ──────────────────────────────────────────────────────
@@ -202,12 +196,7 @@ function InlineInput({ ariaLabel, value, onChange, placeholder, type = 'text' }:
     'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
   if (type === 'date') {
     return (
-      <BeDateInput
-        aria-label={ariaLabel}
-        value={value}
-        onChange={onChange}
-        className={baseCls}
-      />
+      <BeDateInput aria-label={ariaLabel} value={value} onChange={onChange} className={baseCls} />
     );
   }
   if (type === 'time') {
@@ -228,10 +217,7 @@ function InlineInput({ ariaLabel, value, onChange, placeholder, type = 'text' }:
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       aria-label={ariaLabel}
-      className={cn(
-        baseCls,
-        type === 'number' && 'font-semibold tabular-nums',
-      )}
+      className={cn(baseCls, type === 'number' && 'font-semibold tabular-nums')}
     />
   );
 }
@@ -249,7 +235,13 @@ interface EditRowProps {
 }
 
 function EditRow({
-  config, draft, setDraft, initialDrugLabel, saving, onCancel, onSave,
+  config,
+  draft,
+  setDraft,
+  initialDrugLabel,
+  saving,
+  onCancel,
+  onSave,
 }: EditRowProps) {
   return (
     <tr className="bg-cyan-50/40">
@@ -281,18 +273,14 @@ function EditRow({
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-[12px] font-semibold text-slate-700">
-                  รหัสยา · icode
-                </label>
+                <label className="text-[12px] font-semibold text-slate-700">รหัสยา · icode</label>
                 <InlineInput
                   ariaLabel="icode"
                   value={draft.icode}
                   onChange={(v) => setDraft((d) => ({ ...d, icode: v }))}
                   placeholder="ระบบเติมเอง"
                 />
-                <div className="text-[11px] text-slate-500">
-                  เลือกจากผลค้นหา หรือพิมพ์เอง
-                </div>
+                <div className="text-[11px] text-slate-500">เลือกจากผลค้นหา หรือพิมพ์เอง</div>
               </div>
             </div>
           </div>
@@ -580,11 +568,17 @@ export function StageMedTab({ an }: { an: string }) {
                       <div className="flex flex-col gap-0.5">
                         {row.medication_name ? (
                           <>
-                            <span className="font-semibold text-slate-900">{row.medication_name}</span>
-                            <span className="font-mono text-[11px] text-slate-500">{row.icode}</span>
+                            <span className="font-semibold text-slate-900">
+                              {row.medication_name}
+                            </span>
+                            <span className="font-mono text-[11px] text-slate-500">
+                              {row.icode}
+                            </span>
                           </>
                         ) : (
-                          <span className="font-mono font-semibold text-slate-900">{row.icode}</span>
+                          <span className="font-mono font-semibold text-slate-900">
+                            {row.icode}
+                          </span>
                         )}
                       </div>
                     </td>

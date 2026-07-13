@@ -11,7 +11,14 @@
 //     whenever the `open` prop transitions from false → true.
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 interface AnchoredDropdownProps {
@@ -27,7 +34,11 @@ interface AnchoredDropdownProps {
 }
 
 export function AnchoredDropdown({
-  open, anchorRef, onDismiss, className, children,
+  open,
+  anchorRef,
+  onDismiss,
+  className,
+  children,
 }: AnchoredDropdownProps) {
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
