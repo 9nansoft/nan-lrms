@@ -5,6 +5,36 @@ import { ReferralStatus, UrgencyLevel } from '@/types/domain';
 import type { CachedReferral } from '@/types/domain';
 import { REFERRAL_AUTO_ARRIVE } from '@/config/referral-sla';
 
+export class ReferralAccessError extends Error {
+  constructor(
+    public readonly code: 'NOT_FOUND' | 'FORBIDDEN',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ReferralAccessError';
+  }
+}
+
+/** Throws unless `hospitalId` is the referral's `side` party. */
+export async function assertReferralParty(
+  db: DatabaseAdapter,
+  referralId: string,
+  hospitalId: string,
+  side: 'from' | 'to',
+): Promise<void> {
+  const rows = await db.query<{ from_hospital_id: string; to_hospital_id: string }>(
+    'SELECT from_hospital_id, to_hospital_id FROM cached_referrals WHERE id = ?',
+    [referralId],
+  );
+  if (rows.length === 0) {
+    throw new ReferralAccessError('NOT_FOUND', 'ไม่พบใบส่งต่อที่ระบุ');
+  }
+  const expected = side === 'from' ? rows[0].from_hospital_id : rows[0].to_hospital_id;
+  if (expected !== hospitalId) {
+    throw new ReferralAccessError('FORBIDDEN', 'โรงพยาบาลของคุณไม่มีสิทธิ์ดำเนินการกับใบส่งต่อนี้');
+  }
+}
+
 export interface InitiateReferralInput {
   journeyId: string;
   fromHospitalId: string;

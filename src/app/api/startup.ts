@@ -2,6 +2,7 @@
 import { getDatabase, closeDatabase, isPgliteEnabled } from '@/db/connection';
 import { SchemaSync } from '@/db/schema-sync';
 import { migrateAuditLogsActor } from '@/db/migrations/audit-logs-actor';
+import { migrateCachedReferralsActor } from '@/db/migrations/cached-referrals-actor';
 import { migrateVideoCallsGroupModel } from '@/db/migrations/video-calls-group';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
@@ -43,6 +44,13 @@ export async function initializeApp(): Promise<void> {
     // live in the table definition. Without it every audit write for a
     // BMS-session actor keeps failing audit_logs_user_id_fkey.
     await migrateAuditLogsActor(db);
+
+    // 2a-1. One-shot idempotent migration: drop the legacy cached_referrals →
+    // users(id) FKs on initiated_by/accepted_by. Same rationale as the
+    // audit_logs actor migration above — BMS/ProviderID sessions have no
+    // users row, so a hard FK made every referral create/accept fail
+    // cached_referrals_initiated_by_fkey / _accepted_by_fkey.
+    await migrateCachedReferralsActor(db);
 
     // 2b. One-shot idempotent backfill for cached_anc_visits.hospital_id —
     // the column was added after data already existed; populate from the

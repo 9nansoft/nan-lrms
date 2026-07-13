@@ -20,8 +20,11 @@ export const cachedReferralsTable: TableDefinition = {
     { name: 'departed_at', type: 'datetime', nullable: true },
     { name: 'arrived_at', type: 'datetime', nullable: true },
     { name: 'rejected_at', type: 'datetime', nullable: true },
-    { name: 'initiated_by', type: 'uuid', nullable: true, references: { table: 'users', column: 'id' } },
-    { name: 'accepted_by', type: 'uuid', nullable: true, references: { table: 'users', column: 'id' } },
+    // Inline actor snapshot (name or synthesized session id) — no users FK;
+    // BMS/ProviderID sessions have no users row (same pattern as audit_logs
+    // actor, bc31704).
+    { name: 'initiated_by', type: 'uuid', nullable: true },
+    { name: 'accepted_by', type: 'uuid', nullable: true },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },
   ],
