@@ -55,52 +55,107 @@ describe('labor ingestion -> journey LABOR transition', () => {
 
   it('transitions an existing PREGNANCY journey to LABOR and links the patient', async () => {
     const journey = await createJourney(db, {
-      hospitalId: await hospitalId(), hn: 'HN-B1', personAncId: null, name: '', cid: '',
-      cidHash: CID_HASH, age: 30, gravida: 1, para: 0, lmp: null, edc: null,
+      hospitalId: await hospitalId(),
+      hn: 'HN-B1',
+      personAncId: null,
+      name: '',
+      cid: '',
+      cidHash: CID_HASH,
+      age: 30,
+      gravida: 1,
+      para: 0,
+      lmp: null,
+      edc: null,
       ancRiskLevel: AncRiskLevel.LOW,
     });
 
-    await processWebhookPayload(db, await hospitalId(), laborPayload() as never, SseManager.getInstance());
+    await processWebhookPayload(
+      db,
+      await hospitalId(),
+      laborPayload() as never,
+      SseManager.getInstance(),
+    );
 
     const j = await db.query<{ care_stage: string }>(
-      'SELECT care_stage FROM maternal_journeys WHERE id = ?', [journey.id]);
+      'SELECT care_stage FROM maternal_journeys WHERE id = ?',
+      [journey.id],
+    );
     expect(j[0].care_stage).toBe(CareStage.LABOR);
     const p = await db.query<{ journey_id: string }>(
-      'SELECT journey_id FROM cached_patients WHERE an = ?', ['AN-B1']);
+      'SELECT journey_id FROM cached_patients WHERE an = ?',
+      ['AN-B1'],
+    );
     expect(p[0].journey_id).toBe(journey.id);
   });
 
   it('creates a LABOR journey for a walk-in with no prior ANC', async () => {
-    await processWebhookPayload(db, await hospitalId(), laborPayload() as never, SseManager.getInstance());
+    await processWebhookPayload(
+      db,
+      await hospitalId(),
+      laborPayload() as never,
+      SseManager.getInstance(),
+    );
     const j = await db.query<{ care_stage: string }>(
-      'SELECT care_stage FROM maternal_journeys WHERE cid_hash = ?', [CID_HASH]);
+      'SELECT care_stage FROM maternal_journeys WHERE cid_hash = ?',
+      [CID_HASH],
+    );
     expect(j.length).toBe(1);
     expect(j[0].care_stage).toBe(CareStage.LABOR);
   });
 
   it('never regresses a DELIVERED journey', async () => {
     const journey = await createJourney(db, {
-      hospitalId: await hospitalId(), hn: 'HN-B1', personAncId: null, name: '', cid: '',
-      cidHash: CID_HASH, age: 30, gravida: 1, para: 0, lmp: null, edc: null,
+      hospitalId: await hospitalId(),
+      hn: 'HN-B1',
+      personAncId: null,
+      name: '',
+      cid: '',
+      cidHash: CID_HASH,
+      age: 30,
+      gravida: 1,
+      para: 0,
+      lmp: null,
+      edc: null,
       ancRiskLevel: AncRiskLevel.LOW,
     });
     await transitionToDelivered(db, journey.id);
 
-    await processWebhookPayload(db, await hospitalId(), laborPayload() as never, SseManager.getInstance());
+    await processWebhookPayload(
+      db,
+      await hospitalId(),
+      laborPayload() as never,
+      SseManager.getInstance(),
+    );
 
     const j = await db.query<{ care_stage: string }>(
-      'SELECT care_stage FROM maternal_journeys WHERE id = ?', [journey.id]);
+      'SELECT care_stage FROM maternal_journeys WHERE id = ?',
+      [journey.id],
+    );
     expect(j[0].care_stage).toBe(CareStage.DELIVERED);
   });
 
   it('re-delivery is idempotent: one journey, stage_changed_at not re-stamped', async () => {
-    await processWebhookPayload(db, await hospitalId(), laborPayload() as never, SseManager.getInstance());
+    await processWebhookPayload(
+      db,
+      await hospitalId(),
+      laborPayload() as never,
+      SseManager.getInstance(),
+    );
     const first = await db.query<{ id: string; stage_changed_at: unknown }>(
-      'SELECT id, stage_changed_at FROM maternal_journeys WHERE cid_hash = ?', [CID_HASH]);
+      'SELECT id, stage_changed_at FROM maternal_journeys WHERE cid_hash = ?',
+      [CID_HASH],
+    );
 
-    await processWebhookPayload(db, await hospitalId(), laborPayload() as never, SseManager.getInstance());
+    await processWebhookPayload(
+      db,
+      await hospitalId(),
+      laborPayload() as never,
+      SseManager.getInstance(),
+    );
     const second = await db.query<{ id: string; stage_changed_at: unknown }>(
-      'SELECT id, stage_changed_at FROM maternal_journeys WHERE cid_hash = ?', [CID_HASH]);
+      'SELECT id, stage_changed_at FROM maternal_journeys WHERE cid_hash = ?',
+      [CID_HASH],
+    );
 
     expect(second.length).toBe(1);
     expect(second[0].id).toBe(first[0].id);
@@ -109,7 +164,8 @@ describe('labor ingestion -> journey LABOR transition', () => {
 
   it('skips non-ACTIVE labor rows (DELIVERED payloads change no journey)', async () => {
     await processWebhookPayload(
-      db, await hospitalId(),
+      db,
+      await hospitalId(),
       laborPayload({ labor_status: 'DELIVERED' }) as never,
       SseManager.getInstance(),
     );

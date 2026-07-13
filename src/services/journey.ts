@@ -29,7 +29,28 @@ export async function createJourney(
   await db.execute(
     `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, person_anc_id, name, cid, cid_hash, age, gravida, para, lmp, edc, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-    [id, input.hospitalId, input.hospitalId, input.hn, input.personAncId, input.name, input.cid, input.cidHash, input.age, input.gravida, input.para, input.lmp, input.edc, CareStage.PREGNANCY, input.ancRiskLevel, now, now, now, now, now],
+    [
+      id,
+      input.hospitalId,
+      input.hospitalId,
+      input.hn,
+      input.personAncId,
+      input.name,
+      input.cid,
+      input.cidHash,
+      input.age,
+      input.gravida,
+      input.para,
+      input.lmp,
+      input.edc,
+      CareStage.PREGNANCY,
+      input.ancRiskLevel,
+      now,
+      now,
+      now,
+      now,
+      now,
+    ],
   );
 
   return {

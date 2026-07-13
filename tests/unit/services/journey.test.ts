@@ -121,10 +121,14 @@ describe('Journey Lifecycle Service', () => {
 
       await transitionToLabor(db, journeyId);
       const first = await db.query<{ stage_changed_at: unknown }>(
-        'SELECT stage_changed_at FROM maternal_journeys WHERE id = ?', [journeyId]);
+        'SELECT stage_changed_at FROM maternal_journeys WHERE id = ?',
+        [journeyId],
+      );
       await transitionToLabor(db, journeyId);
       const second = await db.query<{ stage_changed_at: unknown }>(
-        'SELECT stage_changed_at FROM maternal_journeys WHERE id = ?', [journeyId]);
+        'SELECT stage_changed_at FROM maternal_journeys WHERE id = ?',
+        [journeyId],
+      );
       expect(String(second[0].stage_changed_at)).toBe(String(first[0].stage_changed_at));
     });
   });
