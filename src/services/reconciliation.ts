@@ -47,9 +47,19 @@ export async function getReconciliationReport(db: DatabaseAdapter): Promise<Reco
   const sum = (rows: { count: number }[]) => rows.reduce((acc, r) => acc + Number(r.count), 0);
   return {
     generatedAt: new Date().toISOString(),
-    riskMismatches: riskMismatches.map((r) => ({ hospitalId: r.hospital_id, count: Number(r.count) })),
-    stuckPregnancyWithActiveLabor: stuck.map((r) => ({ hospitalId: r.hospital_id, count: Number(r.count) })),
-    duplicateActiveJourneys: dupes.map((r) => ({ hospitalId: r.hospital_id, hn: r.hn, count: Number(r.count) })),
+    riskMismatches: riskMismatches.map((r) => ({
+      hospitalId: r.hospital_id,
+      count: Number(r.count),
+    })),
+    stuckPregnancyWithActiveLabor: stuck.map((r) => ({
+      hospitalId: r.hospital_id,
+      count: Number(r.count),
+    })),
+    duplicateActiveJourneys: dupes.map((r) => ({
+      hospitalId: r.hospital_id,
+      hn: r.hn,
+      count: Number(r.count),
+    })),
     totals: {
       riskMismatches: sum(riskMismatches),
       stuckPregnancyWithActiveLabor: sum(stuck),
