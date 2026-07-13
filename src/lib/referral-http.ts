@@ -9,7 +9,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { requireReadWriteSession } from '@/lib/session-guard';
 import { getHospitalIdByHcode } from '@/services/hospital-lookup';
-import { assertReferralParty, ReferralAccessError } from '@/services/referral';
+import { assertReferralParty, ReferralAccessError, ReferralConflictError } from '@/services/referral';
 import { isJsonContentType } from '@/lib/request-origin';
 import { logger } from '@/lib/logger';
 
@@ -89,6 +89,18 @@ export function referralTransitionRoute(spec: ReferralTransitionSpec) {
         return NextResponse.json(
           { error: { code: error.code, message: error.message, details: null } },
           { status: error.code === 'NOT_FOUND' ? 404 : 403 },
+        );
+      }
+      if (error instanceof ReferralConflictError) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'STATE_CONFLICT',
+              message: error.message,
+              details: { currentStatus: error.currentStatus },
+            },
+          },
+          { status: 409 },
         );
       }
       logger.error(spec.logEvent, { error });

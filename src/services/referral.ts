@@ -4,6 +4,8 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { ReferralStatus, UrgencyLevel } from '@/types/domain';
 import type { CachedReferral } from '@/types/domain';
 import { REFERRAL_AUTO_ARRIVE } from '@/config/referral-sla';
+import { logAccess } from '@/services/audit';
+import type { AuditActor } from '@/lib/audit-actor';
 
 export class ReferralAccessError extends Error {
   constructor(
@@ -74,31 +76,66 @@ export async function initiateReferral(
   return getReferralById(db, id);
 }
 
-async function assertReferralStatus(
+export class ReferralConflictError extends Error {
+  constructor(
+    public readonly currentStatus: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ReferralConflictError';
+  }
+}
+
+/** After a lost compare-and-set: idempotent success if the target status is
+ *  already committed, NOT_FOUND if the row vanished, else a 409 conflict. */
+async function resolveLostTransition(
   db: DatabaseAdapter,
   referralId: string,
-  expectedStatus: ReferralStatus,
-): Promise<void> {
-  const current = await getReferralById(db, referralId);
-  if (current.status !== expectedStatus) {
-    throw new Error(
-      `ไม่สามารถดำเนินการได้: สถานะปัจจุบัน "${current.status}" ต้องเป็น "${expectedStatus}"`,
-    );
+  idempotentStatus: ReferralStatus,
+  expected: ReferralStatus,
+): Promise<CachedReferral> {
+  const rows = await db.query<{ status: string }>(
+    'SELECT status FROM cached_referrals WHERE id = ?',
+    [referralId],
+  );
+  if (rows.length === 0) {
+    throw new ReferralAccessError('NOT_FOUND', 'ไม่พบใบส่งต่อที่ระบุ');
   }
+  if (rows[0].status === idempotentStatus) {
+    return getReferralById(db, referralId);
+  }
+  throw new ReferralConflictError(
+    rows[0].status,
+    `ไม่สามารถดำเนินการได้: สถานะปัจจุบัน "${rows[0].status}" ต้องเป็น "${expected}"`,
+  );
 }
 
 export async function acceptReferral(
   db: DatabaseAdapter,
   referralId: string,
   acceptedBy: string,
+  audit?: AuditActor,
 ): Promise<CachedReferral> {
-  await assertReferralStatus(db, referralId, ReferralStatus.INITIATED);
-  const now = new Date().toISOString();
-  await db.execute(
-    `UPDATE cached_referrals SET status = ?, accepted_at = ?, accepted_by = ?, updated_at = ? WHERE id = ?`,
-    [ReferralStatus.ACCEPTED, now, acceptedBy, now, referralId],
-  );
-  return getReferralById(db, referralId);
+  return db.transaction(async (tx) => {
+    const now = new Date().toISOString();
+    const won = await tx.query<{ id: string }>(
+      `UPDATE cached_referrals SET status = ?, accepted_at = ?, accepted_by = ?, updated_at = ?
+        WHERE id = ? AND status = ? RETURNING id`,
+      [ReferralStatus.ACCEPTED, now, acceptedBy, now, referralId, ReferralStatus.INITIATED],
+    );
+    if (won.length === 0) {
+      return resolveLostTransition(tx, referralId, ReferralStatus.ACCEPTED, ReferralStatus.INITIATED);
+    }
+    if (audit?.userId) {
+      await logAccess(tx, {
+        ...audit,
+        action: 'referral_accept',
+        resourceType: 'referral',
+        resourceId: referralId,
+      });
+    }
+    return getReferralById(tx, referralId);
+  });
 }
 
 export async function rejectReferral(
@@ -106,49 +143,96 @@ export async function rejectReferral(
   referralId: string,
   reason: string,
   suggestedAlternativeId?: string,
+  audit?: AuditActor,
 ): Promise<CachedReferral> {
-  await assertReferralStatus(db, referralId, ReferralStatus.INITIATED);
-  const now = new Date().toISOString();
-  await db.execute(
-    `UPDATE cached_referrals SET status = ?, rejected_at = ?, rejection_reason = ?, suggested_alternative_id = ?, updated_at = ? WHERE id = ?`,
-    [ReferralStatus.REJECTED, now, reason, suggestedAlternativeId ?? null, now, referralId],
-  );
-  return getReferralById(db, referralId);
+  return db.transaction(async (tx) => {
+    const now = new Date().toISOString();
+    const won = await tx.query<{ id: string }>(
+      `UPDATE cached_referrals SET status = ?, rejected_at = ?, rejection_reason = ?, suggested_alternative_id = ?, updated_at = ?
+        WHERE id = ? AND status = ? RETURNING id`,
+      [
+        ReferralStatus.REJECTED,
+        now,
+        reason,
+        suggestedAlternativeId ?? null,
+        now,
+        referralId,
+        ReferralStatus.INITIATED,
+      ],
+    );
+    if (won.length === 0) {
+      return resolveLostTransition(tx, referralId, ReferralStatus.REJECTED, ReferralStatus.INITIATED);
+    }
+    if (audit?.userId) {
+      await logAccess(tx, {
+        ...audit,
+        action: 'referral_reject',
+        resourceType: 'referral',
+        resourceId: referralId,
+      });
+    }
+    return getReferralById(tx, referralId);
+  });
 }
 
 export async function markInTransit(
   db: DatabaseAdapter,
   referralId: string,
   transportMode: string,
+  audit?: AuditActor,
 ): Promise<CachedReferral> {
-  await assertReferralStatus(db, referralId, ReferralStatus.ACCEPTED);
-  const now = new Date().toISOString();
-  await db.execute(
-    `UPDATE cached_referrals SET status = ?, departed_at = ?, transport_mode = ?, updated_at = ? WHERE id = ?`,
-    [ReferralStatus.IN_TRANSIT, now, transportMode, now, referralId],
-  );
-  return getReferralById(db, referralId);
+  return db.transaction(async (tx) => {
+    const now = new Date().toISOString();
+    const won = await tx.query<{ id: string }>(
+      `UPDATE cached_referrals SET status = ?, departed_at = ?, transport_mode = ?, updated_at = ?
+        WHERE id = ? AND status = ? RETURNING id`,
+      [ReferralStatus.IN_TRANSIT, now, transportMode, now, referralId, ReferralStatus.ACCEPTED],
+    );
+    if (won.length === 0) {
+      return resolveLostTransition(tx, referralId, ReferralStatus.IN_TRANSIT, ReferralStatus.ACCEPTED);
+    }
+    if (audit?.userId) {
+      await logAccess(tx, {
+        ...audit,
+        action: 'referral_transit',
+        resourceType: 'referral',
+        resourceId: referralId,
+      });
+    }
+    return getReferralById(tx, referralId);
+  });
 }
 
 export async function confirmArrival(
   db: DatabaseAdapter,
   referralId: string,
   _receivingAn: string,
+  audit?: AuditActor,
 ): Promise<CachedReferral> {
-  await assertReferralStatus(db, referralId, ReferralStatus.IN_TRANSIT);
-  const now = new Date().toISOString();
-  await db.execute(
-    `UPDATE cached_referrals SET status = ?, arrived_at = ?, updated_at = ? WHERE id = ?`,
-    [ReferralStatus.ARRIVED, now, now, referralId],
-  );
-
-  const referral = await getReferralById(db, referralId);
-  await db.execute(
-    `UPDATE maternal_journeys SET current_hospital_id = ?, updated_at = ? WHERE id = ?`,
-    [referral.toHospitalId, now, referral.journeyId],
-  );
-
-  return referral;
+  return db.transaction(async (tx) => {
+    const now = new Date().toISOString();
+    const won = await tx.query<{ id: string; to_hospital_id: string; journey_id: string }>(
+      `UPDATE cached_referrals SET status = ?, arrived_at = ?, updated_at = ?
+        WHERE id = ? AND status = ? RETURNING id, to_hospital_id, journey_id`,
+      [ReferralStatus.ARRIVED, now, now, referralId, ReferralStatus.IN_TRANSIT],
+    );
+    if (won.length === 0) {
+      return resolveLostTransition(tx, referralId, ReferralStatus.ARRIVED, ReferralStatus.IN_TRANSIT);
+    }
+    await tx.execute(
+      `UPDATE maternal_journeys SET current_hospital_id = ?, updated_at = ? WHERE id = ?`,
+      [won[0].to_hospital_id, now, won[0].journey_id],
+    );
+    if (audit?.userId) {
+      await logAccess(tx, {
+        ...audit,
+        action: 'referral_arrive',
+        resourceType: 'referral',
+        resourceId: referralId,
+      });
+    }
+    return getReferralById(tx, referralId);
+  });
 }
 
 /**
