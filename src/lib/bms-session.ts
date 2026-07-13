@@ -81,10 +81,7 @@ export class BmsSessionClient {
     }
   }
 
-  async validateSession(
-    sessionId: string,
-    validateUrl: string,
-  ): Promise<SessionConfig> {
+  async validateSession(sessionId: string, validateUrl: string): Promise<SessionConfig> {
     try {
       const response = await fetch(validateUrl, {
         method: 'POST',
@@ -175,13 +172,7 @@ export class BmsSessionClient {
     options?: { marketplaceToken?: string | null; appIdentifier?: string },
   ): Promise<DatabaseDialect | null> {
     try {
-      const result = await this.executeQuery(
-        'SELECT version()',
-        bmsUrl,
-        jwt,
-        undefined,
-        options,
-      );
+      const result = await this.executeQuery('SELECT version()', bmsUrl, jwt, undefined, options);
       const first = result.data[0] ?? {};
       const version = String(
         first['version()'] ?? first.version ?? Object.values(first)[0] ?? '',

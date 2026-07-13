@@ -60,7 +60,10 @@ describe('BmsSessionClient', () => {
         }),
       });
 
-      const config = await client.validateSession('test-session-id', 'https://hosxp.net/phapi/PasteJSON');
+      const config = await client.validateSession(
+        'test-session-id',
+        'https://hosxp.net/phapi/PasteJSON',
+      );
       expect(config.jwt).toBe('eyJhbGc...');
       expect(config.bmsUrl).toBe('https://99999-test.tunnel.hosxp.net');
       expect(config.userInfo.name).toBe('Test User');
@@ -116,9 +119,9 @@ describe('BmsSessionClient', () => {
         statusText: 'SQL Error',
       });
 
-      await expect(
-        client.executeQuery('INVALID SQL', 'https://test.net', 'jwt'),
-      ).rejects.toThrow(BmsApiErrorClass);
+      await expect(client.executeQuery('INVALID SQL', 'https://test.net', 'jwt')).rejects.toThrow(
+        BmsApiErrorClass,
+      );
     });
   });
 

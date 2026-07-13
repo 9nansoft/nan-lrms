@@ -296,10 +296,7 @@ export async function GET() {
       id: string;
       connection_status: string | null;
       last_sync_at: string | null;
-    }>(
-      'SELECT id, connection_status, last_sync_at FROM hospitals WHERE hcode = ?',
-      [hcode],
-    );
+    }>('SELECT id, connection_status, last_sync_at FROM hospitals WHERE hcode = ?', [hcode]);
 
     if (hospitals.length === 0) {
       return NextResponse.json({
