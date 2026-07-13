@@ -31,11 +31,11 @@ export async function getHealthStatus(db: DatabaseAdapter): Promise<HealthStatus
 
     // Get hospital connection stats
     const stats = await db.query<{ connection_status: string; count: number }>(
-      "SELECT connection_status, COUNT(*) as count FROM hospitals WHERE is_active = true GROUP BY connection_status"
+      'SELECT connection_status, COUNT(*) as count FROM hospitals WHERE is_active = true GROUP BY connection_status',
     );
 
     const total = await db.query<{ count: number }>(
-      "SELECT COUNT(*) as count FROM hospitals WHERE is_active = true"
+      'SELECT COUNT(*) as count FROM hospitals WHERE is_active = true',
     );
     hospitalConnections.total = total[0]?.count ?? 0;
 

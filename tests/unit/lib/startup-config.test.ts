@@ -5,7 +5,12 @@ import { validateStartupConfig } from '@/lib/startup-config';
 const VALID_KEY = 'a'.repeat(64);
 
 function env(overrides: Record<string, string | undefined>): NodeJS.ProcessEnv {
-  return { NODE_ENV: 'production', ENCRYPTION_KEY: VALID_KEY, DATABASE_URL: 'postgres://x', ...overrides } as NodeJS.ProcessEnv;
+  return {
+    NODE_ENV: 'production',
+    ENCRYPTION_KEY: VALID_KEY,
+    DATABASE_URL: 'postgres://x',
+    ...overrides,
+  } as NodeJS.ProcessEnv;
 }
 
 describe('validateStartupConfig', () => {
@@ -13,7 +18,9 @@ describe('validateStartupConfig', () => {
     expect(() => validateStartupConfig(env({}))).not.toThrow();
   });
   it('rejects a missing ENCRYPTION_KEY in production', () => {
-    expect(() => validateStartupConfig(env({ ENCRYPTION_KEY: undefined }))).toThrow(/ENCRYPTION_KEY/);
+    expect(() => validateStartupConfig(env({ ENCRYPTION_KEY: undefined }))).toThrow(
+      /ENCRYPTION_KEY/,
+    );
   });
   it('rejects a 64-char NON-HEX key', () => {
     expect(() => validateStartupConfig(env({ ENCRYPTION_KEY: 'z'.repeat(64) }))).toThrow(/hex/);
