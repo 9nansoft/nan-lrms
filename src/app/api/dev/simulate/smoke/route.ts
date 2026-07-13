@@ -9,11 +9,7 @@
 import { NextResponse } from 'next/server';
 import { simulationGuard } from '../_guard';
 import { llmChat, llmJson } from '@/lib/llm-client';
-import {
-  getProfileById,
-  profilePromptHint,
-  PROFILE_IDS,
-} from '@/services/dev-simulation/profiles';
+import { getProfileById, profilePromptHint, PROFILE_IDS } from '@/services/dev-simulation/profiles';
 import {
   evaluateAncEvent,
   evaluateLaborEvent,
@@ -123,7 +119,11 @@ export async function GET() {
     try {
       const raw = await llmJson<Record<string, unknown>>({
         messages: [
-          { role: 'system', content: 'You plan obstetric ward shifts. JSON only. The events array MUST be named exactly "events".' },
+          {
+            role: 'system',
+            content:
+              'You plan obstetric ward shifts. JSON only. The events array MUST be named exactly "events".',
+          },
           { role: 'user', content: prompt },
         ],
         jsonSchema: schema,
@@ -136,7 +136,8 @@ export async function GET() {
         (Array.isArray(raw.events) ? raw.events : null) ??
         (Array.isArray(raw.shift_plan) ? raw.shift_plan : null) ??
         (Array.isArray(raw.plan) ? raw.plan : null) ??
-        Object.values(raw).find((v): v is unknown[] => Array.isArray(v)) ?? [];
+        Object.values(raw).find((v): v is unknown[] => Array.isArray(v)) ??
+        [];
       const narrative = typeof raw.narrative === 'string' ? raw.narrative : '';
       const parsed = { narrative, events, rawKeys: Object.keys(raw) };
       cases.push({
@@ -200,13 +201,22 @@ export async function GET() {
       if (!name) errors.push('missing field: name');
       // applyProfileToLabor ensures clinical fields — verify one round.
       const laborEvent: WebhookPatientPayload = {
-        hn: '000012345', an: '690001234',
-        name: name ?? 'นาง ทดลอง', cid: '1234567890123',
-        age: 28, gravida: 1, ga_weeks: 35, anc_count: 4,
+        hn: '000012345',
+        an: '690001234',
+        name: name ?? 'นาง ทดลอง',
+        cid: '1234567890123',
+        age: 28,
+        gravida: 1,
+        ga_weeks: 35,
+        anc_count: 4,
         admit_date: new Date().toISOString(),
-        height_cm: 158, weight_kg: 70, weight_diff_kg: 14,
-        fundal_height_cm: 34.5, us_weight_g: 3100,
-        hematocrit_pct: 34, labor_status: 'ACTIVE',
+        height_cm: 158,
+        weight_kg: 70,
+        weight_diff_kg: 14,
+        fundal_height_cm: 34.5,
+        us_weight_g: 3100,
+        hematocrit_pct: 34,
+        labor_status: 'ACTIVE',
       };
       const ev = evaluateLaborEvent(profile, laborEvent);
       const allErrors = [...errors, ...ev.errors];
@@ -313,7 +323,10 @@ export async function GET() {
     const t0 = Date.now();
     try {
       const parsed = await llmJson<{
-        name: string; reason: string; diagnosisCode: string; urgency: string;
+        name: string;
+        reason: string;
+        diagnosisCode: string;
+        urgency: string;
       }>({
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
