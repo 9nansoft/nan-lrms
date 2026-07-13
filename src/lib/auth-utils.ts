@@ -3,12 +3,16 @@ import { UserRole } from '@/types/domain';
 import { logger } from '@/lib/logger';
 
 // Subordinate leadership titles must not inherit the director's ADMIN role.
-const DIRECTOR_EXCLUSIONS = ['deputy', 'assistant', 'vice', 'รอง', 'ผู้ช่วย'];
+// English needs word-boundary matching ('vice' is a substring of 'services');
+// Thai compounds attach directly, so match the full subordinate title.
+const DIRECTOR_EXCLUSION_EN = /\b(deputy|assistant|vice)\b/;
+const DIRECTOR_EXCLUSIONS_TH = ['รองผู้อำนวยการ', 'ผู้ช่วยผู้อำนวยการ'];
 
 export function mapPositionToRole(position: string): UserRole {
   const lower = position.toLowerCase();
   const isDirector = lower.includes('director') || lower.includes('ผู้อำนวยการ');
-  const isSubordinate = DIRECTOR_EXCLUSIONS.some((p) => lower.includes(p));
+  const isSubordinate =
+    DIRECTOR_EXCLUSION_EN.test(lower) || DIRECTOR_EXCLUSIONS_TH.some((t) => lower.includes(t));
   if (isDirector && !isSubordinate) {
     return UserRole.ADMIN;
   }

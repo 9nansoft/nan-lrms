@@ -26,6 +26,15 @@ describe('BMS Session Auth', () => {
       expect(mapPositionToRole('ผู้ช่วยผู้อำนวยการ')).not.toBe(UserRole.ADMIN);
     });
 
+    it('does not demote directors whose titles merely contain exclusion substrings', () => {
+      expect(mapPositionToRole('Director of Clinical Services')).toBe(UserRole.ADMIN);
+      expect(mapPositionToRole('Nursing Services Director')).toBe(UserRole.ADMIN);
+    });
+
+    it('still demotes explicit vice directors', () => {
+      expect(mapPositionToRole('Vice Director')).not.toBe(UserRole.ADMIN);
+    });
+
     it('maps doctor/obstetrician to OBSTETRICIAN', () => {
       expect(mapPositionToRole('doctor')).toBe(UserRole.OBSTETRICIAN);
       expect(mapPositionToRole('สูติแพทย์')).toBe(UserRole.OBSTETRICIAN);
