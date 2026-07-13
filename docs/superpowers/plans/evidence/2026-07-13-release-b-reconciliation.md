@@ -37,15 +37,19 @@ Reconciliation is **clean and favorable — safe to bless the Release B canonica
 
 ## The one actionable finding — 3 "stuck" PREGNANCY-with-active-labor cases
 
-These are journeys still marked PREGNANCY that have an ACTIVE labor admission for the same patient — the exact bug B1 fixes. B1 is now live, so most should self-heal on the next browser-push sync. De-identified detail:
+These are journeys still marked PREGNANCY that have a cached labor row still flagged ACTIVE. **Root cause (confirmed by drill-down): they are NOT a Release B / B1 problem** — they are stale ACTIVE-labor rows for patients who have **left the active-labor ward in HOSxP** (delivered/discharged) but were never reconciled from ACTIVE → DELIVERED.
 
-| Hospital | Risk | Journey stage since | Labor admitted | Labor last updated | Assessment |
+Evidence: all three hospitals synced **today** (บ้านฝาง 08:57, มัญจาคีรี 09:51, เขาสวนกวาง 09:59 — the latter two *after* the deploy), yet each patient's own `cached_patients.synced_at` is old (below). That means these patients **dropped out of the labor-sync payload** — so B1 never sees them (B1 only transitions patients present in the payload), and the auto-discharge reconcile never flipped their stale ACTIVE row. No `delivered_at` and no recorded newborn in the cache — consistent with the update simply never arriving after they left the ward.
+
+| Hospital | Risk | Labor admitted | Patient row last synced | Partograph | Assessment |
 |---|---|---|---|---|---|
-| 11011 เขาสวนกวาง | LOW | 2026-07-13 | 2026-07-07 | 2026-07-12 | Recent + active → should transition to LABOR on next sync |
-| 11009 มัญจาคีรี | LOW | 2026-07-13 | 2026-07-08 | 2026-07-08 | Recent + active → should self-heal on next sync |
-| **10995 บ้านฝาง** | LOW | 2026-07-07 | **2026-06-12** | **2026-06-12** | **STALE** — labor admission ~1 month old, untouched since 12 Jun. May have delivered/discharged in HOSxP without cache reconciliation. **Recommend manual review** rather than assuming self-heal. |
+| **10995 บ้านฝาง** | LOW | 2026-06-12 | **2026-06-12** | 2 obs, both 12 Jun | Frozen ~1 month; a labor cannot last a month — she delivered long ago. Stale ACTIVE row. |
+| 11009 มัญจาคีรี | LOW | 2026-07-08 | 2026-07-08 | none | Dropped from payload after 8 Jul; no partograph → left ward without reconcile |
+| 11011 เขาสวนกวาง | LOW | 2026-07-07 | 2026-07-12 | 3 obs, ALERT, latest 11 Jul | Was a genuinely monitored labor; dropped from payload after 12 Jul |
 
-**Recommended action:** re-check this report after ~1–2 sync cycles. The two recent cases should drop to 0; if บ้านฝาง persists, review that patient's HOSxP record directly (it looks like a stale cached admission, not a live labor).
+**This is orthogonal to Release B** — a pre-existing data-hygiene gap in the auto-discharge/reconcile path (a previously-ACTIVE labor patient who disappears from the sync payload should be marked DELIVERED, and here three were not). It affects **3 of 1,729** active journeys (0.17%), all LOW risk.
+
+**Recommended follow-up (own ticket, not urgent, not a Release B blocker):** verify the browser-push auto-discharge reconcile handles "patient previously ACTIVE is absent from the current payload," and/or a one-time cleanup of ACTIVE labor rows whose `synced_at` is older than the hospital's recent sync activity. None of the three needs individual clinical review — they are almost certainly all delivered.
 
 ## Two items to confirm for the sign-off artifact (both benign here)
 
