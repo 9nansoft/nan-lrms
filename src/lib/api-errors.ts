@@ -97,6 +97,12 @@ export const ApiErrors = {
     message: 'คำขอถูกปฏิเสธ: ต้นทางของคำขอ (Origin) ไม่ได้รับอนุญาต',
     suggestedAction: 'โปรดใช้งานผ่านหน้าเว็บ KK-LRMS โดยตรง',
   },
+  RATE_LIMITED: {
+    error: 'Too many requests',
+    code: 'RATE_LIMITED',
+    message: 'ส่งคำขอถี่เกินไป กรุณารอสักครู่แล้วลองใหม่',
+    suggestedAction: 'ลดความถี่ของการเรียก API แล้วลองใหม่ภายหลัง',
+  },
 } as const;
 
 export type ApiErrorKey = keyof typeof ApiErrors;

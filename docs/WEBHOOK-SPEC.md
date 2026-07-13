@@ -955,7 +955,12 @@ Pre-check whether a patient is eligible for referral **before** sending the refe
 POST /api/referrals/check
 ```
 
-> **No API key required** — this endpoint uses session authentication (dashboard login).
+> **Requires the same webhook API key as `/api/webhooks/patient-data`** —
+> `Authorization: Bearer <api-key>`. (Prior versions of this doc said this
+> endpoint used session authentication; that was incorrect — the endpoint was
+> fully public until the 2026-07-13 PHI review locked it down.) Responses are
+> rate-limited to 30 requests/minute per hospital (HTTP 429 `RATE_LIMITED`
+> when exceeded).
 
 ### Request Body
 
@@ -967,27 +972,17 @@ POST /api/referrals/check
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `cid` | string | Yes | เลขบัตรประชาชน 13 หลัก (plain text — hashed server-side) |
+| `cid` | string | Yes | เลขบัตรประชาชน 13 หลัก (plain text — hashed server-side, checksum-validated) |
 
 ### Response
+
+The response is intentionally minimized — it returns only the referral
+decision, never maternity/patient details:
 
 ```json
 {
   "canRefer": true,
   "reason": "พร้อมส่งต่อ",
-  "patient": {
-    "found": true,
-    "careStage": "PREGNANCY",
-    "ancRiskLevel": "HR2",
-    "gravida": 1,
-    "gaWeeks": 34,
-    "ancVisitCount": 5,
-    "lastAncDate": "2026-03-15",
-    "currentHospitalCode": "10679",
-    "currentHospitalName": "รพ.น้ำพอง",
-    "originHospitalCode": "10679"
-  },
-  "labor": null,
   "activeReferrals": 0
 }
 ```
@@ -998,14 +993,6 @@ POST /api/referrals/check
 |-------|------|-------------|
 | `canRefer` | boolean | Whether a referral is advisable |
 | `reason` | string | Thai explanation of the result |
-| `patient` | object/null | Maternal journey data (ANC/pregnancy) |
-| `patient.careStage` | string | `PREGNANCY`, `LABOR`, `DELIVERED`, `POSTPARTUM` |
-| `patient.ancRiskLevel` | string | `LOW`, `HR1`, `HR2`, `HR3` |
-| `patient.currentHospitalCode` | string | HCODE of hospital currently managing the patient |
-| `patient.currentHospitalName` | string | Name of current hospital |
-| `labor` | object/null | Active labor room data (if admitted) |
-| `labor.an` | string | Admission number |
-| `labor.laborStatus` | string | `ACTIVE` or `DELIVERED` |
 | `activeReferrals` | number | Number of referrals still in progress (not ARRIVED/REJECTED) |
 
 ### Decision Logic
@@ -1017,13 +1004,23 @@ POST /api/referrals/check
 | Active ANC/labor, no existing referral | `true` | พร้อมส่งต่อ |
 | Active ANC/labor, has existing referral | `true` | มีใบส่งต่อที่ยังดำเนินการอยู่ — ควรตรวจสอบใบส่งต่อเดิม |
 
+### Errors
+
+| Status | Code | Cause |
+|--------|------|-------|
+| 401 | `MISSING_AUTH` | No `Authorization: Bearer` header |
+| 401 | `INVALID_API_KEY` | Key not found, inactive, or revoked |
+| 400 | `INVALID_JSON` | Body is not a JSON object |
+| 400 | `VALIDATION_FAILED` | `cid` missing, wrong length, non-digit, or fails the Thai checksum |
+| 429 | `RATE_LIMITED` | More than 30 requests/minute from this hospital's key |
+
 ### Examples
 
 ```bash
 # Check if patient can be referred
 curl -X POST https://kk-lrms.bmscloud.in.th/api/referrals/check \
   -H "Content-Type: application/json" \
-  -H "Cookie: next-auth.session-token=..." \
+  -H "Authorization: Bearer kklrms_..." \
   -d '{ "cid": "1100700123456" }'
 ```
 
@@ -1032,7 +1029,7 @@ curl -X POST https://kk-lrms.bmscloud.in.th/api/referrals/check \
 ```
 1. Hospital checks patient eligibility
    POST /api/referrals/check  { cid: "1100700123456" }
-   → canRefer: true, careStage: "PREGNANCY", ancRiskLevel: "HR2"
+   → canRefer: true, reason: "พร้อมส่งต่อ"
 
 2. Hospital sends referral
    POST /api/webhooks/patient-data  { type: "referral", ... }

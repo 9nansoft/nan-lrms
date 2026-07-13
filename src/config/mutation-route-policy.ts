@@ -23,9 +23,7 @@ export const MUTATION_ROUTE_POLICIES: Record<string, MutationRoutePolicy> = {
   'src/app/api/referrals/[id]/reject/route.ts': 'session-origin-checked',
   'src/app/api/referrals/[id]/transit/route.ts': 'session-origin-checked',
   'src/app/api/referrals/[id]/arrive/route.ts': 'session-origin-checked',
-  // check/route.ts is public until Task A8 locks it down — A8 flips this
-  // entry to 'bearer-api-key' in the same commit as the route change.
-  'src/app/api/referrals/check/route.ts': 'public-by-design',
+  'src/app/api/referrals/check/route.ts': 'bearer-api-key',
   'src/app/api/webhooks/patient-data/route.ts': 'bearer-api-key',
   'src/app/api/auth/bms-session/route.ts': 'auth-endpoint',
   'src/app/api/auth/hospital-preflight/route.ts': 'auth-endpoint',
