@@ -88,9 +88,7 @@ describe('isAdminAuthorized', () => {
     it('rejects an ADMIN with an empty allow-list IN production (fail closed)', () => {
       expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '1' }, [], true)).toBe(false);
       expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '' }, [], true)).toBe(false);
-      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: undefined }, [], true)).toBe(
-        false,
-      );
+      expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: undefined }, [], true)).toBe(false);
     });
 
     it('still enforces the CID gate in production when the list is non-empty', () => {

@@ -1,15 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { isRequestOriginTrusted, parseTrustedOrigins, isJsonContentType } from '@/lib/request-origin';
+import {
+  isRequestOriginTrusted,
+  parseTrustedOrigins,
+  isJsonContentType,
+} from '@/lib/request-origin';
 
 const APP = 'https://kk-lrms.bmscloud.in.th';
 
 describe('parseTrustedOrigins', () => {
   it('derives the app origin from NEXTAUTH_URL and appends extras', () => {
-    expect(parseTrustedOrigins(`${APP}/`, 'https://embedder.example.com, https://two.example.com')).toEqual([
-      APP,
-      'https://embedder.example.com',
-      'https://two.example.com',
-    ]);
+    expect(
+      parseTrustedOrigins(`${APP}/`, 'https://embedder.example.com, https://two.example.com'),
+    ).toEqual([APP, 'https://embedder.example.com', 'https://two.example.com']);
   });
   it('skips invalid URLs instead of throwing', () => {
     expect(parseTrustedOrigins('not a url', 'also-bad')).toEqual([]);
@@ -36,7 +38,10 @@ describe('isRequestOriginTrusted', () => {
   });
   it('allows the configured app origin', () => {
     expect(
-      isRequestOriginTrusted({ method: 'POST', origin: APP, secFetchSite: 'same-origin', ...base }, [APP]),
+      isRequestOriginTrusted(
+        { method: 'POST', origin: APP, secFetchSite: 'same-origin', ...base },
+        [APP],
+      ),
     ).toBe(true);
   });
   it('allows Origin matching the request host even if NEXTAUTH_URL is misconfigured', () => {
@@ -46,7 +51,10 @@ describe('isRequestOriginTrusted', () => {
   });
   it('rejects cross-site Sec-Fetch-Site when Origin is absent', () => {
     expect(
-      isRequestOriginTrusted({ method: 'POST', origin: null, secFetchSite: 'cross-site', ...base }, [APP]),
+      isRequestOriginTrusted(
+        { method: 'POST', origin: null, secFetchSite: 'cross-site', ...base },
+        [APP],
+      ),
     ).toBe(false);
   });
   it('allows non-browser clients that send neither header (curl, HOSxP Pascal)', () => {
