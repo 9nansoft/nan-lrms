@@ -101,6 +101,32 @@ describe('Journey Lifecycle Service', () => {
       const updated = await getJourneyByHn(db, '12345', hospitalId);
       expect(updated!.careStage).toBe(CareStage.LABOR);
     });
+
+    it('does not re-stamp stage_changed_at when already in LABOR', async () => {
+      const journey = await createJourney(db, {
+        hospitalId,
+        hn: '12345',
+        personAncId: 100,
+        name: 'Test',
+        cid: 'enc_test_130',
+        cidHash: 'testhash00000000000000000000000000000000000000000000000000000130',
+        age: 25,
+        gravida: 1,
+        para: 0,
+        lmp: '2025-06-01',
+        edc: '2026-03-08',
+        ancRiskLevel: AncRiskLevel.LOW,
+      });
+      const journeyId = journey.id;
+
+      await transitionToLabor(db, journeyId);
+      const first = await db.query<{ stage_changed_at: unknown }>(
+        'SELECT stage_changed_at FROM maternal_journeys WHERE id = ?', [journeyId]);
+      await transitionToLabor(db, journeyId);
+      const second = await db.query<{ stage_changed_at: unknown }>(
+        'SELECT stage_changed_at FROM maternal_journeys WHERE id = ?', [journeyId]);
+      expect(String(second[0].stage_changed_at)).toBe(String(first[0].stage_changed_at));
+    });
   });
 
   describe('transitionToDelivered', () => {

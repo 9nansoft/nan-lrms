@@ -29,7 +29,7 @@ import {
 } from './newborn';
 import type { HosxpLabourInfantRow, HosxpIptPregnancyRow } from '@/types/hosxp';
 import { calculateAndStoreCpdScores } from './cpd-persist';
-import { syncAncData } from './anc';
+import { syncAncData, linkJourneyToLabor } from './anc';
 import { logger } from '@/lib/logger';
 import { APP_IDENTIFIER } from '@/lib/bms-browser-client';
 import { decryptSafe } from '@/lib/encryption';
@@ -1025,6 +1025,20 @@ export async function pollHospital(
       message: `Upserted ${count} active patient rows.`,
       counts: { rows: count },
     });
+
+    // Parity with processWebhookPayload: link + LABOR-transition each active
+    // admission (prod runs browser-only sync; this path must not diverge).
+    for (const p of patients) {
+      if ((p.laborStatus ?? 'ACTIVE') !== 'ACTIVE') continue;
+      const rows = await db.query<{ id: string }>(
+        'SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?',
+        [hospitalId, p.an],
+      );
+      if (rows.length === 0) continue;
+      await db.transaction((tx) =>
+        linkJourneyToLabor(tx, hospitalId, p.hn, rows[0].id, p.cidHash ?? null, p.cid ?? null),
+      );
+    }
 
     emitStep(options, {
       name: 'detect_transfers',

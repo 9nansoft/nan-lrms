@@ -9,6 +9,7 @@ import {
   detectTransfers,
   markPatientsDelivered,
   calculateAndStoreCpdScores,
+  linkJourneyToLabor,
 } from '@/services/sync';
 import type { SyncPatientData } from '@/services/sync';
 import { upsertPartographObservations, type PartographRow } from '@/services/sync/partograph';
@@ -639,29 +640,22 @@ export async function processWebhookPayload(
   // Upsert patients (reuse existing sync pipeline)
   await upsertCachedPatients(db, hospitalId, patients);
 
-  // Fix E — link each cached_patients row to its maternal_journey when a
-  // matching cid_hash exists. Without this the journey_id FK stays null even
-  // though the read-path can still resolve via cid_hash JOIN; persisting the
-  // FK means the /patients/[an] page's journeyContext works without relying
-  // on the lookup path, and the continuity audit is no longer fragile.
-  const cidHashes = patients.map((p) => p.cidHash).filter((h): h is string => !!h);
-  if (cidHashes.length > 0) {
-    const placeholders = cidHashes.map(() => '?').join(',');
-    const journeys = await db.query<{ id: string; cid_hash: string }>(
-      `SELECT id, cid_hash FROM maternal_journeys WHERE cid_hash IN (${placeholders})`,
-      cidHashes,
+  // Link each ACTIVE labor admission to its maternal journey and transition
+  // PREGNANCY -> LABOR (walk-ins get a LABOR journey). linkJourneyToLabor is
+  // the single service-layer entry point: cid-hash-first + HN-fallback
+  // lookup, stage guard (DELIVERED journeys are never regressed), FK write.
+  // One transaction per patient (spec 3.1): the journey_id link and the
+  // stage transition (or walk-in creation) commit together.
+  for (const p of patients) {
+    if ((p.laborStatus ?? 'ACTIVE') !== 'ACTIVE') continue;
+    const rows = await db.query<{ id: string }>(
+      'SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?',
+      [hospitalId, p.an],
     );
-    const journeyByCid = new Map(journeys.map((j) => [j.cid_hash, j.id]));
-    for (const p of patients) {
-      if (!p.cidHash) continue;
-      const journeyId = journeyByCid.get(p.cidHash);
-      if (!journeyId) continue;
-      await db.execute(
-        `UPDATE cached_patients SET journey_id = ?, updated_at = ?
-         WHERE hospital_id = ? AND an = ? AND (journey_id IS NULL OR journey_id <> ?)`,
-        [journeyId, new Date().toISOString(), hospitalId, p.an, journeyId],
-      );
-    }
+    if (rows.length === 0) continue;
+    await db.transaction((tx) =>
+      linkJourneyToLabor(tx, hospitalId, p.hn, rows[0].id, p.cidHash ?? null, p.cid ?? null),
+    );
   }
 
   // Detect transfers

@@ -95,9 +95,13 @@ export async function getJourneyByHn(
 
 export async function transitionToLabor(db: DatabaseAdapter, journeyId: string): Promise<void> {
   const now = new Date().toISOString();
+  // Idempotent: linkJourneyToLabor runs on every sync cycle (~30 s); avoid
+  // re-stamping stage_changed_at on a journey already in LABOR (same
+  // dashboard-KPI rationale as transitionToDelivered below).
   await db.execute(
-    `UPDATE maternal_journeys SET care_stage = ?, stage_changed_at = ?, updated_at = ? WHERE id = ?`,
-    [CareStage.LABOR, now, now, journeyId],
+    `UPDATE maternal_journeys SET care_stage = ?, stage_changed_at = ?, updated_at = ?
+      WHERE id = ? AND care_stage <> ?`,
+    [CareStage.LABOR, now, now, journeyId, CareStage.LABOR],
   );
 }
 
