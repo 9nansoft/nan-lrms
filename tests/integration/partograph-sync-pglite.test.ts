@@ -7,8 +7,8 @@
 //   * decimal columns round-trip values without precision loss when read back
 //     (Postgres returns NUMERIC as a string, so the production toNum() helper
 //     must keep working through that),
-//   * the two-phase UPSERT in upsertPartographObservations() is dialect-safe
-//     (no ON CONFLICT, $N placeholder rewrite from PgliteAdapter works), and
+//   * the INSERT ... ON CONFLICT upsert in upsertPartographObservations() is
+//     dialect-correct ($N placeholder rewrite from PgliteAdapter works), and
 //   * the severity roll-up onto cached_patients works against pglite too.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createPgliteDb } from '../helpers/createPgliteDb';

@@ -286,7 +286,9 @@ function analyzeCervix(obs: PartographObservationDto[]): CdssAlertDto[] {
     for (let i = firstActiveIdx + 1; i < obs.length; i++) {
       const d = obs[i].cervicalDilationCm;
       if (d === null || d <= 0) continue;
-      const expected = anchorDil + hoursBetween(obs[i].observeDatetime, anchorDt);
+      // Full dilation is 10 cm — the expectation can never exceed it, so a
+      // fully dilated patient is never "behind" an impossible target.
+      const expected = Math.min(10, anchorDil + hoursBetween(obs[i].observeDatetime, anchorDt));
       if (d < expected - 4) {
         out.push({
           severity: 'CRITICAL', section: 'CERVIX', obsIndex: i,

@@ -238,6 +238,47 @@ describe('Sync Journey Extension', () => {
       );
       expect(visits).toHaveLength(2);
     });
+
+    it('repeated unchanged ANC sync does not append duplicate screening rows', async () => {
+      const ancPatients: HosxpPersonAncRow[] = [
+        {
+          person_anc_id: 1001,
+          person_id: 500,
+          hn: 'HN-ANC-DEDUP',
+          pname: 'นาง',
+          fname: 'ทดสอบ',
+          lname: 'ซ้ำเสี่ยง',
+          cid: '1234567890121',
+          birthday: '1992-01-01',
+          preg_no: 1,
+          lmp: '2025-06-01',
+          edc: '2026-03-08',
+          anc_register_date: '2025-08-01',
+        },
+      ];
+      const ancServices: HosxpAncServiceRow[] = [];
+      const ancRisks: HosxpAncRiskRow[] = [];
+      const ancClassifying: HosxpAncClassifyingRow[] = [];
+
+      await syncAncData(
+        db, hospitalId, ancPatients, ancServices, ancRisks, ancClassifying, ENCRYPTION_KEY,
+      );
+      await syncAncData(
+        db, hospitalId, ancPatients, ancServices, ancRisks, ancClassifying, ENCRYPTION_KEY,
+      );
+
+      const journeys = await db.query<{ id: string }>(
+        'SELECT id FROM maternal_journeys WHERE hospital_id = ? AND hn = ?',
+        [hospitalId, 'HN-ANC-DEDUP'],
+      );
+      expect(journeys).toHaveLength(1);
+
+      const rows = await db.query(
+        'SELECT id FROM cached_anc_risks WHERE journey_id = ?',
+        [journeys[0].id],
+      );
+      expect(rows.length).toBe(1);
+    });
   });
 
   // --- linkJourneyToLabor Tests ---

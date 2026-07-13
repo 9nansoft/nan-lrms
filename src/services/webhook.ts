@@ -23,6 +23,7 @@ import {
 import { AncRiskLevel, ReferralStatus } from '@/types/domain';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
 import { ANC_RISK_CONFIGS, ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
+import { insertAncScreeningIfChanged } from '@/services/anc-screening';
 import { logger } from '@/lib/logger';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
 import { isoDatesEqual } from '@/lib/dates';
@@ -861,38 +862,14 @@ async function recordAncRiskScreening(
   itemIds: number[],
 ): Promise<void> {
   const derived = classifyAncItems(itemIds);
-  const labelsJson = JSON.stringify(derived.labels);
-
-  const latest = await db.query<{ risk_level: string; triggered_rules: unknown }>(
-    `SELECT risk_level, triggered_rules FROM cached_anc_risks
-      WHERE journey_id = ? ORDER BY screened_at DESC, created_at DESC LIMIT 1`,
-    [journeyId],
-  );
-  if (latest.length > 0) {
-    // pg returns JSONB pre-parsed, SQLite returns TEXT — normalize both.
-    const prev = latest[0].triggered_rules;
-    const prevJson = typeof prev === 'string' ? prev : JSON.stringify(prev);
-    if (latest[0].risk_level === level && prevJson === labelsJson) return;
-  }
-
   const config = ANC_RISK_CONFIGS[level];
-  const now = new Date().toISOString();
-  await db.execute(
-    `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors,
-     recommended_facility, recommended_provider, screened_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      uuidv4(),
-      journeyId,
-      level,
-      labelsJson,
-      JSON.stringify({ itemIds }),
-      config?.facilityTh ?? null,
-      config?.providerTh ?? null,
-      now,
-      now,
-    ],
-  );
+  await insertAncScreeningIfChanged(db, journeyId, {
+    level,
+    triggeredRulesJson: JSON.stringify(derived.labels),
+    riskFactorsJson: JSON.stringify({ itemIds }),
+    recommendedFacility: config?.facilityTh ?? null,
+    recommendedProvider: config?.providerTh ?? null,
+  });
 }
 
 export async function processAncWebhook(

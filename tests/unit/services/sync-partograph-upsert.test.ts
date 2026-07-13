@@ -107,4 +107,29 @@ describe('upsertPartographObservations', () => {
       'SELECT id FROM cached_partograph_observations');
     expect(stored).toHaveLength(0);
   });
+
+  it('concurrent upserts of the same source row produce ONE row and no unique-violation', async () => {
+    const row = mkRow({ sourcePk: 'race-1' });
+    const results = await Promise.allSettled([
+      upsertPartographObservations(db, HOSPITAL_ID, [row]),
+      upsertPartographObservations(db, HOSPITAL_ID, [row]),
+    ]);
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+    const rows = await db.query(
+      `SELECT id FROM cached_partograph_observations WHERE source_pk = 'race-1'`,
+    );
+    expect(rows.length).toBe(1);
+  });
+
+  it('a failing row rolls back the WHOLE batch (no partial ingestion)', async () => {
+    const good = mkRow({ sourcePk: 'batch-1' });
+    const bad = mkRow({ sourcePk: 'batch-2', patientId: crypto.randomUUID() }); // FK violation
+    await expect(
+      upsertPartographObservations(db, HOSPITAL_ID, [good, bad]),
+    ).rejects.toThrow();
+    const rows = await db.query(
+      `SELECT id FROM cached_partograph_observations WHERE source_pk = 'batch-1'`,
+    );
+    expect(rows.length).toBe(0); // good row rolled back with the bad one
+  });
 });

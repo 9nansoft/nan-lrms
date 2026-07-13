@@ -22,6 +22,7 @@ import {
   transitionToDelivered,
 } from '@/services/journey';
 import { evaluateAncRisk } from '@/services/anc-risk';
+import { insertAncScreeningIfChanged } from '@/services/anc-screening';
 import type { AncRiskInput } from '@/config/anc-risk-rules';
 import { HOSXP_RISK_TO_LAB_FLAGS } from '@/config/anc-risk-rules';
 import { AncRiskLevel } from '@/types/domain';
@@ -338,23 +339,13 @@ async function upsertAncRisk(
   },
   _riskInput: AncRiskInput,
 ): Promise<void> {
-  const now = new Date().toISOString();
-  await db.execute(
-    `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors,
-     recommended_facility, recommended_provider, screened_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      uuidv4(),
-      journeyId,
-      riskResult.level,
-      JSON.stringify(riskResult.triggeredRules),
-      JSON.stringify({}),
-      riskResult.recommendation.facilityTh,
-      riskResult.recommendation.providerTh,
-      now,
-      now,
-    ],
-  );
+  await insertAncScreeningIfChanged(db, journeyId, {
+    level: riskResult.level,
+    triggeredRulesJson: JSON.stringify(riskResult.triggeredRules),
+    riskFactorsJson: JSON.stringify({}),
+    recommendedFacility: riskResult.recommendation.facilityTh,
+    recommendedProvider: riskResult.recommendation.providerTh,
+  });
 }
 
 export async function linkJourneyToLabor(
