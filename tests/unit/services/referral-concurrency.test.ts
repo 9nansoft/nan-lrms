@@ -18,8 +18,17 @@ async function seedReferral(): Promise<string> {
     `SELECT id, hcode FROM hospitals WHERE hcode IN ('10670','11004') ORDER BY hcode`,
   );
   const journey = await createJourney(db, {
-    hospitalId: hosp[0].id, hn: 'HN-C1', personAncId: null, name: '', cid: '',
-    cidHash: 'hash-c1', age: 30, gravida: 1, para: 0, lmp: null, edc: null,
+    hospitalId: hosp[0].id,
+    hn: 'HN-C1',
+    personAncId: null,
+    name: '',
+    cid: '',
+    cidHash: 'hash-c1',
+    age: 30,
+    gravida: 1,
+    para: 0,
+    lmp: null,
+    edc: null,
     ancRiskLevel: AncRiskLevel.LOW,
   });
   const referral = await initiateReferral(db, {
@@ -51,8 +60,11 @@ describe('referral transition concurrency', () => {
     expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ReferralConflictError);
 
     // no mixed-column corruption: the losing transition wrote NOTHING
-    const row = await db.query<{ status: string; accepted_by: string | null; rejection_reason: string | null }>(
-      'SELECT status, accepted_by, rejection_reason FROM cached_referrals WHERE id = ?', [id]);
+    const row = await db.query<{
+      status: string;
+      accepted_by: string | null;
+      rejection_reason: string | null;
+    }>('SELECT status, accepted_by, rejection_reason FROM cached_referrals WHERE id = ?', [id]);
     if (row[0].status === ReferralStatus.ACCEPTED) {
       expect(row[0].rejection_reason).toBeNull();
     } else {
@@ -67,17 +79,23 @@ describe('referral transition concurrency', () => {
     const second = await acceptReferral(db, id, 'พว.สอง'); // duplicate request
     expect(second.status).toBe(ReferralStatus.ACCEPTED);
     const row = await db.query<{ accepted_by: string }>(
-      'SELECT accepted_by FROM cached_referrals WHERE id = ?', [id]);
+      'SELECT accepted_by FROM cached_referrals WHERE id = ?',
+      [id],
+    );
     expect(row[0].accepted_by).toBe('พว.หนึ่ง');
   });
 
   it('accept writes its audit row atomically with the transition', async () => {
     const id = await seedReferral();
     await acceptReferral(db, id, 'พว.เอ', {
-      userId: 'u-c1', userName: 'พว.เอ', userRole: 'NURSE', hospitalCode: '11004',
+      userId: 'u-c1',
+      userName: 'พว.เอ',
+      userRole: 'NURSE',
+      hospitalCode: '11004',
     });
     const audit = await db.query<{ resource_id: string }>(
-      `SELECT resource_id FROM audit_logs WHERE action = 'referral_accept'`);
+      `SELECT resource_id FROM audit_logs WHERE action = 'referral_accept'`,
+    );
     expect(audit.length).toBe(1);
     expect(audit[0].resource_id).toBe(id);
   });

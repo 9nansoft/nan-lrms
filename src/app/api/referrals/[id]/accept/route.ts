@@ -9,10 +9,5 @@ export const PATCH = referralTransitionRoute({
   requiredField: null,
   logEvent: 'referral_accept_failed',
   run: (db, id, _body, session) =>
-    acceptReferral(
-      db,
-      id,
-      session.user.name ?? session.user.id,
-      auditActorFromSession(session),
-    ),
+    acceptReferral(db, id, session.user.name ?? session.user.id, auditActorFromSession(session)),
 });

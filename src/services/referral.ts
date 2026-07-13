@@ -124,7 +124,12 @@ export async function acceptReferral(
       [ReferralStatus.ACCEPTED, now, acceptedBy, now, referralId, ReferralStatus.INITIATED],
     );
     if (won.length === 0) {
-      return resolveLostTransition(tx, referralId, ReferralStatus.ACCEPTED, ReferralStatus.INITIATED);
+      return resolveLostTransition(
+        tx,
+        referralId,
+        ReferralStatus.ACCEPTED,
+        ReferralStatus.INITIATED,
+      );
     }
     if (audit?.userId) {
       await logAccess(tx, {
@@ -161,7 +166,12 @@ export async function rejectReferral(
       ],
     );
     if (won.length === 0) {
-      return resolveLostTransition(tx, referralId, ReferralStatus.REJECTED, ReferralStatus.INITIATED);
+      return resolveLostTransition(
+        tx,
+        referralId,
+        ReferralStatus.REJECTED,
+        ReferralStatus.INITIATED,
+      );
     }
     if (audit?.userId) {
       await logAccess(tx, {
@@ -189,7 +199,12 @@ export async function markInTransit(
       [ReferralStatus.IN_TRANSIT, now, transportMode, now, referralId, ReferralStatus.ACCEPTED],
     );
     if (won.length === 0) {
-      return resolveLostTransition(tx, referralId, ReferralStatus.IN_TRANSIT, ReferralStatus.ACCEPTED);
+      return resolveLostTransition(
+        tx,
+        referralId,
+        ReferralStatus.IN_TRANSIT,
+        ReferralStatus.ACCEPTED,
+      );
     }
     if (audit?.userId) {
       await logAccess(tx, {
@@ -217,7 +232,12 @@ export async function confirmArrival(
       [ReferralStatus.ARRIVED, now, now, referralId, ReferralStatus.IN_TRANSIT],
     );
     if (won.length === 0) {
-      return resolveLostTransition(tx, referralId, ReferralStatus.ARRIVED, ReferralStatus.IN_TRANSIT);
+      return resolveLostTransition(
+        tx,
+        referralId,
+        ReferralStatus.ARRIVED,
+        ReferralStatus.IN_TRANSIT,
+      );
     }
     await tx.execute(
       `UPDATE maternal_journeys SET current_hospital_id = ?, updated_at = ? WHERE id = ?`,
