@@ -39,9 +39,9 @@ const READONLY_BLOCKED_API_PREFIXES = [
   '/api/referrals',
   '/api/hospital/audit-log',
 ];
-// Dev-only API routes that are already guarded server-side by simulationGuard()
-// (which throws 404 in production). Listing them here lets local CLI tooling
-// curl them without a NextAuth cookie. No-op in prod because the guard fires first.
+// Dev-only API routes. In production isSimulationEnabled() is hard-false and
+// every handler 404s via simulationGuard(); this unauthenticated middleware
+// bypass additionally only applies when NODE_ENV !== 'production'.
 const DEV_ONLY_API_PATHS = ['/api/dev/simulate', '/api/dev/smoke-tab-update'];
 
 // T108: security headers for all responses — policy + rationale live in
