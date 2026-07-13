@@ -6,12 +6,14 @@ import { BmsSessionClient, BmsApiErrorClass } from '@/lib/bms-session';
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+const BMS_URL = 'https://99999-test.tunnel.hosxp.net';
+
 describe('BmsSessionClient', () => {
   let client: BmsSessionClient;
 
   beforeEach(() => {
     mockFetch.mockReset();
-    client = new BmsSessionClient('https://99999-test.tunnel.hosxp.net');
+    client = new BmsSessionClient(BMS_URL);
   });
 
   it('should create with tunnel URL', () => {
@@ -117,6 +119,52 @@ describe('BmsSessionClient', () => {
       await expect(
         client.executeQuery('INVALID SQL', 'https://test.net', 'jwt'),
       ).rejects.toThrow(BmsApiErrorClass);
+    });
+  });
+
+  describe('classifyTransportError (via executeQuery/getDatabaseType)', () => {
+    it('classifies an AbortSignal timeout as TIMEOUT', async () => {
+      const timeoutError = new DOMException(
+        'The operation was aborted due to timeout',
+        'TimeoutError',
+      );
+      mockFetch.mockRejectedValueOnce(timeoutError);
+      await expect(client.executeQuery('SELECT 1', BMS_URL, 'jwt')).rejects.toMatchObject({
+        code: 'TIMEOUT',
+      });
+    });
+
+    it('classifies DNS failure as CONNECTION_ERROR with a DNS message, not TIMEOUT', async () => {
+      const dnsError = Object.assign(new TypeError('fetch failed'), {
+        cause: { code: 'ENOTFOUND' },
+      });
+      mockFetch.mockRejectedValueOnce(dnsError);
+      await expect(client.executeQuery('SELECT 1', BMS_URL, 'jwt')).rejects.toMatchObject({
+        code: 'CONNECTION_ERROR',
+        message: expect.stringContaining('DNS lookup failed'),
+      });
+    });
+
+    it('classifies a malformed 200 response as CONNECTION_ERROR (invalid JSON), not TIMEOUT', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => {
+          throw new SyntaxError('Unexpected token < in JSON');
+        },
+      });
+      await expect(client.executeQuery('SELECT 1', BMS_URL, 'jwt')).rejects.toMatchObject({
+        code: 'CONNECTION_ERROR',
+        message: expect.stringContaining('invalid JSON response'),
+      });
+    });
+
+    it('getDatabaseType returns null (not a mysql guess) when detection fails', async () => {
+      mockFetch.mockRejectedValueOnce(
+        Object.assign(new TypeError('fetch failed'), {
+          cause: { code: 'ECONNREFUSED' },
+        }),
+      );
+      await expect(client.getDatabaseType(BMS_URL, 'jwt')).resolves.toBeNull();
     });
   });
 });

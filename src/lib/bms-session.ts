@@ -6,6 +6,8 @@ import type {
   SessionConfig,
   BmsApiError,
 } from '@/types/bms-session';
+import type { DatabaseDialect } from '@/config/hosxp-queries';
+import { logger } from '@/lib/logger';
 
 export class BmsApiErrorClass extends Error {
   code: BmsApiError['code'];
@@ -19,6 +21,35 @@ export class BmsApiErrorClass extends Error {
     this.statusCode = error.statusCode;
     this.details = error.details;
   }
+}
+
+// Classifies a raw transport failure (thrown by fetch or response.json())
+// into a truthful BmsApiError. Previously every non-HTTP failure — DNS,
+// refused connections, TLS, malformed JSON — was flattened to TIMEOUT in
+// some call sites and CONNECTION_ERROR in others, regardless of cause.
+function classifyTransportError(error: unknown): BmsApiError {
+  const err = error as Error & { cause?: { code?: string } };
+  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+    return { code: 'TIMEOUT', message: `Request timed out: ${err.message}`, statusCode: 0 };
+  }
+  const causeCode = String(err?.cause?.code ?? '');
+  const detail =
+    causeCode === 'ENOTFOUND' || causeCode === 'EAI_AGAIN'
+      ? 'DNS lookup failed'
+      : causeCode === 'ECONNREFUSED'
+        ? 'connection refused'
+        : causeCode.startsWith('ERR_TLS') ||
+            causeCode === 'CERT_HAS_EXPIRED' ||
+            causeCode === 'DEPTH_ZERO_SELF_SIGNED_CERT'
+          ? 'TLS error'
+          : err instanceof SyntaxError
+            ? 'invalid JSON response'
+            : 'network error';
+  return {
+    code: 'CONNECTION_ERROR',
+    message: `${detail}: ${err?.message ?? String(error)}`,
+    statusCode: 0,
+  };
 }
 
 export class BmsSessionClient {
@@ -46,11 +77,7 @@ export class BmsSessionClient {
       return typeof sessionId === 'string' ? sessionId : String(sessionId);
     } catch (error) {
       if (error instanceof BmsApiErrorClass) throw error;
-      throw new BmsApiErrorClass({
-        code: 'CONNECTION_ERROR',
-        message: `Cannot connect to BMS at ${this.tunnelUrl}: ${(error as Error).message}`,
-        statusCode: 0,
-      });
+      throw new BmsApiErrorClass(classifyTransportError(error));
     }
   }
 
@@ -86,11 +113,7 @@ export class BmsSessionClient {
       };
     } catch (error) {
       if (error instanceof BmsApiErrorClass) throw error;
-      throw new BmsApiErrorClass({
-        code: 'CONNECTION_ERROR',
-        message: `Validation failed: ${(error as Error).message}`,
-        statusCode: 0,
-      });
+      throw new BmsApiErrorClass(classifyTransportError(error));
     }
   }
 
@@ -138,19 +161,36 @@ export class BmsSessionClient {
       return await response.json();
     } catch (error) {
       if (error instanceof BmsApiErrorClass) throw error;
-      throw new BmsApiErrorClass({
-        code: 'TIMEOUT',
-        message: `Query timeout: ${(error as Error).message}`,
-        statusCode: 0,
-      });
+      throw new BmsApiErrorClass(classifyTransportError(error));
     }
   }
 
-  getDatabaseType(bmsUrl: string, jwt: string): Promise<'postgresql' | 'mysql'> {
-    // Detect database type by trying a version query
-    return this.executeQuery('SELECT version()', bmsUrl, jwt).then((result) => {
-      const version = String(result.data[0]?.['version()'] ?? '');
-      return version.toLowerCase().includes('postgresql') ? 'postgresql' : 'mysql';
-    });
+  // Detects the HOSxP database dialect by running a version query. Returns
+  // null (never a guessed dialect) when detection fails for any reason —
+  // callers must treat null as "unknown" and ask for an explicit dialect
+  // rather than silently persisting a wrong guess.
+  async getDatabaseType(
+    bmsUrl: string,
+    jwt: string,
+    options?: { marketplaceToken?: string | null; appIdentifier?: string },
+  ): Promise<DatabaseDialect | null> {
+    try {
+      const result = await this.executeQuery(
+        'SELECT version()',
+        bmsUrl,
+        jwt,
+        undefined,
+        options,
+      );
+      const first = result.data[0] ?? {};
+      const version = String(
+        first['version()'] ?? first.version ?? Object.values(first)[0] ?? '',
+      ).toLowerCase();
+      return version.includes('postgresql') ? 'postgresql' : 'mysql';
+    } catch (error) {
+      const code = error instanceof BmsApiErrorClass ? error.code : 'CONNECTION_ERROR';
+      logger.warn('bms_db_type_detect_failed', { code });
+      return null;
+    }
   }
 }
