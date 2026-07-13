@@ -17,10 +17,10 @@ import { logger } from '@/lib/logger';
 // `global` gives one adapter per Node process regardless of bundle or HMR
 // (matches the pattern already used for __pgliteLock and __simApiKeyCache).
 interface DbSingleton {
-  instance: DatabaseAdapter | null;
+  promise: Promise<DatabaseAdapter> | null;
 }
 const _global = global as unknown as { __dbSingleton?: DbSingleton };
-const _singleton: DbSingleton = _global.__dbSingleton ?? { instance: null };
+const _singleton: DbSingleton = _global.__dbSingleton ?? { promise: null };
 if (!_global.__dbSingleton) _global.__dbSingleton = _singleton;
 
 // In-process Postgres dev mode via @electric-sql/pglite. Useful when you
@@ -38,41 +38,57 @@ export function getDriverType(): 'postgresql' {
 }
 
 export async function getDatabase(): Promise<DatabaseAdapter> {
-  if (_singleton.instance) return _singleton.instance;
+  if (!_singleton.promise) {
+    // Memoize the IN-FLIGHT promise (not just the resolved instance) so
+    // concurrent cold-start callers await one construction instead of each
+    // racing an adapter into existence across the `await import(...)`
+    // suspension (last writer wins, losers leak). Clear on rejection so a
+    // later call can retry — same pattern as src/lib/ensure-init.ts.
+    _singleton.promise = createAdapter().catch((error) => {
+      _singleton.promise = null;
+      throw error;
+    });
+  }
+  return _singleton.promise;
+}
 
+async function createAdapter(): Promise<DatabaseAdapter> {
   if (isPgliteEnabled()) {
     const { PgliteAdapter, createPglite } = await import('./pglite-adapter');
     const path = process.env.PGLITE_PATH ?? './.pglite-data';
-    _singleton.instance = new PgliteAdapter(createPglite(path));
     if (process.env.NODE_ENV !== 'test') {
       logger.info('pglite_connected', { path });
     }
-  } else if (process.env.NODE_ENV === 'test') {
+    return new PgliteAdapter(createPglite(path));
+  }
+  if (process.env.NODE_ENV === 'test') {
     // Tests get an in-memory pglite so they never require a running server.
     // Most suites use tests/helpers/testDb.ts directly; this path covers
     // code that reaches getDatabase() itself.
     const { PgliteAdapter, createPglite } = await import('./pglite-adapter');
-    _singleton.instance = new PgliteAdapter(createPglite());
-  } else {
-    const { PostgresAdapter } = await import('./postgres-adapter');
-    const url = process.env.DATABASE_URL;
-    if (!url) {
-      throw new Error('DATABASE_URL environment variable is required');
-    }
-    _singleton.instance = new PostgresAdapter(url);
+    return new PgliteAdapter(createPglite());
   }
-
-  return _singleton.instance;
+  const { PostgresAdapter } = await import('./postgres-adapter');
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error('DATABASE_URL environment variable is required');
+  }
+  return new PostgresAdapter(url);
 }
 
 export async function closeDatabase(): Promise<void> {
-  if (_singleton.instance) {
-    await _singleton.instance.close();
-    _singleton.instance = null;
+  const pending = _singleton.promise;
+  _singleton.promise = null;
+  if (!pending) return;
+  try {
+    const instance = await pending;
+    await instance.close();
+  } catch {
+    // initialization had failed — nothing to close
   }
 }
 
 // For testing: reset the singleton
 export function resetDatabaseInstance(): void {
-  _singleton.instance = null;
+  _singleton.promise = null;
 }

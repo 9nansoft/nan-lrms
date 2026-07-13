@@ -38,4 +38,22 @@ describe('getDatabase in the test environment', () => {
     const { PgliteAdapter } = await import('@/db/pglite-adapter');
     expect(db).toBeInstanceOf(PgliteAdapter);
   });
+
+  it('concurrent cold-start calls share ONE adapter instance', async () => {
+    resetDatabaseInstance();
+    const [a, b, c] = await Promise.all([getDatabase(), getDatabase(), getDatabase()]);
+    expect(a).toBe(b);
+    expect(b).toBe(c);
+  });
+
+  it('a failed initialization is retryable without an explicit reset', async () => {
+    resetDatabaseInstance();
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('USE_PGLITE', 'false');
+    vi.stubEnv('DATABASE_URL', '');
+    await expect(getDatabase()).rejects.toThrow(/DATABASE_URL/);
+    vi.unstubAllEnvs(); // back to test env -> PGlite branch
+    const db = await getDatabase(); // no reset — the rejected promise must have self-cleared
+    expect(db).toBeDefined();
+  });
 });
