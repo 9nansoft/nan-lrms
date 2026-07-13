@@ -81,9 +81,7 @@ export default auth((req) => {
       requestOrigin: req.nextUrl.origin,
     })
   ) {
-    return addSecurityHeaders(
-      NextResponse.json(apiError('CSRF_ORIGIN_REJECTED'), { status: 403 }),
-    );
+    return addSecurityHeaders(NextResponse.json(apiError('CSRF_ORIGIN_REJECTED'), { status: 403 }));
   }
 
   // Check authentication

@@ -2,9 +2,9 @@
 // CLAUDE.md: error messages MUST be actionable — what went wrong AND what to do (in Thai).
 
 export interface ApiError {
-  error: string;        // English summary for logs/devs
-  code: string;         // Stable machine-readable code
-  message: string;      // Thai message for end users
+  error: string; // English summary for logs/devs
+  code: string; // Stable machine-readable code
+  message: string; // Thai message for end users
   suggestedAction: string; // What the user should do (Thai)
 }
 
@@ -33,7 +33,8 @@ export const ApiErrors = {
     error: 'hospitalCode does not match API key',
     code: 'HOSPITAL_CODE_MISMATCH',
     message: 'รหัสโรงพยาบาลไม่ตรงกับ API key',
-    suggestedAction: 'ใช้ hospitalCode ที่ตรงกับโรงพยาบาลของ API key หรือใช้ key ของโรงพยาบาลที่ถูกต้อง',
+    suggestedAction:
+      'ใช้ hospitalCode ที่ตรงกับโรงพยาบาลของ API key หรือใช้ key ของโรงพยาบาลที่ถูกต้อง',
   },
   CID_REQUIRED: {
     error: '"cid" is required (string, 13 digits)',
@@ -45,7 +46,8 @@ export const ApiErrors = {
     error: '"patients" array is required and must not be empty',
     code: 'PATIENTS_REQUIRED',
     message: 'ต้องมี field "patients" เป็น array ที่ไม่ว่าง',
-    suggestedAction: 'ส่ง patients เป็น array ที่มีอย่างน้อย 1 รายการ และไม่เกิน 100 รายการต่อ request',
+    suggestedAction:
+      'ส่ง patients เป็น array ที่มีอย่างน้อย 1 รายการ และไม่เกิน 100 รายการต่อ request',
   },
   PATIENTS_TOO_MANY: {
     error: '"patients" array must not exceed 100 items per request',
