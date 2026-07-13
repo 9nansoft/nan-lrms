@@ -65,10 +65,18 @@ export async function PUT(
     }
 
     // Upsert BMS config
-    const existing = await db.query<{ id: string }>(
-      'SELECT id FROM hospital_bms_config WHERE hospital_id = ?',
+    const existing = await db.query<{ id: string; database_type: string | null }>(
+      'SELECT id, database_type FROM hospital_bms_config WHERE hospital_id = ?',
       [hospitalId],
     );
+
+    // getDatabaseType returns null when detection fails (or was skipped
+    // because session validation itself failed). Keep whatever dialect was
+    // already persisted rather than overwriting a working value with null —
+    // same guard applied to the other getDatabaseType call sites (C5).
+    if (!databaseType && existing.length > 0) {
+      databaseType = existing[0].database_type;
+    }
 
     if (existing.length > 0) {
       await db.execute(
