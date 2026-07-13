@@ -22,7 +22,7 @@ import {
 } from '@/services/journey';
 import { AncRiskLevel, ReferralStatus } from '@/types/domain';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
-import { ANC_RISK_CONFIGS } from '@/config/anc-risk-rules';
+import { ANC_RISK_CONFIGS, ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
 import { logger } from '@/lib/logger';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
 import { isoDatesEqual } from '@/lib/dates';
@@ -531,6 +531,28 @@ export function validateAncPayload(body: unknown): {
     if (p.pregNo == null || typeof p.pregNo !== 'number') {
       errors.push(`patients[${i}].pregNo is required (number)`);
     }
+    if (p.riskLevel !== undefined && p.riskLevel !== null) {
+      if (
+        typeof p.riskLevel !== 'string' ||
+        !(Object.values(AncRiskLevel) as string[]).includes(p.riskLevel)
+      ) {
+        errors.push(`patients[${i}].riskLevel must be one of LOW|HR1|HR2|HR3`);
+      }
+    }
+    if (p.riskItemIds !== undefined && p.riskItemIds !== null) {
+      if (
+        !Array.isArray(p.riskItemIds) ||
+        p.riskItemIds.some((x) => typeof x !== 'number' || !Number.isInteger(x))
+      ) {
+        errors.push(`patients[${i}].riskItemIds must be an array of integer item IDs`);
+      }
+    }
+    for (const field of ['lmp', 'edc', 'birthday'] as const) {
+      const v = p[field];
+      if (v !== undefined && v !== null && (typeof v !== 'string' || Number.isNaN(Date.parse(v)))) {
+        errors.push(`patients[${i}].${field} must be an ISO date string`);
+      }
+    }
   }
 
   if (errors.length > 0) {
@@ -800,16 +822,38 @@ export async function processWebhookPayload(
 // provincial criteria fired and when. Unchanged classifications are not
 // re-inserted (the webhook pushes every few minutes; without the dedupe
 // this table would grow one row per woman per push).
+function maxRiskLevel(a: AncRiskLevel, b: AncRiskLevel): AncRiskLevel {
+  return ANC_RISK_LEVEL_ORDER[a] >= ANC_RISK_LEVEL_ORDER[b] ? a : b;
+}
+
+/**
+ * Canonical ANC risk (2026-07-13 clinical rule): the item-derived severity is
+ * authoritative and a declared level may only RAISE it, never lower it.
+ * Returns null for legacy payloads carrying neither usable signal.
+ */
+export function resolveCanonicalAncRisk(
+  declaredLevel: string | undefined,
+  riskItemIds: number[] | null | undefined,
+): AncRiskLevel | null {
+  const declared =
+    declaredLevel && (Object.values(AncRiskLevel) as string[]).includes(declaredLevel)
+      ? (declaredLevel as AncRiskLevel)
+      : null;
+  if (!Array.isArray(riskItemIds)) return declared;
+  const derived = classifyAncItems(riskItemIds).level as AncRiskLevel;
+  if (declared && ANC_RISK_LEVEL_ORDER[declared] < ANC_RISK_LEVEL_ORDER[derived]) {
+    logger.warn('anc_declared_risk_understated', { declared, derived });
+  }
+  return declared ? maxRiskLevel(declared, derived) : derived;
+}
+
 async function recordAncRiskScreening(
   db: DatabaseAdapter,
   journeyId: string,
-  declaredLevel: string | undefined,
+  level: AncRiskLevel,
   itemIds: number[],
 ): Promise<void> {
   const derived = classifyAncItems(itemIds);
-  const level = (
-    declaredLevel && declaredLevel in ANC_RISK_CONFIGS ? declaredLevel : derived.level
-  ) as AncRiskLevel;
   const labelsJson = JSON.stringify(derived.labels);
 
   const latest = await db.query<{ risk_level: string; triggered_rules: unknown }>(
@@ -968,6 +1012,10 @@ export async function processAncWebhook(
     // Decide: update existing journey OR create new one
     const shouldCreateNew = !existing || isNewPregnancy;
 
+    // Canonical severity — computed once and applied consistently to the
+    // journey write, the SSE broadcast, and the risk-screening record below.
+    const canonicalRisk = resolveCanonicalAncRisk(patient.riskLevel, patient.riskItemIds);
+
     let journeyId: string;
     if (!shouldCreateNew && existing) {
       // Update existing journey with latest data (same pregnancy)
@@ -980,7 +1028,7 @@ export async function processAncWebhook(
           cidHash,
           patient.lmp ?? existing.lmp,
           patient.edc ?? existing.edc,
-          patient.riskLevel ?? existing.ancRiskLevel,
+          canonicalRisk ?? existing.ancRiskLevel,
           now,
           now,
           existing.id,
@@ -993,7 +1041,7 @@ export async function processAncWebhook(
         hcode,
         journeyId: existing.id,
         careStage: existing.careStage,
-        ancRiskLevel: patient.riskLevel ?? existing.ancRiskLevel ?? undefined,
+        ancRiskLevel: canonicalRisk ?? existing.ancRiskLevel ?? undefined,
       });
       updated++;
     } else {
@@ -1024,7 +1072,7 @@ export async function processAncWebhook(
         para: 0,
         lmp: patient.lmp ?? null,
         edc: patient.edc ?? null,
-        ancRiskLevel: (patient.riskLevel as AncRiskLevel) ?? AncRiskLevel.LOW,
+        ancRiskLevel: canonicalRisk ?? AncRiskLevel.LOW,
       });
       journeyId = journey.id;
 
@@ -1033,7 +1081,7 @@ export async function processAncWebhook(
         hcode,
         journeyId: journey.id,
         careStage: 'PREGNANCY',
-        ancRiskLevel: patient.riskLevel ?? undefined,
+        ancRiskLevel: canonicalRisk ?? undefined,
       });
       created++;
     }
@@ -1056,8 +1104,8 @@ export async function processAncWebhook(
     // Persist the risk screening (level + which criteria fired) when the
     // client sends the checked classifying items. Legacy payloads without
     // riskItemIds keep the old level-only behavior.
-    if (Array.isArray(patient.riskItemIds)) {
-      await recordAncRiskScreening(db, journeyId, patient.riskLevel, patient.riskItemIds);
+    if (Array.isArray(patient.riskItemIds) && canonicalRisk) {
+      await recordAncRiskScreening(db, journeyId, canonicalRisk, patient.riskItemIds);
     }
 
     // Persist ANC visit records — replace strategy (delete old, insert new).

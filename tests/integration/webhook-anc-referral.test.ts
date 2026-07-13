@@ -152,7 +152,9 @@ describe('ANC/Referral Webhook Integration', () => {
 
       sseManager.clearEvents();
 
-      // Second: update riskLevel to HIGH
+      // Second: update riskLevel to HR2 ('HIGH' is not a valid AncRiskLevel —
+      // canonical resolution now rejects it and retains the existing level,
+      // see the sibling test below for that behavior).
       const update: WebhookAncPayload = {
         type: 'anc_data',
         hospitalCode: '99902',
@@ -165,7 +167,7 @@ describe('ANC/Referral Webhook Integration', () => {
             pregNo: 2,
             lmp: '2025-07-01',
             edc: '2026-04-07',
-            riskLevel: 'HIGH',
+            riskLevel: 'HR2',
           },
         ],
       };
@@ -179,7 +181,55 @@ describe('ANC/Referral Webhook Integration', () => {
         ['ANC-UPD', webhookHospitalId],
       );
       expect(after).toHaveLength(1); // No duplicate
-      expect(after[0].anc_risk_level).toBe('HIGH');
+      expect(after[0].anc_risk_level).toBe('HR2');
+    });
+
+    it('declared-only legacy payload (no riskItemIds) can lower the level — the no-lowering rule only applies when items are present', async () => {
+      // First: create at HR2 (no riskItemIds — declared-only, legacy-style payload)
+      const create: WebhookAncPayload = {
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'ANC-LEGACY-LOWER',
+            name: 'นาง ทดสอบ ลดระดับ',
+            cid: '1007000100131',
+            birthday: '1994-06-20',
+            pregNo: 1,
+            riskLevel: 'HR2',
+          },
+        ],
+      };
+      await processAncWebhook(db, webhookHospitalId, create, asSse(sseManager));
+      const before = await db.query<{ anc_risk_level: string }>(
+        'SELECT anc_risk_level FROM maternal_journeys WHERE hn = ? AND hospital_id = ?',
+        ['ANC-LEGACY-LOWER', webhookHospitalId],
+      );
+      expect(before[0].anc_risk_level).toBe('HR2');
+
+      // Second: re-send with riskLevel LOW and still no riskItemIds. There is
+      // no item-derived signal to compare against, so the declared level is
+      // authoritative and the journey lowers to LOW.
+      const lower: WebhookAncPayload = {
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'ANC-LEGACY-LOWER',
+            name: 'นาง ทดสอบ ลดระดับ',
+            cid: '1007000100140',
+            birthday: '1994-06-20',
+            pregNo: 1,
+            riskLevel: 'LOW',
+          },
+        ],
+      };
+      await processAncWebhook(db, webhookHospitalId, lower, asSse(sseManager));
+      const after = await db.query<{ anc_risk_level: string }>(
+        'SELECT anc_risk_level FROM maternal_journeys WHERE hn = ? AND hospital_id = ?',
+        ['ANC-LEGACY-LOWER', webhookHospitalId],
+      );
+      expect(after[0].anc_risk_level).toBe('LOW');
     });
   });
 
@@ -298,7 +348,7 @@ describe('ANC/Referral Webhook Integration', () => {
             cid: '1007000100077',
             birthday: '1993-08-15',
             pregNo: 3,
-            riskLevel: 'HIGH',
+            riskLevel: 'HR2',
           },
         ],
       };
@@ -317,7 +367,7 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(journeys[0].hn).toBe('ANC-M01');
       expect(journeys[0].anc_risk_level).toBe('LOW');
       expect(journeys[1].hn).toBe('ANC-M02');
-      expect(journeys[1].anc_risk_level).toBe('HIGH');
+      expect(journeys[1].anc_risk_level).toBe('HR2');
     });
   });
 

@@ -20,7 +20,10 @@ function asSse(mock: MockSseManager): SseManager {
   return mock as unknown as SseManager;
 }
 
-function payload(riskItemIds: number[] | undefined, riskLevel: string): WebhookAncPayload {
+function payload(
+  riskItemIds: number[] | undefined,
+  riskLevel: string | undefined,
+): WebhookAncPayload {
   return {
     type: 'anc_data',
     hospitalCode: '99902',
@@ -113,5 +116,35 @@ describe('processAncWebhook — risk screening persistence', () => {
     await processAncWebhook(db, HOSPITAL_ID, payload(undefined, 'HR2'), sse);
 
     expect(await riskRows()).toHaveLength(0);
+  });
+
+  // ─── Canonical risk resolution: derived severity can never be understated ───
+
+  it('declared LOW cannot mask HR3 items — screening AND journey store HR3', async () => {
+    await processAncWebhook(db, HOSPITAL_ID, payload([16], 'LOW'), sse);
+    const screening = await db.query<{ risk_level: string }>(
+      `SELECT risk_level FROM cached_anc_risks ORDER BY created_at DESC LIMIT 1`,
+    );
+    expect(screening[0].risk_level).toBe('HR3');
+    const journey = await db.query<{ anc_risk_level: string }>(
+      `SELECT anc_risk_level FROM maternal_journeys LIMIT 1`,
+    );
+    expect(journey[0].anc_risk_level).toBe('HR3');
+  });
+
+  it('declared level HIGHER than derived is preserved (upward clinical override)', async () => {
+    await processAncWebhook(db, HOSPITAL_ID, payload([], 'HR2'), sse);
+    const journey = await db.query<{ anc_risk_level: string }>(
+      `SELECT anc_risk_level FROM maternal_journeys LIMIT 1`,
+    );
+    expect(journey[0].anc_risk_level).toBe('HR2');
+  });
+
+  it('missing declared level with items still derives the level for the journey', async () => {
+    await processAncWebhook(db, HOSPITAL_ID, payload([16], undefined), sse);
+    const journey = await db.query<{ anc_risk_level: string }>(
+      `SELECT anc_risk_level FROM maternal_journeys LIMIT 1`,
+    );
+    expect(journey[0].anc_risk_level).toBe('HR3');
   });
 });
