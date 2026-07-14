@@ -5,6 +5,7 @@ import {
   ANC_RISK_LEVEL_ORDER,
   ANC_RISK_CONFIGS,
   classifyAncRisk,
+  MANDATORY_ANC_RISK_INPUTS,
 } from '@/config/anc-risk-rules';
 import { AncRiskLevel } from '@/types/domain';
 
@@ -181,6 +182,77 @@ describe('ANC Risk Rules Configuration', () => {
       expect(result.triggeredRules).toContain('hr1_age');
       expect(result.triggeredRules).toContain('hr2_hiv');
       expect(result.triggeredRules).toContain('hr3_bmi');
+    });
+  });
+
+  // ─── T3: completeness-aware nullable inputs (WHO containment) ───────────────
+  // Missing data must NEVER fabricate a finding. Because JS coerces null→0 in a
+  // numeric comparison (`null < 145` is true!), every rule touching a
+  // newly-nullable field MUST null-guard before comparing.
+  describe('completeness-aware nullable inputs (WHO containment T3)', () => {
+    const allNullMandatory: AncRiskInput = {
+      ...baseInput,
+      heightCm: null,
+      prePregnancyBmi: null,
+      bpSystolic: null,
+      bpDiastolic: null,
+      o2Sat: null,
+      hct: null,
+      hb: null,
+    };
+
+    it('MANDATORY_ANC_RISK_INPUTS lists exactly the seven formerly-imputed fields', () => {
+      expect([...MANDATORY_ANC_RISK_INPUTS]).toEqual([
+        'heightCm',
+        'prePregnancyBmi',
+        'bpSystolic',
+        'bpDiastolic',
+        'o2Sat',
+        'hct',
+        'hb',
+      ]);
+    });
+
+    it('null height does not trigger hr1_height (no coercion to 0)', () => {
+      const rule = ANC_RISK_RULES.find((r) => r.id === 'hr1_height')!;
+      expect(rule.evaluate({ ...baseInput, heightCm: null })).toBe(false);
+    });
+
+    it('null BMI does not trigger any BMI rule', () => {
+      for (const id of ['hr1_bmi_low', 'hr1_bmi_high', 'hr2_bmi', 'hr3_bmi']) {
+        const rule = ANC_RISK_RULES.find((r) => r.id === id)!;
+        expect(rule.evaluate({ ...baseInput, prePregnancyBmi: null })).toBe(false);
+      }
+    });
+
+    it('null O2sat does not trigger hr1_o2sat', () => {
+      const rule = ANC_RISK_RULES.find((r) => r.id === 'hr1_o2sat')!;
+      expect(rule.evaluate({ ...baseInput, o2Sat: null })).toBe(false);
+    });
+
+    it('null Hct/Hb does not trigger hr3_anemia', () => {
+      const rule = ANC_RISK_RULES.find((r) => r.id === 'hr3_anemia')!;
+      expect(rule.evaluate({ ...baseInput, hct: null, hb: null })).toBe(false);
+    });
+
+    it('null BP does not trigger hr2_bp', () => {
+      const rule = ANC_RISK_RULES.find((r) => r.id === 'hr2_bp')!;
+      expect(rule.evaluate({ ...baseInput, bpSystolic: null, bpDiastolic: null })).toBe(false);
+    });
+
+    it('all-null mandatory inputs → LOW, no triggered rules, all seven reported missing', () => {
+      const res = classifyAncRisk(allNullMandatory);
+      expect(res.level).toBe(AncRiskLevel.LOW);
+      expect(res.triggeredRules).toEqual([]);
+      expect(res.missingRequired).toEqual([...MANDATORY_ANC_RISK_INPUTS]);
+    });
+
+    it('a real abnormal value fires its rule even when every other input is null', () => {
+      const res = classifyAncRisk({ ...allNullMandatory, hb: 8.5 });
+      expect(res.level).toBe(AncRiskLevel.HR3);
+      expect(res.triggeredRules).toContain('hr3_anemia');
+      expect(res.missingRequired).not.toContain('hb');
+      expect(res.missingRequired).toContain('hct');
     });
   });
 });

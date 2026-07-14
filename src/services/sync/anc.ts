@@ -21,10 +21,11 @@ import {
   transitionToLabor,
   transitionToDelivered,
 } from '@/services/journey';
-import { evaluateAncRisk } from '@/services/anc-risk';
+import { evaluateAncRisk, type AncRiskResult } from '@/services/anc-risk';
 import { insertAncScreeningIfChanged } from '@/services/anc-screening';
+import { prePregnancyBmi } from '@/services/anc-clinical';
 import type { AncRiskInput } from '@/config/anc-risk-rules';
-import { HOSXP_RISK_TO_LAB_FLAGS } from '@/config/anc-risk-rules';
+import { HOSXP_RISK_TO_LAB_FLAGS, ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
 import { AncRiskLevel } from '@/types/domain';
 import { logger } from '@/lib/logger';
 
@@ -46,6 +47,8 @@ export async function syncAncData(
   }
   let count = 0;
   let skippedInvalidCid = 0;
+  let incompleteAssessments = 0;
+  let downgradesBlocked = 0;
 
   for (const anc of ancPatients) {
     // Per-row CID gate. The polling-level fingerprint (pollHospital) already
@@ -201,12 +204,15 @@ export async function syncAncData(
     const patientClassifying = ancClassifying.filter((c) => c.person_anc_id === anc.person_anc_id);
     const latestVisit = lastVisit;
 
-    const firstVisitWithHeight = visits.find((v) => v.height != null);
-    const heightCm = firstVisitWithHeight?.height ?? 160;
-
-    const firstVisitWeight = visits.find((v) => v.bw != null)?.bw;
-    const prePregnancyBmi =
-      firstVisitWeight && heightCm > 0 ? firstVisitWeight / (heightCm / 100) ** 2 : 22;
+    // Completeness-aware inputs (WHO containment T3): a missing measurement stays
+    // `null` — NEVER a fabricated healthy value. `heightCm` is the first real
+    // recorded height, BMI is derived from real height+earliest weight via the
+    // shared clinical helper (guards <100cm and 0 weight, rounds to 1dp), and
+    // o2Sat/hct/hb are always null because this HOSxP polling query never
+    // provides them.
+    const heightCm = visits.find((v) => v.height != null)?.height ?? null;
+    const firstVisitWeight = visits.find((v) => v.bw != null)?.bw ?? null;
+    const bmi = prePregnancyBmi(heightCm, firstVisitWeight);
 
     const labFlags = {
       rhNegative: false,
@@ -226,13 +232,13 @@ export async function syncAncData(
     const riskInput: AncRiskInput = {
       age,
       heightCm,
-      prePregnancyBmi,
+      prePregnancyBmi: bmi,
       gravida: anc.preg_no,
-      bpSystolic: latestVisit?.bps ?? 120,
-      bpDiastolic: latestVisit?.bpd ?? 80,
-      o2Sat: 98,
-      hct: 36,
-      hb: 12,
+      bpSystolic: latestVisit?.bps ?? null,
+      bpDiastolic: latestVisit?.bpd ?? null,
+      o2Sat: null,
+      hct: null,
+      hb: null,
       hosxpRiskIds: patientRisks.map((r) => r.anc_risk_id),
       classifyingItems: patientClassifying.map((c) => ({
         itemId: c.person_anc_classifying_item_id,
@@ -242,13 +248,35 @@ export async function syncAncData(
     };
 
     const riskResult = evaluateAncRisk(riskInput);
+    if (riskResult.assessmentIncomplete) incompleteAssessments++;
 
-    await upsertAncRisk(db, currentJourney.id, riskResult, riskInput);
+    // Downgrade guard (WHO containment T3): missing evidence can never LOWER a
+    // previously-known risk. When the assessment is incomplete AND the derived
+    // level is below the journey's current level, keep the existing level and
+    // do NOT append the rejected lower screening row (this also keeps the
+    // reconciliation journey-vs-latest-screening report clean). Escalations and
+    // complete assessments follow existing behavior.
+    const existingLevel = currentJourney.ancRiskLevel;
+    const isDowngrade =
+      ANC_RISK_LEVEL_ORDER[riskResult.level] < ANC_RISK_LEVEL_ORDER[existingLevel];
 
-    await db.execute(
-      `UPDATE maternal_journeys SET anc_risk_level = ?, updated_at = ? WHERE id = ?`,
-      [riskResult.level, now, currentJourney.id],
-    );
+    if (riskResult.assessmentIncomplete && isDowngrade) {
+      downgradesBlocked++;
+      logger.warn('anc_risk_downgrade_blocked', {
+        hospitalId,
+        journeyId: currentJourney.id,
+        from: existingLevel,
+        to: riskResult.level,
+        reason: 'incomplete_assessment',
+      });
+    } else {
+      await upsertAncRisk(db, currentJourney.id, riskResult);
+
+      await db.execute(
+        `UPDATE maternal_journeys SET anc_risk_level = ?, updated_at = ? WHERE id = ?`,
+        [riskResult.level, now, currentJourney.id],
+      );
+    }
 
     count++;
   }
@@ -260,6 +288,16 @@ export async function syncAncData(
       ingested: count,
     });
   }
+
+  // Aggregate assessment-completeness summary (non-PHI): how many rows this
+  // cycle had at least one missing mandatory input, and how many risk
+  // downgrades were blocked because the evidence was incomplete.
+  logger.info('anc_sync_assessment_summary', {
+    hospitalId,
+    incompleteAssessments,
+    downgradesBlocked,
+  });
+
   return count;
 }
 
@@ -332,17 +370,18 @@ async function upsertAncVisit(
 async function upsertAncRisk(
   db: DatabaseAdapter,
   journeyId: string,
-  riskResult: {
-    level: AncRiskLevel;
-    triggeredRules: string[];
-    recommendation: { facilityTh: string; providerTh: string };
-  },
-  _riskInput: AncRiskInput,
+  riskResult: AncRiskResult,
 ): Promise<void> {
   await insertAncScreeningIfChanged(db, journeyId, {
     level: riskResult.level,
     triggeredRulesJson: JSON.stringify(riskResult.triggeredRules),
-    riskFactorsJson: JSON.stringify({}),
+    // Persist completeness metadata (not fabricated vitals) into the existing
+    // JSONB column so the UI/reconciliation can distinguish "measured healthy"
+    // from "not measured".
+    riskFactorsJson: JSON.stringify({
+      missingRequired: riskResult.missingRequired,
+      assessmentIncomplete: riskResult.assessmentIncomplete,
+    }),
     recommendedFacility: riskResult.recommendation.facilityTh,
     recommendedProvider: riskResult.recommendation.providerTh,
   });

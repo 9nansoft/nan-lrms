@@ -290,6 +290,183 @@ describe('Sync Journey Extension', () => {
       ]);
       expect(rows.length).toBe(1);
     });
+
+    // ─── T3: completeness-aware, no-downgrade risk engine (WHO containment) ────
+
+    it('payload lacking vitals records missingRequired and fabricates no values', async () => {
+      const ancPatients: HosxpPersonAncRow[] = [
+        {
+          person_anc_id: 1001,
+          person_id: 500,
+          hn: 'HN-ANC-INCOMPLETE',
+          pname: 'นาง',
+          fname: 'ไร้',
+          lname: 'สัญญาณชีพ',
+          cid: '1234567890121',
+          birthday: '1994-01-01',
+          preg_no: 1,
+          lmp: '2025-06-01',
+          edc: '2026-03-08',
+          anc_register_date: '2025-08-01',
+        },
+      ];
+
+      // No service rows → no height/weight/BP; and this path never provides
+      // o2Sat/hct/hb → all seven mandatory inputs are missing.
+      await syncAncData(db, hospitalId, ancPatients, [], [], [], ENCRYPTION_KEY);
+
+      const journeys = await db.query<{ id: string }>(
+        'SELECT id FROM maternal_journeys WHERE hospital_id = ? AND hn = ?',
+        [hospitalId, 'HN-ANC-INCOMPLETE'],
+      );
+      expect(journeys).toHaveLength(1);
+
+      const rows = await db.query<{ risk_factors: unknown }>(
+        'SELECT risk_factors FROM cached_anc_risks WHERE journey_id = ?',
+        [journeys[0].id],
+      );
+      expect(rows).toHaveLength(1);
+      const rf = rows[0].risk_factors;
+      const parsed = (typeof rf === 'string' ? JSON.parse(rf) : rf) as {
+        missingRequired: string[];
+        assessmentIncomplete: boolean;
+      };
+      expect(parsed.assessmentIncomplete).toBe(true);
+      expect(parsed.missingRequired).toEqual(
+        expect.arrayContaining([
+          'heightCm',
+          'prePregnancyBmi',
+          'bpSystolic',
+          'bpDiastolic',
+          'o2Sat',
+          'hct',
+          'hb',
+        ]),
+      );
+      // risk_factors carries ONLY completeness metadata — no fabricated vitals.
+      expect(new Set(Object.keys(parsed))).toEqual(
+        new Set(['missingRequired', 'assessmentIncomplete']),
+      );
+      // No visit rows were fabricated either.
+      const visits = await db.query('SELECT id FROM cached_anc_visits WHERE journey_id = ?', [
+        journeys[0].id,
+      ]);
+      expect(visits).toHaveLength(0);
+    });
+
+    it('incomplete finding-free re-sync does not downgrade an HR3 journey', async () => {
+      const ancPatients: HosxpPersonAncRow[] = [
+        {
+          person_anc_id: 1001,
+          person_id: 500,
+          hn: 'HN-ANC-NODOWN',
+          pname: 'นาง',
+          fname: 'ไม่ลด',
+          lname: 'ความเสี่ยง',
+          cid: '1234567890121',
+          birthday: '1994-01-01',
+          preg_no: 1,
+          lmp: '2025-06-01',
+          edc: '2026-03-08',
+          anc_register_date: '2025-08-01',
+        },
+      ];
+
+      // First sync carries an HR3 finding (placenta accreta = anc_risk_id 16).
+      const hr3Risks: HosxpAncRiskRow[] = [
+        { person_anc_risk_id: 7001, person_anc_id: 1001, anc_risk_id: 16 },
+      ];
+      await syncAncData(db, hospitalId, ancPatients, [], hr3Risks, [], ENCRYPTION_KEY);
+
+      const journeys = await db.query<{ id: string }>(
+        'SELECT id FROM maternal_journeys WHERE hospital_id = ? AND hn = ?',
+        [hospitalId, 'HN-ANC-NODOWN'],
+      );
+      const journeyId = journeys[0].id;
+
+      const afterFirst = await db.query<{ anc_risk_level: string }>(
+        'SELECT anc_risk_level FROM maternal_journeys WHERE id = ?',
+        [journeyId],
+      );
+      expect(afterFirst[0].anc_risk_level).toBe(AncRiskLevel.HR3);
+
+      // Second sync: HR3 finding gone AND no vitals → derived LOW, but the
+      // assessment is incomplete → the engine must NOT downgrade.
+      await syncAncData(db, hospitalId, ancPatients, [], [], [], ENCRYPTION_KEY);
+
+      const afterSecond = await db.query<{ anc_risk_level: string }>(
+        'SELECT anc_risk_level FROM maternal_journeys WHERE id = ?',
+        [journeyId],
+      );
+      expect(afterSecond[0].anc_risk_level).toBe(AncRiskLevel.HR3);
+
+      // The rejected LOW assessment was NOT appended — every row is still HR3.
+      const rows = await db.query<{ risk_level: string }>(
+        'SELECT risk_level FROM cached_anc_risks WHERE journey_id = ? ORDER BY screened_at, created_at',
+        [journeyId],
+      );
+      expect(rows.every((r) => r.risk_level === AncRiskLevel.HR3)).toBe(true);
+      expect(rows.some((r) => r.risk_level === AncRiskLevel.LOW)).toBe(false);
+    });
+
+    it('a real abnormal vital still escalates an incomplete assessment', async () => {
+      const ancPatients: HosxpPersonAncRow[] = [
+        {
+          person_anc_id: 1001,
+          person_id: 500,
+          hn: 'HN-ANC-ESCALATE',
+          pname: 'นาง',
+          fname: 'ความดัน',
+          lname: 'สูง',
+          cid: '1234567890121',
+          birthday: '1994-01-01',
+          preg_no: 1,
+          lmp: '2025-06-01',
+          edc: '2026-03-08',
+          anc_register_date: '2025-08-01',
+        },
+      ];
+      // Real, elevated BP (150/100) → hr2_bp fires even though o2Sat/hct/hb are
+      // never available in this path (assessment stays incomplete).
+      const ancServices: HosxpAncServiceRow[] = [
+        {
+          person_anc_service_id: 2001,
+          person_anc_id: 1001,
+          service_date: '2025-09-01',
+          anc_service_number: 1,
+          pa_week: 12,
+          pa_day: 0,
+          fundal_height: 10,
+          bw: 55,
+          bps: 150,
+          bpd: 100,
+          height: 160,
+          fetal_heart_rate: 140,
+          baby_position: null,
+          baby_lead: null,
+          pass_quality: null,
+          doctor_code: null,
+        },
+      ];
+
+      await syncAncData(db, hospitalId, ancPatients, ancServices, [], [], ENCRYPTION_KEY);
+
+      const journeys = await db.query<{ id: string; anc_risk_level: string }>(
+        'SELECT id, anc_risk_level FROM maternal_journeys WHERE hospital_id = ? AND hn = ?',
+        [hospitalId, 'HN-ANC-ESCALATE'],
+      );
+      expect(journeys[0].anc_risk_level).toBe(AncRiskLevel.HR2);
+
+      const rows = await db.query<{ risk_level: string; triggered_rules: unknown }>(
+        'SELECT risk_level, triggered_rules FROM cached_anc_risks WHERE journey_id = ?',
+        [journeys[0].id],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].risk_level).toBe(AncRiskLevel.HR2);
+      const tr = rows[0].triggered_rules;
+      const triggered = (typeof tr === 'string' ? JSON.parse(tr) : tr) as string[];
+      expect(triggered).toContain('hr2_bp');
+    });
   });
 
   // --- linkJourneyToLabor Tests ---

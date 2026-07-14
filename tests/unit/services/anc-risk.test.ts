@@ -67,5 +67,19 @@ describe('ANC Risk Service', () => {
       const result = evaluateAncRisk({ ...baseInput, prePregnancyBmi: 42 });
       expect(result.recommendation.providerTh).toBe('สูติแพทย์/MFM');
     });
+
+    // ─── T3: completeness propagation ─────────────────────────────────────────
+    it('marks the assessment complete when all mandatory inputs are present', () => {
+      const result = evaluateAncRisk(baseInput);
+      expect(result.assessmentIncomplete).toBe(false);
+      expect(result.missingRequired).toEqual([]);
+    });
+
+    it('marks the assessment incomplete and lists the missing mandatory inputs', () => {
+      const result = evaluateAncRisk({ ...baseInput, o2Sat: null, hct: null, hb: null });
+      expect(result.assessmentIncomplete).toBe(true);
+      expect(result.missingRequired).toEqual(expect.arrayContaining(['o2Sat', 'hct', 'hb']));
+      expect(result.missingRequired).not.toContain('heightCm');
+    });
   });
 });

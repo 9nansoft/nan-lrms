@@ -3,14 +3,18 @@ import { AncRiskLevel } from '@/types/domain';
 
 export interface AncRiskInput {
   age: number;
-  heightCm: number;
-  prePregnancyBmi: number;
+  // Nullable clinical measurements. `null` means "not measured / not available"
+  // and must be treated as absence of evidence — never as a healthy value.
+  // Every rule lambda touching one of these MUST null-guard before comparing,
+  // because JS coerces null→0 in numeric comparison (`null < 145` is true).
+  heightCm: number | null;
+  prePregnancyBmi: number | null;
   gravida: number;
-  bpSystolic: number;
-  bpDiastolic: number;
-  o2Sat: number;
-  hct: number;
-  hb: number;
+  bpSystolic: number | null;
+  bpDiastolic: number | null;
+  o2Sat: number | null;
+  hct: number | null;
+  hb: number | null;
   hosxpRiskIds: number[];
   classifyingItems: { itemId: number; value: string }[];
   rhNegative: boolean;
@@ -144,18 +148,18 @@ export const ANC_RISK_RULES: AncRiskRule[] = [
   ),
   // --- HR1 rules ---
   { id: 'hr1_age', level: 'HR1', labelTh: 'อายุ < 17 ปี หรือ ≥ 35 ปี', labelEn: 'Age <17 or >=35', source: 'computed', evaluate: (d) => d.age < 17 || d.age >= 35 },
-  { id: 'hr1_bmi_low', level: 'HR1', labelTh: 'BMI < 18.5', labelEn: 'BMI <18.5 (underweight)', source: 'computed', evaluate: (d) => d.prePregnancyBmi < 18.5 },
-  { id: 'hr1_bmi_high', level: 'HR1', labelTh: 'BMI ≥ 23 (< 30)', labelEn: 'BMI >=23 and <30 (overweight)', source: 'computed', evaluate: (d) => d.prePregnancyBmi >= 23 && d.prePregnancyBmi < 30 },
-  { id: 'hr1_o2sat', level: 'HR1', labelTh: 'O2sat < 95%', labelEn: 'O2 saturation <95%', source: 'computed', evaluate: (d) => d.o2Sat < 95 },
-  { id: 'hr1_height', level: 'HR1', labelTh: 'ส่วนสูง < 145 ซม.', labelEn: 'Height <145cm', source: 'computed', evaluate: (d) => d.heightCm < 145 },
+  { id: 'hr1_bmi_low', level: 'HR1', labelTh: 'BMI < 18.5', labelEn: 'BMI <18.5 (underweight)', source: 'computed', evaluate: (d) => d.prePregnancyBmi != null && d.prePregnancyBmi < 18.5 },
+  { id: 'hr1_bmi_high', level: 'HR1', labelTh: 'BMI ≥ 23 (< 30)', labelEn: 'BMI >=23 and <30 (overweight)', source: 'computed', evaluate: (d) => d.prePregnancyBmi != null && d.prePregnancyBmi >= 23 && d.prePregnancyBmi < 30 },
+  { id: 'hr1_o2sat', level: 'HR1', labelTh: 'O2sat < 95%', labelEn: 'O2 saturation <95%', source: 'computed', evaluate: (d) => d.o2Sat != null && d.o2Sat < 95 },
+  { id: 'hr1_height', level: 'HR1', labelTh: 'ส่วนสูง < 145 ซม.', labelEn: 'Height <145cm', source: 'computed', evaluate: (d) => d.heightCm != null && d.heightCm < 145 },
   { id: 'hr1_previous_stillbirth', level: 'HR1', labelTh: 'เคยมีทารกตายในครรภ์/เสียชีวิตแรกเกิด', labelEn: 'Previous stillbirth/neonatal death', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(1) },
   { id: 'hr1_previous_lbw', level: 'HR1', labelTh: 'เคยคลอดน้ำหนัก <2500g หรือ >4000g', labelEn: 'Previous birth weight <2500g or >4000g', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(2) },
   { id: 'hr1_preeclampsia_hx', level: 'HR1', labelTh: 'ประวัติครรภ์เป็นพิษ (ตนเอง/ครอบครัว)', labelEn: 'History of preeclampsia (self/family)', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(3) },
   { id: 'hr1_gdm_hx', level: 'HR1', labelTh: 'ประวัติเบาหวานในครรภ์ (ตนเอง/ครอบครัว)', labelEn: 'History of GDM (self/family)', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(4) },
 
   // --- HR2 rules ---
-  { id: 'hr2_bmi', level: 'HR2', labelTh: 'BMI 30-40', labelEn: 'BMI 30-40 (obese)', source: 'computed', evaluate: (d) => d.prePregnancyBmi >= 30 && d.prePregnancyBmi < 40 },
-  { id: 'hr2_bp', level: 'HR2', labelTh: 'ความดัน Diastolic ≥90 หรือ Systolic ≥140', labelEn: 'BP: Diastolic >=90 or Systolic >=140', source: 'computed', evaluate: (d) => d.bpDiastolic >= 90 || d.bpSystolic >= 140 },
+  { id: 'hr2_bmi', level: 'HR2', labelTh: 'BMI 30-40', labelEn: 'BMI 30-40 (obese)', source: 'computed', evaluate: (d) => d.prePregnancyBmi != null && d.prePregnancyBmi >= 30 && d.prePregnancyBmi < 40 },
+  { id: 'hr2_bp', level: 'HR2', labelTh: 'ความดัน Diastolic ≥90 หรือ Systolic ≥140', labelEn: 'BP: Diastolic >=90 or Systolic >=140', source: 'computed', evaluate: (d) => (d.bpDiastolic != null && d.bpDiastolic >= 90) || (d.bpSystolic != null && d.bpSystolic >= 140) },
   { id: 'hr2_gravida', level: 'HR2', labelTh: 'ครรภ์ที่ 5 เป็นต้นไป', labelEn: 'Gravida >=5', source: 'computed', evaluate: (d) => d.gravida >= 5 },
   { id: 'hr2_rh_negative', level: 'HR2', labelTh: 'Rh Negative', labelEn: 'Rh Negative', source: 'lab', evaluate: (d) => d.rhNegative },
   { id: 'hr2_hbsag', level: 'HR2', labelTh: 'HBsAg positive', labelEn: 'Hepatitis B positive', source: 'lab', evaluate: (d) => d.hbsAgPositive },
@@ -172,8 +176,8 @@ export const ANC_RISK_RULES: AncRiskRule[] = [
   { id: 'hr2_gyn_surgery', level: 'HR2', labelTh: 'ประวัติผ่าตัดทางนรีเวช', labelEn: 'Previous gynecologic surgery', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(12) },
 
   // --- HR3 rules ---
-  { id: 'hr3_bmi', level: 'HR3', labelTh: 'BMI ≥ 40', labelEn: 'BMI >=40 (morbidly obese)', source: 'computed', evaluate: (d) => d.prePregnancyBmi >= 40 },
-  { id: 'hr3_anemia', level: 'HR3', labelTh: 'Severe anemia (Hct<28% หรือ Hb<9)', labelEn: 'Severe anemia (Hct<28% or Hb<9)', source: 'computed', evaluate: (d) => d.hct < 28 || d.hb < 9 },
+  { id: 'hr3_bmi', level: 'HR3', labelTh: 'BMI ≥ 40', labelEn: 'BMI >=40 (morbidly obese)', source: 'computed', evaluate: (d) => d.prePregnancyBmi != null && d.prePregnancyBmi >= 40 },
+  { id: 'hr3_anemia', level: 'HR3', labelTh: 'Severe anemia (Hct<28% หรือ Hb<9)', labelEn: 'Severe anemia (Hct<28% or Hb<9)', source: 'computed', evaluate: (d) => (d.hct != null && d.hct < 28) || (d.hb != null && d.hb < 9) },
   { id: 'hr3_nipt', level: 'HR3', labelTh: 'NIPT หรือ Quad test high risk', labelEn: 'NIPT or Quad test high risk', source: 'lab', evaluate: (d) => d.niptHighRisk },
   { id: 'hr3_twin_mcda', level: 'HR3', labelTh: 'Twin MCDA/MADA หรือ Triplet ขึ้นไป', labelEn: 'Twin MCDA/MADA or Triplet+', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(13) },
   { id: 'hr3_abnormal_us', level: 'HR3', labelTh: 'ผลตรวจทารกในครรภ์ผิดปกติ (Abnormal U/S)', labelEn: 'Abnormal fetal ultrasound', source: 'hosxp_risk', evaluate: (d) => d.hosxpRiskIds.includes(14) },
@@ -202,7 +206,7 @@ export const ANC_RISK_RULES: AncRiskRule[] = [
  *  universal 24–28w screen. Fires if ANY listed risk factor is present. */
 export function isEarlyOgttIndicated(d: AncRiskInput): boolean {
   return (
-    d.prePregnancyBmi >= 30 ||
+    (d.prePregnancyBmi != null && d.prePregnancyBmi >= 30) ||
     !!d.firstDegreeDm ||
     !!d.pcos ||
     !!d.priorMacrosomia4000g ||
@@ -223,7 +227,33 @@ export function ironContraindication(
   return null;
 }
 
-export function classifyAncRisk(input: AncRiskInput): { level: AncRiskLevel; triggeredRules: string[] } {
+/**
+ * Interim engineering "mandatory" input set for a *complete* ANC assessment.
+ * These are EXACTLY the seven fields the removed sync-path imputation block used
+ * to fabricate (height→160, BMI→22, BP→120/80, o2Sat→98, hct→36, hb→12). When
+ * any of them is `null` the assessment is flagged incomplete so a missing
+ * measurement can never be mistaken for a healthy one, and can never silently
+ * lower a previously-known risk.
+ *
+ * NOTE: this is an engineering stopgap, NOT the clinically-approved mandatory
+ * set. The approved set is a Phase 0 deliverable of
+ * `docs/who-guideline-2026-07-14.md`; revisit this list when it lands.
+ */
+export const MANDATORY_ANC_RISK_INPUTS = [
+  'heightCm',
+  'prePregnancyBmi',
+  'bpSystolic',
+  'bpDiastolic',
+  'o2Sat',
+  'hct',
+  'hb',
+] as const;
+
+export function classifyAncRisk(input: AncRiskInput): {
+  level: AncRiskLevel;
+  triggeredRules: string[];
+  missingRequired: string[];
+} {
   const triggered: string[] = [];
   let highestLevel = AncRiskLevel.LOW;
 
@@ -237,5 +267,7 @@ export function classifyAncRisk(input: AncRiskInput): { level: AncRiskLevel; tri
     }
   }
 
-  return { level: highestLevel, triggeredRules: triggered };
+  const missingRequired = MANDATORY_ANC_RISK_INPUTS.filter((field) => input[field] == null);
+
+  return { level: highestLevel, triggeredRules: triggered, missingRequired };
 }
