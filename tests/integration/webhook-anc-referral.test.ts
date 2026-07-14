@@ -184,7 +184,7 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(after[0].anc_risk_level).toBe('HR2');
     });
 
-    it('declared-only legacy payload (no riskItemIds) can lower the level — the no-lowering rule only applies when items are present', async () => {
+    it('declared-only legacy payload (no riskItemIds) CANNOT lower a known level — missing evidence never downgrades (WHO T4)', async () => {
       // First: create at HR2 (no riskItemIds — declared-only, legacy-style payload)
       const create: WebhookAncPayload = {
         type: 'anc_data',
@@ -207,9 +207,12 @@ describe('ANC/Referral Webhook Integration', () => {
       );
       expect(before[0].anc_risk_level).toBe('HR2');
 
-      // Second: re-send with riskLevel LOW and still no riskItemIds. There is
-      // no item-derived signal to compare against, so the declared level is
-      // authoritative and the journey lowers to LOW.
+      sseManager.clearEvents();
+
+      // Second: re-send with riskLevel LOW and still no riskItemIds. A
+      // declared-only payload carries no positive item evidence, so it is
+      // "missing evidence" and must NOT lower the journey. It stays HR2 and the
+      // rejected downgrade is counted + logged (reason 'declared_only').
       const lower: WebhookAncPayload = {
         type: 'anc_data',
         hospitalCode: '99902',
@@ -224,12 +227,96 @@ describe('ANC/Referral Webhook Integration', () => {
           },
         ],
       };
-      await processAncWebhook(db, webhookHospitalId, lower, asSse(sseManager));
+      const result = await processAncWebhook(db, webhookHospitalId, lower, asSse(sseManager));
+      expect(result.downgradesBlocked).toBe(1);
+
       const after = await db.query<{ anc_risk_level: string }>(
         'SELECT anc_risk_level FROM maternal_journeys WHERE hn = ? AND hospital_id = ?',
         ['ANC-LEGACY-LOWER', webhookHospitalId],
       );
-      expect(after[0].anc_risk_level).toBe('LOW');
+      expect(after[0].anc_risk_level).toBe('HR2');
+
+      // SSE journey_update must carry the level actually persisted (HR2), not
+      // the rejected LOW.
+      const sse = sseManager.getEventsByType('journey_update');
+      expect(sse.length).toBeGreaterThanOrEqual(1);
+      const evt = sse[sse.length - 1].data as Record<string, unknown>;
+      expect(evt.ancRiskLevel).toBe('HR2');
+    });
+
+    it('empty riskItemIds ([]) cannot lower a known journey risk — HR3 stays, no new screening row (WHO T4 prod bug)', async () => {
+      // First: establish an HR3 journey via positive item evidence ([16]
+      // derives HR3). This also writes one cached_anc_risks screening row.
+      const create: WebhookAncPayload = {
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'ANC-EMPTY-LOWER',
+            name: 'นาง ทดสอบ รายการว่าง',
+            cid: '1100500090006',
+            birthday: '1994-06-20',
+            pregNo: 1,
+            riskLevel: 'HR3',
+            riskItemIds: [16],
+          },
+        ],
+      };
+      await processAncWebhook(db, webhookHospitalId, create, asSse(sseManager));
+      const journeyBefore = await db.query<{ id: string; anc_risk_level: string }>(
+        'SELECT id, anc_risk_level FROM maternal_journeys WHERE hn = ? AND hospital_id = ?',
+        ['ANC-EMPTY-LOWER', webhookHospitalId],
+      );
+      expect(journeyBefore[0].anc_risk_level).toBe('HR3');
+      const journeyId = journeyBefore[0].id;
+      const screeningBefore = await db.query<{ count: number }>(
+        'SELECT COUNT(*) as count FROM cached_anc_risks WHERE journey_id = ?',
+        [journeyId],
+      );
+
+      sseManager.clearEvents();
+
+      // Second: a transient HOSxP query returns zero classifying rows → empty
+      // items array + declared LOW. This is the primary production bug — an
+      // empty [] derives LOW and would overwrite HR3. It must be blocked.
+      const lower: WebhookAncPayload = {
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'ANC-EMPTY-LOWER',
+            name: 'นาง ทดสอบ รายการว่าง',
+            cid: '1100500090006',
+            birthday: '1994-06-20',
+            pregNo: 1,
+            riskLevel: 'LOW',
+            riskItemIds: [],
+          },
+        ],
+      };
+      const result = await processAncWebhook(db, webhookHospitalId, lower, asSse(sseManager));
+      expect(result.downgradesBlocked).toBe(1);
+      expect(result.updated).toBe(1);
+
+      const after = await db.query<{ anc_risk_level: string }>(
+        'SELECT anc_risk_level FROM maternal_journeys WHERE id = ?',
+        [journeyId],
+      );
+      expect(after[0].anc_risk_level).toBe('HR3');
+
+      // No new (lower) screening row appended — keeps the reconciliation
+      // journey-vs-latest-screening report clean.
+      const screeningAfter = await db.query<{ count: number }>(
+        'SELECT COUNT(*) as count FROM cached_anc_risks WHERE journey_id = ?',
+        [journeyId],
+      );
+      expect(screeningAfter[0].count).toBe(screeningBefore[0].count);
+
+      // SSE journey_update must carry the persisted HR3, not the rejected LOW.
+      const sse = sseManager.getEventsByType('journey_update');
+      expect(sse.length).toBeGreaterThanOrEqual(1);
+      const evt = sse[sse.length - 1].data as Record<string, unknown>;
+      expect(evt.ancRiskLevel).toBe('HR3');
     });
   });
 

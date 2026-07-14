@@ -210,6 +210,10 @@ export interface WebhookAncResult {
   created: number;
   updated: number;
   deleted: number;
+  // Count of per-patient updates whose declared/derived level would have LOWERED
+  // a known journey risk on missing evidence (empty items or declared-only) and
+  // was blocked. Additive/non-breaking — see the WHO T4 downgrade guard below.
+  downgradesBlocked: number;
 }
 
 // ─── Referral webhook payload ───
@@ -885,6 +889,7 @@ export async function processAncWebhook(
   let created = 0;
   let updated = 0;
   let deleted = 0;
+  let downgradesBlocked = 0;
   let skippedInvalidCidChecksum = 0;
 
   for (const patient of payload.patients) {
@@ -1000,6 +1005,46 @@ export async function processAncWebhook(
     // journey write, the SSE broadcast, and the risk-screening record below.
     const canonicalRisk = resolveCanonicalAncRisk(patient.riskLevel, patient.riskItemIds);
 
+    // Downgrade guard (WHO containment T4): on the LIVE production ANC path,
+    // missing evidence must NEVER lower a previously-known journey risk.
+    // "Missing evidence" is either an empty riskItemIds array (a transient
+    // HOSxP query returning zero classifying rows — the primary prod bug) or a
+    // legacy declared-only payload (no riskItemIds at all). Only POSITIVE
+    // current evidence — a non-empty riskItemIds array — may lower today's
+    // level. Decided here where the existing journey is known so the journey
+    // write, the SSE broadcast, and the screening append all agree on the level
+    // actually persisted. Journey CREATION is unaffected (no prior level to
+    // protect). Mirrors the polling-path guard in services/sync/anc.ts, but
+    // keyed on evidence presence rather than assessment completeness.
+    let downgradeBlockReason: 'empty_items' | 'declared_only' | null = null;
+    if (
+      !shouldCreateNew &&
+      existing &&
+      canonicalRisk &&
+      ANC_RISK_LEVEL_ORDER[canonicalRisk] < ANC_RISK_LEVEL_ORDER[existing.ancRiskLevel]
+    ) {
+      if (!Array.isArray(patient.riskItemIds)) {
+        downgradeBlockReason = 'declared_only';
+      } else if (patient.riskItemIds.length === 0) {
+        downgradeBlockReason = 'empty_items';
+      }
+      // non-empty riskItemIds → positive evidence; lowering is allowed (no block)
+      if (downgradeBlockReason) {
+        downgradesBlocked++;
+        logger.warn('anc_risk_downgrade_blocked', {
+          hospitalId,
+          journeyId: existing.id,
+          from: existing.ancRiskLevel,
+          to: canonicalRisk,
+          reason: downgradeBlockReason,
+        });
+      }
+    }
+    // The level actually persisted for THIS update: a blocked downgrade keeps
+    // the existing journey level; everything else follows canonical resolution.
+    const persistedRisk =
+      downgradeBlockReason && existing ? existing.ancRiskLevel : canonicalRisk;
+
     // ONE transaction per patient (specs 3.2 + 3.3): journey update-or-create
     // (including pregnancy rollover), location update, and the risk screening
     // commit or roll back together. SSE fires only after commit.
@@ -1017,7 +1062,7 @@ export async function processAncWebhook(
             cidHash,
             patient.lmp ?? existing.lmp,
             patient.edc ?? existing.edc,
-            canonicalRisk ?? existing.ancRiskLevel,
+            persistedRisk ?? existing.ancRiskLevel,
             now,
             now,
             existing.id,
@@ -1030,7 +1075,7 @@ export async function processAncWebhook(
           hcode,
           journeyId: existing.id,
           careStage: existing.careStage,
-          ancRiskLevel: canonicalRisk ?? existing.ancRiskLevel ?? undefined,
+          ancRiskLevel: persistedRisk ?? existing.ancRiskLevel ?? undefined,
         });
         updated++;
       } else {
@@ -1094,8 +1139,12 @@ export async function processAncWebhook(
 
       // Persist the risk screening (level + which criteria fired) when the
       // client sends the checked classifying items. Legacy payloads without
-      // riskItemIds keep the old level-only behavior.
-      if (Array.isArray(patient.riskItemIds) && canonicalRisk) {
+      // riskItemIds keep the old level-only behavior. A blocked downgrade must
+      // NOT append its (lower) screening row — that would reintroduce the
+      // journey-vs-latest-screening mismatch the reconciliation report flags.
+      // (`canonicalRisk` stays in the guard — it is type-load-bearing, narrowing
+      //  the null case for the recordAncRiskScreening call below.)
+      if (Array.isArray(patient.riskItemIds) && canonicalRisk && !downgradeBlockReason) {
         await recordAncRiskScreening(tx, id, canonicalRisk, patient.riskItemIds);
       }
 
@@ -1366,6 +1415,7 @@ export async function processAncWebhook(
     created,
     updated,
     deleted,
+    downgradesBlocked,
   };
 }
 

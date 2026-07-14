@@ -94,13 +94,21 @@ describe('processAncWebhook — risk screening persistence', () => {
     expect(await riskRows()).toHaveLength(1);
   });
 
-  it('a changed classification appends a new screening row', async () => {
+  it('a changed classification appends a new screening row AND the journey follows the positive-evidence downgrade', async () => {
     await processAncWebhook(db, HOSPITAL_ID, payload([3, 16], 'HR3'), sse);
     await processAncWebhook(db, HOSPITAL_ID, payload([3], 'HR1'), sse);
 
     const rows = await riskRows();
     expect(rows).toHaveLength(2);
     expect(rows[1].risk_level).toBe('HR1');
+
+    // Non-empty riskItemIds is POSITIVE current evidence, so lowering IS
+    // allowed — the journey follows down to HR1 (contrast with empty [] or
+    // declared-only payloads, which are blocked as missing evidence).
+    const journey = await db.query<{ anc_risk_level: string }>(
+      `SELECT anc_risk_level FROM maternal_journeys LIMIT 1`,
+    );
+    expect(journey[0].anc_risk_level).toBe('HR1');
   });
 
   it('LOW with no items still records the baseline screening once', async () => {
