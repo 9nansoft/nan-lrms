@@ -828,6 +828,13 @@ function GaProgressBar({
   gaWeeks: number | null;
   attendedWeeks: number[];
 }) {
+  // WHO containment T2: an unknown GA must never be coerced to 0 — that
+  // made an unknown-GA patient look like an early (T1, on-track) pregnancy
+  // with nothing missed. When GA is unknown we can still show which WHO
+  // contacts were attended (that's a fact from the visit history) but we
+  // cannot say anything about position on the 40-week timeline or which
+  // targets are "missed"/"due" — those all require knowing "now".
+  const gaUnknown = gaWeeks == null;
   const ga = gaWeeks ?? 0;
   const pct = Math.min(100, Math.max(0, (ga / 40) * 100));
   const color =
@@ -857,15 +864,21 @@ function GaProgressBar({
               <span className="text-[9px]">w</span> · {trimester}
             </>
           ) : (
-            '—'
+            <span
+              className="inline-flex items-center gap-1"
+              style={{ color: 'var(--risk-medium)' }}
+            >
+              <AlertTriangle className="h-3 w-3" />— · ไม่ทราบอายุครรภ์
+            </span>
           )}
           <span className="ml-3">
             ATTENDED{' '}
             <span
               className="font-semibold tabular-nums"
               style={{
-                color:
-                  attendedCount >= 6
+                color: gaUnknown
+                  ? 'var(--ink-navy-dim)'
+                  : attendedCount >= 6
                     ? 'var(--risk-low)'
                     : attendedCount >= 3
                       ? 'var(--accent-navy)'
@@ -882,10 +895,14 @@ function GaProgressBar({
         className="relative mt-2 h-2 w-full overflow-visible"
         style={{ background: 'var(--surface-sunken)' }}
       >
-        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+        {/* GA position/"due" marker — only meaningful once GA is known. */}
+        {!gaUnknown && <div style={{ width: `${pct}%`, height: '100%', background: color }} />}
         {WHO_CONTACT_WEEKS.map((week, i) => {
           const hit = attendedWeeks.some((v) => Math.abs(v - week) <= WHO_CONTACT_WINDOW_W);
-          const passed = ga >= week;
+          // Unknown GA: we cannot know whether "now" has passed a target
+          // week, so never render the red "missed" state — only attended
+          // (green) vs not-yet-known (white) dots.
+          const passed = !gaUnknown && ga >= week;
           const missed = passed && !hit;
           const fill = hit ? 'var(--risk-low)' : missed ? 'var(--risk-high)' : '#ffffff';
           const border = hit
@@ -1131,6 +1148,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
   const stageLabel = STAGE_LABEL_TH[journey.careStage] ?? journey.careStage;
   const isReferred = !!journey.currentHcode && journey.currentHcode !== journey.hcode;
   const highRisk = journey.ancRiskLevel === 'HR2' || journey.ancRiskLevel === 'HR3';
+  // WHO containment T2 — WhoContactSchedule is a 3-way discriminated union
+  // (UNKNOWN_GA / COMPLETE / NEXT). Shared by the NEXT DUE tile and the
+  // next-action rail below so both sites stay in sync.
+  const nextSchedule = derived?.next;
 
   return (
     <div
@@ -1455,31 +1476,49 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   ? 'RTCOG on-time'
                   : undefined
             }
-            color={derived?.lateFirstContact ? 'var(--risk-high)' : 'var(--risk-low)'}
+            color={
+              derived?.firstVisitGa == null
+                ? 'var(--ink-navy-muted)'
+                : derived.lateFirstContact
+                  ? 'var(--risk-high)'
+                  : 'var(--risk-low)'
+            }
             icon={<TrendingUp className="h-3 w-3" />}
           />
         </KpiTip>
         <KpiTip
           title="นัดถัดไป (WHO 8-contact)"
-          body="WHO contact ครั้งถัดไปตามตารางนัด 8 ครั้ง เทียบกับ GA ปัจจุบันและครั้งที่มาแล้ว — เลยกำหนดแสดงสีแดง ควรติดตามตัว"
+          body="WHO contact ครั้งถัดไปตามตารางนัด 8 ครั้ง เทียบกับ GA ปัจจุบันและครั้งที่มาแล้ว — เลยกำหนดแสดงสีแดง ควรติดตามตัว ไม่ทราบอายุครรภ์จะประเมินตารางนัดไม่ได้"
           trigger={<div className="cursor-default" />}
         >
           <MetricTile
             label="NEXT DUE"
-            value={derived?.next ? `${derived.next.ga}w` : 'ครบกำหนด'}
+            value={
+              nextSchedule?.status === 'NEXT'
+                ? `${nextSchedule.ga}w`
+                : nextSchedule?.status === 'UNKNOWN_GA'
+                  ? '—'
+                  : 'ครบกำหนด'
+            }
             sub={
-              derived?.next
-                ? derived.next.status === 'overdue'
-                  ? `เลย ${Math.abs(derived.next.weeksAway)}w`
-                  : derived.next.status === 'due-now'
+              nextSchedule?.status === 'NEXT'
+                ? nextSchedule.dueStatus === 'overdue'
+                  ? `เลย ${Math.abs(nextSchedule.weeksAway)}w`
+                  : nextSchedule.dueStatus === 'due-now'
                     ? 'นัดครั้งถัดไป'
-                    : `อีก ${derived.next.weeksAway}w`
-                : 'ครบ 8 contact'
+                    : `อีก ${nextSchedule.weeksAway}w`
+                : nextSchedule?.status === 'UNKNOWN_GA'
+                  ? 'ไม่ทราบอายุครรภ์ — ประเมินตารางนัดไม่ได้'
+                  : 'ครบ 8 contact'
             }
             color={
-              derived?.next?.status === 'overdue'
-                ? 'var(--risk-high)'
-                : derived?.next?.status === 'due-now'
+              nextSchedule?.status === 'NEXT'
+                ? nextSchedule.dueStatus === 'overdue'
+                  ? 'var(--risk-high)'
+                  : nextSchedule.dueStatus === 'due-now'
+                    ? 'var(--risk-medium)'
+                    : 'var(--risk-low)'
+                : nextSchedule?.status === 'UNKNOWN_GA'
                   ? 'var(--risk-medium)'
                   : 'var(--risk-low)'
             }
@@ -2539,16 +2578,18 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               style={{
                 borderBottom: '1px solid var(--rule-strong)',
                 borderLeft: `3px solid ${
-                  derived?.next?.status === 'overdue'
+                  nextSchedule?.status === 'NEXT' && nextSchedule.dueStatus === 'overdue'
                     ? 'var(--risk-high)'
-                    : derived?.next?.status === 'due-now'
+                    : (nextSchedule?.status === 'NEXT' && nextSchedule.dueStatus === 'due-now') ||
+                        nextSchedule?.status === 'UNKNOWN_GA'
                       ? 'var(--risk-medium)'
                       : 'var(--primary-teal)'
                 }`,
                 background:
-                  derived?.next?.status === 'overdue'
+                  nextSchedule?.status === 'NEXT' && nextSchedule.dueStatus === 'overdue'
                     ? 'rgba(239, 68, 68, 0.05)'
-                    : derived?.next?.status === 'due-now'
+                    : (nextSchedule?.status === 'NEXT' && nextSchedule.dueStatus === 'due-now') ||
+                        nextSchedule?.status === 'UNKNOWN_GA'
                       ? 'rgba(234, 179, 8, 0.05)'
                       : 'rgba(13, 148, 136, 0.05)',
               }}
@@ -2558,9 +2599,11 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
                   style={{
                     background:
-                      derived?.next?.status === 'overdue'
+                      nextSchedule?.status === 'NEXT' && nextSchedule.dueStatus === 'overdue'
                         ? 'var(--risk-high)'
-                        : derived?.next?.status === 'due-now'
+                        : (nextSchedule?.status === 'NEXT' &&
+                              nextSchedule.dueStatus === 'due-now') ||
+                            nextSchedule?.status === 'UNKNOWN_GA'
                           ? 'var(--risk-medium)'
                           : 'var(--primary-teal)',
                   }}
@@ -2574,21 +2617,21 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   Next action
                 </span>
               </div>
-              {derived?.next ? (
+              {nextSchedule?.status === 'NEXT' ? (
                 <div className="mt-2">
                   <div className="flex items-baseline gap-2">
                     <span
                       className="font-mono text-[22px] font-semibold tabular-nums leading-none"
                       style={{
                         color:
-                          derived.next.status === 'overdue'
+                          nextSchedule.dueStatus === 'overdue'
                             ? 'var(--risk-high)'
-                            : derived.next.status === 'due-now'
+                            : nextSchedule.dueStatus === 'due-now'
                               ? 'var(--risk-medium)'
                               : 'var(--accent-navy)',
                       }}
                     >
-                      {derived.next.ga}w
+                      {nextSchedule.ga}w
                     </span>
                     <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                       WHO CONTACT
@@ -2598,55 +2641,82 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     className="mt-1 text-[12px]"
                     style={{
                       color:
-                        derived.next.status === 'overdue'
+                        nextSchedule.dueStatus === 'overdue'
                           ? 'var(--risk-high)'
                           : 'var(--ink-navy-dim)',
                     }}
                   >
-                    {derived.next.status === 'overdue'
-                      ? `เลยกำหนด ${Math.abs(derived.next.weeksAway)} สัปดาห์ — ควรติดตามด่วน`
-                      : derived.next.status === 'due-now'
+                    {nextSchedule.dueStatus === 'overdue'
+                      ? `เลยกำหนด ${Math.abs(nextSchedule.weeksAway)} สัปดาห์ — ควรติดตามด่วน`
+                      : nextSchedule.dueStatus === 'due-now'
                         ? 'ถึงกำหนดนัดครั้งถัดไป'
-                        : `อีก ${derived.next.weeksAway} สัปดาห์`}
+                        : `อีก ${nextSchedule.weeksAway} สัปดาห์`}
                   </div>
-                  {derived.daysSinceLastAnc != null && derived.daysSinceLastAnc > 28 && (
+                  {derived?.daysSinceLastAnc != null && derived.daysSinceLastAnc > 28 && (
                     <div className="mt-2 flex items-center gap-1 font-mono text-[11px] text-[var(--risk-high)]">
                       <AlertTriangle className="h-3 w-3" />
                       NO ANC FOR {derived.daysSinceLastAnc}d
                     </div>
                   )}
                 </div>
+              ) : nextSchedule?.status === 'UNKNOWN_GA' ? (
+                <div
+                  className="mt-2 flex items-start gap-1.5 text-[12px]"
+                  style={{ color: 'var(--risk-medium)' }}
+                >
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  ไม่ทราบอายุครรภ์ — ประเมินตารางนัดไม่ได้
+                </div>
               ) : (
                 <div className="mt-2 text-[12px] text-[var(--risk-low)]">
                   ครบทั้ง 8 contact แล้ว
                 </div>
               )}
-              {/* RTCOG overdue-investigation list */}
-              {(derived?.overdue.length ?? 0) > 0 && (
+              {/* RTCOG overdue-investigation list. GA unknown → the service
+                  can't determine due-ness at all (overdueInvestigations
+                  coerces to GA 0 and returns []), so show one amber caveat
+                  instead of silently rendering an empty section. */}
+              {journey.gaWeeks == null ? (
                 <div className="mt-3 border-t pt-2" style={{ borderColor: 'var(--rule-hair)' }}>
                   <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                     RTCOG · การตรวจที่เลยกำหนด
                   </div>
-                  <ul className="mt-1.5 space-y-1">
-                    {derived!.overdue.map((o) => (
-                      <li
-                        key={o.key}
-                        className="flex items-start gap-1.5 text-[11px]"
-                        style={{
-                          color: o.severity === 'high' ? 'var(--risk-high)' : 'var(--risk-medium)',
-                        }}
-                      >
-                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                        <span>
-                          {o.labelTh}
-                          <span className="ml-1 font-mono text-[9px] opacity-70">
-                            DUE ≤ {o.dueBy}
-                          </span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <div
+                    className="mt-1.5 flex items-start gap-1.5 text-[11px]"
+                    style={{ color: 'var(--risk-medium)' }}
+                  >
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                    ไม่ทราบอายุครรภ์ — ตรวจสอบรายการค้างไม่ได้
+                  </div>
                 </div>
+              ) : (
+                (derived?.overdue.length ?? 0) > 0 && (
+                  <div className="mt-3 border-t pt-2" style={{ borderColor: 'var(--rule-hair)' }}>
+                    <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                      RTCOG · การตรวจที่เลยกำหนด
+                    </div>
+                    <ul className="mt-1.5 space-y-1">
+                      {derived!.overdue.map((o) => (
+                        <li
+                          key={o.key}
+                          className="flex items-start gap-1.5 text-[11px]"
+                          style={{
+                            color:
+                              o.severity === 'high' ? 'var(--risk-high)' : 'var(--risk-medium)',
+                          }}
+                        >
+                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                          <span>
+                            {o.labelTh}
+                            <span className="ml-1 font-mono text-[9px] opacity-70">
+                              DUE ≤ {o.dueBy}
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )
               )}
             </div>
 

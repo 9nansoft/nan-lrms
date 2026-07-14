@@ -222,3 +222,73 @@ describe('JourneyDetailPage — unknown-state observation severities (WHO contai
     expect(await screen.findByText('BP HIGH')).toBeInTheDocument();
   });
 });
+
+// WHO containment T2 — unknown-GA schedule semantics. `nextContactDue`
+// previously returned `null` for both "GA unknown" and "genuinely complete"
+// (all 8 WHO contacts attended), so the page rendered the same green "8
+// contacts complete" copy for both — hiding the fact that a patient with no
+// recorded GA cannot have their schedule evaluated at all.
+const contactVisit = (gaWeeks: number, visitNumber: number) => ({
+  ...baseVisit,
+  visitDate: new Date(Date.now() - (400 - gaWeeks) * 24 * HOURS).toISOString(),
+  visitNumber,
+  gaWeeks,
+  bpSystolic: 110,
+  bpDiastolic: 70,
+  fetalHr: 140,
+  hbGDl: 12,
+  fetalMovementOk: true,
+});
+
+// All 8 WHO_CONTACT_WEEKS attended — same visit history used for both the
+// "GA unknown" and "GA known" fixtures below, so the only variable is
+// journey.gaWeeks (the *current* GA the schedule is evaluated against).
+const allEightContactsVisits = [12, 20, 26, 30, 34, 36, 38, 40].map((w, i) =>
+  contactVisit(w, i + 1),
+);
+
+const fixtureUnknownGaAllAttended = {
+  ...fixture,
+  journey: { ...fixture.journey, gaWeeks: null },
+  ancVisits: allEightContactsVisits,
+};
+
+const fixtureKnownGaAllAttended = {
+  ...fixture,
+  journey: { ...fixture.journey, gaWeeks: 41 },
+  ancVisits: allEightContactsVisits,
+};
+
+async function renderPageWithFixture<T>(f: T) {
+  await act(async () => {
+    render(
+      <SWRConfig
+        value={{
+          fetcher: async (_url: string) => f,
+          provider: () => new Map(),
+          dedupingInterval: 0,
+        }}
+      >
+        <Suspense fallback={null}>
+          <JourneyDetailPage params={Promise.resolve({ journeyId: 'j-detail-1' })} />
+        </Suspense>
+      </SWRConfig>,
+    );
+  });
+}
+
+describe('JourneyDetailPage — unknown-GA schedule semantics (WHO containment T2)', () => {
+  it('never renders "8 contacts complete" when current GA is unknown, and shows the unknown-GA caveat instead', async () => {
+    await renderPageWithFixture(fixtureUnknownGaAllAttended);
+    expect((await screen.findAllByText(/ไม่ทราบอายุครรภ์/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText('ครบ 8 contact')).toBeNull();
+    expect(screen.queryByText('ครบทั้ง 8 contact แล้ว')).toBeNull();
+  });
+
+  it('still renders the green "8 contacts complete" copy when GA is known and the schedule is genuinely complete', async () => {
+    await renderPageWithFixture(fixtureKnownGaAllAttended);
+    expect(await screen.findByText('ครบทั้ง 8 contact แล้ว')).toBeInTheDocument();
+    expect(screen.getByText('ครบ 8 contact')).toBeInTheDocument();
+    expect(screen.queryByText(/ไม่ทราบอายุครรภ์/)).toBeNull();
+  });
+});

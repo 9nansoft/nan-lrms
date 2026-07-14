@@ -79,32 +79,50 @@ export function sevFetalMovement(ok: boolean | null | undefined): Severity {
 export const WHO_CONTACT_WEEKS = [12, 20, 26, 30, 34, 36, 38, 40];
 export const WHO_CONTACT_WINDOW_W = 1; // ±1w counts as "attended".
 
-export interface NextWhoContact {
-  ga: number;
-  status: 'overdue' | 'due-now' | 'upcoming';
-  weeksAway: number;
-}
+// WHO containment T2 (2026-07-14): a discriminated union so callers can
+// distinguish "GA unknown — the schedule cannot be evaluated at all" from
+// "genuinely complete — all 8 contacts attended". Both used to collapse to
+// a bare `null` (see git history), which made the journey detail page
+// render the same green "8 contacts complete" copy for a patient whose GA
+// was never recorded as it did for one who actually finished the schedule.
+export type WhoContactSchedule =
+  | { status: 'UNKNOWN_GA' }
+  | { status: 'COMPLETE' }
+  | {
+      status: 'NEXT';
+      ga: number;
+      dueStatus: 'overdue' | 'due-now' | 'upcoming';
+      weeksAway: number;
+    };
 
 // Compute the next WHO contact-week that hasn't been attended, together
-// with whether it's overdue / due-now / upcoming.
+// with whether it's overdue / due-now / upcoming — or UNKNOWN_GA / COMPLETE
+// when there is no "next" target to report.
 export function nextContactDue(
   currentGa: number | null,
   attendedWeeks: number[],
-): NextWhoContact | null {
-  if (currentGa == null) return null;
+): WhoContactSchedule {
+  if (currentGa == null) return { status: 'UNKNOWN_GA' };
   for (const w of WHO_CONTACT_WEEKS) {
+    // NOTE (Phase 4 scope, not fixed here): a single encounter can satisfy
+    // two adjacent targets' ±1w windows (e.g. a visit at GA 27 attends both
+    // the week-26 and, near its own boundary, could be mistaken for
+    // week-28-ish coverage). Fixing the window overlap requires clinically
+    // approved window redefinition and is out of scope for this
+    // containment pass — the ±1w window and boundaries below are
+    // unchanged from the pre-existing logic.
     const attended = attendedWeeks.some((v) => Math.abs(v - w) <= WHO_CONTACT_WINDOW_W);
     if (attended) continue;
     const diff = w - currentGa;
     if (diff < -WHO_CONTACT_WINDOW_W) {
-      return { ga: w, status: 'overdue', weeksAway: diff };
+      return { status: 'NEXT', ga: w, dueStatus: 'overdue', weeksAway: diff };
     }
     if (Math.abs(diff) <= WHO_CONTACT_WINDOW_W) {
-      return { ga: w, status: 'due-now', weeksAway: diff };
+      return { status: 'NEXT', ga: w, dueStatus: 'due-now', weeksAway: diff };
     }
-    return { ga: w, status: 'upcoming', weeksAway: diff };
+    return { status: 'NEXT', ga: w, dueStatus: 'upcoming', weeksAway: diff };
   }
-  return null;
+  return { status: 'COMPLETE' };
 }
 
 // ─── Pre-pregnancy BMI ───────────────────────────────────────────────────────

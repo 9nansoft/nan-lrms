@@ -140,36 +140,51 @@ describe('WHO 8-contact schedule', () => {
   });
 
   describe('nextContactDue', () => {
-    it('returns null when current GA is unknown', () => {
-      expect(nextContactDue(null, [])).toBeNull();
+    // WHO containment T2 (2026-07-14): nextContactDue returns a discriminated
+    // union so callers can distinguish "GA unknown — cannot evaluate the
+    // schedule" from "genuinely complete" — both used to collapse to `null`,
+    // which made the journey detail page render green "8 contacts complete"
+    // for patients whose GA was never recorded.
+    it('returns UNKNOWN_GA when current GA is unknown', () => {
+      expect(nextContactDue(null, [])).toEqual({ status: 'UNKNOWN_GA' });
     });
     it('reports the first contact as upcoming before it is due', () => {
-      expect(nextContactDue(8, [])).toEqual({ ga: 12, status: 'upcoming', weeksAway: 4 });
+      expect(nextContactDue(8, [])).toEqual({
+        status: 'NEXT',
+        ga: 12,
+        dueStatus: 'upcoming',
+        weeksAway: 4,
+      });
     });
     it('skips contacts already attended within the ±1w window', () => {
       // 27 counts as attending the week-26 contact (|27-26| <= 1).
       expect(nextContactDue(25, [12, 20, 27])).toEqual({
+        status: 'NEXT',
         ga: 30,
-        status: 'upcoming',
+        dueStatus: 'upcoming',
         weeksAway: 5,
       });
     });
     it('flags a contact due now when GA is within the window', () => {
       expect(nextContactDue(25, [12, 20])).toEqual({
+        status: 'NEXT',
         ga: 26,
-        status: 'due-now',
+        dueStatus: 'due-now',
         weeksAway: 1,
       });
     });
     it('flags a missed contact as overdue', () => {
       expect(nextContactDue(30, [12, 20])).toEqual({
+        status: 'NEXT',
         ga: 26,
-        status: 'overdue',
+        dueStatus: 'overdue',
         weeksAway: -4,
       });
     });
-    it('returns null once every scheduled contact is attended', () => {
-      expect(nextContactDue(41, [12, 20, 26, 30, 34, 36, 38, 40])).toBeNull();
+    it('returns COMPLETE once every scheduled contact is attended (GA known)', () => {
+      expect(nextContactDue(41, [12, 20, 26, 30, 34, 36, 38, 40])).toEqual({
+        status: 'COMPLETE',
+      });
     });
   });
 });
