@@ -49,6 +49,7 @@ export async function syncAncData(
   let skippedInvalidCid = 0;
   let incompleteAssessments = 0;
   let downgradesBlocked = 0;
+  let visitConflicts = 0;
 
   for (const anc of ancPatients) {
     // Per-row CID gate. The polling-level fingerprint (pollHospital) already
@@ -186,8 +187,11 @@ export async function syncAncData(
     for (const visit of visits) {
       // hospitalId here is the hospital whose tunnel this sync ran against —
       // the visit was recorded at that hospital's HOSxP. Carries through so
-      // the journey detail timeline can show per-visit hospital.
-      await upsertAncVisit(db, currentJourney.id, hospitalId, visit);
+      // the journey detail timeline can show per-visit hospital. A visit
+      // date already owned by ANOTHER hospital is skipped (not overwritten).
+      if (await upsertAncVisit(db, currentJourney.id, hospitalId, visit)) {
+        visitConflicts++;
+      }
     }
 
     const now = new Date().toISOString();
@@ -195,9 +199,17 @@ export async function syncAncData(
       visits.length > 0
         ? visits.sort((a, b) => a.service_date.localeCompare(b.service_date)).at(-1)
         : null;
+    // Roll-up = DB aggregate over ALL of the journey's surviving visits (every
+    // hospital — the provincial history), not this payload's own length (WHO
+    // containment T5). Cross-hospital conflict-skips mean payload length can
+    // diverge from what is actually stored, so aggregate the real rows.
     await db.execute(
-      `UPDATE maternal_journeys SET anc_visit_count = ?, last_anc_date = ?, updated_at = ? WHERE id = ?`,
-      [visits.length, lastVisit?.service_date ?? null, now, currentJourney.id],
+      `UPDATE maternal_journeys
+          SET anc_visit_count = (SELECT COUNT(*) FROM cached_anc_visits WHERE journey_id = ?),
+              last_anc_date = (SELECT MAX(visit_date) FROM cached_anc_visits WHERE journey_id = ?),
+              updated_at = ?
+        WHERE id = ?`,
+      [currentJourney.id, currentJourney.id, now, currentJourney.id],
     );
 
     const patientRisks = ancRisks.filter((r) => r.person_anc_id === anc.person_anc_id);
@@ -296,24 +308,40 @@ export async function syncAncData(
     hospitalId,
     incompleteAssessments,
     downgradesBlocked,
+    visitConflicts,
   });
 
   return count;
 }
 
+// Returns true when the incoming visit was SKIPPED because its
+// (journey_id, visit_date) row is already owned by ANOTHER hospital — this
+// hospital's payload must never overwrite or reattribute it (WHO containment
+// T5). Same-hospital and NULL-hospital rows are updated as before (a
+// NULL-hospital row gets CLAIMED by the updating hospital here because this
+// polling path historically created those rows — acceptable ownership repair).
 async function upsertAncVisit(
   db: DatabaseAdapter,
   journeyId: string,
   hospitalId: string,
   visit: HosxpAncServiceRow,
-): Promise<void> {
+): Promise<boolean> {
   const now = new Date().toISOString();
-  const existing = await db.query<{ id: string }>(
-    `SELECT id FROM cached_anc_visits WHERE journey_id = ? AND visit_date = ?`,
+  const existing = await db.query<{ id: string; hospital_id: string | null }>(
+    `SELECT id, hospital_id FROM cached_anc_visits WHERE journey_id = ? AND visit_date = ?`,
     [journeyId, visit.service_date],
   );
 
   if (existing.length > 0) {
+    const owner = existing[0].hospital_id;
+    if (owner != null && owner !== hospitalId) {
+      logger.warn('anc_cross_hospital_visit_conflict', {
+        journeyId,
+        hospitalId,
+        conflictingHospitalId: owner,
+      });
+      return true;
+    }
     await db.execute(
       `UPDATE cached_anc_visits SET hospital_id = ?, visit_number = ?, ga_weeks = ?, ga_days = ?,
        fundal_height_cm = ?, weight_kg = ?, bp_systolic = ?, bp_diastolic = ?,
@@ -365,6 +393,7 @@ async function upsertAncVisit(
       ],
     );
   }
+  return false;
 }
 
 async function upsertAncRisk(

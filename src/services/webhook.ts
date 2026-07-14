@@ -26,7 +26,7 @@ import { ANC_RISK_CONFIGS, ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules'
 import { insertAncScreeningIfChanged } from '@/services/anc-screening';
 import { logger } from '@/lib/logger';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
-import { isoDatesEqual } from '@/lib/dates';
+import { isoDatesEqual, toIsoDate } from '@/lib/dates';
 
 // ─── Webhook payload types ───
 
@@ -214,6 +214,11 @@ export interface WebhookAncResult {
   // a known journey risk on missing evidence (empty items or declared-only) and
   // was blocked. Additive/non-breaking — see the WHO T4 downgrade guard below.
   downgradesBlocked: number;
+  // Count of incoming visits SKIPPED because their (journey, visit_date) is
+  // already owned by ANOTHER hospital (or a NULL-hospital legacy row). One
+  // hospital's payload may never overwrite or reattribute another hospital's
+  // visit row — see the WHO T5 hospital-scoped visit writes below.
+  visitConflicts: number;
 }
 
 // ─── Referral webhook payload ───
@@ -890,6 +895,7 @@ export async function processAncWebhook(
   let updated = 0;
   let deleted = 0;
   let downgradesBlocked = 0;
+  let visitConflicts = 0;
   let skippedInvalidCidChecksum = 0;
 
   for (const patient of payload.patients) {
@@ -1154,99 +1160,146 @@ export async function processAncWebhook(
       sseManager.broadcast('patient-update', event);
     }
 
-    // Persist ANC visit records — replace strategy (delete old, insert new).
-    // Also mirrors the HOSxP-polling path (src/services/sync/anc.ts): after
-    // visits are written, update the journey's summary columns
-    // (anc_visit_count, last_anc_date, ga_weeks) so the list UI shows the
-    // right "ANC# / LAST ANC / GA" without a separate aggregate query.
-    if (patient.visits?.length) {
-      await db.execute(`DELETE FROM cached_anc_visits WHERE journey_id = ?`, [journeyId]);
-      const visitNow = new Date().toISOString();
-      for (const visit of patient.visits) {
-        await db.execute(
-          `INSERT INTO cached_anc_visits
-           (id, journey_id, hospital_id, visit_date, visit_number, ga_weeks,
-            fundal_height_cm, weight_kg, bp_systolic, bp_diastolic,
-            fetal_hr, presentation, engagement,
-            urine_protein, urine_glucose, hb_g_dl, hct_pct,
-            tt_dose_no, iron_folic_given, calcium_given,
-            danger_signs_json, fetal_movement_ok,
-            vaccines_given_json, urine_ketone, urine_culture_result,
-            iodine_given, multivitamin_given, vitamin_d_iu,
-            nst_result, bpp_score, umbilical_doppler_result,
-            psychosocial_screen_json,
-            synced_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            // hospital_id is the webhook's authenticated hospital — visits
-            // arrive in the payload of THAT hospital's webhook, so attribute
-            // each visit to it. Cross-hospital ANC for referred patients is
-            // captured because the receiving hospital's webhook reports it.
-            uuidv4(),
-            journeyId,
-            hospitalId,
-            visit.date,
-            visit.visitNumber,
-            visit.gaWeeks ?? null,
-            visit.fundalHeightCm ?? null,
-            visit.weightKg ?? null,
-            visit.bpSystolic ?? null,
-            visit.bpDiastolic ?? null,
-            visit.fetalHr ?? null,
-            visit.presentation ?? null,
-            visit.engagement ?? null,
-            visit.urineProtein ?? null,
-            visit.urineGlucose ?? null,
-            visit.hbGDl ?? null,
-            visit.hctPct ?? null,
-            visit.ttDoseNo ?? null,
-            // Postgres is strict on boolean columns — must be true/false,
-            // not 1/0. SQLite is lenient; we normalize here for both paths.
-            visit.ironFolicGiven == null ? null : Boolean(visit.ironFolicGiven),
-            visit.calciumGiven == null ? null : Boolean(visit.calciumGiven),
-            visit.dangerSigns ? JSON.stringify(visit.dangerSigns) : null,
-            visit.fetalMovementOk == null ? null : Boolean(visit.fetalMovementOk),
-            // RTCOG OB 66-029 per-visit additions.
-            visit.vaccinesGiven ? JSON.stringify(visit.vaccinesGiven) : null,
-            visit.urineKetone ?? null,
-            visit.urineCultureResult ?? null,
-            visit.iodineGiven == null ? null : Boolean(visit.iodineGiven),
-            visit.multivitaminGiven == null ? null : Boolean(visit.multivitaminGiven),
-            visit.vitaminDIu ?? null,
-            visit.nstResult ?? null,
-            visit.bppScore ?? null,
-            visit.umbilicalDopplerResult ?? null,
-            visit.psychosocialScreen ? JSON.stringify(visit.psychosocialScreen) : null,
-            visitNow,
-            visitNow,
-          ],
-        );
-      }
-
-      // Summary roll-up. Last visit is the one with the highest visit_number;
-      // fall back to latest visit_date if numbers clash or are missing.
-      const sorted = [...patient.visits].sort((a, b) => {
-        const bn = (b.visitNumber ?? 0) - (a.visitNumber ?? 0);
-        if (bn !== 0) return bn;
-        return (b.date ?? '').localeCompare(a.date ?? '');
-      });
-      const lastVisit = sorted[0];
-      await db.execute(
-        `UPDATE maternal_journeys
-            SET anc_visit_count = ?,
-                last_anc_date = ?,
-                ga_weeks = COALESCE(?, ga_weeks),
-                updated_at = ?
-          WHERE id = ?`,
-        [
-          patient.visits.length,
-          lastVisit?.date ?? null,
-          lastVisit?.gaWeeks ?? null,
-          visitNow,
+    // Persist ANC visit records — HOSPITAL-SCOPED replace (WHO containment T5).
+    // The journey is shared cross-hospital via cid_hash, so an UNSCOPED delete
+    // let hospital B's push erase hospital A's visit rows and re-stamp them
+    // hospital B. Now: (1) delete ONLY this hospital's rows, (2) skip incoming
+    // visits whose date collides with a row owned by another hospital (never
+    // overwrite — that is the provincial history), (3) roll the summary up from
+    // a DB aggregate over ALL surviving rows (all hospitals). The whole
+    // replace + roll-up is ONE transaction so a mid-loop failure can never
+    // leave a partial delete (prior rows are restored on rollback).
+    if (patient.visits && patient.visits.length > 0) {
+      const incomingVisits = patient.visits;
+      await db.transaction(async (tx) => {
+        // Scope strictly to the authenticated pushing hospital. Rows with
+        // hospital_id IS NULL (legacy, normally backfilled at startup from
+        // journey.current_hospital_id) are NEVER deleted by this path —
+        // they are treated as another hospital's rows for conflict purposes.
+        await tx.execute(`DELETE FROM cached_anc_visits WHERE journey_id = ? AND hospital_id = ?`, [
           journeyId,
-        ],
-      );
+          hospitalId,
+        ]);
+
+        // Surviving rows = other hospitals' rows + NULL-hospital rows. Map
+        // their calendar day → owning hospital so an incoming same-day visit
+        // is rejected (conflict), not overwritten. Concurrent-writer race
+        // beyond this in-transaction pre-check is accepted residual risk for
+        // containment — there is one pusher per hospital.
+        const survivors = await tx.query<{ visit_date: string | Date; hospital_id: string | null }>(
+          `SELECT visit_date, hospital_id FROM cached_anc_visits WHERE journey_id = ?`,
+          [journeyId],
+        );
+        const claimedByOther = new Map<string, string | null>();
+        for (const row of survivors) {
+          const key = toIsoDate(row.visit_date);
+          if (key) claimedByOther.set(key, row.hospital_id);
+        }
+
+        const visitNow = new Date().toISOString();
+        const insertedDays = new Set<string>();
+        for (const visit of incomingVisits) {
+          const day = toIsoDate(visit.date);
+          if (day && claimedByOther.has(day)) {
+            // Same-day cross-hospital conflict — skip, count, log. No visit
+            // date, no PHI — only journey + hospital identifiers.
+            visitConflicts++;
+            logger.warn('anc_cross_hospital_visit_conflict', {
+              journeyId,
+              hospitalId,
+              conflictingHospitalId: claimedByOther.get(day) ?? null,
+            });
+            continue;
+          }
+          // Guard the unique (journey_id, visit_date) index against a
+          // payload that repeats a date: keep the first, skip the rest, so a
+          // duplicate never aborts (and rolls back) the whole transaction.
+          if (day && insertedDays.has(day)) continue;
+          if (day) insertedDays.add(day);
+          await tx.execute(
+            `INSERT INTO cached_anc_visits
+             (id, journey_id, hospital_id, visit_date, visit_number, ga_weeks,
+              fundal_height_cm, weight_kg, bp_systolic, bp_diastolic,
+              fetal_hr, presentation, engagement,
+              urine_protein, urine_glucose, hb_g_dl, hct_pct,
+              tt_dose_no, iron_folic_given, calcium_given,
+              danger_signs_json, fetal_movement_ok,
+              vaccines_given_json, urine_ketone, urine_culture_result,
+              iodine_given, multivitamin_given, vitamin_d_iu,
+              nst_result, bpp_score, umbilical_doppler_result,
+              psychosocial_screen_json,
+              synced_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              // hospital_id is the webhook's authenticated hospital — visits
+              // arrive in the payload of THAT hospital's webhook, so attribute
+              // each visit to it. Cross-hospital ANC for referred patients is
+              // captured because the receiving hospital's webhook reports it.
+              uuidv4(),
+              journeyId,
+              hospitalId,
+              visit.date,
+              visit.visitNumber,
+              visit.gaWeeks ?? null,
+              visit.fundalHeightCm ?? null,
+              visit.weightKg ?? null,
+              visit.bpSystolic ?? null,
+              visit.bpDiastolic ?? null,
+              visit.fetalHr ?? null,
+              visit.presentation ?? null,
+              visit.engagement ?? null,
+              visit.urineProtein ?? null,
+              visit.urineGlucose ?? null,
+              visit.hbGDl ?? null,
+              visit.hctPct ?? null,
+              visit.ttDoseNo ?? null,
+              // Postgres is strict on boolean columns — must be true/false,
+              // not 1/0. SQLite is lenient; we normalize here for both paths.
+              visit.ironFolicGiven == null ? null : Boolean(visit.ironFolicGiven),
+              visit.calciumGiven == null ? null : Boolean(visit.calciumGiven),
+              visit.dangerSigns ? JSON.stringify(visit.dangerSigns) : null,
+              visit.fetalMovementOk == null ? null : Boolean(visit.fetalMovementOk),
+              // RTCOG OB 66-029 per-visit additions.
+              visit.vaccinesGiven ? JSON.stringify(visit.vaccinesGiven) : null,
+              visit.urineKetone ?? null,
+              visit.urineCultureResult ?? null,
+              visit.iodineGiven == null ? null : Boolean(visit.iodineGiven),
+              visit.multivitaminGiven == null ? null : Boolean(visit.multivitaminGiven),
+              visit.vitaminDIu ?? null,
+              visit.nstResult ?? null,
+              visit.bppScore ?? null,
+              visit.umbilicalDopplerResult ?? null,
+              visit.psychosocialScreen ? JSON.stringify(visit.psychosocialScreen) : null,
+              visitNow,
+              visitNow,
+            ],
+          );
+        }
+
+        // Summary roll-up = DB aggregate over ALL of the journey's surviving
+        // visits (every hospital — this is the provincial history), not the
+        // payload's own count (spec §7.6 rule 11): anc_visit_count = COUNT(*),
+        // last_anc_date = MAX(visit_date). Done as SQL subqueries so the
+        // TIMESTAMPTZ date never round-trips through JS. ga_weeks is still a
+        // COALESCE hint from the payload's last visit (highest visit_number,
+        // then latest date) so an incremental push keeps a prior GA.
+        const sorted = [...incomingVisits].sort((a, b) => {
+          const bn = (b.visitNumber ?? 0) - (a.visitNumber ?? 0);
+          if (bn !== 0) return bn;
+          return (b.date ?? '').localeCompare(a.date ?? '');
+        });
+        const lastVisit = sorted[0];
+        await tx.execute(
+          `UPDATE maternal_journeys
+              SET anc_visit_count = (SELECT COUNT(*) FROM cached_anc_visits WHERE journey_id = ?),
+                  last_anc_date = (SELECT MAX(visit_date) FROM cached_anc_visits WHERE journey_id = ?),
+                  ga_weeks = COALESCE(?, ga_weeks),
+                  updated_at = ?
+            WHERE id = ?`,
+          [journeyId, journeyId, lastVisit?.gaWeeks ?? null, visitNow, journeyId],
+        );
+      });
     }
 
     // Persist journey-level WHO ANC data (labs, obstetric history, PMH).
@@ -1416,6 +1469,7 @@ export async function processAncWebhook(
     updated,
     deleted,
     downgradesBlocked,
+    visitConflicts,
   };
 }
 

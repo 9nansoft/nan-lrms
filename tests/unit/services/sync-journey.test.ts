@@ -13,6 +13,7 @@ import type {
 } from '@/types/hosxp';
 import { CareStage, AncRiskLevel } from '@/types/domain';
 import { createJourney } from '@/services/journey';
+import { toIsoDate } from '@/lib/dates';
 
 const ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
@@ -237,6 +238,106 @@ describe('Sync Journey Extension', () => {
         [hospitalId, 'HN-ANC-002'],
       );
       expect(visits).toHaveLength(2);
+    });
+
+    it('does not modify or reassign a visit owned by another hospital; roll-up counts all rows (WHO T5)', async () => {
+      const hospB = await db.query<{ id: string }>("SELECT id FROM hospitals WHERE hcode = '10995'");
+      const hospitalB = hospB[0].id;
+
+      const ancPatients: HosxpPersonAncRow[] = [
+        {
+          person_anc_id: 7001,
+          person_id: 700,
+          hn: 'HN-XH',
+          pname: 'นาง',
+          fname: 'ข้าม',
+          lname: 'รพ',
+          cid: '1234567890121',
+          birthday: '1994-01-01',
+          preg_no: 1,
+          lmp: '2025-06-01',
+          edc: '2026-03-08',
+          anc_register_date: '2025-08-01',
+        },
+      ];
+
+      const svc1: HosxpAncServiceRow[] = [
+        {
+          person_anc_service_id: 8001,
+          person_anc_id: 7001,
+          service_date: '2025-09-01',
+          anc_service_number: 1,
+          pa_week: 12,
+          pa_day: 0,
+          fundal_height: 10,
+          bw: 55,
+          bps: 120,
+          bpd: 80,
+          height: 158,
+          fetal_heart_rate: 140,
+          baby_position: null,
+          baby_lead: null,
+          pass_quality: null,
+          doctor_code: null,
+        },
+      ];
+      // First sync (hospital A) creates journey + one visit on 2025-09-01.
+      await syncAncData(db, hospitalId, ancPatients, svc1, [], [], ENCRYPTION_KEY);
+
+      const journey = await db.query<{ id: string }>(
+        'SELECT id FROM maternal_journeys WHERE hospital_id = ? AND hn = ?',
+        [hospitalId, 'HN-XH'],
+      );
+      // Simulate the 2025-09-01 visit being owned by another hospital B.
+      await db.execute(
+        'UPDATE cached_anc_visits SET hospital_id = ?, ga_weeks = 50 WHERE journey_id = ?',
+        [hospitalB, journey[0].id],
+      );
+
+      // Second sync (hospital A): same date (B's row, must NOT change) + a new date.
+      const svc2: HosxpAncServiceRow[] = [
+        { ...svc1[0], pa_week: 99 },
+        {
+          person_anc_service_id: 8002,
+          person_anc_id: 7001,
+          service_date: '2025-10-01',
+          anc_service_number: 2,
+          pa_week: 16,
+          pa_day: 0,
+          fundal_height: 14,
+          bw: 57,
+          bps: 118,
+          bpd: 78,
+          height: 158,
+          fetal_heart_rate: 142,
+          baby_position: null,
+          baby_lead: null,
+          pass_quality: null,
+          doctor_code: null,
+        },
+      ];
+      await syncAncData(db, hospitalId, ancPatients, svc2, [], [], ENCRYPTION_KEY);
+
+      const rows = await db.query<{
+        visit_date: string | Date;
+        hospital_id: string;
+        ga_weeks: number;
+      }>(
+        'SELECT visit_date, hospital_id, ga_weeks FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date',
+        [journey[0].id],
+      );
+      expect(rows).toHaveLength(2);
+      const d1 = rows.find((r) => toIsoDate(r.visit_date) === '2025-09-01')!;
+      expect(d1.hospital_id).toBe(hospitalB); // NOT reassigned to A
+      expect(d1.ga_weeks).toBe(50); // NOT overwritten with pa_week 99
+      const d2 = rows.find((r) => toIsoDate(r.visit_date) === '2025-10-01')!;
+      expect(d2.hospital_id).toBe(hospitalId); // new visit owned by A
+
+      const j = await db.query<{ anc_visit_count: number }>(
+        'SELECT anc_visit_count FROM maternal_journeys WHERE id = ?',
+        [journey[0].id],
+      );
+      expect(j[0].anc_visit_count).toBe(2); // DB aggregate over ALL surviving rows
     });
 
     it('repeated unchanged ANC sync does not append duplicate screening rows', async () => {

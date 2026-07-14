@@ -1,10 +1,13 @@
 // Integration tests: ANC webhook, referral webhook, and delete operations
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 import { createTestDb } from '../helpers/testDb';
+import { FailingAdapter } from '../helpers/failingDb';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { generateKey } from '@/lib/encryption';
+import { toIsoDate } from '@/lib/dates';
 import type { SseManager } from '@/lib/sse';
 import {
   createApiKey,
@@ -966,6 +969,224 @@ describe('ANC/Referral Webhook Integration', () => {
         [journey[0].id],
       );
       expect(visits).toHaveLength(1); // visits preserved, not deleted
+    });
+  });
+
+  // ─── ANC Visit Cross-Hospital Scoping Tests (WHO containment T5) ───
+
+  describe('Scenario 12: hospital-scoped visit writes + cross-hospital conflict rejection', () => {
+    const cidHash = (cid: string) => createHash('sha256').update(cid).digest('hex');
+    const patient = (
+      hn: string,
+      cid: string,
+      visits: Array<{ date: string; visitNumber: number; gaWeeks?: number; bpSystolic?: number }>,
+    ) => ({ hn, name: 'นาง ข้ามรพ.', cid, birthday: '1995-01-01', pregNo: 1, lmp: '2025-09-01', visits });
+    const anc = (hospitalCode: string, p: ReturnType<typeof patient>): WebhookAncPayload => ({
+      type: 'anc_data',
+      hospitalCode,
+      patients: [p],
+    });
+
+    it("hospital B push never deletes hospital A rows; count is the provincial total (A=2 + B=1 → 3)", async () => {
+      const cid = '1007000900014';
+      await processAncWebhook(
+        db,
+        webhookHospitalId,
+        anc('99902', patient('XH-A', cid, [
+          { date: '2025-12-01', visitNumber: 1, gaWeeks: 13 },
+          { date: '2026-01-01', visitNumber: 2, gaWeeks: 17 },
+        ])),
+        asSse(sseManager),
+      );
+      const result = await processAncWebhook(
+        db,
+        destHospitalId,
+        anc('99903', patient('XH-B', cid, [{ date: '2026-02-01', visitNumber: 3, gaWeeks: 22 }])),
+        asSse(sseManager),
+      );
+
+      const journey = await db.query<{
+        id: string;
+        anc_visit_count: number;
+        last_anc_date: string | Date;
+      }>(
+        'SELECT id, anc_visit_count, last_anc_date FROM maternal_journeys WHERE cid_hash = ?',
+        [cidHash(cid)],
+      );
+      expect(journey).toHaveLength(1);
+      const rows = await db.query<{ visit_date: string | Date; hospital_id: string }>(
+        'SELECT visit_date, hospital_id FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date',
+        [journey[0].id],
+      );
+      expect(rows).toHaveLength(3);
+      expect(rows.filter((r) => r.hospital_id === webhookHospitalId)).toHaveLength(2);
+      expect(rows.filter((r) => r.hospital_id === destHospitalId)).toHaveLength(1);
+      expect(journey[0].anc_visit_count).toBe(3);
+      expect(toIsoDate(journey[0].last_anc_date)).toBe('2026-02-01');
+      expect(result.visitConflicts).toBe(0);
+    });
+
+    it('hospital B resend replaces only B rows; A rows untouched (count → 4)', async () => {
+      const cid = '1007000900014';
+      await processAncWebhook(
+        db,
+        webhookHospitalId,
+        anc('99902', patient('XH-A', cid, [
+          { date: '2025-12-01', visitNumber: 1 },
+          { date: '2026-01-01', visitNumber: 2 },
+        ])),
+        asSse(sseManager),
+      );
+      await processAncWebhook(
+        db,
+        destHospitalId,
+        anc('99903', patient('XH-B', cid, [{ date: '2026-02-01', visitNumber: 3 }])),
+        asSse(sseManager),
+      );
+
+      const journey = await db.query<{ id: string }>(
+        'SELECT id FROM maternal_journeys WHERE cid_hash = ?',
+        [cidHash(cid)],
+      );
+      const aBefore = await db.query<{ id: string }>(
+        'SELECT id FROM cached_anc_visits WHERE journey_id = ? AND hospital_id = ? ORDER BY visit_date',
+        [journey[0].id, webhookHospitalId],
+      );
+
+      const result = await processAncWebhook(
+        db,
+        destHospitalId,
+        anc('99903', patient('XH-B', cid, [
+          { date: '2026-02-01', visitNumber: 3 },
+          { date: '2026-03-01', visitNumber: 4 },
+        ])),
+        asSse(sseManager),
+      );
+
+      const rows = await db.query<{ visit_date: string | Date; hospital_id: string }>(
+        'SELECT visit_date, hospital_id FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date',
+        [journey[0].id],
+      );
+      expect(rows).toHaveLength(4);
+      const aAfter = await db.query<{ id: string }>(
+        'SELECT id FROM cached_anc_visits WHERE journey_id = ? AND hospital_id = ? ORDER BY visit_date',
+        [journey[0].id, webhookHospitalId],
+      );
+      expect(aAfter.map((r) => r.id)).toEqual(aBefore.map((r) => r.id));
+      const bDates = rows
+        .filter((r) => r.hospital_id === destHospitalId)
+        .map((r) => toIsoDate(r.visit_date))
+        .sort();
+      expect(bDates).toEqual(['2026-02-01', '2026-03-01']);
+      const j = await db.query<{ anc_visit_count: number }>(
+        'SELECT anc_visit_count FROM maternal_journeys WHERE id = ?',
+        [journey[0].id],
+      );
+      expect(j[0].anc_visit_count).toBe(4);
+      expect(result.visitConflicts).toBe(0);
+    });
+
+    it('same-day cross-hospital conflict is skipped and counted; A row byte-identical; other B visit still inserts', async () => {
+      const cid = '1007000900022';
+      await processAncWebhook(
+        db,
+        webhookHospitalId,
+        anc('99902', patient('XH-A', cid, [
+          { date: '2025-12-01', visitNumber: 1, gaWeeks: 13, bpSystolic: 110 },
+        ])),
+        asSse(sseManager),
+      );
+
+      const journey = await db.query<{ id: string }>(
+        'SELECT id FROM maternal_journeys WHERE cid_hash = ?',
+        [cidHash(cid)],
+      );
+      const aBefore = await db.query(
+        'SELECT * FROM cached_anc_visits WHERE journey_id = ? AND hospital_id = ?',
+        [journey[0].id, webhookHospitalId],
+      );
+
+      const result = await processAncWebhook(
+        db,
+        destHospitalId,
+        anc('99903', patient('XH-B', cid, [
+          { date: '2025-12-01', visitNumber: 5, gaWeeks: 99, bpSystolic: 200 },
+          { date: '2026-03-01', visitNumber: 6, gaWeeks: 30 },
+        ])),
+        asSse(sseManager),
+      );
+
+      expect(result.visitConflicts).toBe(1);
+      const aAfter = await db.query(
+        'SELECT * FROM cached_anc_visits WHERE journey_id = ? AND hospital_id = ?',
+        [journey[0].id, webhookHospitalId],
+      );
+      expect(aAfter).toEqual(aBefore); // A's d1 row byte-identical — never overwritten
+      const rows = await db.query<{ visit_date: string | Date; hospital_id: string }>(
+        'SELECT visit_date, hospital_id FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date',
+        [journey[0].id],
+      );
+      expect(rows).toHaveLength(2);
+      const bRows = rows.filter((r) => r.hospital_id === destHospitalId);
+      expect(bRows).toHaveLength(1);
+      expect(toIsoDate(bRows[0].visit_date)).toBe('2026-03-01');
+    });
+
+    it('injected failure mid visit-insert rolls back — A and B prior rows all survive, count unchanged', async () => {
+      const cid = '1007000900014';
+      await processAncWebhook(
+        db,
+        webhookHospitalId,
+        anc('99902', patient('XH-A', cid, [
+          { date: '2025-12-01', visitNumber: 1 },
+          { date: '2026-01-01', visitNumber: 2 },
+        ])),
+        asSse(sseManager),
+      );
+      await processAncWebhook(
+        db,
+        destHospitalId,
+        anc('99903', patient('XH-B', cid, [{ date: '2026-02-01', visitNumber: 3 }])),
+        asSse(sseManager),
+      );
+
+      const journey = await db.query<{ id: string }>(
+        'SELECT id FROM maternal_journeys WHERE cid_hash = ?',
+        [cidHash(cid)],
+      );
+      const before = await db.query(
+        'SELECT id, hospital_id, visit_date FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date',
+        [journey[0].id],
+      );
+      const jBefore = await db.query<{ anc_visit_count: number }>(
+        'SELECT anc_visit_count FROM maternal_journeys WHERE id = ?',
+        [journey[0].id],
+      );
+      expect(jBefore[0].anc_visit_count).toBe(3);
+
+      const failing = new FailingAdapter(db, /INSERT INTO cached_anc_visits/);
+      await expect(
+        processAncWebhook(
+          failing,
+          destHospitalId,
+          anc('99903', patient('XH-B', cid, [
+            { date: '2026-02-01', visitNumber: 3 },
+            { date: '2026-03-01', visitNumber: 4 },
+          ])),
+          asSse(sseManager),
+        ),
+      ).rejects.toThrow(/injected failure/);
+
+      const after = await db.query(
+        'SELECT id, hospital_id, visit_date FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date',
+        [journey[0].id],
+      );
+      expect(after).toEqual(before); // no partial delete — prior rows intact
+      const jAfter = await db.query<{ anc_visit_count: number }>(
+        'SELECT anc_visit_count FROM maternal_journeys WHERE id = ?',
+        [journey[0].id],
+      );
+      expect(jAfter[0].anc_visit_count).toBe(3);
     });
   });
 
