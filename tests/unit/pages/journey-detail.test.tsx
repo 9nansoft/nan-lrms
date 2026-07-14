@@ -110,6 +110,74 @@ async function renderPage() {
   });
 }
 
+// WHO containment T1 — unknown-state observation severities. Missing
+// clinical data must be a distinct "unknown" state: never the green OK
+// badge, and a known abnormal finding (BP sys 200) must still flag red
+// even when its sibling (diastolic) is missing.
+const baseVisit = {
+  hospitalName: 'รพ.พล',
+  hcode: '10995',
+  fundalHeightCm: null,
+  weightKg: null,
+  presentation: null,
+  engagement: null,
+  passQuality: null,
+  urineProtein: null,
+  urineGlucose: null,
+  hctPct: null,
+  ttDoseNo: null,
+  ironFolicGiven: null,
+  calciumGiven: null,
+  dangerSigns: null,
+};
+
+const visitAllNull = {
+  ...baseVisit,
+  visitDate: new Date(Date.now() - 30 * 24 * HOURS).toISOString(),
+  visitNumber: 1,
+  gaWeeks: 12,
+  bpSystolic: null,
+  bpDiastolic: null,
+  fetalHr: null,
+  hbGDl: null,
+  fetalMovementOk: null,
+};
+
+const visitBpAbnormalPartial = {
+  ...baseVisit,
+  visitDate: new Date(Date.now() - 10 * 24 * HOURS).toISOString(),
+  visitNumber: 2,
+  gaWeeks: 20,
+  bpSystolic: 200,
+  bpDiastolic: null,
+  fetalHr: 140,
+  hbGDl: 12,
+  fetalMovementOk: true,
+};
+
+const fixtureWithVisits = {
+  ...fixture,
+  ancVisits: [visitAllNull, visitBpAbnormalPartial],
+};
+
+async function renderPageWithVisits() {
+  await act(async () => {
+    render(
+      <SWRConfig
+        value={{
+          fetcher: async (_url: string) => fixtureWithVisits,
+          provider: () => new Map(),
+          dedupingInterval: 0,
+        }}
+      >
+        <Suspense fallback={null}>
+          <JourneyDetailPage params={Promise.resolve({ journeyId: 'j-detail-1' })} />
+        </Suspense>
+      </SWRConfig>,
+    );
+  });
+}
+
 describe('JourneyDetailPage — redesign', () => {
   it('shows the HOSxP sync freshness stamp', async () => {
     await renderPage();
@@ -136,5 +204,21 @@ describe('JourneyDetailPage — redesign', () => {
     expect(within(panel).getByText(/PE\/DVT/)).toBeInTheDocument();
     expect(within(panel).getByText(/350/)).toBeInTheDocument();
     expect(within(panel).getByText(/obesity/)).toBeInTheDocument();
+  });
+});
+
+describe('JourneyDetailPage — unknown-state observation severities (WHO containment T1)', () => {
+  it('never shows the green OK badge for a visit whose clinical fields are all missing, and shows the not-fully-recorded badge instead', async () => {
+    await renderPageWithVisits();
+    // "OK" only ever appears as the fully-known-good visit badge on this
+    // page; asserting its total absence proves the all-null visit did not
+    // fall through to the green check.
+    expect(screen.queryByText('OK')).toBeNull();
+    expect(await screen.findByText('ไม่ได้บันทึกครบ')).toBeInTheDocument();
+  });
+
+  it('still fires the red BP-high flag when systolic is abnormal even though diastolic is missing', async () => {
+    await renderPageWithVisits();
+    expect(await screen.findByText('BP HIGH')).toBeInTheDocument();
   });
 });

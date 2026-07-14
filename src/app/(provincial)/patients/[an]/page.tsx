@@ -48,7 +48,7 @@ import { Pill, STATUS_META, URGENCY_META } from '@/components/referrals/chips';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { classifySyncHealth } from '@/config/hospital-network';
 import { NEWBORN_THRESHOLDS } from '@/config/newborn';
-import { FHR_LOW, FHR_HIGH, BP_SYS_HIGH, BP_DIA_HIGH } from '@/services/anc-clinical';
+import { sevBp, sevFhr } from '@/services/anc-clinical';
 
 type WorkspaceTab = 'summary' | 'partograph' | 'contractions';
 
@@ -76,17 +76,16 @@ function fmtDateTimeTh(iso: string | null): string {
   });
 }
 
-// Clinical tinting for the observations table — thresholds shared with the
-// ANC clinical service, never restated here.
+// Clinical tinting for the observations table — severity bands (and their
+// null-handling) live once in the ANC clinical service, never restated
+// here. 'borderline'/'unknown' render with the default ink (undefined) —
+// only a proven-abnormal reading gets the alarm tint.
 function fhrTint(v: number | null): string | undefined {
-  if (v == null) return undefined;
-  return v < FHR_LOW || v > FHR_HIGH ? 'var(--risk-high)' : undefined;
+  return sevFhr(v) === 'abnormal' ? 'var(--risk-high)' : undefined;
 }
 
 function bpTint(sys: number | null, dia: number | null): string | undefined {
-  if ((sys != null && sys >= BP_SYS_HIGH) || (dia != null && dia >= BP_DIA_HIGH))
-    return 'var(--risk-high)';
-  return undefined;
+  return sevBp(sys, dia) === 'abnormal' ? 'var(--risk-high)' : undefined;
 }
 
 export default function PatientDetailPage({ params }: { params: Promise<{ an: string }> }) {

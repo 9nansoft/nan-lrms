@@ -21,26 +21,55 @@ export const HB_SEVERE = 9; // severe anemia
 export const PROTEINURIA_24H_HIGH_MG = 300;
 export const CREATININE_HIGH_MG_DL = 1.1;
 
-export type Severity = 'normal' | 'borderline' | 'abnormal';
+// 'unknown' is a distinct, neutral "not recorded" state — never treated as
+// 'normal' (which would hide missing data behind green/OK styling) and
+// never treated as 'abnormal'/'borderline' (which would raise a false
+// alarm on data we never collected). See WHO guideline containment T1.
+export type Severity = 'normal' | 'borderline' | 'abnormal' | 'unknown';
 
+// Evaluates each present component independently and reports the highest
+// severity provable from present data — a single high/amber reading is
+// abnormal/borderline even if its sibling reading is missing. 'unknown'
+// only when normality cannot be proven (i.e. at least one component is
+// missing and neither present component crossed a band).
 export function sevBp(sys: number | null, dia: number | null): Severity {
-  if (sys == null || dia == null) return 'normal';
-  if (sys >= BP_SYS_HIGH || dia >= BP_DIA_HIGH) return 'abnormal';
-  if (sys >= BP_SYS_AMBER || dia >= BP_DIA_AMBER) return 'borderline';
+  const sysHigh = sys != null && sys >= BP_SYS_HIGH;
+  const diaHigh = dia != null && dia >= BP_DIA_HIGH;
+  if (sysHigh || diaHigh) return 'abnormal';
+  const sysAmber = sys != null && sys >= BP_SYS_AMBER;
+  const diaAmber = dia != null && dia >= BP_DIA_AMBER;
+  if (sysAmber || diaAmber) return 'borderline';
+  if (sys == null || dia == null) return 'unknown';
   return 'normal';
 }
 
 export function sevFhr(v: number | null): Severity {
-  if (v == null) return 'normal';
+  if (v == null) return 'unknown';
   if (v < FHR_LOW || v > FHR_HIGH) return 'abnormal';
   return 'normal';
 }
 
 export function sevHb(v: number | null): Severity {
-  if (v == null) return 'normal';
+  if (v == null) return 'unknown';
   if (v < HB_SEVERE) return 'abnormal';
   if (v < HB_LOW) return 'borderline';
   return 'normal';
+}
+
+// Urine dipstick protein — ANC visit field is a free-text result (e.g.
+// "NEG", "TRACE", "+", "2+"). Ported verbatim from the journey detail
+// page's inline regex; ANY "+" in the result is proteinuria.
+export function sevUrineProtein(v: string | null | undefined): Severity {
+  if (v == null || v === '') return 'unknown';
+  return /\+/.test(v) ? 'abnormal' : 'normal';
+}
+
+// Maternal-reported fetal movement check ("did you feel the baby move
+// normally today?"). Not asked/answered at every visit, so absence must
+// stay 'unknown' rather than implying movement was fine.
+export function sevFetalMovement(ok: boolean | null | undefined): Severity {
+  if (ok == null) return 'unknown';
+  return ok ? 'normal' : 'abnormal';
 }
 
 // ─── WHO 8-contact ANC schedule ──────────────────────────────────────────────

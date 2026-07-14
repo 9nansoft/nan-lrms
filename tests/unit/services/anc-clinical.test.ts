@@ -3,6 +3,8 @@ import {
   sevBp,
   sevFhr,
   sevHb,
+  sevUrineProtein,
+  sevFetalMovement,
   nextContactDue,
   prePregnancyBmi,
   isLateFirstContact,
@@ -17,34 +19,50 @@ import {
 } from '@/services/anc-clinical';
 
 // These tests pin the clinical rules ported verbatim out of the journey detail
-// page. Expected values are derived from the pre-extraction implementation.
+// page. Expected values for *present* readings are derived from the
+// pre-extraction implementation and MUST NOT change (WHO containment T1 only
+// touches null-handling). The null→'normal' assertions below were replaced
+// 2026-07-14 (WHO containment T1): missing clinical data must be a distinct
+// 'unknown' state, never rendered/treated as normal.
 
 describe('anc-clinical severity bands', () => {
   describe('sevBp (systolic/diastolic)', () => {
-    it('treats a missing reading as normal', () => {
-      expect(sevBp(null, 80)).toBe('normal');
-      expect(sevBp(120, null)).toBe('normal');
-      expect(sevBp(null, null)).toBe('normal');
+    // Full case table from the T1 brief — evaluate present components
+    // independently; report the highest severity provable from present
+    // data; 'unknown' only when normality cannot be proven.
+    it('is unknown when normality cannot be proven from present data', () => {
+      expect(sevBp(null, null)).toBe('unknown');
+      expect(sevBp(120, null)).toBe('unknown');
+      expect(sevBp(null, 80)).toBe('unknown');
+    });
+    it('flags abnormal from a single present component, even if the other is missing', () => {
+      expect(sevBp(200, null)).toBe('abnormal');
+      expect(sevBp(null, 95)).toBe('abnormal');
+    });
+    it('flags borderline from a single present component, even if the other is missing', () => {
+      expect(sevBp(132, null)).toBe('borderline');
     });
     it('flags abnormal at/above the high band (>=140 / >=90)', () => {
       expect(sevBp(140, 80)).toBe('abnormal');
       expect(sevBp(120, 90)).toBe('abnormal');
       expect(sevBp(160, 100)).toBe('abnormal');
+      expect(sevBp(140, 90)).toBe('abnormal');
     });
     it('flags borderline in the amber band (130-139 / 85-89)', () => {
       expect(sevBp(130, 80)).toBe('borderline');
       expect(sevBp(139, 84)).toBe('borderline');
       expect(sevBp(120, 85)).toBe('borderline');
+      expect(sevBp(130, 85)).toBe('borderline');
     });
-    it('is normal below the amber band', () => {
+    it('is normal below the amber band when both components are present', () => {
       expect(sevBp(129, 84)).toBe('normal');
       expect(sevBp(120, 80)).toBe('normal');
     });
   });
 
   describe('sevFhr', () => {
-    it('is normal for a missing reading', () => {
-      expect(sevFhr(null)).toBe('normal');
+    it('is unknown for a missing reading', () => {
+      expect(sevFhr(null)).toBe('unknown');
     });
     it('is normal inside 110-160 inclusive', () => {
       expect(sevFhr(110)).toBe('normal');
@@ -59,8 +77,8 @@ describe('anc-clinical severity bands', () => {
   });
 
   describe('sevHb', () => {
-    it('is normal for a missing reading', () => {
-      expect(sevHb(null)).toBe('normal');
+    it('is unknown for a missing reading', () => {
+      expect(sevHb(null)).toBe('unknown');
     });
     it('is abnormal below the severe-anemia band (<9)', () => {
       expect(sevHb(8.9)).toBe('abnormal');
@@ -73,6 +91,36 @@ describe('anc-clinical severity bands', () => {
     it('is normal at/above 11', () => {
       expect(sevHb(11)).toBe('normal');
       expect(sevHb(13)).toBe('normal');
+    });
+  });
+
+  describe('sevUrineProtein', () => {
+    it('is unknown when the result is missing or empty', () => {
+      expect(sevUrineProtein(null)).toBe('unknown');
+      expect(sevUrineProtein(undefined)).toBe('unknown');
+      expect(sevUrineProtein('')).toBe('unknown');
+    });
+    it('is abnormal when the result contains a "+"', () => {
+      expect(sevUrineProtein('+')).toBe('abnormal');
+      expect(sevUrineProtein('2+')).toBe('abnormal');
+      expect(sevUrineProtein('+++')).toBe('abnormal');
+    });
+    it('is normal otherwise', () => {
+      expect(sevUrineProtein('NEG')).toBe('normal');
+      expect(sevUrineProtein('TRACE')).toBe('normal');
+    });
+  });
+
+  describe('sevFetalMovement', () => {
+    it('is unknown when not recorded', () => {
+      expect(sevFetalMovement(null)).toBe('unknown');
+      expect(sevFetalMovement(undefined)).toBe('unknown');
+    });
+    it('is abnormal when reduced fetal movement is reported', () => {
+      expect(sevFetalMovement(false)).toBe('abnormal');
+    });
+    it('is normal when fetal movement is confirmed ok', () => {
+      expect(sevFetalMovement(true)).toBe('normal');
     });
   });
 

@@ -35,6 +35,8 @@ import {
   sevBp,
   sevFhr,
   sevHb,
+  sevUrineProtein,
+  sevFetalMovement,
   nextContactDue,
   prePregnancyBmi,
   isLateFirstContact,
@@ -54,6 +56,7 @@ import {
   Clock,
   Droplets,
   Heart,
+  HelpCircle,
   Activity,
   Ruler,
   MapPin,
@@ -258,14 +261,18 @@ function sevColor(s: Severity): string {
     ? 'var(--risk-high)'
     : s === 'borderline'
       ? 'var(--risk-medium)'
-      : 'var(--ink-navy)';
+      : s === 'unknown'
+        ? 'var(--ink-navy-muted)' // "not recorded" — neutral, never green
+        : 'var(--ink-navy)';
 }
 function sevBg(s: Severity): string {
   return s === 'abnormal'
     ? 'rgba(239, 68, 68, 0.10)'
     : s === 'borderline'
       ? 'rgba(234, 179, 8, 0.10)'
-      : 'transparent';
+      : s === 'unknown'
+        ? 'rgba(234, 179, 8, 0.05)' // faint amber "not recorded" tint
+        : 'transparent';
 }
 
 // Short labels for baby_position / baby_lead. HOSxP values are inconsistent
@@ -748,7 +755,7 @@ function TrendRow({
   const delta = current != null && prev != null ? current - prev : null;
   const sev: Severity =
     current == null
-      ? 'normal'
+      ? 'unknown' // no reading this pregnancy — neutral, not the same as a normal value
       : severity
         ? severity(current)
         : (lowBand != null && current < lowBand) || (highBand != null && current > highBand)
@@ -1635,23 +1642,37 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     const bpSev = sevBp(v.bpSystolic, v.bpDiastolic);
                     const fhrSev = sevFhr(v.fetalHr);
                     const hbSev = sevHb(v.hbGDl);
+                    const urineProteinSev = sevUrineProtein(v.urineProtein);
+                    const fetalMovementSev = sevFetalMovement(v.fetalMovementOk);
                     const bpHigh = bpSev === 'abnormal';
-                    const proteinuria = v.urineProtein != null && /\+/.test(v.urineProtein);
+                    const proteinuria = urineProteinSev === 'abnormal';
                     const glucosuria = v.urineGlucose != null && /\+/.test(v.urineGlucose);
-                    const anemia = hbSev !== 'normal';
+                    const anemia = hbSev === 'borderline' || hbSev === 'abnormal';
                     const severeAnemia = hbSev === 'abnormal';
                     const preeclampsiaSuspect = bpHigh && proteinuria;
-                    const reducedFm = v.fetalMovementOk === false;
+                    const reducedFm = fetalMovementSev === 'abnormal';
                     const dangers = v.dangerSigns ?? [];
+                    // 'unknown' (missing data) must never widen this — only a
+                    // known abnormal/borderline finding raises a flag.
                     const anyFlag =
-                      bpSev !== 'normal' ||
-                      fhrSev !== 'normal' ||
+                      bpSev === 'abnormal' ||
+                      bpSev === 'borderline' ||
+                      fhrSev === 'abnormal' ||
                       proteinuria ||
                       glucosuria ||
                       anemia ||
                       preeclampsiaSuspect ||
                       reducedFm ||
                       dangers.length > 0;
+                    // No known flag fired, but at least one of the five core
+                    // checks couldn't be evaluated — this visit is not fully
+                    // recorded, which is distinct from "checked and normal".
+                    const anyUnknown =
+                      bpSev === 'unknown' ||
+                      fhrSev === 'unknown' ||
+                      hbSev === 'unknown' ||
+                      urineProteinSev === 'unknown' ||
+                      fetalMovementSev === 'unknown';
                     return (
                       <div
                         // Composite key: HOSxP can store duplicate visit_number
@@ -1703,7 +1724,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                         <div
                           className={cn(
                             'inline-flex items-center justify-start rounded-sm px-1.5 font-mono tabular-nums',
-                            bpSev !== 'normal' && 'font-bold',
+                            (bpSev === 'abnormal' || bpSev === 'borderline') && 'font-bold',
                           )}
                           style={{
                             color: sevColor(bpSev),
@@ -1717,7 +1738,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                         <div
                           className={cn(
                             'inline-flex items-center justify-start rounded-sm px-1.5 font-mono tabular-nums',
-                            fhrSev !== 'normal' && 'font-bold',
+                            fhrSev === 'abnormal' && 'font-bold',
                           )}
                           style={{
                             color: sevColor(fhrSev),
@@ -1792,9 +1813,14 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                             <VisitChip label="Fe+FA" color="var(--ink-navy-muted)" />
                           )}
                           {v.calciumGiven && <VisitChip label="Ca" color="var(--ink-navy-muted)" />}
-                          {!anyFlag && (
+                          {!anyFlag && !anyUnknown && (
                             <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--risk-low)]">
                               <CheckCircle2 className="h-2.5 w-2.5" /> OK
+                            </span>
+                          )}
+                          {!anyFlag && anyUnknown && (
+                            <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--risk-medium)]">
+                              <HelpCircle className="h-2.5 w-2.5" /> ไม่ได้บันทึกครบ
                             </span>
                           )}
                         </div>
