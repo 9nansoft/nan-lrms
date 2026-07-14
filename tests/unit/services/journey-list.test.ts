@@ -12,7 +12,12 @@ import {
   ancFreshnessCutoffs,
 } from '@/config/anc-freshness';
 import { ANC_OPS } from '@/config/anc-ops';
-import { listJourneys, listHospitalJourneys, getJourneyDetail } from '@/services/journey-list';
+import {
+  listJourneys,
+  listHospitalJourneys,
+  getJourneyDetail,
+  parseAncAssessment,
+} from '@/services/journey-list';
 
 const HOSP_A = 'hosp-a';
 const HOSP_B = 'hosp-b';
@@ -389,6 +394,40 @@ describe('journey-list service', () => {
     });
   });
 
+  // WHO containment T6 — pure function, tested directly (valid / legacy `{}`
+  // / malformed / webhook items-shape / already-parsed pg JSONB object).
+  describe('parseAncAssessment', () => {
+    it('parses a valid completeness object (string JSON, as SQLite/text columns would return)', () => {
+      const result = parseAncAssessment(
+        JSON.stringify({ missingRequired: ['bpSystolic'], assessmentIncomplete: true }),
+      );
+      expect(result).toEqual({ incomplete: true, missingRequired: ['bpSystolic'] });
+    });
+
+    it('accepts an already-parsed object (pg JSONB passthrough)', () => {
+      const result = parseAncAssessment({ missingRequired: [], assessmentIncomplete: false });
+      expect(result).toEqual({ incomplete: false, missingRequired: [] });
+    });
+
+    it('returns null for legacy empty object {}', () => {
+      expect(parseAncAssessment('{}')).toBeNull();
+      expect(parseAncAssessment({})).toBeNull();
+    });
+
+    it('returns null for malformed JSON', () => {
+      expect(parseAncAssessment('{not json')).toBeNull();
+    });
+
+    it('returns null for the webhook items-based shape (no missingRequired/assessmentIncomplete keys)', () => {
+      expect(parseAncAssessment(JSON.stringify({ itemIds: [16] }))).toBeNull();
+    });
+
+    it('returns null for null/undefined', () => {
+      expect(parseAncAssessment(null)).toBeNull();
+      expect(parseAncAssessment(undefined)).toBeNull();
+    });
+  });
+
   describe('getJourneyDetail', () => {
     it('returns null when the journey does not exist', async () => {
       const res = await getJourneyDetail(db, 'does-not-exist');
@@ -405,9 +444,65 @@ describe('journey-list service', () => {
       expect(res!.newborns).toEqual([]);
       expect(res!.referrals).toEqual([]);
       expect(res!.latestRisk).toBeNull();
+      expect(res!.ancAssessment).toBeNull();
       // No labor record linked → no cross-link; syncedAt always present.
       expect(res!.laborAdmission).toBeNull();
       expect(res!.journey.syncedAt).toBeTruthy();
+    });
+
+    it('ancAssessment is null when there is no cached_anc_risks row at all', async () => {
+      const id = await insertJourney(db, { name: 'No Screening', gaWeeks: 30 });
+      const res = await getJourneyDetail(db, id);
+      expect(res!.ancAssessment).toBeNull();
+    });
+
+    // WHO containment T6 — T3 persists {missingRequired, assessmentIncomplete}
+    // into cached_anc_risks.risk_factors on the POLLING path. getJourneyDetail
+    // must surface it so an incomplete LOW never displays as a bare confirmed
+    // LOW chip.
+    it('exposes ancAssessment parsed from the latest cached_anc_risks.risk_factors (WHO containment T6)', async () => {
+      const id = await insertJourney(db, { name: 'Incomplete Person', gaWeeks: 30 });
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors, screened_at, created_at)
+         VALUES (?, ?, 'LOW', '[]', ?, ?, ?)`,
+        [
+          crypto.randomUUID(),
+          id,
+          JSON.stringify({ missingRequired: ['bpSystolic', 'hb'], assessmentIncomplete: true }),
+          now,
+          now,
+        ],
+      );
+      const res = await getJourneyDetail(db, id);
+      expect(res!.ancAssessment).toEqual({
+        incomplete: true,
+        missingRequired: ['bpSystolic', 'hb'],
+      });
+    });
+
+    it('ancAssessment is null for legacy {} risk_factors (pre-T3 rows)', async () => {
+      const id = await insertJourney(db, { name: 'Legacy Row', gaWeeks: 30 });
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors, screened_at, created_at)
+         VALUES (?, ?, 'LOW', '[]', '{}', ?, ?)`,
+        [crypto.randomUUID(), id, now, now],
+      );
+      const res = await getJourneyDetail(db, id);
+      expect(res!.ancAssessment).toBeNull();
+    });
+
+    it('ancAssessment is null for the webhook items-based risk_factors shape (no missingRequired key)', async () => {
+      const id = await insertJourney(db, { name: 'Webhook Screened', gaWeeks: 30 });
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO cached_anc_risks (id, journey_id, risk_level, triggered_rules, risk_factors, screened_at, created_at)
+         VALUES (?, ?, 'LOW', '[]', ?, ?, ?)`,
+        [crypto.randomUUID(), id, JSON.stringify({ itemIds: [16] }), now, now],
+      );
+      const res = await getJourneyDetail(db, id);
+      expect(res!.ancAssessment).toBeNull();
     });
 
     it('returns the linked labor admission (latest by admit date) for the cross-link', async () => {

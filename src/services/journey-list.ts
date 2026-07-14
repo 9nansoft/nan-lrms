@@ -19,6 +19,7 @@ import type {
   JourneyDetailResponse,
   AncVisitEntry,
   AncRiskEntry,
+  AncAssessmentCompleteness,
   ReferralListItem,
   NewbornEntry,
 } from '@/types/api';
@@ -494,6 +495,32 @@ function parseJson<T = unknown>(raw: unknown): T | null {
   return null;
 }
 
+/**
+ * Parse `cached_anc_risks.risk_factors` into the assessment-completeness
+ * shape the POLLING path (T3) writes: `{missingRequired: string[],
+ * assessmentIncomplete: boolean}`. WHO containment T6.
+ *
+ * Returns null for every "no reliable completeness signal" case, all
+ * deliberately collapsed to the same UI outcome (no marker):
+ *   - absent/null (no screening row, or the column is null)
+ *   - unparseable JSON (malformed string)
+ *   - legacy `{}` rows written before T3 existed
+ *   - the WEBHOOK path's items-based shape (`{itemIds: [...]}`) — webhook
+ *     evidence is items-based, not completeness-based; this is expected,
+ *     not a bug (see WebhookAncResult JSDoc).
+ * Tolerant of both already-parsed pg JSONB objects and raw JSON strings.
+ */
+export function parseAncAssessment(raw: unknown): AncAssessmentCompleteness | null {
+  const parsed = parseJson<Record<string, unknown>>(raw);
+  if (!parsed || typeof parsed !== 'object') return null;
+  const { missingRequired, assessmentIncomplete } = parsed;
+  if (!Array.isArray(missingRequired) || typeof assessmentIncomplete !== 'boolean') return null;
+  return {
+    incomplete: assessmentIncomplete,
+    missingRequired: missingRequired.filter((s): s is string => typeof s === 'string'),
+  };
+}
+
 /** Referrals attached to one journey, hospital names resolved — shared by
  *  the journey detail and the labor patient detail. */
 export async function getJourneyReferrals(
@@ -635,6 +662,9 @@ export async function getJourneyDetail(
           recommendedFacility: riskRows[0].recommended_facility as string | null,
         }
       : null;
+  // WHO containment T6 — see parseAncAssessment JSDoc for the null cases.
+  const ancAssessment =
+    riskRows.length > 0 ? parseAncAssessment(riskRows[0].risk_factors) : null;
 
   const referrals = await getJourneyReferrals(db, journeyId);
   const newborns = await getJourneyNewborns(db, journeyId);
@@ -728,6 +758,7 @@ export async function getJourneyDetail(
     },
     ancVisits,
     latestRisk,
+    ancAssessment,
     referrals,
     newborns,
     laborAdmission,

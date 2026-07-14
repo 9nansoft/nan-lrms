@@ -109,6 +109,14 @@ interface LatestRisk {
   recommendedFacility: string | null;
 }
 
+// WHO containment T6 — completeness of the latest ANC risk screening. Null
+// when there is no screening row, it's unparseable, or it's a legacy/
+// webhook-sourced row (see src/types/api.ts AncAssessmentCompleteness).
+interface AncAssessment {
+  incomplete: boolean;
+  missingRequired: string[];
+}
+
 interface Referral {
   id: string;
   fromHospital: string;
@@ -199,6 +207,8 @@ interface JourneyDetailResponse {
   journey: Journey;
   ancVisits: AncVisit[];
   latestRisk: LatestRisk | null;
+  /** WHO containment T6 — see AncAssessment above. */
+  ancAssessment?: AncAssessment | null;
   referrals: Referral[];
   newborns: Newborn[];
   /** Latest linked labor admission — cross-link to /patients/[hcode]-[an]. */
@@ -375,6 +385,26 @@ function Pill({
       }}
     >
       {label}
+    </span>
+  );
+}
+
+// WHO containment T6 — spec containment item 5: an incomplete LOW assessment
+// must never display as a bare confirmed-LOW chip. Rendered beside every
+// risk chip on the page whenever ancAssessment.incomplete is true.
+function IncompleteAssessmentMarker({ missingCount }: { missingCount: number }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 border px-2 py-0.5 font-mono text-[11px] font-semibold tracking-[0.06em]"
+      style={{
+        color: 'var(--risk-medium)',
+        borderColor: 'var(--risk-medium)',
+        background: 'rgba(234, 179, 8, 0.08)',
+      }}
+      data-testid="anc-assessment-incomplete-marker"
+    >
+      <AlertTriangle className="h-3 w-3" />
+      {`การประเมินความเสี่ยงไม่สมบูรณ์ (ขาดข้อมูล ${missingCount} รายการ)`}
     </span>
   );
 }
@@ -1139,7 +1169,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
     );
   }
 
-  const { journey, ancVisits, latestRisk, referrals, newborns } = data;
+  const { journey, ancVisits, latestRisk, ancAssessment, referrals, newborns } = data;
   const riskColor = ANC_RISK_COLOR[journey.ancRiskLevel ?? ''] ?? 'var(--ink-navy-muted)';
   const riskLabel = journey.ancRiskLevel
     ? (ANC_RISK_LABEL_TH[journey.ancRiskLevel] ?? journey.ancRiskLevel)
@@ -1196,6 +1226,9 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               label={`${journey.ancRiskLevel}${riskLabel ? ` · ${riskLabel}` : ''}`}
               color={riskColor}
             />
+          )}
+          {ancAssessment?.incomplete && (
+            <IncompleteAssessmentMarker missingCount={ancAssessment.missingRequired.length} />
           )}
           <Pill label={stageLabel.toUpperCase()} color={stageColor} />
         </div>
@@ -2519,6 +2552,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                       {ANC_RISK_LABEL_TH[latestRisk.riskLevel] ?? latestRisk.riskLevel}
                     </span>
                   </div>
+                  {ancAssessment?.incomplete && (
+                    <div className="mt-1.5">
+                      <IncompleteAssessmentMarker
+                        missingCount={ancAssessment.missingRequired.length}
+                      />
+                    </div>
+                  )}
                   <div className="mt-1 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
                     SCREENED {formatThai(latestRisk.screenedAt)}
                   </div>

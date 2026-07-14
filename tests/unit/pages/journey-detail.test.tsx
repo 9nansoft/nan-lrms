@@ -292,3 +292,52 @@ describe('JourneyDetailPage — unknown-GA schedule semantics (WHO containment T
     expect(screen.queryByText(/ไม่ทราบอายุครรภ์/)).toBeNull();
   });
 });
+
+// WHO containment T6 — spec containment item 5: an incomplete LOW assessment
+// must never display as a bare confirmed-LOW chip. T3 persists
+// {missingRequired, assessmentIncomplete} into cached_anc_risks.risk_factors
+// on the polling path; the journey-detail API surfaces it as
+// journey.ancAssessment, and this page must render an amber marker beside
+// the risk chip whenever ancAssessment.incomplete is true.
+describe('JourneyDetailPage — assessment-completeness marker (WHO containment T6)', () => {
+  const incompleteMarkerText = /การประเมินความเสี่ยงไม่สมบูรณ์ \(ขาดข้อมูล 2 รายการ\)/;
+
+  const fixtureIncomplete = {
+    ...fixture,
+    journey: { ...fixture.journey, ancRiskLevel: 'LOW' },
+    latestRisk: { ...fixture.latestRisk, riskLevel: 'LOW' },
+    ancAssessment: { incomplete: true, missingRequired: ['bpSystolic', 'hb'] },
+  };
+
+  const fixtureComplete = {
+    ...fixture,
+    journey: { ...fixture.journey, ancRiskLevel: 'LOW' },
+    latestRisk: { ...fixture.latestRisk, riskLevel: 'LOW' },
+    ancAssessment: { incomplete: false, missingRequired: [] },
+  };
+
+  const fixtureNullAssessment = {
+    ...fixture,
+    journey: { ...fixture.journey, ancRiskLevel: 'LOW' },
+    latestRisk: { ...fixture.latestRisk, riskLevel: 'LOW' },
+    ancAssessment: null,
+  };
+
+  it('renders the amber incomplete marker beside the risk chip when ancAssessment.incomplete is true', async () => {
+    await renderPageWithFixture(fixtureIncomplete);
+    expect((await screen.findAllByText(incompleteMarkerText)).length).toBeGreaterThan(0);
+  });
+
+  it('never renders the marker when ancAssessment.incomplete is false', async () => {
+    await renderPageWithFixture(fixtureComplete);
+    // Wait for the page to finish rendering before asserting absence.
+    await screen.findByText('LOW');
+    expect(screen.queryByText(/การประเมินความเสี่ยงไม่สมบูรณ์/)).toBeNull();
+  });
+
+  it('never renders the marker when ancAssessment is null (e.g. webhook-sourced screening)', async () => {
+    await renderPageWithFixture(fixtureNullAssessment);
+    await screen.findByText('LOW');
+    expect(screen.queryByText(/การประเมินความเสี่ยงไม่สมบูรณ์/)).toBeNull();
+  });
+});

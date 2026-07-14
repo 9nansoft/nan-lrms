@@ -205,19 +205,35 @@ export interface WebhookAncPayload {
   patients: WebhookAncPatient[];
 }
 
+/**
+ * Result of {@link processAncWebhook}. Additive/non-breaking: both
+ * `/api/webhooks/patient-data` (anc_data branch) and
+ * `/api/sync/browser-push` (persist_anc step) surface every field of this
+ * shape in their response JSON — see WHO containment T6 (ingestion
+ * observability). `downgradesBlocked` and `visitConflicts` are ANOMALY
+ * COUNTERS: non-zero means the ingest pipeline silently protected data
+ * integrity and an operator should know. Both are logged via
+ * `logger.warn('anc_ingest_anomalies', { hospitalId, downgradesBlocked,
+ * visitConflicts })` on the browser-push path when either is > 0.
+ */
 export interface WebhookAncResult {
   patientsProcessed: number;
   created: number;
   updated: number;
   deleted: number;
-  // Count of per-patient updates whose declared/derived level would have LOWERED
-  // a known journey risk on missing evidence (empty items or declared-only) and
-  // was blocked. Additive/non-breaking — see the WHO T4 downgrade guard below.
+  /**
+   * Count of per-patient updates whose declared/derived level would have
+   * LOWERED a known journey risk on missing evidence (empty items or
+   * declared-only) and was blocked. See the WHO T4 downgrade guard below.
+   */
   downgradesBlocked: number;
-  // Count of incoming visits SKIPPED because their (journey, visit_date) is
-  // already owned by ANOTHER hospital (or a NULL-hospital legacy row). One
-  // hospital's payload may never overwrite or reattribute another hospital's
-  // visit row — see the WHO T5 hospital-scoped visit writes below.
+  /**
+   * Count of incoming visits SKIPPED because their (journey, visit_date) is
+   * already owned by ANOTHER hospital (or a NULL-hospital legacy row). One
+   * hospital's payload may never overwrite or reattribute another
+   * hospital's visit row — see the WHO T5 hospital-scoped visit writes
+   * below.
+   */
   visitConflicts: number;
 }
 

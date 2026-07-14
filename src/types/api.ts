@@ -478,6 +478,18 @@ export interface JourneyDetailResponse {
   };
   ancVisits: AncVisitEntry[];
   latestRisk: AncRiskEntry | null;
+  /**
+   * Completeness of the latest ANC risk screening — WHO containment T6.
+   * Parsed from `cached_anc_risks.risk_factors` (JSONB), written only by
+   * the POLLING path (T3: `{missingRequired, assessmentIncomplete}`).
+   * Null when there is no screening row, the JSON is unparseable, or it's
+   * a legacy/webhook-sourced row that doesn't carry this shape (webhook
+   * evidence is items-based, e.g. `{itemIds: [...]}` — expected, not a bug).
+   * The UI MUST render an amber marker beside the risk chip whenever
+   * `incomplete` is true so an incomplete LOW never displays as a bare
+   * confirmed-LOW chip (spec containment item 5).
+   */
+  ancAssessment: AncAssessmentCompleteness | null;
   referrals: ReferralListItem[];
   newborns: NewbornEntry[];
   /** Latest linked labor admission (cached_patients) — enables the
@@ -488,6 +500,12 @@ export interface JourneyDetailResponse {
     laborStatus: string;
     admitDate: string;
   } | null;
+}
+
+/** See {@link JourneyDetailResponse.ancAssessment}. */
+export interface AncAssessmentCompleteness {
+  incomplete: boolean;
+  missingRequired: string[];
 }
 
 export interface AncVisitEntry {
