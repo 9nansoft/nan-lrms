@@ -286,6 +286,29 @@ rules:
         - { field: headache, operator: "==", value: "SEVERE" }
     clinicalDecision: { ref: "7.5-1", choice: "one severe symptom alone fires LOCAL_SEVERE", approved: false }
 
+  - id: PE-HEADACHE-MODERATE-TOLERABLE
+    purpose: LOCAL_PDF_TIER
+    controllingSourceId: LOCAL_PDF
+    supportingSourceIds: [SRC-ACOG-PREECLAMPSIA-FAQ]
+    condition: PREECLAMPSIA
+    localTier: LOCAL_MODERATE
+    logic:
+      anyOf:
+        - { field: headache, operator: "==", value: "MILD" }
+    clinicalDecision:
+      ref: "7.5-1"
+      choice: >
+        Encodes the local PDF's Clinical/Moderate cell (design doc §2.1:
+        "mild/tolerable headache" => moderate). Without this rule an assessed
+        HeadacheSeverity 'MILD' would map to no rule and evaluate to
+        NO_LOCAL_MATCH — the exact missing/dropped-criterion failure Phase 0
+        exists to prevent. HeadacheSeverity 'MILD' is the normalized ordinal
+        for the PDF's "mild/tolerable" wording; it fires LOCAL_MODERATE
+        independently, and the highest matched tier across all domains still
+        wins (so a co-present severe finding is not masked). Conservative and
+        provisional pending sign-off.
+      approved: false
+
   - id: PE-BLURRED-VISION-IN-LOCAL-SEVERE-COLUMN
     purpose: LOCAL_PDF_TIER
     controllingSourceId: LOCAL_PDF

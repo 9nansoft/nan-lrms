@@ -1718,5 +1718,115 @@
       "matchedRuleIds": [],
       "missingRequiredFields": []
     }
+  },
+  {
+    "name": "mild (tolerable) headache alone is local moderate (PDF moderate clinical cell)",
+    "input": {
+      "headache": "MILD"
+    },
+    "expect": {
+      "localTier": "LOCAL_MODERATE",
+      "emergencyAcuity": "UNKNOWN",
+      "isComplete": false,
+      "suspectedConditions": [
+        "PREECLAMPSIA"
+      ],
+      "matchedRuleIds": [
+        "PE-HEADACHE-MODERATE-TOLERABLE"
+      ],
+      "missingRequiredFields": [
+        "gaWeeks",
+        "gaDays",
+        "systolicBp",
+        "diastolicBp",
+        "proteinuriaGrade",
+        "vaginalBleeding",
+        "fetalHeartRateBpm",
+        "maternalPulseBpm",
+        "consciousness",
+        "shockSignsPresent"
+      ]
+    }
+  },
+  {
+    "name": "contradictory input: heavy bleeding rate reported with vaginalBleeding false still escalates to emergency acuity (concealed-bleeding safety)",
+    "input": {
+      "vaginalBleeding": false,
+      "bleedingRate": "HEAVY"
+    },
+    "expect": {
+      "localTier": "NO_LOCAL_MATCH",
+      "emergencyAcuity": "EMERGENCY",
+      "isComplete": false,
+      "suspectedConditions": [],
+      "matchedRuleIds": [
+        "EA-BLEEDING-HEAVY-EMERGENCY"
+      ],
+      "missingRequiredFields": [
+        "gaWeeks",
+        "gaDays",
+        "systolicBp",
+        "diastolicBp",
+        "proteinuriaGrade",
+        "headache",
+        "fetalHeartRateBpm",
+        "maternalPulseBpm",
+        "consciousness",
+        "shockSignsPresent"
+      ]
+    }
+  },
+  {
+    "name": "two acuity rules of different rank fire simultaneously: EMERGENCY (sinusoidal) wins over URGENT (pulse) on the max-rank acuity axis",
+    "input": {
+      "maternalPulseBpm": 130,
+      "fetalTracingPattern": "SINUSOIDAL"
+    },
+    "expect": {
+      "localTier": "NO_LOCAL_MATCH",
+      "emergencyAcuity": "EMERGENCY",
+      "isComplete": false,
+      "suspectedConditions": [],
+      "matchedRuleIds": [
+        "EA-FETAL-SINUSOIDAL-EMERGENCY",
+        "EA-PULSE-HIGH-URGENT"
+      ],
+      "missingRequiredFields": [
+        "gaWeeks",
+        "gaDays",
+        "systolicBp",
+        "diastolicBp",
+        "proteinuriaGrade",
+        "headache",
+        "vaginalBleeding",
+        "fetalHeartRateBpm",
+        "consciousness",
+        "shockSignsPresent"
+      ]
+    }
+  },
+  {
+    "name": "all mandatory fields assessed and normal, but acuity-only fields (oxygenSaturationPct/bleedingRate/fetalTracingPattern) unassessed: isComplete true coexists with emergencyAcuity UNKNOWN",
+    "input": {
+      "gaWeeks": 30,
+      "gaDays": 0,
+      "systolicBp": 110,
+      "diastolicBp": 70,
+      "proteinuriaGrade": "NEGATIVE",
+      "headache": "NONE",
+      "vaginalBleeding": false,
+      "fetalHeartRateBpm": 140,
+      "maternalPulseBpm": 80,
+      "consciousness": "ALERT",
+      "shockSignsPresent": false
+    },
+    "expect": {
+      "localTier": "NO_LOCAL_MATCH",
+      "emergencyAcuity": "UNKNOWN",
+      "isComplete": true,
+      "suspectedConditions": [],
+      "matchedRuleIds": [],
+      "missingRequiredFields": []
+    }
   }
 ]
