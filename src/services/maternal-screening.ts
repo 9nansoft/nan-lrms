@@ -155,7 +155,12 @@ const PROTEINURIA_SPELLINGS: Readonly<Record<string, ProteinuriaGrade>> = {
  * SAME missing-data semantics as `matchRule`'s null-guard (GC1).
  */
 function isFieldUnassessed(value: unknown): boolean {
-  return value === null || value === undefined || value === 'UNKNOWN';
+  return (
+    value === null ||
+    value === undefined ||
+    value === 'UNKNOWN' ||
+    (typeof value === 'number' && Number.isNaN(value))
+  );
 }
 
 /**

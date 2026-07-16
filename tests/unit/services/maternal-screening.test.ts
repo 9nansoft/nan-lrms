@@ -279,6 +279,50 @@ describe('evaluateMaternalScreen — Global Constraints', () => {
     expect(severe).toBeDefined();
     expect(severe?.evidence).toEqual([{ field: 'systolicBp', value: 160 }]);
   });
+
+  it('GC1: a numeric NaN (e.g. from Number("n/a")) counts as unassessed, never a normal value', () => {
+    // Fully-assessed-normal EXCEPT oxygenSaturationPct is NaN (garbage upstream
+    // parse). NaN must not read as assessed-normal: the field is both a
+    // stability-determination field (=> acuity must NOT be STABLE) and a
+    // mandatory field is unaffected here, so we also assert a NaN in a MANDATORY
+    // numeric field forces isComplete:false.
+    const stableExceptNaNSpo2 = evaluateMaternalScreen(
+      makeInput({
+        shockSignsPresent: false,
+        consciousness: 'ALERT',
+        oxygenSaturationPct: Number('n/a'), // NaN
+        maternalPulseBpm: 80,
+        bleedingRate: 'SPOTTING',
+        fetalTracingPattern: 'REASSURING',
+      }),
+      EVALUATED_AT,
+    );
+    // No acuity rule fires on NaN SpO2 (NaN < 95 is false), and STABLE is
+    // withheld because a stability field is unassessed → UNKNOWN, not STABLE.
+    expect(stableExceptNaNSpo2.emergencyAcuity).not.toBe('STABLE');
+    expect(stableExceptNaNSpo2.emergencyAcuity).toBe('UNKNOWN');
+
+    // A NaN in a MANDATORY numeric field makes the screen incomplete: NaN
+    // behaves like missing, so the field is reported in missingRequiredFields.
+    const otherwiseComplete = evaluateMaternalScreen(
+      makeInput({
+        gaWeeks: 30,
+        gaDays: 0,
+        systolicBp: 110,
+        diastolicBp: 70,
+        proteinuriaGrade: 'NEGATIVE',
+        headache: 'NONE',
+        vaginalBleeding: false,
+        fetalHeartRateBpm: Number('garbage'), // NaN — a mandatory field
+        maternalPulseBpm: 80,
+        consciousness: 'ALERT',
+        shockSignsPresent: false,
+      }),
+      EVALUATED_AT,
+    );
+    expect(otherwiseComplete.isComplete).toBe(false);
+    expect(otherwiseComplete.missingRequiredFields).toContain('fetalHeartRateBpm');
+  });
 });
 
 describe('normalizeProteinuriaGrade — accepted source spellings (Task 7 boundary helper)', () => {

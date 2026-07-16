@@ -78,7 +78,12 @@ function isAllOfNode(node: MaternalScreenLogicNode): node is MaternalScreenAllOf
  * exception).
  */
 function isUnassessed(value: unknown): boolean {
-  return value === null || value === undefined || value === 'UNKNOWN';
+  return (
+    value === null ||
+    value === undefined ||
+    value === 'UNKNOWN' ||
+    (typeof value === 'number' && Number.isNaN(value))
+  );
 }
 
 /**
