@@ -1064,8 +1064,7 @@ export async function processAncWebhook(
     }
     // The level actually persisted for THIS update: a blocked downgrade keeps
     // the existing journey level; everything else follows canonical resolution.
-    const persistedRisk =
-      downgradeBlockReason && existing ? existing.ancRiskLevel : canonicalRisk;
+    const persistedRisk = downgradeBlockReason && existing ? existing.ancRiskLevel : canonicalRisk;
 
     // ONE transaction per patient (specs 3.2 + 3.3): journey update-or-create
     // (including pregnancy rollover), location update, and the risk screening

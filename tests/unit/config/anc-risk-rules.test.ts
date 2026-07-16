@@ -10,11 +10,23 @@ import {
 import { AncRiskLevel } from '@/types/domain';
 
 const baseInput: AncRiskInput = {
-  age: 25, heightCm: 160, prePregnancyBmi: 22, gravida: 2,
-  bpSystolic: 120, bpDiastolic: 80, o2Sat: 98, hct: 36, hb: 12,
-  hosxpRiskIds: [], classifyingItems: [],
-  rhNegative: false, hbsAgPositive: false, syphilisPositive: false,
-  hivPositive: false, thalassemiaDisease: false, niptHighRisk: false,
+  age: 25,
+  heightCm: 160,
+  prePregnancyBmi: 22,
+  gravida: 2,
+  bpSystolic: 120,
+  bpDiastolic: 80,
+  o2Sat: 98,
+  hct: 36,
+  hb: 12,
+  hosxpRiskIds: [],
+  classifyingItems: [],
+  rhNegative: false,
+  hbsAgPositive: false,
+  syphilisPositive: false,
+  hivPositive: false,
+  thalassemiaDisease: false,
+  niptHighRisk: false,
 };
 
 describe('ANC Risk Rules Configuration', () => {
@@ -150,15 +162,26 @@ describe('ANC Risk Rules Configuration', () => {
 
   describe('ANC_RISK_LEVEL_ORDER', () => {
     it('orders HR3 > HR2 > HR1 > LOW', () => {
-      expect(ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR3]).toBeGreaterThan(ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR2]);
-      expect(ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR2]).toBeGreaterThan(ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR1]);
-      expect(ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR1]).toBeGreaterThan(ANC_RISK_LEVEL_ORDER[AncRiskLevel.LOW]);
+      expect(ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR3]).toBeGreaterThan(
+        ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR2],
+      );
+      expect(ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR2]).toBeGreaterThan(
+        ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR1],
+      );
+      expect(ANC_RISK_LEVEL_ORDER[AncRiskLevel.HR1]).toBeGreaterThan(
+        ANC_RISK_LEVEL_ORDER[AncRiskLevel.LOW],
+      );
     });
   });
 
   describe('ANC_RISK_CONFIGS', () => {
     it('has Thai labels and colors for all 4 levels', () => {
-      for (const level of [AncRiskLevel.LOW, AncRiskLevel.HR1, AncRiskLevel.HR2, AncRiskLevel.HR3]) {
+      for (const level of [
+        AncRiskLevel.LOW,
+        AncRiskLevel.HR1,
+        AncRiskLevel.HR2,
+        AncRiskLevel.HR3,
+      ]) {
         const config = ANC_RISK_CONFIGS[level];
         expect(config.labelTh).toBeTruthy();
         expect(config.labelEn).toBeTruthy();
@@ -177,7 +200,12 @@ describe('ANC Risk Rules Configuration', () => {
     });
 
     it('returns highest triggered level (HR3 > HR2 > HR1)', () => {
-      const result = classifyAncRisk({ ...baseInput, age: 36, hivPositive: true, prePregnancyBmi: 42 });
+      const result = classifyAncRisk({
+        ...baseInput,
+        age: 36,
+        hivPositive: true,
+        prePregnancyBmi: 42,
+      });
       expect(result.level).toBe(AncRiskLevel.HR3);
       expect(result.triggeredRules).toContain('hr1_age');
       expect(result.triggeredRules).toContain('hr2_hiv');

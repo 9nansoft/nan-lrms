@@ -980,22 +980,33 @@ describe('ANC/Referral Webhook Integration', () => {
       hn: string,
       cid: string,
       visits: Array<{ date: string; visitNumber: number; gaWeeks?: number; bpSystolic?: number }>,
-    ) => ({ hn, name: 'นาง ข้ามรพ.', cid, birthday: '1995-01-01', pregNo: 1, lmp: '2025-09-01', visits });
+    ) => ({
+      hn,
+      name: 'นาง ข้ามรพ.',
+      cid,
+      birthday: '1995-01-01',
+      pregNo: 1,
+      lmp: '2025-09-01',
+      visits,
+    });
     const anc = (hospitalCode: string, p: ReturnType<typeof patient>): WebhookAncPayload => ({
       type: 'anc_data',
       hospitalCode,
       patients: [p],
     });
 
-    it("hospital B push never deletes hospital A rows; count is the provincial total (A=2 + B=1 → 3)", async () => {
+    it('hospital B push never deletes hospital A rows; count is the provincial total (A=2 + B=1 → 3)', async () => {
       const cid = '1007000900014';
       await processAncWebhook(
         db,
         webhookHospitalId,
-        anc('99902', patient('XH-A', cid, [
-          { date: '2025-12-01', visitNumber: 1, gaWeeks: 13 },
-          { date: '2026-01-01', visitNumber: 2, gaWeeks: 17 },
-        ])),
+        anc(
+          '99902',
+          patient('XH-A', cid, [
+            { date: '2025-12-01', visitNumber: 1, gaWeeks: 13 },
+            { date: '2026-01-01', visitNumber: 2, gaWeeks: 17 },
+          ]),
+        ),
         asSse(sseManager),
       );
       const result = await processAncWebhook(
@@ -1009,10 +1020,9 @@ describe('ANC/Referral Webhook Integration', () => {
         id: string;
         anc_visit_count: number;
         last_anc_date: string | Date;
-      }>(
-        'SELECT id, anc_visit_count, last_anc_date FROM maternal_journeys WHERE cid_hash = ?',
-        [cidHash(cid)],
-      );
+      }>('SELECT id, anc_visit_count, last_anc_date FROM maternal_journeys WHERE cid_hash = ?', [
+        cidHash(cid),
+      ]);
       expect(journey).toHaveLength(1);
       const rows = await db.query<{ visit_date: string | Date; hospital_id: string }>(
         'SELECT visit_date, hospital_id FROM cached_anc_visits WHERE journey_id = ? ORDER BY visit_date',
@@ -1031,10 +1041,13 @@ describe('ANC/Referral Webhook Integration', () => {
       await processAncWebhook(
         db,
         webhookHospitalId,
-        anc('99902', patient('XH-A', cid, [
-          { date: '2025-12-01', visitNumber: 1 },
-          { date: '2026-01-01', visitNumber: 2 },
-        ])),
+        anc(
+          '99902',
+          patient('XH-A', cid, [
+            { date: '2025-12-01', visitNumber: 1 },
+            { date: '2026-01-01', visitNumber: 2 },
+          ]),
+        ),
         asSse(sseManager),
       );
       await processAncWebhook(
@@ -1056,10 +1069,13 @@ describe('ANC/Referral Webhook Integration', () => {
       const result = await processAncWebhook(
         db,
         destHospitalId,
-        anc('99903', patient('XH-B', cid, [
-          { date: '2026-02-01', visitNumber: 3 },
-          { date: '2026-03-01', visitNumber: 4 },
-        ])),
+        anc(
+          '99903',
+          patient('XH-B', cid, [
+            { date: '2026-02-01', visitNumber: 3 },
+            { date: '2026-03-01', visitNumber: 4 },
+          ]),
+        ),
         asSse(sseManager),
       );
 
@@ -1091,9 +1107,12 @@ describe('ANC/Referral Webhook Integration', () => {
       await processAncWebhook(
         db,
         webhookHospitalId,
-        anc('99902', patient('XH-A', cid, [
-          { date: '2025-12-01', visitNumber: 1, gaWeeks: 13, bpSystolic: 110 },
-        ])),
+        anc(
+          '99902',
+          patient('XH-A', cid, [
+            { date: '2025-12-01', visitNumber: 1, gaWeeks: 13, bpSystolic: 110 },
+          ]),
+        ),
         asSse(sseManager),
       );
 
@@ -1109,10 +1128,13 @@ describe('ANC/Referral Webhook Integration', () => {
       const result = await processAncWebhook(
         db,
         destHospitalId,
-        anc('99903', patient('XH-B', cid, [
-          { date: '2025-12-01', visitNumber: 5, gaWeeks: 99, bpSystolic: 200 },
-          { date: '2026-03-01', visitNumber: 6, gaWeeks: 30 },
-        ])),
+        anc(
+          '99903',
+          patient('XH-B', cid, [
+            { date: '2025-12-01', visitNumber: 5, gaWeeks: 99, bpSystolic: 200 },
+            { date: '2026-03-01', visitNumber: 6, gaWeeks: 30 },
+          ]),
+        ),
         asSse(sseManager),
       );
 
@@ -1137,10 +1159,13 @@ describe('ANC/Referral Webhook Integration', () => {
       await processAncWebhook(
         db,
         webhookHospitalId,
-        anc('99902', patient('XH-A', cid, [
-          { date: '2025-12-01', visitNumber: 1 },
-          { date: '2026-01-01', visitNumber: 2 },
-        ])),
+        anc(
+          '99902',
+          patient('XH-A', cid, [
+            { date: '2025-12-01', visitNumber: 1 },
+            { date: '2026-01-01', visitNumber: 2 },
+          ]),
+        ),
         asSse(sseManager),
       );
       await processAncWebhook(
@@ -1169,10 +1194,13 @@ describe('ANC/Referral Webhook Integration', () => {
         processAncWebhook(
           failing,
           destHospitalId,
-          anc('99903', patient('XH-B', cid, [
-            { date: '2026-02-01', visitNumber: 3 },
-            { date: '2026-03-01', visitNumber: 4 },
-          ])),
+          anc(
+            '99903',
+            patient('XH-B', cid, [
+              { date: '2026-02-01', visitNumber: 3 },
+              { date: '2026-03-01', visitNumber: 4 },
+            ]),
+          ),
           asSse(sseManager),
         ),
       ).rejects.toThrow(/injected failure/);

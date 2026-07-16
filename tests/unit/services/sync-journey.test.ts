@@ -241,7 +241,9 @@ describe('Sync Journey Extension', () => {
     });
 
     it('does not modify or reassign a visit owned by another hospital; roll-up counts all rows (WHO T5)', async () => {
-      const hospB = await db.query<{ id: string }>("SELECT id FROM hospitals WHERE hcode = '10995'");
+      const hospB = await db.query<{ id: string }>(
+        "SELECT id FROM hospitals WHERE hcode = '10995'",
+      );
       const hospitalB = hospB[0].id;
 
       const ancPatients: HosxpPersonAncRow[] = [

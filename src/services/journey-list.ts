@@ -663,8 +663,7 @@ export async function getJourneyDetail(
         }
       : null;
   // WHO containment T6 — see parseAncAssessment JSDoc for the null cases.
-  const ancAssessment =
-    riskRows.length > 0 ? parseAncAssessment(riskRows[0].risk_factors) : null;
+  const ancAssessment = riskRows.length > 0 ? parseAncAssessment(riskRows[0].risk_factors) : null;
 
   const referrals = await getJourneyReferrals(db, journeyId);
   const newborns = await getJourneyNewborns(db, journeyId);

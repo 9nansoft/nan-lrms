@@ -4,11 +4,23 @@ import { AncRiskLevel } from '@/types/domain';
 import type { AncRiskInput } from '@/config/anc-risk-rules';
 
 const baseInput: AncRiskInput = {
-  age: 25, heightCm: 160, prePregnancyBmi: 22, gravida: 2,
-  bpSystolic: 120, bpDiastolic: 80, o2Sat: 98, hct: 36, hb: 12,
-  hosxpRiskIds: [], classifyingItems: [],
-  rhNegative: false, hbsAgPositive: false, syphilisPositive: false,
-  hivPositive: false, thalassemiaDisease: false, niptHighRisk: false,
+  age: 25,
+  heightCm: 160,
+  prePregnancyBmi: 22,
+  gravida: 2,
+  bpSystolic: 120,
+  bpDiastolic: 80,
+  o2Sat: 98,
+  hct: 36,
+  hb: 12,
+  hosxpRiskIds: [],
+  classifyingItems: [],
+  rhNegative: false,
+  hbsAgPositive: false,
+  syphilisPositive: false,
+  hivPositive: false,
+  thalassemiaDisease: false,
+  niptHighRisk: false,
 };
 
 describe('ANC Risk Service', () => {

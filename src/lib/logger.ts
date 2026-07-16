@@ -62,7 +62,7 @@ function emit(level: LogLevel, event: string, context: Record<string, unknown> =
     ts: new Date().toISOString(),
     level,
     event,
-    ...redact(context) as Record<string, unknown>,
+    ...(redact(context) as Record<string, unknown>),
   });
   // Use the matching console method so output preserves stderr/stdout semantics
   // and existing observability tooling (Docker logs, journald) continues to work.

@@ -41,9 +41,7 @@ function jsonRequest(body: unknown): Request {
 }
 
 async function hospitalId(): Promise<string> {
-  const rows = await db.query<{ id: string }>('SELECT id FROM hospitals WHERE hcode = ?', [
-    HCODE,
-  ]);
+  const rows = await db.query<{ id: string }>('SELECT id FROM hospitals WHERE hcode = ?', [HCODE]);
   return rows[0].id;
 }
 
