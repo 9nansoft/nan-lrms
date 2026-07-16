@@ -35,12 +35,12 @@ export const maternalJourneysTable: TableDefinition = {
     // normalization to codes is spec Phase 2 terminology work. Widening for
     // existing DBs happens in migrations/widen-anc-result-columns.ts
     // (SchemaSync never ALTERs existing columns).
-    { name: 'blood_group', type: 'string', maxLength: 10, nullable: true },       // A / B / AB / O + free text ("AB+")
-    { name: 'rh_factor', type: 'string', maxLength: 10, nullable: true },         // POS / NEG + free text ("positive")
-    { name: 'hbsag_result', type: 'string', maxLength: 50, nullable: true },      // free text ("Non-reactive")
-    { name: 'vdrl_result', type: 'string', maxLength: 50, nullable: true },       // free text (incl. titer ratios)
-    { name: 'hiv_result', type: 'string', maxLength: 50, nullable: true },        // free text
-    { name: 'ogtt_result', type: 'string', maxLength: 50, nullable: true },       // free text
+    { name: 'blood_group', type: 'string', maxLength: 10, nullable: true }, // A / B / AB / O + free text ("AB+")
+    { name: 'rh_factor', type: 'string', maxLength: 10, nullable: true }, // POS / NEG + free text ("positive")
+    { name: 'hbsag_result', type: 'string', maxLength: 50, nullable: true }, // free text ("Non-reactive")
+    { name: 'vdrl_result', type: 'string', maxLength: 50, nullable: true }, // free text (incl. titer ratios)
+    { name: 'hiv_result', type: 'string', maxLength: 50, nullable: true }, // free text
+    { name: 'ogtt_result', type: 'string', maxLength: 50, nullable: true }, // free text
     // GPAL / GTPAL obstetric history.
     { name: 'term_births', type: 'integer', nullable: true },
     { name: 'preterm_births', type: 'integer', nullable: true },
@@ -54,26 +54,26 @@ export const maternalJourneysTable: TableDefinition = {
     // one of TRAIT / DISEASE / NORMAL / PENDING. "Disease" tag (HbH,
     // β-thal/HbE, β-thal major) drives an iron-contraindication alert.
     { name: 'mcv_fl', type: 'decimal', nullable: true },
-    { name: 'dcip_result', type: 'string', maxLength: 10, nullable: true },      // POS / NEG / PENDING
-    { name: 'hb_e_result', type: 'string', maxLength: 10, nullable: true },      // POS / NEG / PENDING
+    { name: 'dcip_result', type: 'string', maxLength: 10, nullable: true }, // POS / NEG / PENDING
+    { name: 'hb_e_result', type: 'string', maxLength: 10, nullable: true }, // POS / NEG / PENDING
     { name: 'thalassemia_type', type: 'string', maxLength: 20, nullable: true }, // HB_H / BETA_THAL_MAJOR / BETA_THAL_HB_E / TRAIT / NORMAL
 
     // Cervical cancer screening — Pap or HPV DNA, every 3-5y.
-    { name: 'cervical_screen_type', type: 'string', maxLength: 10, nullable: true },   // PAP / HPV / NONE
+    { name: 'cervical_screen_type', type: 'string', maxLength: 10, nullable: true }, // PAP / HPV / NONE
     { name: 'cervical_screen_result', type: 'string', maxLength: 20, nullable: true }, // NORMAL / ABNORMAL / PENDING
     { name: 'cervical_screen_date', type: 'datetime', nullable: true },
 
     // Aneuploidy screening (serum markers or cfDNA).
-    { name: 'aneuploidy_method', type: 'string', maxLength: 20, nullable: true },      // SERUM_T1 / QUAD_T2 / CFDNA / NONE
-    { name: 'aneuploidy_result', type: 'string', maxLength: 20, nullable: true },      // LOW_RISK / HIGH_RISK / PENDING
+    { name: 'aneuploidy_method', type: 'string', maxLength: 20, nullable: true }, // SERUM_T1 / QUAD_T2 / CFDNA / NONE
+    { name: 'aneuploidy_result', type: 'string', maxLength: 20, nullable: true }, // LOW_RISK / HIGH_RISK / PENDING
 
     // GBS rectovaginal culture at 35-37w.
-    { name: 'gbs_result', type: 'string', maxLength: 10, nullable: true },              // POS / NEG / PENDING
+    { name: 'gbs_result', type: 'string', maxLength: 10, nullable: true }, // POS / NEG / PENDING
     { name: 'gbs_collected_date', type: 'datetime', nullable: true },
 
     // 2nd-trimester anatomy scan (18-22w) + estimated fetal weight.
     { name: 'anatomy_scan_date', type: 'datetime', nullable: true },
-    { name: 'anatomy_scan_result', type: 'string', maxLength: 20, nullable: true },    // NORMAL / ABNORMAL / PENDING
+    { name: 'anatomy_scan_result', type: 'string', maxLength: 20, nullable: true }, // NORMAL / ABNORMAL / PENDING
     { name: 'efw_g', type: 'integer', nullable: true },
 
     // EDC dating provenance — LMP (default), US (Ultrasound), ART (IVF/ICSI).

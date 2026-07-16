@@ -10,7 +10,12 @@ export const cachedAncVisitsTable: TableDefinition = {
     // patients can attend ANC visits at multiple hospitals across the
     // province. Nullable for legacy rows; backfilled at startup from
     // maternal_journeys.current_hospital_id.
-    { name: 'hospital_id', type: 'uuid', nullable: true, references: { table: 'hospitals', column: 'id' } },
+    {
+      name: 'hospital_id',
+      type: 'uuid',
+      nullable: true,
+      references: { table: 'hospitals', column: 'id' },
+    },
     { name: 'visit_date', type: 'datetime' },
     { name: 'visit_number', type: 'integer' },
     { name: 'ga_weeks', type: 'integer', nullable: true },
@@ -28,15 +33,15 @@ export const cachedAncVisitsTable: TableDefinition = {
     // (person_anc.albumin/sugar — e.g. "trace albumin", Thai phrases); never
     // truncate clinical evidence. Existing DBs widened by
     // migrations/widen-anc-result-columns.ts.
-    { name: 'urine_protein', type: 'string', maxLength: 50, nullable: true },  // '-', 'trace', '+', … + free text
+    { name: 'urine_protein', type: 'string', maxLength: 50, nullable: true }, // '-', 'trace', '+', … + free text
     { name: 'urine_glucose', type: 'string', maxLength: 50, nullable: true },
     { name: 'hb_g_dl', type: 'decimal', nullable: true },
     { name: 'hct_pct', type: 'decimal', nullable: true },
-    { name: 'tt_dose_no', type: 'integer', nullable: true },                   // tetanus toxoid dose number 0-5
+    { name: 'tt_dose_no', type: 'integer', nullable: true }, // tetanus toxoid dose number 0-5
     { name: 'iron_folic_given', type: 'boolean', nullable: true },
     { name: 'calcium_given', type: 'boolean', nullable: true },
-    { name: 'danger_signs_json', type: 'json', nullable: true },               // ['bleeding','severe_headache',...]
-    { name: 'fetal_movement_ok', type: 'boolean', nullable: true },            // T3 — asks woman if movements felt normal
+    { name: 'danger_signs_json', type: 'json', nullable: true }, // ['bleeding','severe_headache',...]
+    { name: 'fetal_movement_ok', type: 'boolean', nullable: true }, // T3 — asks woman if movements felt normal
 
     // ─── RTCOG OB 66-029 (2566) expansion — per-visit ─────────────────
     // Immunization: structured replacement for tt_dose_no so we can record
@@ -46,7 +51,7 @@ export const cachedAncVisitsTable: TableDefinition = {
     { name: 'vaccines_given_json', type: 'json', nullable: true },
 
     // Urinalysis additions (free text — see urine_protein note above).
-    { name: 'urine_ketone', type: 'string', maxLength: 50, nullable: true },   // '-','trace','+',… + free text
+    { name: 'urine_ketone', type: 'string', maxLength: 50, nullable: true }, // '-','trace','+',… + free text
     { name: 'urine_culture_result', type: 'string', maxLength: 50, nullable: true }, // free text ("no growth in 48 hours")
 
     // Full RTCOG supplementation checklist.
@@ -55,8 +60,8 @@ export const cachedAncVisitsTable: TableDefinition = {
     { name: 'vitamin_d_iu', type: 'integer', nullable: true },
 
     // T3 fetal wellbeing (≥28w) — all nullable, only captured when performed.
-    { name: 'nst_result', type: 'string', maxLength: 20, nullable: true },     // REACTIVE / NON_REACTIVE / PENDING
-    { name: 'bpp_score', type: 'integer', nullable: true },                    // 0-10
+    { name: 'nst_result', type: 'string', maxLength: 20, nullable: true }, // REACTIVE / NON_REACTIVE / PENDING
+    { name: 'bpp_score', type: 'integer', nullable: true }, // 0-10
     { name: 'umbilical_doppler_result', type: 'string', maxLength: 20, nullable: true }, // NORMAL / ABNORMAL
 
     // Psychosocial + behavioral screen (booking visit typically).

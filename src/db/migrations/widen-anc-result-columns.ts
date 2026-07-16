@@ -47,9 +47,7 @@ export async function migrateWidenAncResultColumns(db: DatabaseAdapter): Promise
     const current = rows[0]?.character_maximum_length;
     // Missing column (fresh DB mid-sync) or already wide enough → no-op.
     if (current == null || Number(current) >= t.width) continue;
-    await db.execute(
-      `ALTER TABLE ${t.table} ALTER COLUMN ${t.column} TYPE VARCHAR(${t.width})`,
-    );
+    await db.execute(`ALTER TABLE ${t.table} ALTER COLUMN ${t.column} TYPE VARCHAR(${t.width})`);
     altered++;
   }
   if (altered > 0) {
