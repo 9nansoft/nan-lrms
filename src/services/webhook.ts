@@ -27,13 +27,23 @@ import { insertAncScreeningIfChanged } from '@/services/anc-screening';
 import { logger } from '@/lib/logger';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
 import { isoDatesEqual, toIsoDate } from '@/lib/dates';
-import { isMaternalScreenIngestEnabled } from '@/lib/feature-flags';
+import { isMaternalScreenIngestEnabled, isMaternalScreenEventsEnabled } from '@/lib/feature-flags';
 import { normalizeProteinuriaGrade } from '@/services/maternal-screening';
 import {
   saveMaternalScreenAssessment,
   MaternalScreenStoreError,
 } from '@/services/maternal-screening-store';
-import type { MaternalScreenInput } from '@/types/maternal-screening';
+import {
+  shouldEmitMaternalScreenTransition,
+  buildMaternalScreenStateChangedEvent,
+  type MaternalScreenPreviousSummary,
+} from '@/services/maternal-screening-events';
+import type {
+  MaternalEmergencyAcuity,
+  MaternalScreenInput,
+  MaternalScreenLocalTier,
+  SuspectedMaternalCondition,
+} from '@/types/maternal-screening';
 import {
   MATERNAL_SCREEN_TRANSPORT_MAX_BYTES,
   MATERNAL_SCREEN_ASSESSED_AT_MAX_FUTURE_MS,
@@ -752,9 +762,7 @@ export function validateMaternalScreeningTransport(
     );
   } else if (Number.isNaN(new Date(rawAssessedAt).getTime())) {
     // Pattern-valid but an impossible calendar value (e.g. month 13, day 45).
-    errors.push(
-      `${prefix}.assessed_at is not a real calendar date/time (got "${rawAssessedAt}")`,
-    );
+    errors.push(`${prefix}.assessed_at is not a real calendar date/time (got "${rawAssessedAt}")`);
   } else if (
     new Date(rawAssessedAt).getTime() >
     now.getTime() + MATERNAL_SCREEN_ASSESSED_AT_MAX_FUTURE_MS
@@ -1178,8 +1186,18 @@ export async function processWebhookPayload(
           });
           continue;
         }
-        const admissionRows = await db.query<{ id: string; journey_id: string | null }>(
-          'SELECT id, journey_id FROM cached_patients WHERE hospital_id = ? AND an = ?',
+        const admissionRows = await db.query<{
+          id: string;
+          journey_id: string | null;
+          // Previous summary axes — read BEFORE the save so the post-commit
+          // transition check (Task 8) has a "before" to compare against.
+          // null means "no assessment existed yet" (GC1: never a stable
+          // finding), matching MaternalScreenPreviousSummary's contract.
+          maternal_screen_local_tier: string | null;
+          maternal_screen_emergency_acuity: string | null;
+        }>(
+          `SELECT id, journey_id, maternal_screen_local_tier, maternal_screen_emergency_acuity
+             FROM cached_patients WHERE hospital_id = ? AND an = ?`,
           [hospitalId, p.an],
         );
         if (admissionRows.length === 0) {
@@ -1192,10 +1210,16 @@ export async function processWebhookPayload(
           });
           continue;
         }
+        const admission = admissionRows[0];
+        const previousSummary: MaternalScreenPreviousSummary = {
+          localTier: admission.maternal_screen_local_tier as MaternalScreenLocalTier | null,
+          emergencyAcuity:
+            admission.maternal_screen_emergency_acuity as MaternalEmergencyAcuity | null,
+        };
         const saveResult = await saveMaternalScreenAssessment(db, {
           hospitalId,
-          laborAdmissionId: admissionRows[0].id,
-          journeyId: admissionRows[0].journey_id,
+          laborAdmissionId: admission.id,
+          journeyId: admission.journey_id,
           sourceSystem: 'WEBHOOK',
           sourcePk: validated.candidate.sourcePk,
           assessedAt: validated.candidate.assessedAt,
@@ -1205,6 +1229,45 @@ export async function processWebhookPayload(
         });
         if (saveResult.status === 'duplicate') screeningResult.duplicates++;
         else screeningResult.saved++;
+
+        // ─── Task 8: gated, POST-COMMIT state-change broadcast ───
+        // saveMaternalScreenAssessment has already committed by the time it
+        // returns (GC6) — the store itself is event-free by design. Never
+        // broadcasts on a 'duplicate' replay (idempotent no-op), never when
+        // the flag is off (default — GC2), and never for a same-state
+        // transition (shouldEmitMaternalScreenTransition).
+        if (
+          isMaternalScreenEventsEnabled() &&
+          (saveResult.status === 'created' || saveResult.status === 'corrected') &&
+          shouldEmitMaternalScreenTransition(previousSummary, saveResult)
+        ) {
+          // suspectedConditions isn't on SaveMaternalScreenResult (the store
+          // stays minimal/event-free by design) — a small scoped read of the
+          // row just written, rather than widening the Task 6 store's return
+          // contract or re-running evaluation a second time.
+          const conditionRows = await db.query<{ suspected_conditions_json: unknown }>(
+            'SELECT suspected_conditions_json FROM maternal_screening_assessments WHERE id = ? AND hospital_id = ?',
+            [saveResult.assessmentId, hospitalId],
+          );
+          const rawConditions = conditionRows[0]?.suspected_conditions_json;
+          const suspectedConditions: SuspectedMaternalCondition[] =
+            typeof rawConditions === 'string'
+              ? (JSON.parse(rawConditions) as SuspectedMaternalCondition[])
+              : ((rawConditions as SuspectedMaternalCondition[] | null) ?? []);
+
+          sseManager.broadcast(
+            'patient-update',
+            buildMaternalScreenStateChangedEvent({
+              patientId: admission.id,
+              previous: previousSummary,
+              localTier: saveResult.localTier,
+              emergencyAcuity: saveResult.emergencyAcuity,
+              isComplete: saveResult.isComplete,
+              suspectedConditions,
+              assessedAt: validated.candidate.assessedAt,
+            }),
+          );
+        }
       } catch (err) {
         // Store errors are PHI-free by contract (ids/codes only — never
         // name/cid/free text), so their message is safe and actionable.

@@ -37,8 +37,11 @@ import type {
   MaternalEmergencyAcuity,
   MaternalScreenInput,
   MaternalScreenLocalTier,
+  MaternalScreenMatch,
   MaternalScreenResult,
+  SuspectedMaternalCondition,
 } from '@/types/maternal-screening';
+import type { MaternalScreenAssessmentDto } from '@/types/api';
 import { logger } from '@/lib/logger';
 
 // ---------------------------------------------------------------------------
@@ -536,4 +539,171 @@ export async function reconcileLatestSummary(
     }
     return projectLatestSummary(tx, laborAdmissionId, hospitalId);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Read API (Task 8, spec §9.3) — GET /api/patients/{an}/maternal-screenings
+// ---------------------------------------------------------------------------
+//
+// Read-only: this section never writes. `latest` mirrors the exact
+// "latest non-superseded" selection rule used by `projectLatestSummary`
+// (same ORDER BY / NOT EXISTS clause) so the read API can never disagree
+// with the cached_patients summary it is meant to explain. `history` is
+// every assessment for the admission — including superseded rows, so the
+// correction chain (GC6 `supersedesId`) is visible to the caller — newest
+// first, cursor-paginated. Tenant isolation: every query below is scoped by
+// BOTH labor_admission_id AND hospital_id; callers MUST resolve and pass the
+// caller's own hospitalId (never trust a client-supplied one).
+
+const LIST_DEFAULT_LIMIT = 20;
+const LIST_MAX_LIMIT = 100;
+
+/** Opaque pagination cursor — a base64url-encoded row offset. Deliberately
+ *  opaque (not a bare integer) so callers can't be tempted to construct or
+ *  edit one; internally this reuses the same LIMIT/OFFSET convention as
+ *  src/services/journey-list.ts and src/services/referral-list.ts (GC5). */
+function encodeAssessmentCursor(offset: number): string {
+  return Buffer.from(`o:${offset}`, 'utf8').toString('base64url');
+}
+
+function decodeAssessmentCursor(cursor: string): number {
+  try {
+    const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+    const match = /^o:(\d+)$/.exec(decoded);
+    if (!match) throw new Error('unrecognized cursor shape');
+    const offset = Number(match[1]);
+    if (!Number.isInteger(offset) || offset < 0) throw new Error('negative/non-integer offset');
+    return offset;
+  } catch {
+    throw new MaternalScreenStoreError(
+      "invalid cursor — it must be an opaque token returned from a previous response's nextCursor; do not construct or edit one manually",
+      'INVALID_PARAMS',
+    );
+  }
+}
+
+interface AssessmentRow {
+  id: string;
+  assessed_at: string | Date;
+  assessed_by: string | null;
+  source_system: string;
+  source_pk: string | null;
+  local_tier: string;
+  emergency_acuity: string;
+  is_complete: boolean;
+  suspected_conditions_json: unknown;
+  matches_json: unknown;
+  missing_fields_json: unknown;
+  rule_set_version: string;
+  input_json: unknown;
+  supersedes_id: string | null;
+  created_at: string | Date;
+}
+
+const ASSESSMENT_COLUMNS = `id, assessed_at, assessed_by, source_system, source_pk,
+     local_tier, emergency_acuity, is_complete, suspected_conditions_json, matches_json,
+     missing_fields_json, rule_set_version, input_json, supersedes_id, created_at`;
+
+function toIsoString(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+/** pg/PGlite return JSONB columns pre-parsed; a string means a non-JSONB
+ *  dialect (defense-in-depth, mirrors the same guard in projectLatestSummary). */
+function parseJsonColumn<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  return typeof value === 'string' ? (JSON.parse(value) as T) : (value as T);
+}
+
+function mapAssessmentRow(row: AssessmentRow): MaternalScreenAssessmentDto {
+  return {
+    id: row.id,
+    assessedAt: toIsoString(row.assessed_at),
+    assessedBy: row.assessed_by,
+    sourceSystem: row.source_system,
+    sourcePk: row.source_pk,
+    localTier: row.local_tier as MaternalScreenLocalTier,
+    emergencyAcuity: row.emergency_acuity as MaternalEmergencyAcuity,
+    isComplete: row.is_complete,
+    suspectedConditions: parseJsonColumn<SuspectedMaternalCondition[]>(
+      row.suspected_conditions_json,
+      [],
+    ),
+    matches: parseJsonColumn<MaternalScreenMatch[]>(row.matches_json, []),
+    missingRequiredFields: parseJsonColumn<Array<keyof MaternalScreenInput>>(
+      row.missing_fields_json,
+      [],
+    ),
+    ruleSetVersion: row.rule_set_version,
+    input: parseJsonColumn<MaternalScreenInput>(row.input_json, {} as MaternalScreenInput),
+    supersedesId: row.supersedes_id,
+    createdAt: toIsoString(row.created_at),
+  };
+}
+
+export interface ListMaternalScreenAssessmentsParams {
+  hospitalId: string;
+  laborAdmissionId: string;
+  /** Bound to [1, 100]; defaults to 20 when omitted or out of range. */
+  limit?: number;
+  /** Opaque token from a previous response's `nextCursor`; omit for page 1. */
+  cursor?: string | null;
+}
+
+export interface ListMaternalScreenAssessmentsResult {
+  latest: MaternalScreenAssessmentDto | null;
+  history: MaternalScreenAssessmentDto[];
+  nextCursor: string | null;
+}
+
+/**
+ * List maternal screening assessments for one labor admission: the current
+ * latest (non-superseded) assessment plus the full, paginated history.
+ * Tenant-scoped by `hospitalId` (never trust a caller-supplied hospitalId —
+ * resolve it server-side from the authenticated caller's session/hospital).
+ * Throws `MaternalScreenStoreError('INVALID_PARAMS')` for a malformed cursor.
+ */
+export async function listMaternalScreenAssessments(
+  db: DatabaseAdapter,
+  params: ListMaternalScreenAssessmentsParams,
+): Promise<ListMaternalScreenAssessmentsResult> {
+  const rawLimit = params.limit ?? LIST_DEFAULT_LIMIT;
+  const limit =
+    Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(Math.trunc(rawLimit), LIST_MAX_LIMIT)
+      : LIST_DEFAULT_LIMIT;
+  const offset = params.cursor != null ? decodeAssessmentCursor(params.cursor) : 0;
+
+  // "Latest non-superseded" — identical selection rule to projectLatestSummary
+  // (a row referenced by another row's supersedes_id is corrected-away).
+  const latestRows = await db.query<AssessmentRow>(
+    `SELECT ${ASSESSMENT_COLUMNS}
+       FROM maternal_screening_assessments a
+      WHERE a.labor_admission_id = ? AND a.hospital_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM maternal_screening_assessments c WHERE c.supersedes_id = a.id
+        )
+      ORDER BY a.assessed_at DESC, a.created_at DESC, a.id DESC
+      LIMIT 1`,
+    [params.laborAdmissionId, params.hospitalId],
+  );
+
+  // Fetch one extra row to detect "is there a next page" without a COUNT(*).
+  const pageRows = await db.query<AssessmentRow>(
+    `SELECT ${ASSESSMENT_COLUMNS}
+       FROM maternal_screening_assessments
+      WHERE labor_admission_id = ? AND hospital_id = ?
+      ORDER BY assessed_at DESC, created_at DESC, id DESC
+      LIMIT ? OFFSET ?`,
+    [params.laborAdmissionId, params.hospitalId, limit + 1, offset],
+  );
+
+  const hasMore = pageRows.length > limit;
+  const history = pageRows.slice(0, limit).map(mapAssessmentRow);
+
+  return {
+    latest: latestRows.length > 0 ? mapAssessmentRow(latestRows[0]) : null,
+    history,
+    nextCursor: hasMore ? encodeAssessmentCursor(offset + limit) : null,
+  };
 }

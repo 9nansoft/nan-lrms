@@ -1,6 +1,13 @@
 // T013: API response types per contracts/api-routes.md
 
 import type { RiskLevel, ConnectionStatus, HospitalLevel, LaborStatus } from './domain';
+import type {
+  MaternalScreenLocalTier,
+  MaternalEmergencyAcuity,
+  SuspectedMaternalCondition,
+  MaternalScreenMatch,
+  MaternalScreenInput,
+} from './maternal-screening';
 
 // Dashboard
 //
@@ -358,6 +365,73 @@ export interface SseNewbornUpdateEvent {
   journeyId: string;
   infantNumber: number;
   birthWeightG?: number;
+}
+
+// --- Maternal labor-triage screening (Task 8, spec §9.3/§10.4) ---
+//
+// PROVISIONAL / flag-gated (docs/superpowers/plans/2026-07-16-maternal-screening.md).
+// GC3: `localTier`/`emergencyAcuity`/`suspectedConditions`/`isComplete` are a
+// separate vocabulary from `CdssSeverity` (INFO/WARN/ALERT/CRITICAL, above)
+// and `AncRiskLevel` (LOW/HR1/HR2/HR3, src/config/anc-risk-rules.ts) — never
+// merged into either, never stored/displayed as `partographSeverity`.
+
+/**
+ * One immutable maternal-screen assessment row, shaped for the read API
+ * (GET /api/patients/{an}/maternal-screenings). `supersedesId` is the
+ * correction marker (GC6): non-null means this row is a correction of an
+ * earlier assessment; the earlier row is never mutated, only referenced.
+ */
+export interface MaternalScreenAssessmentDto {
+  id: string;
+  assessedAt: string;
+  assessedBy: string | null;
+  sourceSystem: string;
+  sourcePk: string | null;
+  localTier: MaternalScreenLocalTier;
+  emergencyAcuity: MaternalEmergencyAcuity;
+  isComplete: boolean;
+  suspectedConditions: SuspectedMaternalCondition[];
+  matches: MaternalScreenMatch[];
+  missingRequiredFields: Array<keyof MaternalScreenInput>;
+  ruleSetVersion: string;
+  /** Raw normalized input snapshot (GC6 — immutable at write time). */
+  input: MaternalScreenInput;
+  supersedesId: string | null;
+  createdAt: string;
+}
+
+/**
+ * `latest` is the current non-superseded assessment (mirrors the
+ * `cached_patients.maternal_screen_*` summary projection); `null` when the
+ * admission has no assessments yet. `history` is every assessment for the
+ * admission (including superseded rows, so the correction chain is
+ * visible), newest first, paginated via `?limit=&cursor=`. `nextCursor` is
+ * an opaque token — `null` when there is no further page.
+ */
+export interface MaternalScreenAssessmentsResponse {
+  latest: MaternalScreenAssessmentDto | null;
+  history: MaternalScreenAssessmentDto[];
+  nextCursor: string | null;
+}
+
+/**
+ * SSE state-change event (spec §10.4). Broadcast on the `patient-update`
+ * channel, POST-COMMIT, ONLY for a meaningful transition (localTier changed
+ * OR emergencyAcuity changed), ONLY when `isMaternalScreenEventsEnabled()`
+ * (default OFF — GC2). `previousLocalTier`/`previousEmergencyAcuity` are
+ * `null` when no prior assessment existed for this admission. PHI-free by
+ * construction: no name/cid/free-text, only ids/enums/timestamps.
+ */
+export interface MaternalScreenStateChangedEvent {
+  type: 'maternal_screen_state_changed';
+  patientId: string;
+  previousLocalTier: MaternalScreenLocalTier | null;
+  localTier: MaternalScreenLocalTier;
+  previousEmergencyAcuity: MaternalEmergencyAcuity | null;
+  emergencyAcuity: MaternalEmergencyAcuity;
+  isComplete: boolean;
+  suspectedConditions: SuspectedMaternalCondition[];
+  assessedAt: string;
 }
 
 // --- Maternal Journey API Types ---
