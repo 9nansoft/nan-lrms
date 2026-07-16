@@ -39,11 +39,15 @@ export function isMaternalScreenShadowMode(): boolean {
 /**
  * Maternal screening UI components and dashboard panels.
  *
- * FAIL CLOSED: UI is off by default. Set MATERNAL_SCREEN_UI_ENABLED=true
- * to display maternal screening results in patient detail and summary views.
+ * DEFAULT ON (operator decision 2026-07-16): the read-only, shadow-labeled
+ * UI (spec §17.2 step 4) displays by default; set
+ * MATERNAL_SCREEN_UI_ENABLED=false to hide it. Safe because every surface
+ * carries the PROVISIONAL/shadow banner and nothing renders green while the
+ * rule set is unapproved. Ingest and events remain FAIL CLOSED separately —
+ * this flag only controls display of already-ingested data.
  */
 export function isMaternalScreenUiEnabled(): boolean {
-  return process.env.MATERNAL_SCREEN_UI_ENABLED === 'true';
+  return process.env.MATERNAL_SCREEN_UI_ENABLED !== 'false';
 }
 
 /**

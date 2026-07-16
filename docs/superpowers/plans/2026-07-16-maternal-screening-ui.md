@@ -124,3 +124,8 @@ added to setup).
 ## Phase-end gate
 Full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build` all green; whole-phase
 review (U1–U3 diff) before declaring done.
+
+---
+**AMENDMENT 2026-07-16 (operator decision):** `MATERNAL_SCREEN_UI_ENABLED` default flipped to
+**ON** after Phase 4 review approval — GC-U3's guarantee now reads: explicit `false` ⇒ page
+byte-identical to pre-Phase-4. GC-U1 (shadow banner + no green) unchanged and still binding.

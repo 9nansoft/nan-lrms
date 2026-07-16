@@ -354,3 +354,9 @@ Phase 4 patient-detail/assessment UI, Phase 5 ward tiles + active alert propagat
 Phase 6 HOSxP Pascal mapping + shadow-cohort activation, and any change that surfaces
 an *unapproved* clinical tier/acuity to a clinician or flips a flag to active. The
 flags and event type shipped here make those a later config/UI change, not a rebuild.
+
+---
+**AMENDMENT 2026-07-16 (operator decision):** `MATERNAL_SCREEN_UI_ENABLED` default flipped
+to **ON** (`!== 'false'`) — the read-only, shadow-labeled UI (spec §17.2 step 4) displays by
+default; explicit `false` hides it. GC2 remains in force for ingest/events (fail-closed) and
+for the PROVISIONAL_UNAPPROVED rule set; no alert/workflow behavior changed.

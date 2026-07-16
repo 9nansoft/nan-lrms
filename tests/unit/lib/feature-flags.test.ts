@@ -84,9 +84,11 @@ describe('isMaternalScreenShadowMode', () => {
 });
 
 describe('isMaternalScreenUiEnabled', () => {
-  it('defaults to false when unset', () => {
+  // Operator decision 2026-07-16: shadow-labeled read-only UI defaults ON
+  // (same default-true convention as isMaternalScreenShadowMode).
+  it('defaults to true when unset', () => {
     vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', '');
-    expect(isMaternalScreenUiEnabled()).toBe(false);
+    expect(isMaternalScreenUiEnabled()).toBe(true);
   });
 
   it('returns true when explicitly set to true', () => {
@@ -94,14 +96,8 @@ describe('isMaternalScreenUiEnabled', () => {
     expect(isMaternalScreenUiEnabled()).toBe(true);
   });
 
-  it('returns false for non-truthy values', () => {
+  it('returns false only when explicitly disabled', () => {
     vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', 'false');
-    expect(isMaternalScreenUiEnabled()).toBe(false);
-
-    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', '1');
-    expect(isMaternalScreenUiEnabled()).toBe(false);
-
-    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', 'yes');
     expect(isMaternalScreenUiEnabled()).toBe(false);
   });
 });
