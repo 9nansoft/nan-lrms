@@ -4,6 +4,7 @@ import { use, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePatient } from '@/hooks/usePatient';
 import { usePartogram } from '@/hooks/usePartogram';
+import { useMaternalScreenings } from '@/hooks/useMaternalScreenings';
 import { useSSE } from '@/hooks/useSSE';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { PatientHeader } from '@/components/patient/PatientHeader';
@@ -12,6 +13,7 @@ import { StickyPatientHeader } from '@/components/patient/StickyPatientHeader';
 import { QuickStatsBar } from '@/components/patient/QuickStatsBar';
 import { CurrentVitalsPanel } from '@/components/patient/CurrentVitalsPanel';
 import { LaborProgressCard } from '@/components/patient/LaborProgressCard';
+import { MaternalScreeningCard } from '@/components/patient/MaternalScreeningCard';
 import { CpdFactorBreakdown } from '@/components/patient/CpdFactorBreakdown';
 import { ClinicalData } from '@/components/patient/ClinicalData';
 import { ContractionTable } from '@/components/patient/ContractionTable';
@@ -113,13 +115,23 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
     mutateContractions,
   } = usePatient(patientId);
   const { partogram, error: partogramError, mutate: mutatePartogram } = usePartogram(patientId);
+  // SEPARATE hook, not folded into usePatient's composite isLoading (GC-U4 /
+  // plan Task U3) — this provisional, flag-gated feed must never block first
+  // paint of the rest of the page.
+  const screenings = useMaternalScreenings(patientId);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('summary');
 
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: `AN ${patientId}` }]);
 
   useSSE({
-    onPatientUpdate: () => mutate(),
-    onSyncComplete: () => mutate(),
+    onPatientUpdate: () => {
+      mutate();
+      screenings.mutate();
+    },
+    onSyncComplete: () => {
+      mutate();
+      screenings.mutate();
+    },
   });
 
   if (isLoading) {
@@ -194,10 +206,22 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
   // surface a non-blocking banner naming the failed feed(s); onRetry revalidates
   // only those feeds. The partograph tab additionally distinguishes its own
   // error state (below) from the "no data yet" empty state.
+  // Maternal-screening fetch failures only join the shared banner when the
+  // feature is actually visible (uiEnabled) OR when we have no data at all
+  // to judge that from — a first-load failure defaults uiEnabled/latest to
+  // false/null via the hook's `?? false`/`?? null` unwrap, same as a real
+  // "flag currently off" response. If a *stale* successful response is still
+  // cached (uiEnabled false, an assessment already loaded once) and a later
+  // background revalidation errors, we deliberately stay silent — surfacing
+  // a banner for a feature staff can't see would be confusing noise.
+  const screeningsFailed =
+    Boolean(screenings.error) && (screenings.uiEnabled || screenings.latest === null);
+
   const failedFeeds: Array<{ label: string; retry: () => void }> = [
     { failed: Boolean(vitalsError), label: 'สัญญาณชีพ', retry: mutateVitals },
     { failed: Boolean(contractionsError), label: 'การหดรัดตัว', retry: mutateContractions },
     { failed: Boolean(partogramError), label: 'Partograph', retry: mutatePartogram },
+    { failed: screeningsFailed, label: 'การคัดกรองความเสี่ยงมารดา', retry: screenings.mutate },
   ]
     .filter((f) => f.failed)
     .map(({ label, retry }) => ({ label, retry: () => void retry() }));
@@ -538,6 +562,42 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Section 3.7: Maternal labor-triage screening (Phase 4, shadow mode).
+          Flag-gated per GC-U3: the API always computes `uiEnabled`
+          server-side from MATERNAL_SCREEN_UI_ENABLED, and with the flag off
+          (today's production default) this block renders nothing — the page
+          is byte-identical to before this feature existed. Placed as its own
+          section here (not inside a workspace tab) so the card stays visible
+          regardless of which tab (Summary/Partograph/Contractions) is active
+          — it is independent of partogram/CPD data, same reasoning as the
+          ANC-summary/referral sections above. Its SectionLabel starts its own
+          local "01" counter: idx is a per-list visual ordinal (the tabs below
+          already reuse 1/2/3 independently per tab), not a page-wide one. */}
+      {screenings.uiEnabled && (
+        <div
+          data-testid="patient-maternal-screening"
+          className="bg-white px-6 py-3"
+          style={{ borderBottom: '1px solid var(--rule-strong)' }}
+        >
+          <SectionLabel idx={1} right={<span>MATERNAL SCREENING — SHADOW</span>}>
+            การคัดกรองความเสี่ยงมารดา (รอคลอด)
+          </SectionLabel>
+          <div className="mt-2">
+            <MaternalScreeningCard
+              data={{
+                latest: screenings.latest,
+                history: screenings.history,
+                nextCursor: screenings.nextCursor,
+                uiEnabled: screenings.uiEnabled,
+              }}
+              isLoading={screenings.isLoading}
+              error={screenings.error}
+              onRetry={() => screenings.mutate()}
+            />
           </div>
         </div>
       )}

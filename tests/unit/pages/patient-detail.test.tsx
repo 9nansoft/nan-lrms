@@ -1,10 +1,12 @@
 // Patient detail page — behavior tests for the 2026-07-09 redesign:
 // per-patient sync freshness stamp, referral history strip, and newborn
 // outcomes card (both from the linked maternal journey).
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within, act } from '@testing-library/react';
 import { Suspense } from 'react';
 import PatientDetailPage from '@/app/(provincial)/patients/[an]/page';
+import type { MaternalScreenAssessmentDto } from '@/types/api';
+import type { MaternalScreenInput } from '@/types/maternal-screening';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
@@ -12,6 +14,16 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({}),
 }));
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
+
+// Task U3 — mock the shadow-mode screening hook. `vi.mock` factories are
+// hoisted above all other module code, so the mock fn itself must be created
+// via `vi.hoisted` to avoid a temporal-dead-zone ReferenceError. Default is
+// flag-off, matching production; tests that need the flag on override via
+// `mockUseMaternalScreenings.mockReturnValue(...)`.
+const { mockUseMaternalScreenings } = vi.hoisted(() => ({ mockUseMaternalScreenings: vi.fn() }));
+vi.mock('@/hooks/useMaternalScreenings', () => ({
+  useMaternalScreenings: mockUseMaternalScreenings,
+}));
 
 // jsdom has no IntersectionObserver; StickyPatientHeader observes the main
 // header to decide when to pin itself.
@@ -117,6 +129,83 @@ vi.mock('@/hooks/usePartogram', () => ({
   usePartogram: () => ({ partogram: null, error: undefined, mutate: vi.fn() }),
 }));
 
+// Default: flag off, matching production — existing tests above must render
+// identically to before this feature existed without touching their
+// assertions.
+beforeEach(() => {
+  mockUseMaternalScreenings.mockReturnValue({
+    uiEnabled: false,
+    latest: null,
+    history: [],
+    nextCursor: null,
+    isLoading: false,
+    error: null,
+    mutate: vi.fn(),
+  });
+});
+
+// Minimal valid MaternalScreenInput — every field required, all-UNKNOWN/null
+// is a legitimate (if maximally incomplete) input snapshot (mirrors the
+// fixture in tests/unit/components/MaternalScreeningCard.test.tsx).
+const maternalScreenInput: MaternalScreenInput = {
+  gaWeeks: null,
+  gaDays: null,
+  piHDiagnosed: null,
+  systolicBp: null,
+  diastolicBp: null,
+  proteinuriaGrade: 'UNKNOWN',
+  creatinineMgDl: null,
+  creatinineBaselineMgDl: null,
+  plateletPerUl: null,
+  astIuL: null,
+  altIuL: null,
+  urineOutputMlPerHour: null,
+  headache: 'UNKNOWN',
+  blurredVision: null,
+  epigastricPain: null,
+  pulmonaryEdema: null,
+  rightUpperQuadrantPain: null,
+  vaginalBleeding: null,
+  estimatedBleedingMl: null,
+  bleedingRate: 'UNKNOWN',
+  concealedBleedingSuspected: null,
+  abdominalOrBackPain: null,
+  uterineTenderness: null,
+  frequentContractions: null,
+  contractionDurationExceedsInterval: null,
+  suprapubicTenderness: null,
+  bandlsRing: null,
+  membranesRuptured: null,
+  abnormalPresentation: null,
+  fetalHeartRateBpm: null,
+  fetalTracingPattern: 'UNKNOWN',
+  maternalPulseBpm: null,
+  respiratoryRatePerMin: null,
+  oxygenSaturationPct: null,
+  consciousness: 'UNKNOWN',
+  shockSignsPresent: null,
+  placentaPreviaExcluded: null,
+  placentaLocationSource: 'UNKNOWN',
+};
+
+const severeMaternalScreenAssessment: MaternalScreenAssessmentDto = {
+  id: 'assess-severe-1',
+  assessedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+  assessedBy: null,
+  sourceSystem: 'HOSXP',
+  sourcePk: null,
+  localTier: 'LOCAL_SEVERE',
+  emergencyAcuity: 'EMERGENCY',
+  isComplete: true,
+  suspectedConditions: [],
+  matches: [],
+  missingRequiredFields: [],
+  ruleSetVersion: '0.1.0-provisional',
+  input: maternalScreenInput,
+  supersedesId: null,
+  createdAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+};
+
 async function renderPage() {
   // use(params) suspends on first render — the App Router provides the
   // boundary in production, the test provides its own. The act() must be
@@ -155,5 +244,39 @@ describe('PatientDetailPage — redesign', () => {
     expect(within(card).getByText('LBW')).toBeInTheDocument();
     const apgar = within(card).getByTestId('newborn-apgar-1');
     expect(apgar.getAttribute('data-low')).toBe('true');
+  });
+});
+
+// Task U3 — maternal-screening shadow card is flag-gated server-side
+// (GC-U3): with the flag off (production default), the section must not
+// render at all.
+describe('PatientDetailPage — maternal screening shadow card (flag-gated)', () => {
+  it('flag off: no shadow banner and no section title', async () => {
+    await renderPage();
+
+    expect(screen.queryByTestId('maternal-screen-shadow-banner')).toBeNull();
+    expect(screen.queryByText('การคัดกรองความเสี่ยงมารดา (รอคลอด)')).toBeNull();
+    expect(screen.queryByTestId('patient-maternal-screening')).toBeNull();
+  });
+
+  it('flag on: section, shadow banner, and LOCAL_SEVERE tier chip render', async () => {
+    mockUseMaternalScreenings.mockReturnValue({
+      uiEnabled: true,
+      latest: severeMaternalScreenAssessment,
+      history: [severeMaternalScreenAssessment],
+      nextCursor: null,
+      isLoading: false,
+      error: null,
+      mutate: vi.fn(),
+    });
+
+    await renderPage();
+
+    expect(screen.getByText('การคัดกรองความเสี่ยงมารดา (รอคลอด)')).toBeInTheDocument();
+    expect(screen.getByTestId('maternal-screen-shadow-banner')).toBeInTheDocument();
+    // The severe fixture is both `latest` and the sole `history` row, so the
+    // tier chip renders twice (summary + history row) — assert on the first.
+    const [tierChip] = screen.getAllByTestId('maternal-screen-tier-chip');
+    expect(tierChip.getAttribute('data-tier')).toBe('LOCAL_SEVERE');
   });
 });
