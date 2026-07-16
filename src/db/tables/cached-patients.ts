@@ -66,7 +66,7 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'maternal_screen_local_tier', type: 'string', maxLength: 30, nullable: true },
     { name: 'maternal_screen_emergency_acuity', type: 'string', maxLength: 30, nullable: true },
     // Comma-separated SuspectedMaternalCondition codes (e.g.
-    // "SUSPECTED_ABRUPTION,SUSPECTED_PREVIA") rather than JSON — this is a
+    // "ABRUPTIO_PLACENTAE,PLACENTA_PREVIA") rather than JSON — this is a
     // lightweight dashboard-list projection, not the audit record; the
     // assessment row's suspected_conditions_json remains the structured
     // source of truth.

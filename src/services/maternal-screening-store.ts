@@ -101,6 +101,23 @@ export interface SaveMaternalScreenParams {
 
 export type SaveMaternalScreenStatus = 'created' | 'corrected' | 'duplicate';
 
+/**
+ * The six cached_patients maternal_screen_* summary values EXACTLY as
+ * projected by `projectLatestSummary` — i.e. the LATEST non-superseded
+ * assessment for the admission, which is NOT necessarily the row that was
+ * just saved (a backfilled older `assessedAt` does not become latest). All
+ * nulls / empty conditions means the projection was cleared (no assessments
+ * exist). PHI-free by construction: ids, enums, booleans, ISO timestamps.
+ */
+export interface MaternalScreenProjectedSummary {
+  localTier: MaternalScreenLocalTier | null;
+  emergencyAcuity: MaternalEmergencyAcuity | null;
+  isComplete: boolean | null;
+  suspectedConditions: SuspectedMaternalCondition[];
+  assessedAt: string | null;
+  ruleSetVersion: string | null;
+}
+
 /** Structured, PHI-free result (no name/cid/free-text — AC-safe for logs). */
 export interface SaveMaternalScreenResult {
   status: SaveMaternalScreenStatus;
@@ -109,6 +126,18 @@ export interface SaveMaternalScreenResult {
   emergencyAcuity: MaternalEmergencyAcuity;
   isComplete: boolean;
   ruleSetVersion: string;
+  /**
+   * POST-save projected summary — what cached_patients now says for this
+   * admission, computed by the SAME `projectLatestSummary` call that wrote
+   * it, inside the same transaction. Event emitters MUST use this (never the
+   * incoming assessment's own tier/acuity above): a backfilled OLDER
+   * assessment that does not become latest leaves the summary unchanged, and
+   * announcing the incoming values would contradict the persisted summary
+   * and the read API's `latest`. Present for 'created'/'corrected';
+   * undefined for 'duplicate' (the replay wrote nothing and the summary was
+   * not touched).
+   */
+  summary?: MaternalScreenProjectedSummary;
 }
 
 export interface ReconcileSummaryResult {
@@ -116,6 +145,9 @@ export interface ReconcileSummaryResult {
    *  'cleared' — no assessments exist, all six summary columns set to NULL. */
   status: 'reconciled' | 'cleared';
   assessmentId: string | null;
+  /** The projected summary values now persisted on cached_patients (all
+   *  nulls / empty conditions when status is 'cleared'). */
+  summary: MaternalScreenProjectedSummary;
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +380,7 @@ export async function saveMaternalScreenAssessment(
       //    reconcileLatestSummary (constitution III: one projection rule).
       //    Hospital-scoped (tenant isolation) even though the admission was
       //    already verified above.
-      await projectLatestSummary(tx, params.laborAdmissionId, params.hospitalId);
+      const projection = await projectLatestSummary(tx, params.laborAdmissionId, params.hospitalId);
 
       return {
         status: params.supersedesId != null ? 'corrected' : 'created',
@@ -357,6 +389,9 @@ export async function saveMaternalScreenAssessment(
         emergencyAcuity: result.emergencyAcuity,
         isComplete: result.isComplete,
         ruleSetVersion: result.ruleSetVersion,
+        // The projected post-save summary — may reflect a DIFFERENT (newer)
+        // row than the one just inserted (out-of-order/backfilled saves).
+        summary: projection.summary,
       };
     });
   } catch (err) {
@@ -459,7 +494,18 @@ async function projectLatestSummary(
        WHERE ${patientWhere}`,
       [now, ...patientKeyParams],
     );
-    return { status: 'cleared', assessmentId: null };
+    return {
+      status: 'cleared',
+      assessmentId: null,
+      summary: {
+        localTier: null,
+        emergencyAcuity: null,
+        isComplete: null,
+        suspectedConditions: [],
+        assessedAt: null,
+        ruleSetVersion: null,
+      },
+    };
   }
 
   const latest = rows[0];
@@ -501,7 +547,19 @@ async function projectLatestSummary(
       ...patientKeyParams,
     ],
   );
-  return { status: 'reconciled', assessmentId: latest.id };
+  return {
+    status: 'reconciled',
+    assessmentId: latest.id,
+    summary: {
+      // Stored values were engine-produced by a previous save — safe narrowing.
+      localTier: latest.local_tier as MaternalScreenLocalTier,
+      emergencyAcuity: latest.emergency_acuity as MaternalEmergencyAcuity,
+      isComplete: latest.is_complete,
+      suspectedConditions: conditions as SuspectedMaternalCondition[],
+      assessedAt: assessedAtIso,
+      ruleSetVersion: latest.rule_set_version,
+    },
+  };
 }
 
 /**
@@ -558,6 +616,15 @@ export async function reconcileLatestSummary(
 const LIST_DEFAULT_LIMIT = 20;
 const LIST_MAX_LIMIT = 100;
 
+/** Upper bound for a decoded cursor offset. Real cursors are only ever
+ *  `previous offset + limit(≤100)`, so a legitimate offset can never
+ *  approach this; a crafted 20-digit offset would otherwise pass
+ *  `Number.isInteger` and reach the DB as `OFFSET 1e20` (a 500). Anything
+ *  above the bound is treated as the same invalid-cursor rejection as a
+ *  malformed token. 9 digits (< 1e9) is comfortably beyond any admission's
+ *  assessment history. */
+const LIST_MAX_CURSOR_OFFSET = 999_999_999;
+
 /** Opaque pagination cursor — a base64url-encoded row offset. Deliberately
  *  opaque (not a bare integer) so callers can't be tempted to construct or
  *  edit one; internally this reuses the same LIMIT/OFFSET convention as
@@ -569,10 +636,13 @@ function encodeAssessmentCursor(offset: number): string {
 function decodeAssessmentCursor(cursor: string): number {
   try {
     const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
-    const match = /^o:(\d+)$/.exec(decoded);
+    // Digit count capped at 9 so an over-long offset never even parses.
+    const match = /^o:(\d{1,9})$/.exec(decoded);
     if (!match) throw new Error('unrecognized cursor shape');
     const offset = Number(match[1]);
-    if (!Number.isInteger(offset) || offset < 0) throw new Error('negative/non-integer offset');
+    if (!Number.isInteger(offset) || offset < 0 || offset > LIST_MAX_CURSOR_OFFSET) {
+      throw new Error('offset out of bounds');
+    }
     return offset;
   } catch {
     throw new MaternalScreenStoreError(

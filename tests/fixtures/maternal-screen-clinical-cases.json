@@ -1828,5 +1828,61 @@
       "matchedRuleIds": [],
       "missingRequiredFields": []
     }
+  },
+  {
+    "name": "P0-GAP (T1-VOICE-MODERATE-STABLE): consciousness VOICE with all six stability fields assessed and all else normal currently yields STABLE — awaiting clinical sign-off (candidate: VOICE => URGENT)",
+    "input": {
+      "shockSignsPresent": false,
+      "consciousness": "VOICE",
+      "oxygenSaturationPct": 98,
+      "maternalPulseBpm": 80,
+      "bleedingRate": "SPOTTING",
+      "fetalTracingPattern": "REASSURING"
+    },
+    "expect": {
+      "localTier": "NO_LOCAL_MATCH",
+      "emergencyAcuity": "STABLE",
+      "isComplete": false,
+      "suspectedConditions": [],
+      "matchedRuleIds": [],
+      "missingRequiredFields": [
+        "gaWeeks",
+        "gaDays",
+        "systolicBp",
+        "diastolicBp",
+        "proteinuriaGrade",
+        "headache",
+        "vaginalBleeding",
+        "fetalHeartRateBpm"
+      ]
+    }
+  },
+  {
+    "name": "P0-GAP (T1-VOICE-MODERATE-STABLE): bleedingRate MODERATE with all six stability fields assessed and all else normal currently yields STABLE — awaiting clinical sign-off (candidate: MODERATE => URGENT)",
+    "input": {
+      "shockSignsPresent": false,
+      "consciousness": "ALERT",
+      "oxygenSaturationPct": 98,
+      "maternalPulseBpm": 80,
+      "bleedingRate": "MODERATE",
+      "fetalTracingPattern": "REASSURING"
+    },
+    "expect": {
+      "localTier": "NO_LOCAL_MATCH",
+      "emergencyAcuity": "STABLE",
+      "isComplete": false,
+      "suspectedConditions": [],
+      "matchedRuleIds": [],
+      "missingRequiredFields": [
+        "gaWeeks",
+        "gaDays",
+        "systolicBp",
+        "diastolicBp",
+        "proteinuriaGrade",
+        "headache",
+        "vaginalBleeding",
+        "fetalHeartRateBpm"
+      ]
+    }
   }
 ]

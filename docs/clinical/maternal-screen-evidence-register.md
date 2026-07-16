@@ -40,6 +40,22 @@ in the YAML fixtures because no v1 rule consumes them yet.
   as supporting evidence only; the local PDF's 26+0 boundary controls
   `APH-GA26-VAGINAL-BLEEDING` (decision 7.5-13).
 
+## Open clinical decisions awaiting Phase 0 sign-off
+
+Known provisional-behavior gaps recorded as unapproved decision entries in
+`maternal-screen-acuity-v1.yaml` (`clinicalDecisions`), each pinned by
+"P0-GAP"-named cases in `tests/fixtures/maternal-screen-clinical-cases.json`
+so the current behavior is explicit, not accidental:
+
+- `T1-VOICE-MODERATE-STABLE` — with all six stability-determination fields
+  assessed and no rule firing, `consciousness: VOICE` and
+  `bleedingRate: MODERATE` each currently yield `STABLE` (candidate at
+  sign-off: escalate both to `URGENT`).
+- `T1-BLEEDINGRATE-NONE` — `bleedingRate` has no `NONE` member, so
+  "assessed, no bleeding" is inexpressible and an otherwise-normal screen
+  yields `UNKNOWN` (conservative); Phase 0 must decide between adding `NONE`
+  or treating `vaginalBleeding: false` as bleeding-stable.
+
 ## Outstanding evidence gap
 
 The local PDF's own cited Thai-language source manual ("คู่มือการดูแลรักษาสตรีตั้งครรภ์ที่มีความเสี่ยงสูงฯ

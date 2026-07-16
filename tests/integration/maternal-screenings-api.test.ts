@@ -10,7 +10,11 @@
 //      POST-COMMIT broadcast wired into webhook.ts's Task 7 ingest block:
 //      flag OFF ⇒ no broadcast, a `duplicate` replay ⇒ no broadcast, an
 //      identical re-evaluation ⇒ no broadcast, a real transition ⇒ exactly
-//      one `maternal_screen_state_changed` event.
+//      one `maternal_screen_state_changed` event. The transition is decided
+//      on the store's PROJECTED post-save summary (never the incoming
+//      assessment's own result), so a backfilled OLDER assessment that does
+//      not change the summary broadcasts nothing, and a real transition's
+//      event carries the projected values.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import { createTestDb } from '../helpers/testDb';
@@ -347,6 +351,13 @@ describe('GET /api/patients/[an]/maternal-screenings (Task 8)', () => {
     const badCursor = await callRoute(HCODE_A, 'AN-BOUND', '?cursor=not-a-real-cursor');
     expect(badCursor.status).toBe(400);
     expect((badCursor.body as { code: string }).code).toBe('BAD_REQUEST');
+
+    // A crafted, well-shaped cursor with an absurd 20-digit offset is bounded
+    // and rejected as invalid — it must never reach the DB as OFFSET 1e20.
+    const hugeCursor = Buffer.from('o:99999999999999999999', 'utf8').toString('base64url');
+    const overflow = await callRoute(HCODE_A, 'AN-BOUND', `?cursor=${hugeCursor}`);
+    expect(overflow.status).toBe(400);
+    expect((overflow.body as { code: string }).code).toBe('BAD_REQUEST');
   });
 
   // ─── Tenant isolation ───
@@ -531,6 +542,49 @@ function severeAphScreening(
   };
 }
 
+/** Entirely-normal transport picture (all six stability fields assessed) —
+ *  server evaluation: localTier NO_LOCAL_MATCH, emergencyAcuity STABLE. A
+ *  deliberately DIFFERENT state from severeAphScreening's
+ *  LOCAL_SEVERE/EMERGENCY, for transition/backfill tests. */
+function stableScreening(
+  overrides: Partial<WebhookMaternalScreeningPayload> = {},
+): WebhookMaternalScreeningPayload {
+  return {
+    source_pk: 'T8-SCR-STABLE-0001',
+    assessed_at: '2026-07-16T06:30:00+07:00',
+    assessed_by: 'RN ทดสอบ',
+    pih_diagnosed: false,
+    proteinuria_grade: 'negative',
+    headache: 'NONE',
+    blurred_vision: false,
+    epigastric_pain: false,
+    pulmonary_edema: false,
+    right_upper_quadrant_pain: false,
+    vaginal_bleeding: false,
+    estimated_bleeding_ml: 0,
+    bleeding_rate: 'SPOTTING',
+    concealed_bleeding_suspected: false,
+    abdominal_or_back_pain: false,
+    uterine_tenderness: false,
+    frequent_contractions: false,
+    contraction_duration_exceeds_interval: false,
+    suprapubic_tenderness: false,
+    bandls_ring: false,
+    membranes_ruptured: false,
+    abnormal_presentation: false,
+    fetal_heart_rate_bpm: 140,
+    fetal_tracing_pattern: 'REASSURING',
+    maternal_pulse_bpm: 80,
+    respiratory_rate_per_min: 16,
+    oxygen_saturation_pct: 98,
+    consciousness: 'ALERT',
+    shock_signs_present: false,
+    placenta_previa_excluded: null,
+    placenta_location_source: null,
+    ...overrides,
+  };
+}
+
 describe('webhook.ts gated maternal_screen_state_changed broadcast (Task 8)', () => {
   let db: DatabaseAdapter;
   let sse: MockSseManager;
@@ -637,5 +691,81 @@ describe('webhook.ts gated maternal_screen_state_changed broadcast (Task 8)', ()
       }),
     ]);
     expect(stateChangedEvents()).toHaveLength(0);
+  });
+
+  it('flag ON: a backfilled OLDER assessment that does not change the projected summary broadcasts nothing', async () => {
+    vi.stubEnv('MATERNAL_SCREEN_EVENTS_ENABLED', 'true');
+    // The NEWER severe assessment arrives first and becomes (and stays) the
+    // projected summary.
+    await process([basePatient({ maternal_screening: severeAphScreening() })]); // assessed 06:30+07:00
+    expect(stateChangedEvents()).toHaveLength(1);
+
+    sse.events = [];
+    // A would-be-downgrading assessment assessed BEFORE the severe one is
+    // backfilled AFTER it. It persists as history but does not become latest:
+    // cached_patients and the read API still say LOCAL_SEVERE/EMERGENCY, so
+    // emitting its NO_LOCAL_MATCH/STABLE picture would announce a state that
+    // contradicts everything persisted.
+    await process([
+      basePatient({
+        maternal_screening: stableScreening({
+          source_pk: 'T8-SCR-BACKFILL',
+          assessed_at: '2026-07-16T05:00:00+07:00', // OLDER than 06:30
+        }),
+      }),
+    ]);
+
+    // The backfilled row WAS stored…
+    const rows = await db.query<{ id: string }>('SELECT id FROM maternal_screening_assessments');
+    expect(rows).toHaveLength(2);
+    // …but nothing was broadcast, and the summary still mirrors the newer row.
+    expect(stateChangedEvents()).toHaveLength(0);
+    const summary = await db.query<{
+      maternal_screen_local_tier: string;
+      maternal_screen_emergency_acuity: string;
+    }>(
+      `SELECT maternal_screen_local_tier, maternal_screen_emergency_acuity
+         FROM cached_patients WHERE hospital_id = ? AND an = ?`,
+      [hospitalId, 'MSAN-T8'],
+    );
+    expect(summary[0].maternal_screen_local_tier).toBe('LOCAL_SEVERE');
+    expect(summary[0].maternal_screen_emergency_acuity).toBe('EMERGENCY');
+  });
+
+  it('flag ON: a NEWER assessment that changes the summary broadcasts once, carrying the PROJECTED post-save values', async () => {
+    vi.stubEnv('MATERNAL_SCREEN_EVENTS_ENABLED', 'true');
+    await process([basePatient({ maternal_screening: severeAphScreening() })]); // assessed 06:30+07:00
+    expect(stateChangedEvents()).toHaveLength(1);
+
+    sse.events = [];
+    const NEWER_ASSESSED_AT = '2026-07-16T08:00:00+07:00';
+    await process([
+      basePatient({
+        maternal_screening: stableScreening({
+          source_pk: 'T8-SCR-NEWER-STABLE',
+          assessed_at: NEWER_ASSESSED_AT, // NEWER than 06:30 — becomes latest
+        }),
+      }),
+    ]);
+
+    const events = stateChangedEvents();
+    expect(events).toHaveLength(1);
+    const data = events[0].data as {
+      previousLocalTier: string | null;
+      localTier: string;
+      previousEmergencyAcuity: string | null;
+      emergencyAcuity: string;
+      isComplete: boolean;
+      suspectedConditions: string[];
+      assessedAt: string;
+    };
+    expect(data.previousLocalTier).toBe('LOCAL_SEVERE');
+    expect(data.previousEmergencyAcuity).toBe('EMERGENCY');
+    // The event carries the PROJECTED (now-latest) summary values — exactly
+    // what cached_patients and the read API's `latest` now say.
+    expect(data.localTier).toBe('NO_LOCAL_MATCH');
+    expect(data.emergencyAcuity).toBe('STABLE');
+    expect(data.suspectedConditions).toEqual([]);
+    expect(new Date(data.assessedAt).getTime()).toBe(new Date(NEWER_ASSESSED_AT).getTime());
   });
 });

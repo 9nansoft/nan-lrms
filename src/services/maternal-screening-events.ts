@@ -31,21 +31,30 @@ export interface MaternalScreenPreviousSummary {
   emergencyAcuity: MaternalEmergencyAcuity | null;
 }
 
-/** The server-evaluated result of the assessment that was just saved. */
+/**
+ * The PROJECTED post-save summary axes for the admission — the store's
+ * `SaveMaternalScreenResult.summary` (latest-by-`assessed_at` projection),
+ * NOT the just-saved assessment's own result. The distinction matters for
+ * out-of-order/backfilled saves: an older assessment that does not become
+ * latest leaves the projection (and therefore this value) unchanged, and the
+ * comparison below correctly yields "no transition" instead of announcing a
+ * tier/acuity that contradicts the persisted summary and the read API.
+ */
 export interface MaternalScreenNewSummary {
   localTier: MaternalScreenLocalTier;
   emergencyAcuity: MaternalEmergencyAcuity;
 }
 
 /**
- * True only for a MEANINGFUL state transition — `localTier` changed OR
- * `emergencyAcuity` changed (spec §10.4: "only for a meaningful state
- * transition. Replayed idempotent payloads must not emit duplicate
- * events."). An assessment that lands on the exact same tier/acuity as the
- * admission's current summary (including the very first assessment landing
- * on `NO_LOCAL_MATCH`/`STABLE` when the previous summary was already `null`
- * — i.e. no prior assessment — DOES count as a transition, since `null` is
- * never equal to a proven enum value) emits nothing.
+ * True only for a MEANINGFUL state transition of the PROJECTED summary —
+ * `localTier` changed OR `emergencyAcuity` changed (spec §10.4: "only for a
+ * meaningful state transition. Replayed idempotent payloads must not emit
+ * duplicate events."). Callers compare the pre-save summary against the
+ * store-returned POST-save projected summary, so a save that leaves the
+ * projection unchanged (same-state re-evaluation, or a backfilled older
+ * assessment that does not become latest) emits nothing. The very first
+ * assessment (previous axes `null`) DOES count as a transition, since `null`
+ * is never equal to a proven enum value.
  */
 export function shouldEmitMaternalScreenTransition(
   prev: MaternalScreenPreviousSummary,
@@ -69,7 +78,10 @@ export interface BuildMaternalScreenEventParams {
 /**
  * Pure constructor for the `patient-update` broadcast payload. PHI-free by
  * construction — only ids, enums, booleans, and an ISO timestamp; never
- * name/cid/free-text (GC6).
+ * name/cid/free-text (GC6). The tier/acuity/isComplete/suspectedConditions/
+ * assessedAt values MUST be the PROJECTED post-save summary values (see
+ * MaternalScreenNewSummary above) so the event always mirrors what
+ * cached_patients and the read API's `latest` say.
  */
 export function buildMaternalScreenStateChangedEvent(
   params: BuildMaternalScreenEventParams,

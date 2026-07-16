@@ -527,6 +527,31 @@ describe('Webhook maternal screening ingest (Task 7)', () => {
         'maximum size',
       );
     });
+
+    it('truncates a long echoed sender value in validation errors — a misrouted free-text never lands verbatim in the response/logs (review MINOR 2)', async () => {
+      // Simulates a misrouted free-text value (e.g. a name/phone note) landing
+      // in an enum field. The rejection stays actionable (field name + value
+      // prefix + reported length) but never echoes the full value.
+      const misrouted =
+        'นาง สมมุติ นามสมมุติ โทร 081-000-0000 นัดติดตามอาการเลือดออกซ้ำในสัปดาห์หน้า';
+      expect(misrouted.length).toBeGreaterThan(40);
+
+      const result = await process([
+        basePatient({
+          maternal_screening: severeAphScreening({ bleeding_rate: misrouted }),
+        }),
+      ]);
+
+      expect(result.maternalScreenAssessments).toBe(0);
+      expect(result.maternalScreenIngestErrors).toHaveLength(1);
+      const err = result.maternalScreenIngestErrors![0];
+      expect(err).toContain('patients[0]');
+      expect(err).toContain('bleeding_rate');
+      expect(err).toContain('truncated'); // sender is told the echo is partial
+      expect(err).not.toContain(misrouted); // the full value never appears
+      // Nothing was written (same no-partial-write contract as every rejection).
+      expect(await assessmentRows()).toHaveLength(0);
+    });
   });
 
   // ─── Flag ON: per-patient error isolation ───

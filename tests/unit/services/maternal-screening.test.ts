@@ -1,8 +1,12 @@
 // Table-driven oracle + boundary + Global-Constraint tests for the pure
 // maternal-screening rule engine (src/services/maternal-screening.ts, Task 3).
 //
-// The 64-case fixture tests/fixtures/maternal-screen-clinical-cases.json is the
-// clinical ORACLE: for every case the engine must reproduce localTier,
+// The 66-case fixture tests/fixtures/maternal-screen-clinical-cases.json is the
+// clinical ORACLE (64 clinical cases + 2 "P0-GAP" cases that deliberately PIN
+// current provisional behavior awaiting Phase 0 sign-off — see
+// docs/clinical/maternal-screen-acuity-v1.yaml decisions
+// T1-VOICE-MODERATE-STABLE / T1-BLEEDINGRATE-NONE): for every case the engine
+// must reproduce localTier,
 // emergencyAcuity, isComplete, suspectedConditions, matchedRuleIds, and
 // missingRequiredFields. Set-valued expectations (suspected/matched/missing)
 // are compared order-insensitively.
@@ -86,8 +90,8 @@ interface OracleCase {
 const cases = clinicalCases as unknown as OracleCase[];
 
 describe('evaluateMaternalScreen — clinical oracle (fixture-driven)', () => {
-  it('fixture has the full 64-case oracle set', () => {
-    expect(cases).toHaveLength(64);
+  it('fixture has the full 66-case oracle set (64 clinical + 2 pinned P0-GAP cases)', () => {
+    expect(cases).toHaveLength(66);
   });
 
   it.each(cases.map((c) => [c.name, c] as const))('%s', (_name, testCase) => {

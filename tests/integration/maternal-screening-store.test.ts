@@ -275,6 +275,17 @@ describe('saveMaternalScreenAssessment (Task 6 transactional store)', () => {
     expect(result.emergencyAcuity).toBe(engine.emergencyAcuity);
     expect(result.isComplete).toBe(engine.isComplete);
     expect(result.ruleSetVersion).toBe(engine.ruleSetVersion);
+    // The returned POST-save projected summary mirrors the projection that
+    // was just written (here the saved row IS the latest, so it matches the
+    // engine result and ASSESSED_AT exactly).
+    expect(result.summary).toEqual({
+      localTier: engine.localTier,
+      emergencyAcuity: engine.emergencyAcuity,
+      isComplete: engine.isComplete,
+      suspectedConditions: engine.suspectedConditions,
+      assessedAt: ASSESSED_AT,
+      ruleSetVersion: engine.ruleSetVersion,
+    });
     // Sanity: this input is a proven severe pattern with all mandatory fields.
     expect(engine.localTier).toBe('LOCAL_SEVERE');
     expect(engine.isComplete).toBe(true);
@@ -327,6 +338,9 @@ describe('saveMaternalScreenAssessment (Task 6 transactional store)', () => {
     expect(replay.status).toBe('duplicate');
     expect(replay.assessmentId).toBe(first.assessmentId);
     expect(replay.localTier).toBe(first.localTier); // stored values, not the replay's
+    // No projected summary on a duplicate — nothing was written, the summary
+    // was not touched (event emitters must not announce anything for it).
+    expect(replay.summary).toBeUndefined();
 
     const rows = await readAssessments(db, patientId);
     expect(rows).toHaveLength(1);
@@ -368,6 +382,10 @@ describe('saveMaternalScreenAssessment (Task 6 transactional store)', () => {
     expect(summary.maternal_screen_emergency_acuity).toBe(correctionEngine.emergencyAcuity);
     expect(summary.maternal_screen_is_complete).toBe(correctionEngine.isComplete);
     expect(correctionEngine.localTier).toBe('LOCAL_MILD'); // sanity: it actually changed
+
+    // The returned projected summary agrees with the persisted projection.
+    expect(correction.summary?.localTier).toBe(correctionEngine.localTier);
+    expect(correction.summary?.emergencyAcuity).toBe(correctionEngine.emergencyAcuity);
   });
 
   it('rejects a correction whose target belongs to a different admission, persisting nothing', async () => {
@@ -595,6 +613,16 @@ describe('saveMaternalScreenAssessment (Task 6 transactional store)', () => {
     );
     expect(late.status).toBe('created');
 
+    // The result's OWN axes report the incoming (backfilled) assessment…
+    expect(late.localTier).toBe('LOCAL_MILD');
+    // …but the returned PROJECTED summary stays on the newer severe row —
+    // exactly what cached_patients and the read API's `latest` now say. Event
+    // emitters key off this so a backfilled older assessment can never emit
+    // an event announcing a stale/contradictory (downgraded) state.
+    expect(late.summary?.localTier).toBe('LOCAL_SEVERE');
+    expect(late.summary?.assessedAt).toBe(NEWER_AT);
+    expect(late.summary?.ruleSetVersion).toBe(late.ruleSetVersion);
+
     // Both rows exist, but the summary stays on the newer-assessed severe row.
     expect(await readAssessments(db, patientId)).toHaveLength(2);
     const summary = await readSummary(db, patientId);
@@ -648,6 +676,10 @@ describe('reconcileLatestSummary (AC #12: summary reconstructable from history)'
     expect(result.assessmentId).toBe(correction.assessmentId); // not the superseded original
 
     const engine = evaluateMaternalScreen(MILD_COMPLETE_INPUT, EVALUATED_AT);
+    // The returned projected summary mirrors the reprojected values.
+    expect(result.summary.localTier).toBe(engine.localTier);
+    expect(result.summary.emergencyAcuity).toBe(engine.emergencyAcuity);
+    expect(result.summary.assessedAt).toBe(ASSESSED_AT);
     const summary = await readSummary(db, patientId);
     expect(summary.maternal_screen_local_tier).toBe(engine.localTier);
     expect(summary.maternal_screen_emergency_acuity).toBe(engine.emergencyAcuity);
@@ -665,6 +697,14 @@ describe('reconcileLatestSummary (AC #12: summary reconstructable from history)'
     const result = await reconcileLatestSummary(db, patientId);
     expect(result.status).toBe('cleared');
     expect(result.assessmentId).toBeNull();
+    expect(result.summary).toEqual({
+      localTier: null,
+      emergencyAcuity: null,
+      isComplete: null,
+      suspectedConditions: [],
+      assessedAt: null,
+      ruleSetVersion: null,
+    });
 
     const summary = await readSummary(db, patientId);
     expect(summary.maternal_screen_local_tier).toBeNull();

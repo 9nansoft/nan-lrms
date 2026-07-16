@@ -42,7 +42,6 @@ import type {
   MaternalEmergencyAcuity,
   MaternalScreenInput,
   MaternalScreenLocalTier,
-  SuspectedMaternalCondition,
 } from '@/types/maternal-screening';
 import {
   MATERNAL_SCREEN_TRANSPORT_MAX_BYTES,
@@ -698,6 +697,23 @@ const MS_KNOWN_TRANSPORT_KEYS: ReadonlySet<string> = new Set<string>([
 ]);
 
 /**
+ * GC6 / PDPA: validation errors echo the offending sender value so they stay
+ * actionable, but a misrouted free-text value (e.g. a patient name landing in
+ * an enum field) must not flow verbatim into the webhook response and the
+ * `maternal_screen_webhook_ingest_rejected` server log. Echoes of unbounded
+ * sender values are therefore truncated to a short prefix (length reported so
+ * the sender can still find the culprit). `assessed_by`/`source_pk` keep
+ * their existing length-only echoes (no value at all).
+ */
+const MS_ECHO_MAX_CHARS = 40;
+function echoForError(value: unknown): string {
+  const rendered = JSON.stringify(value) ?? String(value);
+  return rendered.length <= MS_ECHO_MAX_CHARS
+    ? rendered
+    : `${rendered.slice(0, MS_ECHO_MAX_CHARS)}… (truncated, ${rendered.length} chars)`;
+}
+
+/**
  * Validate one patient's OPTIONAL `maternal_screening` transport object
  * (spec §9.2) and map it to a normalized `MaternalScreenInput` (spec §6.1).
  *
@@ -758,7 +774,7 @@ export function validateMaternalScreeningTransport(
   const rawAssessedAt = raw.assessed_at;
   if (typeof rawAssessedAt !== 'string' || !MATERNAL_SCREEN_ISO_8601_PATTERN.test(rawAssessedAt)) {
     errors.push(
-      `${prefix}.assessed_at is required and must be a strict ISO 8601 instant (YYYY-MM-DDTHH:MM(:SS(.sss)?)? with a Z or ±HH:MM offset; got ${JSON.stringify(rawAssessedAt)})`,
+      `${prefix}.assessed_at is required and must be a strict ISO 8601 instant (YYYY-MM-DDTHH:MM(:SS(.sss)?)? with a Z or ±HH:MM offset; got ${echoForError(rawAssessedAt)})`,
     );
   } else if (Number.isNaN(new Date(rawAssessedAt).getTime())) {
     // Pattern-valid but an impossible calendar value (e.g. month 13, day 45).
@@ -809,7 +825,7 @@ export function validateMaternalScreeningTransport(
     if (v === undefined || v === null) return null;
     if (typeof v !== 'boolean') {
       errors.push(
-        `${prefix}.${field} must be true, false, or null (three-state assessed/absent/not-assessed; got ${JSON.stringify(v)})`,
+        `${prefix}.${field} must be true, false, or null (three-state assessed/absent/not-assessed; got ${echoForError(v)})`,
       );
       return null;
     }
@@ -822,7 +838,7 @@ export function validateMaternalScreeningTransport(
     const v = raw[field];
     if (v === undefined || v === null) return null;
     if (typeof v !== 'number' || !Number.isFinite(v)) {
-      errors.push(`${prefix}.${field} must be a finite number or null (got ${JSON.stringify(v)})`);
+      errors.push(`${prefix}.${field} must be a finite number or null (got ${echoForError(v)})`);
       return null;
     }
     const bounds = MATERNAL_SCREEN_NUMERIC_BOUNDS[field];
@@ -845,14 +861,16 @@ export function validateMaternalScreeningTransport(
     const v = raw[field];
     if (v === undefined || v === null) return 'UNKNOWN' as T;
     if (typeof v !== 'string') {
-      errors.push(`${prefix}.${field} must be a string or null (got ${JSON.stringify(v)})`);
+      errors.push(`${prefix}.${field} must be a string or null (got ${echoForError(v)})`);
       return 'UNKNOWN' as T;
     }
     const trimmed = v.trim();
     if (trimmed === '') return 'UNKNOWN' as T;
     const norm = trimmed.toUpperCase() as T;
     if (!allowed.includes(norm)) {
-      errors.push(`${prefix}.${field} must be one of ${allowed.join('|')} or null (got "${v}")`);
+      errors.push(
+        `${prefix}.${field} must be one of ${allowed.join('|')} or null (got ${echoForError(v)})`,
+      );
       return 'UNKNOWN' as T;
     }
     return norm;
@@ -886,7 +904,7 @@ export function validateMaternalScreeningTransport(
     const bounds = MATERNAL_SCREEN_ADMISSION_CONTEXT_BOUNDS[field];
     if (typeof v !== 'number' || !Number.isFinite(v) || v < bounds.min || v > bounds.max) {
       errors.push(
-        `${label}.${field} must be a number between ${bounds.min} and ${bounds.max} to be reused as a screening input (got ${JSON.stringify(v)}) — fix the value or send null`,
+        `${label}.${field} must be a number between ${bounds.min} and ${bounds.max} to be reused as a screening input (got ${echoForError(v)}) — fix the value or send null`,
       );
       return null;
     }
@@ -1232,39 +1250,42 @@ export async function processWebhookPayload(
 
         // ─── Task 8: gated, POST-COMMIT state-change broadcast ───
         // saveMaternalScreenAssessment has already committed by the time it
-        // returns (GC6) — the store itself is event-free by design. Never
-        // broadcasts on a 'duplicate' replay (idempotent no-op), never when
-        // the flag is off (default — GC2), and never for a same-state
-        // transition (shouldEmitMaternalScreenTransition).
+        // returns (GC6) — the store itself is event-free by design. The
+        // transition is decided on the store's PROJECTED post-save summary
+        // (saveResult.summary — the latest-by-assessed_at row), NEVER on the
+        // incoming assessment's own result: a backfilled OLDER assessment
+        // that does not become latest leaves the summary unchanged, and
+        // announcing the incoming (e.g. downgraded) tier would contradict
+        // the persisted summary and the read API's `latest`. Never
+        // broadcasts on a 'duplicate' replay (idempotent no-op, no summary
+        // on the result), never when the flag is off (default — GC2), and
+        // never when the projected summary did not actually transition
+        // (shouldEmitMaternalScreenTransition on projected before/after —
+        // this also prevents a concurrent double-save from emitting twice
+        // for the same final state).
+        const projected = saveResult.summary;
         if (
           isMaternalScreenEventsEnabled() &&
           (saveResult.status === 'created' || saveResult.status === 'corrected') &&
-          shouldEmitMaternalScreenTransition(previousSummary, saveResult)
+          projected?.localTier != null &&
+          projected.emergencyAcuity != null &&
+          shouldEmitMaternalScreenTransition(previousSummary, {
+            localTier: projected.localTier,
+            emergencyAcuity: projected.emergencyAcuity,
+          })
         ) {
-          // suspectedConditions isn't on SaveMaternalScreenResult (the store
-          // stays minimal/event-free by design) — a small scoped read of the
-          // row just written, rather than widening the Task 6 store's return
-          // contract or re-running evaluation a second time.
-          const conditionRows = await db.query<{ suspected_conditions_json: unknown }>(
-            'SELECT suspected_conditions_json FROM maternal_screening_assessments WHERE id = ? AND hospital_id = ?',
-            [saveResult.assessmentId, hospitalId],
-          );
-          const rawConditions = conditionRows[0]?.suspected_conditions_json;
-          const suspectedConditions: SuspectedMaternalCondition[] =
-            typeof rawConditions === 'string'
-              ? (JSON.parse(rawConditions) as SuspectedMaternalCondition[])
-              : ((rawConditions as SuspectedMaternalCondition[] | null) ?? []);
-
           sseManager.broadcast(
             'patient-update',
             buildMaternalScreenStateChangedEvent({
               patientId: admission.id,
               previous: previousSummary,
-              localTier: saveResult.localTier,
-              emergencyAcuity: saveResult.emergencyAcuity,
-              isComplete: saveResult.isComplete,
-              suspectedConditions,
-              assessedAt: validated.candidate.assessedAt,
+              // PROJECTED values throughout — the event must mirror what the
+              // summary/read API now say, not the row that happened to arrive.
+              localTier: projected.localTier,
+              emergencyAcuity: projected.emergencyAcuity,
+              isComplete: projected.isComplete ?? false,
+              suspectedConditions: projected.suspectedConditions,
+              assessedAt: projected.assessedAt ?? validated.candidate.assessedAt,
             }),
           );
         }

@@ -91,6 +91,42 @@ clinicalDecisions:
       explicit adoption of the WHO/ACOG qualitative description) at Phase 0
       sign-off.
     approved: false
+  - ref: "T1-VOICE-MODERATE-STABLE"
+    question: >
+      Should consciousness=VOICE or bleedingRate=MODERATE (with all six
+      stabilityDeterminationFields assessed and no other rule firing) really
+      yield STABLE?
+    choice: >
+      CURRENT (provisional) behavior, deliberately pinned by the test oracle
+      (tests/fixtures/maternal-screen-clinical-cases.json, "P0-GAP" cases):
+      when all six stabilityDeterminationFields are assessed and no rule
+      fires, the result is STABLE — and neither consciousness=VOICE (AVPU one
+      step below ALERT; EA-CONSCIOUSNESS-DEPRESSED-EMERGENCY only fires on
+      PAIN/UNRESPONSIVE) nor bleedingRate=MODERATE (EA-BLEEDING-HEAVY-EMERGENCY
+      only fires on HEAVY) fires any rule. So a VOICE-responsive or
+      moderately-bleeding patient who is otherwise assessed-normal is
+      currently classified STABLE. This is a KNOWN provisional-behavior gap
+      flagged for the clinical owner. Candidate resolution at Phase 0
+      sign-off: escalate consciousness=VOICE to URGENT and
+      bleedingRate=MODERATE to URGENT (each as a new rule), or explicitly
+      approve STABLE as intended.
+    approved: false
+  - ref: "T1-BLEEDINGRATE-NONE"
+    question: >
+      How should "bleeding assessed, none present" be expressed, given
+      bleedingRate has no NONE member?
+    choice: >
+      CURRENT (provisional) behavior: the bleedingRate enum is
+      SPOTTING|LIGHT|MODERATE|HEAVY|UNKNOWN — "assessed, no bleeding" is
+      inexpressible on this axis. A sender who assessed the patient and found
+      no bleeding can only transmit UNKNOWN (or omit the field), which marks
+      the stability field unassessed, so an otherwise-normal screen yields
+      emergencyAcuity UNKNOWN rather than STABLE. This is CONSERVATIVE (GC1:
+      never fabricate STABLE from missing data) but understates genuinely
+      assessed-stable patients. Phase 0 must decide: add a NONE member to
+      bleedingRate, or treat vaginalBleeding=false as satisfying the
+      bleeding-stability determination.
+    approved: false
 
 rules:
   - id: EA-SHOCK-SIGNS-EMERGENCY
