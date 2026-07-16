@@ -21,6 +21,7 @@ import { NEWBORN_THRESHOLDS } from '@/config/newborn';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { KpiTip } from '@/components/shared/KpiTip';
 import { FlagChip } from '@/components/shared/FlagChip';
+import { IncompleteAssessmentMarker } from '@/components/shared/IncompleteAssessmentMarker';
 import { STATUS_META, URGENCY_META } from '@/components/referrals/chips';
 import {
   BP_SYS_HIGH,
@@ -385,26 +386,6 @@ function Pill({
       }}
     >
       {label}
-    </span>
-  );
-}
-
-// WHO containment T6 — spec containment item 5: an incomplete LOW assessment
-// must never display as a bare confirmed-LOW chip. Rendered beside every
-// risk chip on the page whenever ancAssessment.incomplete is true.
-function IncompleteAssessmentMarker({ missingCount }: { missingCount: number }) {
-  return (
-    <span
-      className="inline-flex items-center gap-1 border px-2 py-0.5 font-mono text-[11px] font-semibold tracking-[0.06em]"
-      style={{
-        color: 'var(--risk-medium)',
-        borderColor: 'var(--risk-medium)',
-        background: 'rgba(234, 179, 8, 0.08)',
-      }}
-      data-testid="anc-assessment-incomplete-marker"
-    >
-      <AlertTriangle className="h-3 w-3" />
-      {`การประเมินความเสี่ยงไม่สมบูรณ์ (ขาดข้อมูล ${missingCount} รายการ)`}
     </span>
   );
 }
