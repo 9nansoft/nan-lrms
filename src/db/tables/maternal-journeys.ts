@@ -28,13 +28,19 @@ export const maternalJourneysTable: TableDefinition = {
     { name: 'amphur_code', type: 'string', maxLength: 2, nullable: true },
     { name: 'tambon_code', type: 'string', maxLength: 2, nullable: true },
     // WHO 2016 ANC journey-level data (L2). All optional — populated opportunistically
-    // by HOSxP sync / webhook. Results are short codes (POS/NEG/PENDING/UNKNOWN).
-    { name: 'blood_group', type: 'string', maxLength: 2, nullable: true },        // A / B / AB / O
-    { name: 'rh_factor', type: 'string', maxLength: 3, nullable: true },          // POS / NEG
-    { name: 'hbsag_result', type: 'string', maxLength: 10, nullable: true },      // POS / NEG / PENDING
-    { name: 'vdrl_result', type: 'string', maxLength: 10, nullable: true },
-    { name: 'hiv_result', type: 'string', maxLength: 10, nullable: true },
-    { name: 'ogtt_result', type: 'string', maxLength: 10, nullable: true },       // NORMAL / ABNORMAL / PENDING
+    // by HOSxP sync / webhook. Lab results hold FREE TEXT from the source EHR
+    // verbatim ("Non-reactive", Thai phrases, titer ratios) — real senders never
+    // conformed to the originally-intended short codes, and truncating clinical
+    // evidence is forbidden (WHO containment). Widths must match reality;
+    // normalization to codes is spec Phase 2 terminology work. Widening for
+    // existing DBs happens in migrations/widen-anc-result-columns.ts
+    // (SchemaSync never ALTERs existing columns).
+    { name: 'blood_group', type: 'string', maxLength: 10, nullable: true },       // A / B / AB / O + free text ("AB+")
+    { name: 'rh_factor', type: 'string', maxLength: 10, nullable: true },         // POS / NEG + free text ("positive")
+    { name: 'hbsag_result', type: 'string', maxLength: 50, nullable: true },      // free text ("Non-reactive")
+    { name: 'vdrl_result', type: 'string', maxLength: 50, nullable: true },       // free text (incl. titer ratios)
+    { name: 'hiv_result', type: 'string', maxLength: 50, nullable: true },        // free text
+    { name: 'ogtt_result', type: 'string', maxLength: 50, nullable: true },       // free text
     // GPAL / GTPAL obstetric history.
     { name: 'term_births', type: 'integer', nullable: true },
     { name: 'preterm_births', type: 'integer', nullable: true },

@@ -25,6 +25,9 @@ import { logger } from '@/lib/logger';
 import { apiError } from '@/lib/api-errors';
 
 export async function POST(request: NextRequest) {
+  // Captured for the catch-all error log — without sender identity the
+  // 2026-07-14 "value too long" incident was undiagnosable from app logs.
+  const logCtx: { hospitalId?: string; payloadType?: string } = {};
   try {
     await ensureInit();
     const db = await getDatabase();
@@ -52,6 +55,8 @@ export async function POST(request: NextRequest) {
     const sseManager = SseManager.getInstance();
     const payloadType = (body as Record<string, unknown>).type;
     const payloadHospCode = (body as Record<string, unknown>).hospitalCode;
+    logCtx.hospitalId = keyInfo.hospitalId;
+    logCtx.payloadType = typeof payloadType === 'string' ? payloadType : undefined;
 
     // Validate hospitalCode matches API key's hospital (if provided)
     if (payloadHospCode && typeof payloadHospCode === 'string') {
@@ -227,7 +232,11 @@ export async function POST(request: NextRequest) {
       const status = error.code === 'REFERRAL_NOT_FOUND' ? 404 : 400;
       return NextResponse.json(apiError(error.code), { status });
     }
-    logger.error('webhook_processing_failed', { error });
+    logger.error('webhook_processing_failed', {
+      error,
+      hospitalId: logCtx.hospitalId ?? null,
+      payloadType: logCtx.payloadType ?? null,
+    });
     return NextResponse.json(apiError('INTERNAL_ERROR'), { status: 500 });
   }
 }

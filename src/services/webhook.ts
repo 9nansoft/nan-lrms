@@ -235,6 +235,16 @@ export interface WebhookAncResult {
    * below.
    */
   visitConflicts: number;
+  /**
+   * Count of sender string fields DROPPED (stored as null) because they
+   * exceeded their column width even after the widen-anc-result-columns
+   * migration. Defense-in-depth for the 2026-07-14..16 prod incident where
+   * one over-long value ("Non-reactive" > VARCHAR(10)) threw and silently
+   * aborted a hospital's entire ANC bundle every sync cycle. Values are
+   * never truncated — partial clinical text is worse than an explicit gap,
+   * and the full value remains in the source EHR.
+   */
+  fieldOverflows: number;
 }
 
 // ─── Referral webhook payload ───
@@ -912,6 +922,24 @@ export async function processAncWebhook(
   let deleted = 0;
   let downgradesBlocked = 0;
   let visitConflicts = 0;
+  let fieldOverflows = 0;
+
+  // Defense-in-depth against "value too long for type character varying(N)":
+  // a sender string exceeding its column is dropped (null) for THAT FIELD
+  // only, counted, and logged non-PHI (never the value itself) — it must
+  // never abort the patient or the hospital's whole bundle. Widths mirror
+  // src/db/tables/ + migrations/widen-anc-result-columns.ts.
+  const fitOrNull = (
+    value: string | null | undefined,
+    max: number,
+    field: string,
+  ): string | null => {
+    if (value == null) return null;
+    if (value.length <= max) return value;
+    fieldOverflows++;
+    logger.warn('anc_field_length_overflow', { hospitalId, field, length: value.length, max });
+    return null;
+  };
   let skippedInvalidCidChecksum = 0;
 
   for (const patient of payload.patients) {
@@ -1262,10 +1290,10 @@ export async function processAncWebhook(
               visit.bpSystolic ?? null,
               visit.bpDiastolic ?? null,
               visit.fetalHr ?? null,
-              visit.presentation ?? null,
-              visit.engagement ?? null,
-              visit.urineProtein ?? null,
-              visit.urineGlucose ?? null,
+              fitOrNull(visit.presentation, 50, 'presentation'),
+              fitOrNull(visit.engagement, 50, 'engagement'),
+              fitOrNull(visit.urineProtein, 50, 'urine_protein'),
+              fitOrNull(visit.urineGlucose, 50, 'urine_glucose'),
               visit.hbGDl ?? null,
               visit.hctPct ?? null,
               visit.ttDoseNo ?? null,
@@ -1277,14 +1305,14 @@ export async function processAncWebhook(
               visit.fetalMovementOk == null ? null : Boolean(visit.fetalMovementOk),
               // RTCOG OB 66-029 per-visit additions.
               visit.vaccinesGiven ? JSON.stringify(visit.vaccinesGiven) : null,
-              visit.urineKetone ?? null,
-              visit.urineCultureResult ?? null,
+              fitOrNull(visit.urineKetone, 50, 'urine_ketone'),
+              fitOrNull(visit.urineCultureResult, 50, 'urine_culture_result'),
               visit.iodineGiven == null ? null : Boolean(visit.iodineGiven),
               visit.multivitaminGiven == null ? null : Boolean(visit.multivitaminGiven),
               visit.vitaminDIu ?? null,
-              visit.nstResult ?? null,
+              fitOrNull(visit.nstResult, 20, 'nst_result'),
               visit.bppScore ?? null,
-              visit.umbilicalDopplerResult ?? null,
+              fitOrNull(visit.umbilicalDopplerResult, 20, 'umbilical_doppler_result'),
               visit.psychosocialScreen ? JSON.stringify(visit.psychosocialScreen) : null,
               visitNow,
               visitNow,
@@ -1350,12 +1378,12 @@ export async function processAncWebhook(
            updated_at = ?
          WHERE id = ?`,
         [
-          patient.bloodGroup ?? null,
-          patient.rhFactor ?? null,
-          patient.hbsagResult ?? null,
-          patient.vdrlResult ?? null,
-          patient.hivResult ?? null,
-          patient.ogttResult ?? null,
+          fitOrNull(patient.bloodGroup, 10, 'blood_group'),
+          fitOrNull(patient.rhFactor, 10, 'rh_factor'),
+          fitOrNull(patient.hbsagResult, 50, 'hbsag_result'),
+          fitOrNull(patient.vdrlResult, 50, 'vdrl_result'),
+          fitOrNull(patient.hivResult, 50, 'hiv_result'),
+          fitOrNull(patient.ogttResult, 50, 'ogtt_result'),
           patient.termBirths ?? null,
           patient.pretermBirths ?? null,
           patient.abortions ?? null,
@@ -1428,20 +1456,20 @@ export async function processAncWebhook(
          WHERE id = ?`,
         [
           patient.mcvFl ?? null,
-          patient.dcipResult ?? null,
-          patient.hbEResult ?? null,
-          patient.thalassemiaType ?? null,
-          patient.cervicalScreenType ?? null,
-          patient.cervicalScreenResult ?? null,
+          fitOrNull(patient.dcipResult, 10, 'dcip_result'),
+          fitOrNull(patient.hbEResult, 10, 'hb_e_result'),
+          fitOrNull(patient.thalassemiaType, 20, 'thalassemia_type'),
+          fitOrNull(patient.cervicalScreenType, 10, 'cervical_screen_type'),
+          fitOrNull(patient.cervicalScreenResult, 20, 'cervical_screen_result'),
           patient.cervicalScreenDate ?? null,
-          patient.aneuploidyMethod ?? null,
-          patient.aneuploidyResult ?? null,
-          patient.gbsResult ?? null,
+          fitOrNull(patient.aneuploidyMethod, 20, 'aneuploidy_method'),
+          fitOrNull(patient.aneuploidyResult, 20, 'aneuploidy_result'),
+          fitOrNull(patient.gbsResult, 10, 'gbs_result'),
           patient.gbsCollectedDate ?? null,
           patient.anatomyScanDate ?? null,
-          patient.anatomyScanResult ?? null,
+          fitOrNull(patient.anatomyScanResult, 20, 'anatomy_scan_result'),
           patient.efwG ?? null,
-          patient.datingMethod ?? null,
+          fitOrNull(patient.datingMethod, 10, 'dating_method'),
           patient.proteinuria24hMg ?? null,
           patient.creatinineMgDl ?? null,
           patient.priorPeDvt == null ? null : Boolean(patient.priorPeDvt),
@@ -1485,6 +1513,7 @@ export async function processAncWebhook(
     deleted,
     downgradesBlocked,
     visitConflicts,
+    fieldOverflows,
   };
 }
 

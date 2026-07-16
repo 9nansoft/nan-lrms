@@ -24,9 +24,12 @@ export const cachedAncVisitsTable: TableDefinition = {
     { name: 'engagement', type: 'string', maxLength: 50, nullable: true },
     { name: 'pass_quality', type: 'boolean', nullable: true },
     { name: 'provider_code', type: 'string', maxLength: 20, nullable: true },
-    // WHO 2016 ANC data elements (L2).
-    { name: 'urine_protein', type: 'string', maxLength: 10, nullable: true },  // '-', 'trace', '+', '++', '+++'
-    { name: 'urine_glucose', type: 'string', maxLength: 10, nullable: true },
+    // WHO 2016 ANC data elements (L2). Urine results are FREE TEXT from HOSxP
+    // (person_anc.albumin/sugar — e.g. "trace albumin", Thai phrases); never
+    // truncate clinical evidence. Existing DBs widened by
+    // migrations/widen-anc-result-columns.ts.
+    { name: 'urine_protein', type: 'string', maxLength: 50, nullable: true },  // '-', 'trace', '+', … + free text
+    { name: 'urine_glucose', type: 'string', maxLength: 50, nullable: true },
     { name: 'hb_g_dl', type: 'decimal', nullable: true },
     { name: 'hct_pct', type: 'decimal', nullable: true },
     { name: 'tt_dose_no', type: 'integer', nullable: true },                   // tetanus toxoid dose number 0-5
@@ -42,9 +45,9 @@ export const cachedAncVisitsTable: TableDefinition = {
     //          given_at_ga?: number }]. tt_dose_no is kept for backward compat.
     { name: 'vaccines_given_json', type: 'json', nullable: true },
 
-    // Urinalysis additions.
-    { name: 'urine_ketone', type: 'string', maxLength: 10, nullable: true },   // '-','trace','+','++','+++'
-    { name: 'urine_culture_result', type: 'string', maxLength: 20, nullable: true }, // NEGATIVE / POSITIVE / PENDING
+    // Urinalysis additions (free text — see urine_protein note above).
+    { name: 'urine_ketone', type: 'string', maxLength: 50, nullable: true },   // '-','trace','+',… + free text
+    { name: 'urine_culture_result', type: 'string', maxLength: 50, nullable: true }, // free text ("no growth in 48 hours")
 
     // Full RTCOG supplementation checklist.
     { name: 'iodine_given', type: 'boolean', nullable: true },

@@ -7,6 +7,7 @@ import { migrateCachedReferralsActor } from '@/db/migrations/cached-referrals-ac
 import { migrateMaternalJourneysActiveUnique } from '@/db/migrations/maternal-journeys-active-unique';
 import { migrateVideoCallParticipantsUnique } from '@/db/migrations/video-call-participants-unique';
 import { migrateVideoCallsGroupModel } from '@/db/migrations/video-calls-group';
+import { migrateWidenAncResultColumns } from '@/db/migrations/widen-anc-result-columns';
 import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { SseManager } from '@/lib/sse';
@@ -69,6 +70,13 @@ export async function initializeApp(): Promise<void> {
     // persistRingRows' ON CONFLICT DO UPDATE (fresh DBs get the index
     // directly from the table definition via SchemaSync above).
     await migrateVideoCallParticipantsUnique(db);
+
+    // 2a-4. One-shot idempotent migration: widen ANC lab/urine result columns
+    // to fit real HOSxP free text ("Non-reactive" > VARCHAR(10)) — an
+    // over-long value aborted a hospital's whole ANC bundle every sync.
+    // SchemaSync never ALTERs existing columns; fresh DBs get the new widths
+    // from the table definitions directly.
+    await migrateWidenAncResultColumns(db);
 
     // 2b. One-shot idempotent backfill for cached_anc_visits.hospital_id —
     // the column was added after data already existed; populate from the

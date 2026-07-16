@@ -96,7 +96,12 @@ export async function POST(request: NextRequest) {
       // admin Sync Log via the persist_anc step below) can see when the
       // ingest pipeline silently protected data integrity. See WHO
       // containment T6.
-      anc?: { processed: number; downgradesBlocked: number; visitConflicts: number };
+      anc?: {
+        processed: number;
+        downgradesBlocked: number;
+        visitConflicts: number;
+        fieldOverflows: number;
+      };
       partograph?: { accepted: number; skipped: number };
       newborns?: { upserted: number; journeys: number };
     } = {};
@@ -247,6 +252,7 @@ export async function POST(request: NextRequest) {
           processed: r.patientsProcessed,
           downgradesBlocked: r.downgradesBlocked,
           visitConflicts: r.visitConflicts,
+          fieldOverflows: r.fieldOverflows,
         };
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_anc',
@@ -256,17 +262,20 @@ export async function POST(request: NextRequest) {
             processed: r.patientsProcessed,
             downgradesBlocked: r.downgradesBlocked,
             visitConflicts: r.visitConflicts,
+            fieldOverflows: r.fieldOverflows,
           },
         });
         // WHO containment T6 — non-zero means the ingest pipeline silently
         // protected data integrity (blocked a downgrade on missing evidence,
-        // or skipped a cross-hospital visit conflict). An operator should
-        // know without having to dig through the Sync Log.
-        if (r.downgradesBlocked > 0 || r.visitConflicts > 0) {
+        // skipped a cross-hospital visit conflict, or dropped an over-width
+        // sender field). An operator should know without having to dig
+        // through the Sync Log.
+        if (r.downgradesBlocked > 0 || r.visitConflicts > 0 || r.fieldOverflows > 0) {
           logger.warn('anc_ingest_anomalies', {
             hospitalId,
             downgradesBlocked: r.downgradesBlocked,
             visitConflicts: r.visitConflicts,
+            fieldOverflows: r.fieldOverflows,
           });
         }
       } catch (e) {
