@@ -51,6 +51,24 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'journey_id', type: 'uuid', nullable: true, references: { table: 'maternal_journeys', column: 'id' } },
     { name: 'partograph_severity',     type: 'string',  maxLength: 10, nullable: true },
     { name: 'partograph_alert_count',  type: 'integer', nullable: true },
+    // Maternal labor-triage screening summary — a projection of the LATEST
+    // valid row in maternal_screening_assessments (source of truth stays the
+    // assessment table). GC3: deliberately kept separate from
+    // `partograph_severity` above — different domain, different vocabulary
+    // (MaternalScreenLocalTier / MaternalEmergencyAcuity vs CdssSeverity) —
+    // never reuse partograph_severity for this. All nullable: dormant until
+    // Task 6 (store service) and Task 7 (webhook ingest) start writing them.
+    { name: 'maternal_screen_local_tier', type: 'string', maxLength: 30, nullable: true },
+    { name: 'maternal_screen_emergency_acuity', type: 'string', maxLength: 30, nullable: true },
+    // Comma-separated SuspectedMaternalCondition codes (e.g.
+    // "SUSPECTED_ABRUPTION,SUSPECTED_PREVIA") rather than JSON — this is a
+    // lightweight dashboard-list projection, not the audit record; the
+    // assessment row's suspected_conditions_json remains the structured
+    // source of truth.
+    { name: 'maternal_screen_condition_codes', type: 'string', maxLength: 255, nullable: true },
+    { name: 'maternal_screen_assessed_at', type: 'datetime', nullable: true },
+    { name: 'maternal_screen_is_complete', type: 'boolean', nullable: true },
+    { name: 'maternal_screen_rule_set_version', type: 'string', maxLength: 40, nullable: true },
     { name: 'synced_at', type: 'datetime' },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },

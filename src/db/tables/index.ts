@@ -6,6 +6,7 @@ import { cachedPatientsTable } from './cached-patients';
 import { cachedPartographObservationsTable } from './cached-partograph-observations';
 import { cachedVitalSignsTable } from './cached-vital-signs';
 import { cpdScoresTable } from './cpd-scores';
+import { maternalScreeningAssessmentsTable } from './maternal-screening-assessments';
 import { usersTable } from './users';
 import { auditLogsTable } from './audit-logs';
 import { webhookApiKeysTable } from './webhook-api-keys';
@@ -30,6 +31,7 @@ export {
   cachedPartographObservationsTable,
   cachedVitalSignsTable,
   cpdScoresTable,
+  maternalScreeningAssessmentsTable,
   usersTable,
   auditLogsTable,
   webhookApiKeysTable,
@@ -63,6 +65,9 @@ export const ALL_TABLES: TableDefinition[] = [
   cachedPartographObservationsTable,
   cachedVitalSignsTable,
   cpdScoresTable,
+  // References cached_patients, hospitals, maternal_journeys (all above) —
+  // must stay after all three (GC5).
+  maternalScreeningAssessmentsTable,
   auditLogsTable,
   webhookApiKeysTable,
   cachedAncVisitsTable,
