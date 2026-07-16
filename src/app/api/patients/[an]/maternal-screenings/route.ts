@@ -18,10 +18,12 @@ import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
 import { logger } from '@/lib/logger';
+import { isMaternalScreenUiEnabled } from '@/lib/feature-flags';
 import type { MaternalScreenAssessmentsResponse } from '@/types/api';
 import {
   listMaternalScreenAssessments,
   MaternalScreenStoreError,
+  type ListMaternalScreenAssessmentsResult,
 } from '@/services/maternal-screening-store';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ an: string }> }) {
@@ -75,7 +77,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const limit = limitParam != null ? Number(limitParam) : undefined;
     const cursor = request.nextUrl.searchParams.get('cursor');
 
-    let result: MaternalScreenAssessmentsResponse;
+    let result: ListMaternalScreenAssessmentsResult;
     try {
       result = await listMaternalScreenAssessments(db, {
         hospitalId: patient.hospital_id,
@@ -90,7 +92,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       throw err;
     }
 
-    return NextResponse.json(result);
+    // uiEnabled is computed server-side, independent of the store query
+    // (GC-U3): the flag governs whether the client renders the section, not
+    // whether data exists to read.
+    const response: MaternalScreenAssessmentsResponse = {
+      ...result,
+      uiEnabled: isMaternalScreenUiEnabled(),
+    };
+
+    return NextResponse.json(response);
   } catch (error) {
     logger.error('maternal_screenings_api_failed', { error });
     return NextResponse.json(

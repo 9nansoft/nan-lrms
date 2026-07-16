@@ -213,6 +213,7 @@ describe('GET /api/patients/[an]/maternal-screenings (Task 8)', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await testDb.close();
   });
 
@@ -220,7 +221,25 @@ describe('GET /api/patients/[an]/maternal-screenings (Task 8)', () => {
     await seedAdmission(testDb, hospitalAId, 'AN-EMPTY');
     const { status, body } = await callRoute(HCODE_A, 'AN-EMPTY');
     expect(status).toBe(200);
-    expect(body).toEqual({ latest: null, history: [], nextCursor: null });
+    expect(body).toEqual({ latest: null, history: [], nextCursor: null, uiEnabled: false });
+  });
+
+  // ─── uiEnabled (Task U1, GC-U3): server-computed from MATERNAL_SCREEN_UI_ENABLED ───
+
+  it('uiEnabled defaults to false when MATERNAL_SCREEN_UI_ENABLED is unset', async () => {
+    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', '');
+    await seedAdmission(testDb, hospitalAId, 'AN-UI-DEFAULT');
+    const { status, body } = await callRoute(HCODE_A, 'AN-UI-DEFAULT');
+    expect(status).toBe(200);
+    expect((body as MaternalScreenAssessmentsResponse).uiEnabled).toBe(false);
+  });
+
+  it('uiEnabled is true when MATERNAL_SCREEN_UI_ENABLED=true', async () => {
+    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', 'true');
+    await seedAdmission(testDb, hospitalAId, 'AN-UI-ON');
+    const { status, body } = await callRoute(HCODE_A, 'AN-UI-ON');
+    expect(status).toBe(200);
+    expect((body as MaternalScreenAssessmentsResponse).uiEnabled).toBe(true);
   });
 
   it('404s for an AN that does not exist at all', async () => {

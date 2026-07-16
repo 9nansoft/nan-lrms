@@ -412,6 +412,8 @@ export interface MaternalScreenAssessmentsResponse {
   latest: MaternalScreenAssessmentDto | null;
   history: MaternalScreenAssessmentDto[];
   nextCursor: string | null;
+  /** Server-computed from MATERNAL_SCREEN_UI_ENABLED; client renders the section only when true (GC-U3). */
+  uiEnabled: boolean;
 }
 
 /**
