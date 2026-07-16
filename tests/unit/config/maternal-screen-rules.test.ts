@@ -130,7 +130,10 @@ describe('maternal-screen-rules config', () => {
       if (rule.purpose === 'LOCAL_PDF_TIER') {
         expect(rule.localTier, `rule ${rule.id} missing localTier`).toBeTruthy();
         expect(rule.condition, `rule ${rule.id} missing condition`).toBeTruthy();
-        expect(rule.emergencyAcuity, `rule ${rule.id} unexpectedly has emergencyAcuity`).toBeUndefined();
+        expect(
+          rule.emergencyAcuity,
+          `rule ${rule.id} unexpectedly has emergencyAcuity`,
+        ).toBeUndefined();
       } else if (rule.purpose === 'EMERGENCY_ACUITY') {
         expect(rule.emergencyAcuity, `rule ${rule.id} missing emergencyAcuity`).toBeTruthy();
         expect(rule.localTier, `rule ${rule.id} unexpectedly has localTier`).toBeUndefined();
@@ -153,7 +156,12 @@ describe('maternal-screen-rules config', () => {
   });
 
   describe('LOCAL_TIER_RANK', () => {
-    const expectedKeys: MaternalScreenLocalTier[] = ['NO_LOCAL_MATCH', 'LOCAL_MILD', 'LOCAL_MODERATE', 'LOCAL_SEVERE'];
+    const expectedKeys: MaternalScreenLocalTier[] = [
+      'NO_LOCAL_MATCH',
+      'LOCAL_MILD',
+      'LOCAL_MODERATE',
+      'LOCAL_SEVERE',
+    ];
 
     it('is total over MaternalScreenLocalTier', () => {
       expect(Object.keys(LOCAL_TIER_RANK).sort()).toEqual([...expectedKeys].sort());
@@ -218,11 +226,19 @@ describe('maternal-screen-rules config', () => {
 
     it('APH-PREVIA-PATTERN "!=" deliberately fires when abdominalOrBackPain is unassessed (GC1 permissive exception, ref 7.5-11)', () => {
       const rule = MATERNAL_SCREEN_RULES.find((r) => r.id === 'APH-PREVIA-PATTERN')!;
-      expect(matchRule(rule, { ...baseInput, vaginalBleeding: true, abdominalOrBackPain: null })).toBe(true);
-      expect(matchRule(rule, { ...baseInput, vaginalBleeding: true, abdominalOrBackPain: false })).toBe(true);
-      expect(matchRule(rule, { ...baseInput, vaginalBleeding: true, abdominalOrBackPain: true })).toBe(false);
+      expect(
+        matchRule(rule, { ...baseInput, vaginalBleeding: true, abdominalOrBackPain: null }),
+      ).toBe(true);
+      expect(
+        matchRule(rule, { ...baseInput, vaginalBleeding: true, abdominalOrBackPain: false }),
+      ).toBe(true);
+      expect(
+        matchRule(rule, { ...baseInput, vaginalBleeding: true, abdominalOrBackPain: true }),
+      ).toBe(false);
       // The other conjunct (vaginalBleeding) is still ordinarily null-guarded.
-      expect(matchRule(rule, { ...baseInput, vaginalBleeding: null, abdominalOrBackPain: false })).toBe(false);
+      expect(
+        matchRule(rule, { ...baseInput, vaginalBleeding: null, abdominalOrBackPain: false }),
+      ).toBe(false);
     });
 
     it('APH-ABRUPTIO-PATTERN fires on concealed bleeding alone (visible bleeding not required, GC4)', () => {
@@ -240,7 +256,11 @@ describe('maternal-screen-rules config', () => {
 
   it('rule count matches the documented 19 local-tier + 7 acuity total', () => {
     expect(MATERNAL_SCREEN_RULES).toHaveLength(26);
-    expect(MATERNAL_SCREEN_RULES.filter((r: MaternalScreenRule) => r.purpose === 'LOCAL_PDF_TIER')).toHaveLength(19);
-    expect(MATERNAL_SCREEN_RULES.filter((r: MaternalScreenRule) => r.purpose === 'EMERGENCY_ACUITY')).toHaveLength(7);
+    expect(
+      MATERNAL_SCREEN_RULES.filter((r: MaternalScreenRule) => r.purpose === 'LOCAL_PDF_TIER'),
+    ).toHaveLength(19);
+    expect(
+      MATERNAL_SCREEN_RULES.filter((r: MaternalScreenRule) => r.purpose === 'EMERGENCY_ACUITY'),
+    ).toHaveLength(7);
   });
 });
