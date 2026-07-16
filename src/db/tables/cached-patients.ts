@@ -48,9 +48,14 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'station_admit', type: 'string', maxLength: 10, nullable: true },
     { name: 'labor_status', type: 'string', maxLength: 20, defaultValue: 'ACTIVE' },
     { name: 'delivered_at', type: 'datetime', nullable: true },
-    { name: 'journey_id', type: 'uuid', nullable: true, references: { table: 'maternal_journeys', column: 'id' } },
-    { name: 'partograph_severity',     type: 'string',  maxLength: 10, nullable: true },
-    { name: 'partograph_alert_count',  type: 'integer', nullable: true },
+    {
+      name: 'journey_id',
+      type: 'uuid',
+      nullable: true,
+      references: { table: 'maternal_journeys', column: 'id' },
+    },
+    { name: 'partograph_severity', type: 'string', maxLength: 10, nullable: true },
+    { name: 'partograph_alert_count', type: 'integer', nullable: true },
     // Maternal labor-triage screening summary — a projection of the LATEST
     // valid row in maternal_screening_assessments (source of truth stays the
     // assessment table). GC3: deliberately kept separate from
@@ -81,6 +86,9 @@ export const cachedPatientsTable: TableDefinition = {
     { name: 'idx_cp_cid', columns: ['cid'] },
     { name: 'idx_cp_cid_hash', columns: ['cid_hash'] },
     { name: 'idx_cp_journey_id', columns: ['journey_id'] },
-    { name: 'idx_cp_hospital_status_created', columns: ['hospital_id', 'labor_status', 'created_at'] },
+    {
+      name: 'idx_cp_hospital_status_created',
+      columns: ['hospital_id', 'labor_status', 'created_at'],
+    },
   ],
 };

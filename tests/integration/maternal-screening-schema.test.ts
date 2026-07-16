@@ -70,7 +70,22 @@ async function seedJourney(db: DatabaseAdapter, hospitalId: string): Promise<str
        (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida,
         registered_at, stage_changed_at, synced_at, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, hospitalId, hospitalId, 'HN1', 'enc-name', 'enc-cid', 'hash1', 28, 1, now, now, now, now, now],
+    [
+      id,
+      hospitalId,
+      hospitalId,
+      'HN1',
+      'enc-name',
+      'enc-cid',
+      'hash1',
+      28,
+      1,
+      now,
+      now,
+      now,
+      now,
+      now,
+    ],
   );
   return id;
 }
@@ -182,7 +197,13 @@ describe('maternal_screening_assessments schema (Task 5, dormant)', () => {
     const originalId = uuidv4();
     await db.execute(
       INSERT_SQL,
-      assessmentParams({ id: originalId, laborAdmissionId, hospitalId, journeyId: null, sourcePk: 'src-2' }),
+      assessmentParams({
+        id: originalId,
+        laborAdmissionId,
+        hospitalId,
+        journeyId: null,
+        sourcePk: 'src-2',
+      }),
     );
 
     const correctionId = uuidv4();
@@ -262,12 +283,24 @@ describe('maternal_screening_assessments schema (Task 5, dormant)', () => {
 
     await db.execute(
       INSERT_SQL,
-      assessmentParams({ id: uuidv4(), laborAdmissionId, hospitalId, journeyId: null, sourcePk: null }),
+      assessmentParams({
+        id: uuidv4(),
+        laborAdmissionId,
+        hospitalId,
+        journeyId: null,
+        sourcePk: null,
+      }),
     );
     await expect(
       db.execute(
         INSERT_SQL,
-        assessmentParams({ id: uuidv4(), laborAdmissionId, hospitalId, journeyId: null, sourcePk: null }),
+        assessmentParams({
+          id: uuidv4(),
+          laborAdmissionId,
+          hospitalId,
+          journeyId: null,
+          sourcePk: null,
+        }),
       ),
     ).resolves.not.toThrow();
   });
@@ -278,12 +311,24 @@ describe('maternal_screening_assessments schema (Task 5, dormant)', () => {
 
     await db.execute(
       INSERT_SQL,
-      assessmentParams({ id: uuidv4(), laborAdmissionId, hospitalId, journeyId: null, sourcePk: 'dup-key' }),
+      assessmentParams({
+        id: uuidv4(),
+        laborAdmissionId,
+        hospitalId,
+        journeyId: null,
+        sourcePk: 'dup-key',
+      }),
     );
     await expect(
       db.execute(
         INSERT_SQL,
-        assessmentParams({ id: uuidv4(), laborAdmissionId, hospitalId, journeyId: null, sourcePk: 'dup-key' }),
+        assessmentParams({
+          id: uuidv4(),
+          laborAdmissionId,
+          hospitalId,
+          journeyId: null,
+          sourcePk: 'dup-key',
+        }),
       ),
     ).rejects.toThrow();
   });
@@ -320,13 +365,30 @@ describe('cached_patients maternal_screen_* summary columns (Task 5, dormant)', 
            maternal_screen_is_complete, maternal_screen_rule_set_version
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          id, hospitalId, 'HN2', 'AN2', 'enc-name-2', 30, now, now, now, now,
-          'LOCAL_SEVERE', 'URGENT', 'SUSPECTED_ABRUPTION', now, false, '0.1.0-provisional',
+          id,
+          hospitalId,
+          'HN2',
+          'AN2',
+          'enc-name-2',
+          30,
+          now,
+          now,
+          now,
+          now,
+          'LOCAL_SEVERE',
+          'URGENT',
+          'SUSPECTED_ABRUPTION',
+          now,
+          false,
+          '0.1.0-provisional',
         ],
       ),
     ).resolves.not.toThrow();
 
-    const rows = await db.query<{ maternal_screen_local_tier: string; maternal_screen_is_complete: boolean }>(
+    const rows = await db.query<{
+      maternal_screen_local_tier: string;
+      maternal_screen_is_complete: boolean;
+    }>(
       `SELECT maternal_screen_local_tier, maternal_screen_is_complete FROM cached_patients WHERE id = ?`,
       [id],
     );
@@ -338,7 +400,10 @@ describe('cached_patients maternal_screen_* summary columns (Task 5, dormant)', 
   it('leaves summary columns NULL when not supplied', async () => {
     const hospitalId = await seedHospital(db);
     const id = await seedCachedPatient(db, hospitalId);
-    const rows = await db.query<{ maternal_screen_local_tier: string | null; maternal_screen_assessed_at: Date | null }>(
+    const rows = await db.query<{
+      maternal_screen_local_tier: string | null;
+      maternal_screen_assessed_at: Date | null;
+    }>(
       `SELECT maternal_screen_local_tier, maternal_screen_assessed_at FROM cached_patients WHERE id = ?`,
       [id],
     );
