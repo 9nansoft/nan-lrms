@@ -290,9 +290,7 @@ describe('Webhook maternal screening ingest (Task 7)', () => {
   describe('flag OFF (default)', () => {
     it('ignores maternal_screening entirely: no assessment row, summary untouched, legacy result shape', async () => {
       // Flag deliberately NOT set — fail-closed default.
-      const result = await process([
-        basePatient({ maternal_screening: severeAphScreening() }),
-      ]);
+      const result = await process([basePatient({ maternal_screening: severeAphScreening() })]);
 
       expect(result).toEqual({
         patientsProcessed: 1,
@@ -335,9 +333,7 @@ describe('Webhook maternal screening ingest (Task 7)', () => {
     });
 
     it('persists assessment + summary with server-evaluated LOCAL_SEVERE/EMERGENCY and the expected rule IDs', async () => {
-      const result = await process([
-        basePatient({ maternal_screening: severeAphScreening() }),
-      ]);
+      const result = await process([basePatient({ maternal_screening: severeAphScreening() })]);
 
       expect(result.maternalScreenAssessments).toBe(1);
       expect(result.maternalScreenDuplicates).toBe(0);
@@ -456,6 +452,31 @@ describe('Webhook maternal screening ingest (Task 7)', () => {
       await expectRejected(severeAphScreening({ bleeding_rate: 'GUSHING' }), 'bleeding_rate');
     });
 
+    it('rejects an unknown/misspelled key instead of silently dropping the finding (review IMPORTANT 2)', async () => {
+      // Typo: `shock_sign_present` (missing the plural "s"). Without an
+      // allowlist this would leave shockSignsPresent null and silently drop a
+      // real EMERGENCY finding with a 200 + written assessment.
+      const withTypo = {
+        ...severeAphScreening({ shock_signs_present: null }),
+        shock_sign_present: true,
+      } as unknown as WebhookMaternalScreeningPayload;
+      await expectRejected(withTypo, 'shock_sign_present');
+    });
+
+    it('rejects a non-ISO assessed_at (locale date "07/16/2026") — strict ISO-8601 only (review MINOR 3)', async () => {
+      await expectRejected(
+        severeAphScreening({ assessed_at: '07/16/2026' as unknown as string }),
+        'assessed_at',
+      );
+    });
+
+    it('rejects an offset-less (ambiguous local) assessed_at', async () => {
+      await expectRejected(
+        severeAphScreening({ assessed_at: '2026-07-16T07:55:00' }),
+        'assessed_at',
+      );
+    });
+
     it('rejects an impossible number (SpO2 130%)', async () => {
       await expectRejected(
         severeAphScreening({ oxygen_saturation_pct: 130 }),
@@ -540,6 +561,24 @@ describe('Webhook maternal screening ingest (Task 7)', () => {
 
       const badSummary = await summaryFor('MSAN-001');
       expect(badSummary.maternal_screen_local_tier).toBeNull();
+    });
+
+    it('makes a screening riding an action:delete patient operator-visible instead of silently skipping it (review MINOR 5)', async () => {
+      vi.stubEnv('MATERNAL_SCREEN_INGEST_ENABLED', 'true');
+
+      // Seed the admission first so the delete has something to remove.
+      await process([basePatient()]);
+
+      const result = await process([
+        basePatient({ action: 'delete', maternal_screening: severeAphScreening() }),
+      ]);
+
+      // The screening was NOT written, but the drop is reported (not silent).
+      expect(result.maternalScreenAssessments).toBe(0);
+      expect(result.maternalScreenIngestErrors).toHaveLength(1);
+      expect(result.maternalScreenIngestErrors![0]).toContain('patients[0]');
+      expect(result.maternalScreenIngestErrors![0]).toContain("action:'delete'");
+      expect(await assessmentRows()).toHaveLength(0);
     });
   });
 });

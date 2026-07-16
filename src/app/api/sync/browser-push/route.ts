@@ -90,7 +90,21 @@ export async function POST(request: NextRequest) {
 
     const sseManager = SseManager.getInstance();
     const result: {
-      labor?: { processed: number; newAdmissions: number; discharges: number; transfers: number };
+      labor?: {
+        processed: number;
+        newAdmissions: number;
+        discharges: number;
+        transfers: number;
+        // Maternal screening ingest counters (Task 7). Present only when the
+        // ingest flag is on AND a patient carried a maternal_screening object;
+        // surfaced so the browser client and the admin Sync Log can see
+        // persisted assessments, idempotent replays, and — critically —
+        // dropped/invalid screenings that would otherwise vanish on this
+        // browser-only prod path (review IMPORTANT 1).
+        maternalScreenAssessments?: number;
+        maternalScreenDuplicates?: number;
+        maternalScreenIngestErrors?: string[];
+      };
       // downgradesBlocked/visitConflicts are the WHO T4/T5 anomaly counters
       // off WebhookAncResult — surfaced here so the browser client (and the
       // admin Sync Log via the persist_anc step below) can see when the
@@ -158,23 +172,49 @@ export async function POST(request: NextRequest) {
             laborValidation.payload,
             sseManager,
           );
+          // Forward the maternal-screening counters (present only when the
+          // ingest flag is on AND a screening rode along) so they are not
+          // silently dropped on this browser-only prod path (review IMPORTANT 1a).
+          // result.labor keeps the full PHI-free error strings; the Sync Log
+          // `counts` map is numeric-only, so it carries an error COUNT.
+          const hasScreening = r.maternalScreenAssessments !== undefined;
+          const screenErrorCount = r.maternalScreenIngestErrors?.length ?? 0;
           result.labor = {
             processed: r.patientsProcessed,
             newAdmissions: r.newAdmissions,
             discharges: r.discharges,
             transfers: r.transfers,
+            ...(hasScreening
+              ? {
+                  maternalScreenAssessments: r.maternalScreenAssessments,
+                  maternalScreenDuplicates: r.maternalScreenDuplicates,
+                  maternalScreenIngestErrors: r.maternalScreenIngestErrors,
+                }
+              : {}),
           };
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_labor',
-            status: 'success',
-            message: `Upserted ${r.patientsProcessed} labor rows (${r.newAdmissions} new, ${r.discharges} discharges, ${r.transfers} transfers).`,
+            status: screenErrorCount > 0 ? 'warning' : 'success',
+            message: `Upserted ${r.patientsProcessed} labor rows (${r.newAdmissions} new, ${r.discharges} discharges, ${r.transfers} transfers)${
+              hasScreening
+                ? `; maternal screening: ${r.maternalScreenAssessments} saved, ${r.maternalScreenDuplicates ?? 0} duplicate, ${screenErrorCount} error(s)`
+                : ''
+            }.`,
             counts: {
               processed: r.patientsProcessed,
               newAdmissions: r.newAdmissions,
               discharges: r.discharges,
               transfers: r.transfers,
+              ...(hasScreening
+                ? {
+                    maternalScreenAssessments: r.maternalScreenAssessments ?? 0,
+                    maternalScreenDuplicates: r.maternalScreenDuplicates ?? 0,
+                    maternalScreenErrors: screenErrorCount,
+                  }
+                : {}),
             },
           });
+          if (screenErrorCount > 0) hadWarning = true;
         } catch (e) {
           hadWarning = true;
           await appendSyncStep(hospitalId, runId, {

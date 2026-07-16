@@ -18,6 +18,18 @@ import type { HeadacheSeverity, MaternalScreenInput } from '@/types/maternal-scr
  *  object is ~40 scalar fields; anything past this is malformed or abusive. */
 export const MATERNAL_SCREEN_TRANSPORT_MAX_BYTES = 16 * 1024;
 
+/**
+ * Strict ISO-8601 date-time pattern for `assessed_at` (spec §9.2). `new Date()`
+ * happily parses locale strings ("07/16/2026") and 2-digit years, which then
+ * get reinterpreted in server-local time and perturb the
+ * `ORDER BY assessed_at DESC` latest-summary projection. We therefore require a
+ * full ISO-8601 instant: `YYYY-MM-DDTHH:MM(:SS(.sss)?)?` plus a `Z` or
+ * `±HH:MM` offset (offset mandatory — a bare local time is ambiguous across
+ * hospital timezones). Callers must send a UTC/offset-qualified timestamp.
+ */
+export const MATERNAL_SCREEN_ISO_8601_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+
 /** `assessed_at` may lead the server clock by at most this much (covers
  *  hospital clock skew and a botched +07:00 offset) — anything further in the
  *  future is rejected as implausible (spec §9.2 future-time tolerance). */

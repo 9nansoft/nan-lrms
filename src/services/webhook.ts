@@ -37,6 +37,7 @@ import type { MaternalScreenInput } from '@/types/maternal-screening';
 import {
   MATERNAL_SCREEN_TRANSPORT_MAX_BYTES,
   MATERNAL_SCREEN_ASSESSED_AT_MAX_FUTURE_MS,
+  MATERNAL_SCREEN_ISO_8601_PATTERN,
   MATERNAL_SCREEN_SOURCE_PK_MAX_LENGTH,
   MATERNAL_SCREEN_ASSESSED_BY_MAX_LENGTH,
   MATERNAL_SCREEN_NUMERIC_BOUNDS,
@@ -668,6 +669,25 @@ const MS_NUMERIC_FIELD_MAP = {
 } as const satisfies Record<string, keyof MaternalScreenInput>;
 
 /**
+ * The COMPLETE allowlist of accepted `maternal_screening` transport keys,
+ * assembled from the boolean + numeric field maps, the enum field names, and
+ * the free-standing scalar keys. Any key outside this set is REJECTED at the
+ * boundary rather than silently ignored: a typo like `shock_sign_present`
+ * would otherwise leave `shockSignsPresent` null and drop a real EMERGENCY
+ * finding with a 200 response and no operator trace (review IMPORTANT 2).
+ * Derived from the maps so it can never drift out of sync with them.
+ */
+const MS_KNOWN_TRANSPORT_KEYS: ReadonlySet<string> = new Set<string>([
+  'source_pk',
+  'assessed_at',
+  'assessed_by',
+  'proteinuria_grade',
+  ...Object.keys(MS_BOOLEAN_FIELD_MAP),
+  ...Object.keys(MS_NUMERIC_FIELD_MAP),
+  ...Object.keys(MATERNAL_SCREEN_ENUM_VALUES),
+]);
+
+/**
  * Validate one patient's OPTIONAL `maternal_screening` transport object
  * (spec §9.2) and map it to a normalized `MaternalScreenInput` (spec §6.1).
  *
@@ -708,12 +728,32 @@ export function validateMaternalScreeningTransport(
   const raw = ms as unknown as Record<string, unknown>;
   const errors: string[] = [];
 
-  // assessed_at — required ISO timestamp with a bounded future tolerance.
+  // Unknown-key allowlist (review IMPORTANT 2): reject any key outside the
+  // known transport set BEFORE mapping, so a misspelled field (e.g.
+  // `shock_sign_present`) surfaces as an actionable error instead of silently
+  // dropping the finding it was meant to carry.
+  const unknownKeys = Object.keys(raw).filter((k) => !MS_KNOWN_TRANSPORT_KEYS.has(k));
+  if (unknownKeys.length > 0) {
+    errors.push(
+      `${prefix} has unrecognized field(s): ${unknownKeys.join(', ')} — check for typos; only documented maternal_screening keys are accepted (spec §9.1)`,
+    );
+  }
+
+  // assessed_at — required, STRICT ISO-8601 instant with a bounded future
+  // tolerance. `new Date()` alone accepts locale strings ("07/16/2026") and
+  // 2-digit years that shift under server-local time and corrupt the
+  // ORDER BY assessed_at DESC projection (review MINOR 3) — so require the
+  // offset-qualified ISO pattern first.
   let assessedAt = '';
   const rawAssessedAt = raw.assessed_at;
-  if (typeof rawAssessedAt !== 'string' || Number.isNaN(new Date(rawAssessedAt).getTime())) {
+  if (typeof rawAssessedAt !== 'string' || !MATERNAL_SCREEN_ISO_8601_PATTERN.test(rawAssessedAt)) {
     errors.push(
-      `${prefix}.assessed_at is required and must be a valid ISO 8601 timestamp (got ${JSON.stringify(rawAssessedAt)})`,
+      `${prefix}.assessed_at is required and must be a strict ISO 8601 instant (YYYY-MM-DDTHH:MM(:SS(.sss)?)? with a Z or ±HH:MM offset; got ${JSON.stringify(rawAssessedAt)})`,
+    );
+  } else if (Number.isNaN(new Date(rawAssessedAt).getTime())) {
+    // Pattern-valid but an impossible calendar value (e.g. month 13, day 45).
+    errors.push(
+      `${prefix}.assessed_at is not a real calendar date/time (got "${rawAssessedAt}")`,
     );
   } else if (
     new Date(rawAssessedAt).getTime() >
@@ -821,7 +861,9 @@ export function validateMaternalScreeningTransport(
   ) {
     errors.push(`${prefix}.proteinuria_grade must be a string or null`);
   } else {
-    proteinuriaGrade = normalizeProteinuriaGrade(raw.proteinuria_grade as string | null | undefined);
+    proteinuriaGrade = normalizeProteinuriaGrade(
+      raw.proteinuria_grade as string | null | undefined,
+    );
   }
 
   // Same-payload admission context (spec §9.1): GA and admission BP are
@@ -1111,13 +1153,29 @@ export async function processWebhookPayload(
   if (isMaternalScreenIngestEnabled()) {
     for (let i = 0; i < payload.patients.length; i++) {
       const p = payload.patients[i];
-      if (p.maternal_screening == null || p.action === 'delete') continue;
+      if (p.maternal_screening == null) continue;
       screeningCarriers++;
       const label = `patients[${i}]`;
+      // A screening riding a delete cannot attach to a surviving admission —
+      // make the drop operator-visible instead of a silent `continue`
+      // (review MINOR 5).
+      if (p.action === 'delete') {
+        screeningResult.errors.push(
+          `${label}.maternal_screening: ignored because the patient is marked action:'delete' — screening cannot attach to a deleted admission; send it on an upsert`,
+        );
+        continue;
+      }
       try {
         const validated = validateMaternalScreeningTransport(p, label);
         if (!validated.ok) {
+          // Validation rejections are PHI-free `patients[i].field` strings —
+          // surface them to the server log so an operator sees a dropped
+          // assessment on ANY path, including browser-push (review IMPORTANT 1b).
           screeningResult.errors.push(...validated.errors);
+          logger.warn('maternal_screen_webhook_ingest_rejected', {
+            hospitalId,
+            errors: validated.errors,
+          });
           continue;
         }
         const admissionRows = await db.query<{ id: string; journey_id: string | null }>(
@@ -1128,6 +1186,10 @@ export async function processWebhookPayload(
           screeningResult.errors.push(
             `${label}.maternal_screening: no labor admission row exists for this AN after upsert — assessment not stored; resend once the admission is accepted`,
           );
+          logger.warn('maternal_screen_webhook_ingest_rejected', {
+            hospitalId,
+            errors: ['no labor admission row for AN after upsert'],
+          });
           continue;
         }
         const saveResult = await saveMaternalScreenAssessment(db, {
