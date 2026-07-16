@@ -91,3 +91,6 @@ GEMINI.md
 
 # Deck snapshot ZIPs (regeneratable from public/deck/)
 public/*-deck-*.zip
+
+# Production DB dumps (PHI) — never commit
+backups/
