@@ -37,7 +37,12 @@ const ALL_LOCAL_TIERS: MaternalScreenLocalTier[] = [
   'NO_LOCAL_MATCH',
 ];
 
-const ALL_EMERGENCY_ACUITIES: MaternalEmergencyAcuity[] = ['STABLE', 'URGENT', 'EMERGENCY', 'UNKNOWN'];
+const ALL_EMERGENCY_ACUITIES: MaternalEmergencyAcuity[] = [
+  'STABLE',
+  'URGENT',
+  'EMERGENCY',
+  'UNKNOWN',
+];
 
 const ALL_SUSPECTED_CONDITIONS: SuspectedMaternalCondition[] = [
   'PREECLAMPSIA',
@@ -66,7 +71,9 @@ function assertNotGreen(label: string, value: string): void {
 describe('maternal-screen-display config', () => {
   describe('totality', () => {
     it('MATERNAL_SCREEN_TIER_LABEL_TH covers every MaternalScreenLocalTier member', () => {
-      expect(Object.keys(MATERNAL_SCREEN_TIER_LABEL_TH).sort()).toEqual([...ALL_LOCAL_TIERS].sort());
+      expect(Object.keys(MATERNAL_SCREEN_TIER_LABEL_TH).sort()).toEqual(
+        [...ALL_LOCAL_TIERS].sort(),
+      );
       for (const tier of ALL_LOCAL_TIERS) {
         expect(typeof MATERNAL_SCREEN_TIER_LABEL_TH[tier]).toBe('string');
         expect(MATERNAL_SCREEN_TIER_LABEL_TH[tier].length).toBeGreaterThan(0);
@@ -92,7 +99,9 @@ describe('maternal-screen-display config', () => {
     });
 
     it('EMERGENCY_ACUITY_COLOR covers every MaternalEmergencyAcuity member', () => {
-      expect(Object.keys(EMERGENCY_ACUITY_COLOR).sort()).toEqual([...ALL_EMERGENCY_ACUITIES].sort());
+      expect(Object.keys(EMERGENCY_ACUITY_COLOR).sort()).toEqual(
+        [...ALL_EMERGENCY_ACUITIES].sort(),
+      );
       for (const acuity of ALL_EMERGENCY_ACUITIES) {
         expect(typeof EMERGENCY_ACUITY_COLOR[acuity]).toBe('string');
         expect(EMERGENCY_ACUITY_COLOR[acuity].length).toBeGreaterThan(0);
