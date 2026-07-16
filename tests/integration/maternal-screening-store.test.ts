@@ -243,9 +243,7 @@ class InTxSourceSelectSuppressingAdapter extends DatabaseAdapter {
   transaction<T>(fn: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
     // Suppress ONLY inside the transaction (the store's pre-INSERT check); the
     // top-level re-query in the catch stays truthful so recovery can succeed.
-    return this.inner.transaction((tx) =>
-      fn(new InTxSourceSelectSuppressingAdapter(tx, true)),
-    );
+    return this.inner.transaction((tx) => fn(new InTxSourceSelectSuppressingAdapter(tx, true)));
   }
 
   close(): Promise<void> {
@@ -681,7 +679,7 @@ describe('reconcileLatestSummary (AC #12: summary reconstructable from history)'
     await expect(reconcileLatestSummary(db, uuidv4())).rejects.toThrow(/not found/);
   });
 
-  it('F3: hospital-scoped reconcile rebuilds within its tenant and refuses another tenant\'s admission', async () => {
+  it("F3: hospital-scoped reconcile rebuilds within its tenant and refuses another tenant's admission", async () => {
     await saveMaternalScreenAssessment(
       db,
       saveParams(hospitalId, patientId, { sourcePk: 'scope-K', input: SEVERE_COMPLETE_INPUT }),
