@@ -19,11 +19,16 @@
 //   whole write rolls back and an operational error is raised — a fallback
 //   NO_LOCAL_MATCH/LOCAL_MILD/STABLE row is NEVER persisted (spec §8.3).
 // - Idempotency: replaying the same (hospital_id, source_system, source_pk)
-//   is a clean no-op returning the existing row (GC6, AC #10). The unique
-//   index idx_msa_hospital_source_pk is defense-in-depth for the race window.
+//   on the SAME admission is a clean no-op returning the existing row (GC6,
+//   AC #10). Reusing that key on a DIFFERENT admission is a sender error and
+//   is REJECTED (INVALID_PARAMS), never silently collapsed into the prior
+//   row. The unique index idx_msa_hospital_source_pk is defense-in-depth for
+//   the race window.
 // - Every string column value passes through the fitOrNull guard pattern
 //   from src/services/webhook.ts (GC5 — 2026-07-16 ANC field-width incident).
-// - Tenant isolation: every read/write is scoped by hospital_id.
+// - Tenant isolation: saveMaternalScreenAssessment scopes every read/write by
+//   hospital_id; reconcileLatestSummary does too when passed the optional
+//   hospitalId (callers with a known tenant MUST pass it — see its JSDoc).
 // - No PHI (name/cid/free-text) in results, logs, or error messages.
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '@/db/adapter';
@@ -157,6 +162,7 @@ function fitRequired(value: string, max: number, field: string): string {
 
 interface ExistingAssessmentRow {
   id: string;
+  labor_admission_id: string;
   local_tier: string;
   emergency_acuity: string;
   is_complete: boolean;
@@ -164,10 +170,34 @@ interface ExistingAssessmentRow {
 }
 
 const EXISTING_BY_SOURCE_SQL = `
-  SELECT id, local_tier, emergency_acuity, is_complete, rule_set_version
+  SELECT id, labor_admission_id, local_tier, emergency_acuity, is_complete, rule_set_version
     FROM maternal_screening_assessments
    WHERE hospital_id = ? AND source_system = ? AND source_pk = ?
    LIMIT 1`;
+
+/**
+ * Resolve an existing (hospital, source_system, source_pk) row against the
+ * incoming admission (GC6, F1 — cross-admission key collision guard).
+ *
+ * A reused idempotency key is only a legitimate replay when it lands on the
+ * SAME labor admission — then it's a clean duplicate. A key reused across
+ * admissions (e.g. key K used for patient A, then sent again on patient B's
+ * payload) is a SENDER ERROR, not a replay: silently returning A's row would
+ * drop B's assessment as "already stored" — silent clinical data loss. Reject
+ * it loudly so the caller fixes the key; nothing is persisted.
+ */
+function resolveExistingBySource(
+  existing: ExistingAssessmentRow,
+  laborAdmissionId: string,
+): SaveMaternalScreenResult {
+  if (existing.labor_admission_id !== laborAdmissionId) {
+    throw new MaternalScreenStoreError(
+      `idempotency key already used for a DIFFERENT labor admission — a (source_system, source_pk) key must be unique per admission; reusing it across admissions would drop this assessment. Nothing persisted; use a distinct key for this admission`,
+      'INVALID_PARAMS',
+    );
+  }
+  return duplicateResult(existing);
+}
 
 function duplicateResult(existing: ExistingAssessmentRow): SaveMaternalScreenResult {
   return {
@@ -186,7 +216,10 @@ function duplicateResult(existing: ExistingAssessmentRow): SaveMaternalScreenRes
 function isSourcePkUniqueViolation(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const constraint = (err as Error & { constraint?: string }).constraint;
-  return constraint === 'idx_msa_hospital_source_pk' || err.message.includes('idx_msa_hospital_source_pk');
+  return (
+    constraint === 'idx_msa_hospital_source_pk' ||
+    err.message.includes('idx_msa_hospital_source_pk')
+  );
 }
 
 /**
@@ -199,10 +232,17 @@ export async function saveMaternalScreenAssessment(
   db: DatabaseAdapter,
   params: SaveMaternalScreenParams,
 ): Promise<SaveMaternalScreenResult> {
-  const sourceSystem = fitRequired(params.sourceSystem, WIDTHS.sourceSystem, 'source_system');
-  const sourcePk = fitOrNull(params.sourcePk, WIDTHS.sourcePk, 'source_pk');
+  // Validated inside the try (F6) so a rejection here is still routed through
+  // the maternal_screen_store_failed structured log, like every other failure
+  // path. Hoisted so the catch block can reference them for logging /
+  // race-recovery even if source_pk normalization has not run yet.
+  let sourceSystem = params.sourceSystem;
+  let sourcePk: string | null = null;
 
   try {
+    sourceSystem = fitRequired(params.sourceSystem, WIDTHS.sourceSystem, 'source_system');
+    sourcePk = fitOrNull(params.sourcePk, WIDTHS.sourcePk, 'source_pk');
+
     return await db.transaction(async (tx) => {
       // 1. Idempotency (GC6, AC #10): a replay of the same
       //    (hospital_id, source_system, source_pk) inserts nothing and leaves
@@ -213,7 +253,9 @@ export async function saveMaternalScreenAssessment(
           sourceSystem,
           sourcePk,
         ]);
-        if (existing.length > 0) return duplicateResult(existing[0]);
+        if (existing.length > 0) {
+          return resolveExistingBySource(existing[0], params.laborAdmissionId);
+        }
       }
 
       // 2. Tenant isolation: the admission row must exist AND belong to the
@@ -301,7 +343,9 @@ export async function saveMaternalScreenAssessment(
 
       // 6. Summary projection — same transaction (GC6), same rule as
       //    reconcileLatestSummary (constitution III: one projection rule).
-      await projectLatestSummary(tx, params.laborAdmissionId);
+      //    Hospital-scoped (tenant isolation) even though the admission was
+      //    already verified above.
+      await projectLatestSummary(tx, params.laborAdmissionId, params.hospitalId);
 
       return {
         status: params.supersedesId != null ? 'corrected' : 'created',
@@ -314,15 +358,19 @@ export async function saveMaternalScreenAssessment(
     });
   } catch (err) {
     // Race-safe idempotency: a concurrent save slipped between our SELECT and
-    // INSERT and the unique index (defense-in-depth) fired. Treat the replay
-    // as the clean no-op it is (GC6, AC #10).
+    // INSERT and the unique index (defense-in-depth) fired. Re-resolve the
+    // now-committed row: a same-admission collision is the clean no-op it is
+    // (GC6, AC #10); a cross-admission collision still raises INVALID_PARAMS
+    // (F1) rather than masquerading as a duplicate.
     if (sourcePk != null && isSourcePkUniqueViolation(err)) {
       const existing = await db.query<ExistingAssessmentRow>(EXISTING_BY_SOURCE_SQL, [
         params.hospitalId,
         sourceSystem,
         sourcePk,
       ]);
-      if (existing.length > 0) return duplicateResult(existing[0]);
+      if (existing.length > 0) {
+        return resolveExistingBySource(existing[0], params.laborAdmissionId);
+      }
     }
 
     // Operational error path (spec §8.3) — non-PHI structured log, then raise.
@@ -362,29 +410,38 @@ interface LatestAssessmentRow {
  * callers own transactionality. This is THE single projection rule: both
  * saveMaternalScreenAssessment and reconcileLatestSummary use it, which is
  * what makes the summary reconstructable from history (AC #12).
+ *
+ * When `hospitalId` is supplied, both the source query and the cached_patients
+ * UPDATE are scoped to that tenant — a defense-in-depth guard so a mismatched
+ * (admission, hospital) pair projects/clears nothing rather than touching
+ * another tenant's row.
  */
 async function projectLatestSummary(
   adapter: DatabaseAdapter,
   laborAdmissionId: string,
+  hospitalId?: string | null,
 ): Promise<ReconcileSummaryResult> {
   // "Latest non-superseded": rows referenced by another row's supersedes_id
   // are corrected-away and excluded. Tie-breaks (same assessed_at AND same
   // created_at millisecond): a correcting row beats a non-correcting one,
   // then id keeps the ordering deterministic.
+  const hospitalFilter = hospitalId != null;
   const rows = await adapter.query<LatestAssessmentRow>(
     `SELECT a.id, a.local_tier, a.emergency_acuity, a.is_complete,
             a.suspected_conditions_json, a.assessed_at, a.rule_set_version
        FROM maternal_screening_assessments a
-      WHERE a.labor_admission_id = ?
+      WHERE a.labor_admission_id = ?${hospitalFilter ? ' AND a.hospital_id = ?' : ''}
         AND NOT EXISTS (
           SELECT 1 FROM maternal_screening_assessments c WHERE c.supersedes_id = a.id
         )
       ORDER BY a.assessed_at DESC, a.created_at DESC,
                (a.supersedes_id IS NOT NULL) DESC, a.id DESC
       LIMIT 1`,
-    [laborAdmissionId],
+    hospitalFilter ? [laborAdmissionId, hospitalId] : [laborAdmissionId],
   );
   const now = new Date().toISOString();
+  const patientWhere = `id = ?${hospitalFilter ? ' AND hospital_id = ?' : ''}`;
+  const patientKeyParams = hospitalFilter ? [laborAdmissionId, hospitalId] : [laborAdmissionId];
 
   if (rows.length === 0) {
     await adapter.execute(
@@ -396,8 +453,8 @@ async function projectLatestSummary(
          maternal_screen_is_complete = NULL,
          maternal_screen_rule_set_version = NULL,
          updated_at = ?
-       WHERE id = ?`,
-      [now, laborAdmissionId],
+       WHERE ${patientWhere}`,
+      [now, ...patientKeyParams],
     );
     return { status: 'cleared', assessmentId: null };
   }
@@ -421,10 +478,14 @@ async function projectLatestSummary(
        maternal_screen_is_complete = ?,
        maternal_screen_rule_set_version = ?,
        updated_at = ?
-     WHERE id = ?`,
+     WHERE ${patientWhere}`,
     [
       fitOrNull(latest.local_tier, WIDTHS.localTier, 'maternal_screen_local_tier'),
-      fitOrNull(latest.emergency_acuity, WIDTHS.emergencyAcuity, 'maternal_screen_emergency_acuity'),
+      fitOrNull(
+        latest.emergency_acuity,
+        WIDTHS.emergencyAcuity,
+        'maternal_screen_emergency_acuity',
+      ),
       // Comma-separated dashboard projection — the assessment row's
       // suspected_conditions_json stays the structured source of truth.
       conditions.length > 0
@@ -434,7 +495,7 @@ async function projectLatestSummary(
       latest.is_complete,
       fitOrNull(latest.rule_set_version, WIDTHS.ruleSetVersion, 'maternal_screen_rule_set_version'),
       now,
-      laborAdmissionId,
+      ...patientKeyParams,
     ],
   );
   return { status: 'reconciled', assessmentId: latest.id };
@@ -445,22 +506,34 @@ async function projectLatestSummary(
  * non-superseded assessment for the admission (AC #12: the projection is
  * always reconstructable from the immutable history). Clears the summary to
  * NULL when the admission has no assessments.
+ *
+ * `hospitalId` is OPTIONAL for back-compat, but callers that know the tenant
+ * (any authenticated request path) MUST pass it: when supplied, the admission
+ * lookup and the projection are both scoped to that hospital, so a caller can
+ * never reconcile — and thereby read/observe — an admission belonging to
+ * another tenant. When omitted, the caller is asserting it has already
+ * authorized the admission by some other means (e.g. an internal maintenance
+ * job operating across all hospitals). Prefer passing it.
  */
 export async function reconcileLatestSummary(
   db: DatabaseAdapter,
   laborAdmissionId: string,
+  hospitalId?: string | null,
 ): Promise<ReconcileSummaryResult> {
+  const hospitalFilter = hospitalId != null;
   return db.transaction(async (tx) => {
     const admission = await tx.query<{ id: string }>(
-      `SELECT id FROM cached_patients WHERE id = ?`,
-      [laborAdmissionId],
+      `SELECT id FROM cached_patients WHERE id = ?${hospitalFilter ? ' AND hospital_id = ?' : ''}`,
+      hospitalFilter ? [laborAdmissionId, hospitalId] : [laborAdmissionId],
     );
     if (admission.length === 0) {
       throw new MaternalScreenStoreError(
-        `labor admission ${laborAdmissionId} not found — cannot reconcile a summary for a missing cached_patients row`,
+        `labor admission ${laborAdmissionId} not found${
+          hospitalFilter ? ` for hospital ${hospitalId}` : ''
+        } — cannot reconcile a summary for a missing cached_patients row`,
         'ADMISSION_NOT_FOUND',
       );
     }
-    return projectLatestSummary(tx, laborAdmissionId);
+    return projectLatestSummary(tx, laborAdmissionId, hospitalId);
   });
 }

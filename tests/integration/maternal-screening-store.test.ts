@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import { createTestDb } from '../helpers/testDb';
 import { FailingAdapter } from '../helpers/failingDb';
-import type { DatabaseAdapter } from '@/db/adapter';
+import { DatabaseAdapter, type ColumnInfo } from '@/db/adapter';
 import { evaluateMaternalScreen } from '@/services/maternal-screening';
 import {
   saveMaternalScreenAssessment,
@@ -199,6 +199,58 @@ function toIso(value: string | Date | null): string | null {
 // pg/PGlite return JSONB pre-parsed; normalize in case of a string dialect.
 function asJson(value: unknown): unknown {
   return typeof value === 'string' ? JSON.parse(value) : value;
+}
+
+/**
+ * Simulates the idempotency RACE (F2): the store's in-transaction
+ * existing-by-source SELECT runs BEFORE a competitor commits, so it must
+ * appear empty — but the competitor's row is already committed by the time the
+ * store's INSERT fires, tripping the unique index. We reproduce this
+ * deterministically by suppressing the store's in-tx `... source_pk = ?`
+ * SELECT (returning []) while leaving the already-committed conflicting row in
+ * place, so the store's own INSERT hits idx_msa_hospital_source_pk and its
+ * race-recovery re-query (on the top-level adapter, NOT suppressed) must
+ * resolve a clean duplicate rather than a WRITE_FAILED.
+ */
+class InTxSourceSelectSuppressingAdapter extends DatabaseAdapter {
+  constructor(
+    private readonly inner: DatabaseAdapter,
+    private readonly suppressSourceSelect: boolean,
+  ) {
+    super();
+  }
+
+  execute(sql: string, params?: unknown[]): Promise<void> {
+    return this.inner.execute(sql, params);
+  }
+
+  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
+    // Only the existing-by-source lookup carries this exact predicate.
+    if (this.suppressSourceSelect && /source_system = \? AND source_pk = \?/.test(sql)) {
+      return [] as T[];
+    }
+    return this.inner.query<T>(sql, params);
+  }
+
+  getTableNames(): Promise<string[]> {
+    return this.inner.getTableNames();
+  }
+
+  getColumnInfo(table: string): Promise<ColumnInfo[]> {
+    return this.inner.getColumnInfo(table);
+  }
+
+  transaction<T>(fn: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+    // Suppress ONLY inside the transaction (the store's pre-INSERT check); the
+    // top-level re-query in the catch stays truthful so recovery can succeed.
+    return this.inner.transaction((tx) =>
+      fn(new InTxSourceSelectSuppressingAdapter(tx, true)),
+    );
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 describe('saveMaternalScreenAssessment (Task 6 transactional store)', () => {
@@ -431,6 +483,126 @@ describe('saveMaternalScreenAssessment (Task 6 transactional store)', () => {
     expect(summary.maternal_screen_local_tier).toBe('LOCAL_SEVERE');
     expect(summary.maternal_screen_is_complete).toBe(false);
   });
+
+  it('F1: reusing an idempotency key across admissions RAISES INVALID_PARAMS — patient B severe row is NOT collapsed into A', async () => {
+    const patientB = await seedCachedPatient(db, hospitalId);
+
+    // Patient A: a MILD assessment claims key K.
+    const a = await saveMaternalScreenAssessment(
+      db,
+      saveParams(hospitalId, patientId, { sourcePk: 'shared-K', input: MILD_COMPLETE_INPUT }),
+    );
+    const summaryABefore = await readSummary(db, patientId);
+    expect(summaryABefore.maternal_screen_local_tier).toBe('LOCAL_MILD');
+
+    // Patient B's SEVERE payload reuses key K — a sender error, not a replay.
+    // It MUST be rejected loudly, never silently returned as A's duplicate.
+    let caught: unknown;
+    try {
+      await saveMaternalScreenAssessment(
+        db,
+        saveParams(hospitalId, patientB, { sourcePk: 'shared-K', input: SEVERE_COMPLETE_INPUT }),
+      );
+      throw new Error('expected saveMaternalScreenAssessment to reject');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(MaternalScreenStoreError);
+    expect((caught as MaternalScreenStoreError).code).toBe('INVALID_PARAMS');
+
+    // B's severe assessment was dropped nowhere: B has ZERO rows, its summary
+    // is still NULL, and A was neither mutated nor collapsed-into.
+    expect(await readAssessments(db, patientB)).toHaveLength(0);
+    const summaryB = await readSummary(db, patientB);
+    expect(summaryB.maternal_screen_local_tier).toBeNull();
+
+    const aRows = await readAssessments(db, patientId);
+    expect(aRows).toHaveLength(1);
+    expect(aRows[0].id).toBe(a.assessmentId);
+    expect(aRows[0].local_tier).toBe('LOCAL_MILD'); // untouched
+    expect(await readSummary(db, patientId)).toEqual(summaryABefore);
+  });
+
+  it('F2: unique-violation race (SELECT misses, INSERT conflicts) recovers as a clean duplicate, not WRITE_FAILED', async () => {
+    // Seed the committed conflicting row via a normal save (same admission).
+    const original = await saveMaternalScreenAssessment(
+      db,
+      saveParams(hospitalId, patientId, { sourcePk: 'race-K', input: SEVERE_COMPLETE_INPUT }),
+    );
+    const summaryBefore = await readSummary(db, patientId);
+
+    // Replay through the adapter that hides the row from the in-tx SELECT, so
+    // the store proceeds to INSERT and trips idx_msa_hospital_source_pk.
+    const racing = new InTxSourceSelectSuppressingAdapter(db, false);
+    const replay = await saveMaternalScreenAssessment(
+      racing,
+      saveParams(hospitalId, patientId, { sourcePk: 'race-K', input: MILD_COMPLETE_INPUT }),
+    );
+
+    expect(replay.status).toBe('duplicate');
+    expect(replay.assessmentId).toBe(original.assessmentId);
+    // The rolled-back INSERT left no second row; summary is unchanged.
+    expect(await readAssessments(db, patientId)).toHaveLength(1);
+    expect(await readSummary(db, patientId)).toEqual(summaryBefore);
+  });
+
+  it('F4: two saves with a null source_pk on the same admission both persist distinct rows (MANUAL_UI path)', async () => {
+    const first = await saveMaternalScreenAssessment(
+      db,
+      saveParams(hospitalId, patientId, {
+        sourceSystem: 'MANUAL_UI',
+        sourcePk: null,
+        input: SEVERE_COMPLETE_INPUT,
+      }),
+    );
+    const second = await saveMaternalScreenAssessment(
+      db,
+      saveParams(hospitalId, patientId, {
+        sourceSystem: 'MANUAL_UI',
+        sourcePk: null,
+        input: MILD_COMPLETE_INPUT,
+      }),
+    );
+
+    expect(first.status).toBe('created');
+    expect(second.status).toBe('created'); // NOT collapsed into a duplicate
+    expect(second.assessmentId).not.toBe(first.assessmentId);
+
+    const rows = await readAssessments(db, patientId);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.source_pk === null)).toBe(true);
+  });
+
+  it('F5: an older assessed_at saved AFTER a newer one does not regress the summary off the newer row', async () => {
+    const NEWER_AT = '2026-07-16T10:00:00.000Z';
+    const OLDER_AT = '2026-07-16T06:00:00.000Z';
+
+    // Persist the NEWER-assessed severe row first...
+    await saveMaternalScreenAssessment(
+      db,
+      saveParams(hospitalId, patientId, {
+        sourcePk: 'ooo-newer',
+        assessedAt: NEWER_AT,
+        input: SEVERE_COMPLETE_INPUT,
+      }),
+    );
+    // ...then persist an OLDER-assessed mild row LATER (higher created_at).
+    const late = await saveMaternalScreenAssessment(
+      db,
+      saveParams(hospitalId, patientId, {
+        sourcePk: 'ooo-older',
+        assessedAt: OLDER_AT,
+        input: MILD_COMPLETE_INPUT,
+      }),
+    );
+    expect(late.status).toBe('created');
+
+    // Both rows exist, but the summary stays on the newer-assessed severe row.
+    expect(await readAssessments(db, patientId)).toHaveLength(2);
+    const summary = await readSummary(db, patientId);
+    expect(summary.maternal_screen_local_tier).toBe('LOCAL_SEVERE');
+    expect(toIso(summary.maternal_screen_assessed_at)).toBe(NEWER_AT);
+  });
 });
 
 describe('reconcileLatestSummary (AC #12: summary reconstructable from history)', () => {
@@ -507,5 +679,25 @@ describe('reconcileLatestSummary (AC #12: summary reconstructable from history)'
 
   it('raises an actionable operational error for a missing admission', async () => {
     await expect(reconcileLatestSummary(db, uuidv4())).rejects.toThrow(/not found/);
+  });
+
+  it('F3: hospital-scoped reconcile rebuilds within its tenant and refuses another tenant\'s admission', async () => {
+    await saveMaternalScreenAssessment(
+      db,
+      saveParams(hospitalId, patientId, { sourcePk: 'scope-K', input: SEVERE_COMPLETE_INPUT }),
+    );
+    await clobberSummary();
+
+    // Correct tenant → reconciles.
+    const ok = await reconcileLatestSummary(db, patientId, hospitalId);
+    expect(ok.status).toBe('reconciled');
+    expect((await readSummary(db, patientId)).maternal_screen_local_tier).toBe('LOCAL_SEVERE');
+
+    // A different hospital reconciling this admission is refused — the row is
+    // never read/rewritten across tenants.
+    const otherHospital = await seedHospital(db);
+    await expect(reconcileLatestSummary(db, patientId, otherHospital)).rejects.toThrow(
+      /not found for hospital/,
+    );
   });
 });
