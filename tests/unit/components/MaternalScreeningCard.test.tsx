@@ -110,7 +110,12 @@ describe('MaternalScreeningCard — states', () => {
   it('renders an ErrorState banner with a working retry button on error', () => {
     const onRetry = vi.fn();
     render(
-      <MaternalScreeningCard data={null} isLoading={false} error={new Error('boom')} onRetry={onRetry} />,
+      <MaternalScreeningCard
+        data={null}
+        isLoading={false}
+        error={new Error('boom')}
+        onRetry={onRetry}
+      />,
     );
     expect(screen.getByRole('alert')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /ลองใหม่/ }));
@@ -132,7 +137,10 @@ describe('MaternalScreeningCard — states', () => {
   it('renders the shadow banner and latest chips when data is present', () => {
     const assessment = buildAssessment({ localTier: 'LOCAL_MILD', emergencyAcuity: 'STABLE' });
     render(
-      <MaternalScreeningCard data={buildResponse({ latest: assessment, history: [] })} isLoading={false} />,
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+      />,
     );
     expect(screen.getByTestId('maternal-screen-shadow-banner')).toBeTruthy();
     expect(screen.getByTestId('maternal-screen-tier-chip')).toBeTruthy();
@@ -148,7 +156,10 @@ describe('MaternalScreeningCard — shadow banner (GC-U1)', () => {
   it('always renders the verbatim shadow banner text + ruleSetVersion when data renders', () => {
     const assessment = buildAssessment({ ruleSetVersion: '0.1.0-provisional' });
     render(
-      <MaternalScreeningCard data={buildResponse({ latest: assessment, history: [] })} isLoading={false} />,
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+      />,
     );
     const banner = screen.getByTestId('maternal-screen-shadow-banner');
     expect(banner.textContent).toContain(
@@ -160,7 +171,10 @@ describe('MaternalScreeningCard — shadow banner (GC-U1)', () => {
   it('the banner is the first rendered section once data is present', () => {
     const assessment = buildAssessment();
     const { container } = render(
-      <MaternalScreeningCard data={buildResponse({ latest: assessment, history: [] })} isLoading={false} />,
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+      />,
     );
     const card = screen.getByTestId('maternal-screening-card');
     // header (card title) is index 0; banner must be the very next section.
@@ -179,7 +193,10 @@ describe('MaternalScreeningCard — GC-U1 no-green lock', () => {
   it('STABLE + NO_LOCAL_MATCH: both chips resolve to the muted var, not green', () => {
     const assessment = buildAssessment({ localTier: 'NO_LOCAL_MATCH', emergencyAcuity: 'STABLE' });
     render(
-      <MaternalScreeningCard data={buildResponse({ latest: assessment, history: [] })} isLoading={false} />,
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+      />,
     );
     const tierChip = screen.getByTestId('maternal-screen-tier-chip');
     const acuityChip = screen.getByTestId('maternal-screen-acuity-chip');
@@ -245,16 +262,17 @@ describe('MaternalScreeningCard — severe + incomplete coexist', () => {
       missingRequiredFields: ['systolicBp', 'diastolicBp'],
     });
     render(
-      <MaternalScreeningCard data={buildResponse({ latest: assessment, history: [] })} isLoading={false} />,
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+      />,
     );
     const tierChip = screen.getByTestId('maternal-screen-tier-chip');
     expect(tierChip.dataset.tier).toBe('LOCAL_SEVERE');
     expect(tierChip.style.color).toBe('var(--risk-high)');
 
     const marker = screen.getByTestId('maternal-screen-incomplete-marker');
-    expect(marker.textContent).toContain(
-      'การประเมินความเสี่ยงไม่สมบูรณ์ (ขาดข้อมูล 2 รายการ)',
-    );
+    expect(marker.textContent).toContain('การประเมินความเสี่ยงไม่สมบูรณ์ (ขาดข้อมูล 2 รายการ)');
   });
 });
 
@@ -269,7 +287,10 @@ describe('MaternalScreeningCard — suspected conditions', () => {
       suspectedConditions: ['PREECLAMPSIA', 'ABRUPTIO_PLACENTAE'],
     });
     render(
-      <MaternalScreeningCard data={buildResponse({ latest: assessment, history: [] })} isLoading={false} />,
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+      />,
     );
     expect(screen.getByText('สงสัยภาวะครรภ์เป็นพิษ')).toBeTruthy();
     expect(screen.getByText('สงสัยรกลอกตัวก่อนกำหนด')).toBeTruthy();
@@ -295,7 +316,10 @@ describe('MaternalScreeningCard — matches and evidence', () => {
     ];
     const assessment = buildAssessment({ localTier: 'LOCAL_MODERATE', matches });
     render(
-      <MaternalScreeningCard data={buildResponse({ latest: assessment, history: [] })} isLoading={false} />,
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+      />,
     );
     expect(screen.getByText(/RULE-PREE-01/)).toBeTruthy();
     expect(screen.getByText('systolicBp: 150')).toBeTruthy();
@@ -307,7 +331,10 @@ describe('MaternalScreeningCard — matches and evidence', () => {
       missingRequiredFields: ['systolicBp', 'proteinuriaGrade'],
     });
     render(
-      <MaternalScreeningCard data={buildResponse({ latest: assessment, history: [] })} isLoading={false} />,
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+      />,
     );
     const missing = screen.getByTestId('maternal-screen-missing-fields');
     expect(missing.textContent).toContain('systolicBp');
@@ -338,7 +365,11 @@ describe('MaternalScreeningCard — history', () => {
     const assessment = buildAssessment();
     render(
       <MaternalScreeningCard
-        data={buildResponse({ latest: assessment, history: [assessment], nextCursor: 'cursor-abc' })}
+        data={buildResponse({
+          latest: assessment,
+          history: [assessment],
+          nextCursor: 'cursor-abc',
+        })}
         isLoading={false}
       />,
     );
@@ -362,7 +393,10 @@ describe('MaternalScreeningCard — history', () => {
   // row's ruleSetVersion, since `latest` is null) and the row itself must
   // render — this is still "hasData" per the card's own hasData check.
   it('renders the shadow banner (with the history row ruleSetVersion) and the row when latest is null but history has one row', () => {
-    const historyOnly = buildAssessment({ id: 'assess-hist-only', ruleSetVersion: '0.2.0-provisional' });
+    const historyOnly = buildAssessment({
+      id: 'assess-hist-only',
+      ruleSetVersion: '0.2.0-provisional',
+    });
     render(
       <MaternalScreeningCard
         data={buildResponse({ latest: null, history: [historyOnly], nextCursor: null })}

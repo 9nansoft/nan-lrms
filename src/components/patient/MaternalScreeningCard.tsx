@@ -248,7 +248,12 @@ function HistoryRow({ row }: { row: MaternalScreenAssessmentDto }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export function MaternalScreeningCard({ data, isLoading, error, onRetry }: MaternalScreeningCardProps) {
+export function MaternalScreeningCard({
+  data,
+  isLoading,
+  error,
+  onRetry,
+}: MaternalScreeningCardProps) {
   const hasData = !!data && (data.latest !== null || data.history.length > 0);
   const ruleSetVersion = data?.latest?.ruleSetVersion ?? data?.history[0]?.ruleSetVersion ?? '—';
 
