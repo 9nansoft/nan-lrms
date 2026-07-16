@@ -96,6 +96,13 @@ export interface PatientListItem {
   } | null;
   partographSeverity: CdssSeverity | null;
   partographAlertCount: number | null;
+  // GC3: maternal labor-triage screening axes — a separate vocabulary from
+  // partographSeverity/CdssSeverity above (never merge). Null when
+  // MATERNAL_SCREEN_UI_ENABLED=false (server-side gate) or unassessed.
+  maternalScreenLocalTier: MaternalScreenLocalTier | null;
+  maternalScreenEmergencyAcuity: MaternalEmergencyAcuity | null;
+  maternalScreenIsComplete: boolean | null;
+  maternalScreenAssessedAt: string | null;
   syncedAt: string;
 }
 
@@ -308,6 +315,13 @@ export interface HighRiskPatient {
   lastVitalAt: string | null;
   partographSeverity: CdssSeverity | null;
   partographAlertCount: number | null;
+  // GC3: maternal labor-triage screening axes — a separate vocabulary from
+  // partographSeverity/CdssSeverity above (never merge). Null when
+  // MATERNAL_SCREEN_UI_ENABLED=false (server-side gate) or unassessed.
+  maternalScreenLocalTier: MaternalScreenLocalTier | null;
+  maternalScreenEmergencyAcuity: MaternalEmergencyAcuity | null;
+  maternalScreenIsComplete: boolean | null;
+  maternalScreenAssessedAt: string | null;
 }
 
 export interface HighRiskPatientsResponse {

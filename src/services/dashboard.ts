@@ -34,6 +34,8 @@ import { SYNC_FAILURE_STATUSES } from '@/config/sync-status';
 import { getHospitalCapability } from '@/config/hospital-capabilities';
 import { ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
 import { AncRiskLevel } from '@/types/domain';
+import { isMaternalScreenUiEnabled } from '@/lib/feature-flags';
+import type { MaternalScreenLocalTier, MaternalEmergencyAcuity } from '@/types/maternal-screening';
 
 // Reusable subquery — every cached_*/maternal_journeys aggregate joins this
 // against the relevant hospital_id column to honor the operational
@@ -259,12 +261,76 @@ interface HighRiskRow {
   last_vital_at: string | null;
   partograph_severity: string | null;
   partograph_alert_count: number | null;
+  maternal_screen_local_tier: string | null;
+  maternal_screen_emergency_acuity: string | null;
+  maternal_screen_is_complete: boolean | null;
+  maternal_screen_assessed_at: string | Date | null;
+}
+
+/** Raw `cached_patients.maternal_screen_*` values, keyed the same regardless
+ *  of source row shape (HighRiskRow columns vs the `SELECT cp.*` spread in
+ *  getHospitalPatientList). */
+interface MaternalScreenRawFields {
+  maternal_screen_local_tier: string | null;
+  maternal_screen_emergency_acuity: string | null;
+  maternal_screen_is_complete: boolean | null;
+  maternal_screen_assessed_at: string | Date | null;
+}
+
+interface MaternalScreenProjectedFields {
+  maternalScreenLocalTier: MaternalScreenLocalTier | null;
+  maternalScreenEmergencyAcuity: MaternalEmergencyAcuity | null;
+  maternalScreenIsComplete: boolean | null;
+  maternalScreenAssessedAt: string | null;
+}
+
+/**
+ * GC-W3: server-side flag gate for the maternal-screen axes carried on the
+ * cached-path list projections (getHighRiskPatients, getHospitalPatientList
+ * — the exact same `cached_patients` columns `partograph_severity` flows
+ * through today). `uiEnabled` MUST be resolved once per request by the
+ * caller and passed in here — not re-read per row — so a single request
+ * can't observe the flag flip mid-response.
+ *
+ * GC3: `maternal_screen_*` is a distinct vocabulary from
+ * `partographSeverity`/`CdssSeverity` — DB values are raw strings, narrowed
+ * with an `as` cast (same convention as `partograph_severity` above); an
+ * out-of-vocabulary value is passed through as-is rather than thrown on —
+ * the UI fallback token handles it (see src/config/maternal-screen-display.ts).
+ */
+function projectMaternalScreenFields(
+  uiEnabled: boolean,
+  row: MaternalScreenRawFields,
+): MaternalScreenProjectedFields {
+  if (!uiEnabled) {
+    return {
+      maternalScreenLocalTier: null,
+      maternalScreenEmergencyAcuity: null,
+      maternalScreenIsComplete: null,
+      maternalScreenAssessedAt: null,
+    };
+  }
+  return {
+    maternalScreenLocalTier: (row.maternal_screen_local_tier as MaternalScreenLocalTier | null) ?? null,
+    maternalScreenEmergencyAcuity:
+      (row.maternal_screen_emergency_acuity as MaternalEmergencyAcuity | null) ?? null,
+    maternalScreenIsComplete: row.maternal_screen_is_complete ?? null,
+    // pg returns timestamptz columns as Date objects, SQLite/PGlite as
+    // strings — normalize to ISO (same convention as admit_date below).
+    maternalScreenAssessedAt:
+      row.maternal_screen_assessed_at == null
+        ? null
+        : new Date(row.maternal_screen_assessed_at).toISOString(),
+  };
 }
 
 export async function getHighRiskPatients(
   db: DatabaseAdapter,
   limit: number = 50,
 ): Promise<HighRiskPatient[]> {
+  // Flag read once per request (GC-W3), not per row.
+  const maternalScreenUiEnabled = isMaternalScreenUiEnabled();
+
   // The province-wide ACTIVE labor roster, high risk first. LEFT JOIN, not
   // INNER: the panel's "ALL ACTIVE" tab must show LOW-risk and not-yet-scored
   // women too — the old HIGH/MEDIUM pre-filter meant "all active" showed one
@@ -284,6 +350,10 @@ export async function getHighRiskPatients(
       cp.admit_date,
       cp.partograph_severity,
       cp.partograph_alert_count,
+      cp.maternal_screen_local_tier,
+      cp.maternal_screen_emergency_acuity,
+      cp.maternal_screen_is_complete,
+      cp.maternal_screen_assessed_at,
       (SELECT MAX(cv.measured_at) FROM cached_vital_signs cv WHERE cv.patient_id = cp.id) AS last_vital_at
     FROM cached_patients cp
     LEFT JOIN cpd_scores cs ON cs.id = (
@@ -316,6 +386,7 @@ export async function getHighRiskPatients(
     lastVitalAt: row.last_vital_at == null ? null : new Date(row.last_vital_at).toISOString(),
     partographSeverity: (row.partograph_severity as CdssSeverity | null) ?? null,
     partographAlertCount: row.partograph_alert_count ?? null,
+    ...projectMaternalScreenFields(maternalScreenUiEnabled, row),
   }));
 }
 
@@ -480,6 +551,10 @@ export async function getHospitalPatientList(
     Record<string, unknown> & {
       partograph_severity: string | null;
       partograph_alert_count: number | null;
+      maternal_screen_local_tier: string | null;
+      maternal_screen_emergency_acuity: string | null;
+      maternal_screen_is_complete: boolean | null;
+      maternal_screen_assessed_at: string | Date | null;
     }
   >(
     `SELECT cp.*,
@@ -495,12 +570,40 @@ export async function getHospitalPatientList(
     [...params, perPage, offset],
   );
 
-  const patients = rows.map((r) => ({
-    ...r,
-    name: decryptSafe(typeof r.name === 'string' ? r.name : ''),
-    partographSeverity: (r.partograph_severity as CdssSeverity | null) ?? null,
-    partographAlertCount: r.partograph_alert_count ?? null,
-  }));
+  // Flag read once per request (GC-W3), not per row.
+  const maternalScreenUiEnabled = isMaternalScreenUiEnabled();
+
+  const patients = rows.map((r) => {
+    const projected = projectMaternalScreenFields(maternalScreenUiEnabled, {
+      maternal_screen_local_tier: r.maternal_screen_local_tier,
+      maternal_screen_emergency_acuity: r.maternal_screen_emergency_acuity,
+      maternal_screen_is_complete: r.maternal_screen_is_complete,
+      maternal_screen_assessed_at: r.maternal_screen_assessed_at,
+    });
+
+    // Leak fix (GC-W3): `cp.*` above pulls in every raw snake_case
+    // maternal_screen_* column untyped, regardless of the UI flag. Strip
+    // all six always — the typed camelCase fields from `projected` are the
+    // only supported way to read this data from this response. Widened to
+    // Record<string, unknown> (dropping the row type's explicit non-optional
+    // maternal_screen_* fields) so `delete` is valid under TS 4.4+'s
+    // "operand of delete must be optional" rule.
+    const rest: Record<string, unknown> = { ...r };
+    delete rest.maternal_screen_local_tier;
+    delete rest.maternal_screen_emergency_acuity;
+    delete rest.maternal_screen_condition_codes;
+    delete rest.maternal_screen_assessed_at;
+    delete rest.maternal_screen_is_complete;
+    delete rest.maternal_screen_rule_set_version;
+
+    return {
+      ...rest,
+      name: decryptSafe(typeof r.name === 'string' ? r.name : ''),
+      partographSeverity: (r.partograph_severity as CdssSeverity | null) ?? null,
+      partographAlertCount: r.partograph_alert_count ?? null,
+      ...projected,
+    };
+  });
 
   return {
     hospital,

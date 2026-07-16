@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { cn, formatRelativeTime, buildPatientId } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import type { CdssSeverity } from '@/types/api';
+import type { MaternalScreenLocalTier, MaternalEmergencyAcuity } from '@/types/maternal-screening';
 import { PartographCell, SectionLabel } from './shared';
 
 export interface HighRiskPatient {
@@ -26,6 +27,13 @@ export interface HighRiskPatient {
   partographSeverity?: CdssSeverity | null;
   partographAlertCount?: number | null;
   note?: string | null;
+  // GC3: maternal labor-triage screening axes — a separate vocabulary from
+  // partographSeverity/CdssSeverity above (never merge). Rendering these is
+  // W2; this task only keeps the local copy in sync with src/types/api.ts.
+  maternalScreenLocalTier?: MaternalScreenLocalTier | null;
+  maternalScreenEmergencyAcuity?: MaternalEmergencyAcuity | null;
+  maternalScreenIsComplete?: boolean | null;
+  maternalScreenAssessedAt?: string | null;
 }
 
 export interface HighRiskPatientListProps {
