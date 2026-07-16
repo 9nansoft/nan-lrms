@@ -84,12 +84,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "systolicBp",
         "diastolicBp",
@@ -113,14 +109,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "ANTEPARTUM_HEMORRHAGE",
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-GA26-VAGINAL-BLEEDING",
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["ANTEPARTUM_HEMORRHAGE", "PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-GA26-VAGINAL-BLEEDING", "APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "systolicBp",
         "diastolicBp",
@@ -144,12 +134,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "systolicBp",
         "diastolicBp",
@@ -173,12 +159,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "systolicBp",
         "diastolicBp",
@@ -200,12 +182,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -254,12 +232,8 @@
       "localTier": "LOCAL_MILD",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -283,12 +257,8 @@
       "localTier": "LOCAL_MILD",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -312,13 +282,8 @@
       "localTier": "LOCAL_MODERATE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140",
-        "PE-BP-MODERATE-SBP-150"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140", "PE-BP-MODERATE-SBP-150"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -342,13 +307,8 @@
       "localTier": "LOCAL_MODERATE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140",
-        "PE-BP-MODERATE-SBP-150"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140", "PE-BP-MODERATE-SBP-150"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -372,14 +332,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140",
-        "PE-BP-MODERATE-SBP-150",
-        "PE-BP-SEVERE-SBP-160"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140", "PE-BP-MODERATE-SBP-150", "PE-BP-SEVERE-SBP-160"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -428,12 +382,8 @@
       "localTier": "LOCAL_MILD",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -457,12 +407,8 @@
       "localTier": "LOCAL_MILD",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -486,13 +432,8 @@
       "localTier": "LOCAL_MODERATE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140",
-        "PE-BP-MODERATE-DBP-100"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140", "PE-BP-MODERATE-DBP-100"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -516,13 +457,8 @@
       "localTier": "LOCAL_MODERATE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140",
-        "PE-BP-MODERATE-DBP-100"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140", "PE-BP-MODERATE-DBP-100"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -546,14 +482,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BP-MILD-140",
-        "PE-BP-MODERATE-DBP-100",
-        "PE-BP-SEVERE-DBP-110"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BP-MILD-140", "PE-BP-MODERATE-DBP-100", "PE-BP-SEVERE-DBP-110"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -603,12 +533,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-LAB-SEVERE-CREATININE-1_1"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-LAB-SEVERE-CREATININE-1_1"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -686,12 +612,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-LAB-SEVERE-PLATELET-100K"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-LAB-SEVERE-PLATELET-100K"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -717,14 +639,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "ABRUPTIO_PLACENTAE",
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-ABRUPTIO-PATTERN",
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["ABRUPTIO_PLACENTAE", "PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-ABRUPTIO-PATTERN", "APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -748,12 +664,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -777,12 +689,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -806,14 +714,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "ABRUPTIO_PLACENTAE",
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-ABRUPTIO-PATTERN",
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["ABRUPTIO_PLACENTAE", "PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-ABRUPTIO-PATTERN", "APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -839,9 +741,7 @@
       "emergencyAcuity": "EMERGENCY",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-SHOCK-SIGNS-EMERGENCY"
-      ],
+      "matchedRuleIds": ["EA-SHOCK-SIGNS-EMERGENCY"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -864,12 +764,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-HEADACHE-IN-LOCAL-SEVERE-COLUMN"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-HEADACHE-IN-LOCAL-SEVERE-COLUMN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -893,12 +789,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-BLURRED-VISION-IN-LOCAL-SEVERE-COLUMN"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-BLURRED-VISION-IN-LOCAL-SEVERE-COLUMN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -923,12 +815,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-EPIGASTRIC-PAIN-IN-LOCAL-SEVERE-COLUMN"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-EPIGASTRIC-PAIN-IN-LOCAL-SEVERE-COLUMN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -953,12 +841,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-PULMONARY-EDEMA-IN-LOCAL-SEVERE-COLUMN"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-PULMONARY-EDEMA-IN-LOCAL-SEVERE-COLUMN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -986,12 +870,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "ABRUPTIO_PLACENTAE"
-      ],
-      "matchedRuleIds": [
-        "APH-ABRUPTIO-PATTERN"
-      ],
+      "suspectedConditions": ["ABRUPTIO_PLACENTAE"],
+      "matchedRuleIds": ["APH-ABRUPTIO-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1017,12 +897,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "ABRUPTIO_PLACENTAE"
-      ],
-      "matchedRuleIds": [
-        "APH-ABRUPTIO-PATTERN"
-      ],
+      "suspectedConditions": ["ABRUPTIO_PLACENTAE"],
+      "matchedRuleIds": ["APH-ABRUPTIO-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1047,12 +923,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PLACENTA_PREVIA"
-      ],
-      "matchedRuleIds": [
-        "APH-PREVIA-PATTERN"
-      ],
+      "suspectedConditions": ["PLACENTA_PREVIA"],
+      "matchedRuleIds": ["APH-PREVIA-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1078,12 +950,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "UTERINE_RUPTURE"
-      ],
-      "matchedRuleIds": [
-        "APH-RUPTURE-UTERUS-PATTERN"
-      ],
+      "suspectedConditions": ["UTERINE_RUPTURE"],
+      "matchedRuleIds": ["APH-RUPTURE-UTERUS-PATTERN"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1109,11 +977,7 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "EMERGENCY",
       "isComplete": false,
-      "suspectedConditions": [
-        "ABRUPTIO_PLACENTAE",
-        "PLACENTA_PREVIA",
-        "VASA_PREVIA"
-      ],
+      "suspectedConditions": ["ABRUPTIO_PLACENTAE", "PLACENTA_PREVIA", "VASA_PREVIA"],
       "matchedRuleIds": [
         "APH-ABRUPTIO-PATTERN",
         "APH-PREVIA-PATTERN",
@@ -1143,12 +1007,8 @@
       "localTier": "LOCAL_MILD",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-PROT-MILD-1PLUS"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-PROT-MILD-1PLUS"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1172,12 +1032,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-PROT-SEVERE-2TO3PLUS"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-PROT-SEVERE-2TO3PLUS"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1201,12 +1057,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-PROT-SEVERE-2TO3PLUS"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-PROT-SEVERE-2TO3PLUS"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1230,12 +1082,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-PROT-SEVERE-2TO3PLUS"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-PROT-SEVERE-2TO3PLUS"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1336,9 +1184,7 @@
       "emergencyAcuity": "EMERGENCY",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-CONSCIOUSNESS-DEPRESSED-EMERGENCY"
-      ],
+      "matchedRuleIds": ["EA-CONSCIOUSNESS-DEPRESSED-EMERGENCY"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1363,9 +1209,7 @@
       "emergencyAcuity": "EMERGENCY",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-CONSCIOUSNESS-DEPRESSED-EMERGENCY"
-      ],
+      "matchedRuleIds": ["EA-CONSCIOUSNESS-DEPRESSED-EMERGENCY"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1415,9 +1259,7 @@
       "emergencyAcuity": "URGENT",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-OXYGEN-SAT-LOW-URGENT"
-      ],
+      "matchedRuleIds": ["EA-OXYGEN-SAT-LOW-URGENT"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1469,9 +1311,7 @@
       "emergencyAcuity": "URGENT",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-PULSE-HIGH-URGENT"
-      ],
+      "matchedRuleIds": ["EA-PULSE-HIGH-URGENT"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1521,9 +1361,7 @@
       "emergencyAcuity": "URGENT",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-FETAL-NON-REASSURING-URGENT"
-      ],
+      "matchedRuleIds": ["EA-FETAL-NON-REASSURING-URGENT"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1549,9 +1387,7 @@
       "emergencyAcuity": "EMERGENCY",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-BLEEDING-HEAVY-EMERGENCY"
-      ],
+      "matchedRuleIds": ["EA-BLEEDING-HEAVY-EMERGENCY"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1608,10 +1444,7 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "EMERGENCY",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA",
-        "ABRUPTIO_PLACENTAE"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA", "ABRUPTIO_PLACENTAE"],
       "matchedRuleIds": [
         "PE-HEADACHE-IN-LOCAL-SEVERE-COLUMN",
         "PE-BP-MILD-140",
@@ -1640,12 +1473,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-LAB-SEVERE-PLATELET-100K"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-LAB-SEVERE-PLATELET-100K"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1673,12 +1502,8 @@
       "localTier": "LOCAL_SEVERE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-PROT-SEVERE-2TO3PLUS"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-PROT-SEVERE-2TO3PLUS"],
       "missingRequiredFields": [
         "systolicBp",
         "diastolicBp",
@@ -1728,12 +1553,8 @@
       "localTier": "LOCAL_MODERATE",
       "emergencyAcuity": "UNKNOWN",
       "isComplete": false,
-      "suspectedConditions": [
-        "PREECLAMPSIA"
-      ],
-      "matchedRuleIds": [
-        "PE-HEADACHE-MODERATE-TOLERABLE"
-      ],
+      "suspectedConditions": ["PREECLAMPSIA"],
+      "matchedRuleIds": ["PE-HEADACHE-MODERATE-TOLERABLE"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1759,9 +1580,7 @@
       "emergencyAcuity": "EMERGENCY",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-BLEEDING-HEAVY-EMERGENCY"
-      ],
+      "matchedRuleIds": ["EA-BLEEDING-HEAVY-EMERGENCY"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
@@ -1787,10 +1606,7 @@
       "emergencyAcuity": "EMERGENCY",
       "isComplete": false,
       "suspectedConditions": [],
-      "matchedRuleIds": [
-        "EA-FETAL-SINUSOIDAL-EMERGENCY",
-        "EA-PULSE-HIGH-URGENT"
-      ],
+      "matchedRuleIds": ["EA-FETAL-SINUSOIDAL-EMERGENCY", "EA-PULSE-HIGH-URGENT"],
       "missingRequiredFields": [
         "gaWeeks",
         "gaDays",
