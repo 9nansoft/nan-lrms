@@ -25,10 +25,7 @@
 
 /** Local PDF-tier preeclampsia screening classification (spec §6.1, §7). */
 export type MaternalScreenLocalTier =
-  | 'LOCAL_MILD'
-  | 'LOCAL_MODERATE'
-  | 'LOCAL_SEVERE'
-  | 'NO_LOCAL_MATCH';
+  'LOCAL_MILD' | 'LOCAL_MODERATE' | 'LOCAL_SEVERE' | 'NO_LOCAL_MATCH';
 
 /**
  * Immediate maternal/fetal instability, computed independently of
@@ -47,13 +44,7 @@ export type MaternalEmergencyAcuity = 'STABLE' | 'URGENT' | 'EMERGENCY' | 'UNKNO
  * happened.
  */
 export type ProteinuriaGrade =
-  | 'NEGATIVE'
-  | 'TRACE'
-  | 'ONE_PLUS'
-  | 'TWO_PLUS'
-  | 'THREE_PLUS'
-  | 'FOUR_PLUS'
-  | 'UNKNOWN';
+  'NEGATIVE' | 'TRACE' | 'ONE_PLUS' | 'TWO_PLUS' | 'THREE_PLUS' | 'FOUR_PLUS' | 'UNKNOWN';
 
 export type HeadacheSeverity = 'NONE' | 'MILD' | 'SEVERE' | 'UNKNOWN';
 
@@ -129,30 +120,66 @@ export type SuspectedMaternalCondition =
  */
 export type MaternalScreenRulePurpose = 'LOCAL_PDF_TIER' | 'EXTERNAL_SAFETY' | 'EMERGENCY_ACUITY';
 
-/**
- * A single matched rule with its evidence (spec §6.2).
- *
- * `condition` is OPTIONAL here — a deliberate, documented deviation from the
- * design doc's §7.1 inline sketch (which shows it as required). The
- * `EMERGENCY_ACUITY`-purpose rules in maternal-screen-acuity-v1.yaml
- * describe instability findings (shock, depressed consciousness, heavy
- * bleeding, sinusoidal tracing, low SpO2, tachycardia) that do not map to
- * any `SuspectedMaternalCondition`. Forcing one onto every match would
- * fabricate an etiologic diagnosis label for a pure stability finding and
- * violate GC3's "separate concepts" rule (localTier/emergencyAcuity/
- * suspectedConditions/isComplete must never collapse into each other).
- * `condition` is present only for `LOCAL_PDF_TIER`-purpose matches.
- */
-export interface MaternalScreenMatch {
+/** Fields common to every match variant, regardless of `purpose`. */
+interface MaternalScreenMatchBase {
   ruleId: string;
-  purpose: MaternalScreenRulePurpose;
   controllingSourceId: string;
   supportingSourceIds: string[];
-  localTier?: Exclude<MaternalScreenLocalTier, 'NO_LOCAL_MATCH'>;
-  emergencyAcuity?: Exclude<MaternalEmergencyAcuity, 'UNKNOWN'>;
-  condition?: SuspectedMaternalCondition;
   evidence: Array<{ field: keyof MaternalScreenInput; value: unknown }>;
 }
+
+/**
+ * A `LOCAL_PDF_TIER` match: REQUIRES `condition` and `localTier`; FORBIDS
+ * `emergencyAcuity` (`?: never`). This is the compile-time enforcement of
+ * GC3 — the type system now rejects a local-tier match that omits its
+ * `condition` (which would otherwise leak `undefined` into
+ * `suspectedConditions`) or that carries an emergency acuity.
+ */
+export interface LocalPdfTierMatch extends MaternalScreenMatchBase {
+  purpose: 'LOCAL_PDF_TIER';
+  localTier: Exclude<MaternalScreenLocalTier, 'NO_LOCAL_MATCH'>;
+  condition: SuspectedMaternalCondition;
+  emergencyAcuity?: never;
+}
+
+/**
+ * An `EMERGENCY_ACUITY` match: REQUIRES `emergencyAcuity`; FORBIDS
+ * `condition` and `localTier` (`?: never`). Instability findings (shock,
+ * depressed consciousness, heavy bleeding, sinusoidal/non-reassuring
+ * tracing, low SpO2, tachycardia) do NOT map to any
+ * `SuspectedMaternalCondition`; forcing one on would fabricate an etiologic
+ * diagnosis label for a pure stability finding (GC3).
+ */
+export interface EmergencyAcuityMatch extends MaternalScreenMatchBase {
+  purpose: 'EMERGENCY_ACUITY';
+  emergencyAcuity: Exclude<MaternalEmergencyAcuity, 'UNKNOWN'>;
+  condition?: never;
+  localTier?: never;
+}
+
+/**
+ * An `EXTERNAL_SAFETY` match: an external corroboration/challenge that is
+ * neither a local PDF tier nor an emergency acuity (spec §7.1). No rule in
+ * the v1 fixture emits one yet (maternal-screen-rules-v1.yaml decision
+ * "7.5-15" records this as an intentional scope limitation), but the variant
+ * is retained so a future rule-set version can add one without a breaking
+ * type change. `condition` is optional; the tier/acuity discriminators are
+ * FORBIDDEN (`?: never`).
+ */
+export interface ExternalSafetyMatch extends MaternalScreenMatchBase {
+  purpose: 'EXTERNAL_SAFETY';
+  condition?: SuspectedMaternalCondition;
+  localTier?: never;
+  emergencyAcuity?: never;
+}
+
+/**
+ * A single matched rule with its evidence (spec §6.2), modeled as a
+ * discriminated union keyed on `purpose` so that GC3 ("separate concepts;
+ * localTier/emergencyAcuity/suspectedConditions/isComplete never collapse
+ * into each other") is enforced at compile time, not merely by convention.
+ */
+export type MaternalScreenMatch = LocalPdfTierMatch | EmergencyAcuityMatch | ExternalSafetyMatch;
 
 /**
  * Result of evaluating a `MaternalScreenInput` (spec §6.2). `isComplete` is

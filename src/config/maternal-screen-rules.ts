@@ -26,7 +26,6 @@ import type {
   MaternalScreenInput,
   MaternalScreenLocalTier,
   MaternalEmergencyAcuity,
-  MaternalScreenRulePurpose,
   SuspectedMaternalCondition,
 } from '@/types/maternal-screening';
 
@@ -63,9 +62,7 @@ export interface MaternalScreenAllOfNode {
 }
 
 export type MaternalScreenLogicNode =
-  | MaternalScreenFieldCondition
-  | MaternalScreenAnyOfNode
-  | MaternalScreenAllOfNode;
+  MaternalScreenFieldCondition | MaternalScreenAnyOfNode | MaternalScreenAllOfNode;
 
 function isAnyOfNode(node: MaternalScreenLogicNode): node is MaternalScreenAnyOfNode {
   return 'anyOf' in node;
@@ -101,7 +98,10 @@ function isUnassessed(value: unknown): boolean {
  * `!==` naturally yields this behavior (`null !== true` is `true`) without
  * any special-casing beyond skipping the blanket unassessed-guard.
  */
-function matchFieldCondition(condition: MaternalScreenFieldCondition, input: MaternalScreenInput): boolean {
+function matchFieldCondition(
+  condition: MaternalScreenFieldCondition,
+  input: MaternalScreenInput,
+): boolean {
   const raw: unknown = input[condition.field];
 
   if (condition.operator === '!=') {
@@ -114,15 +114,25 @@ function matchFieldCondition(condition: MaternalScreenFieldCondition, input: Mat
     case '==':
       return raw === condition.value;
     case '>':
-      return typeof raw === 'number' && typeof condition.value === 'number' && raw > condition.value;
+      return (
+        typeof raw === 'number' && typeof condition.value === 'number' && raw > condition.value
+      );
     case '>=':
-      return typeof raw === 'number' && typeof condition.value === 'number' && raw >= condition.value;
+      return (
+        typeof raw === 'number' && typeof condition.value === 'number' && raw >= condition.value
+      );
     case '<':
-      return typeof raw === 'number' && typeof condition.value === 'number' && raw < condition.value;
+      return (
+        typeof raw === 'number' && typeof condition.value === 'number' && raw < condition.value
+      );
     case '<=':
-      return typeof raw === 'number' && typeof condition.value === 'number' && raw <= condition.value;
+      return (
+        typeof raw === 'number' && typeof condition.value === 'number' && raw <= condition.value
+      );
     case 'in':
-      return Array.isArray(condition.value) && (condition.value as readonly unknown[]).includes(raw);
+      return (
+        Array.isArray(condition.value) && (condition.value as readonly unknown[]).includes(raw)
+      );
     default: {
       // Exhaustiveness guard — every MaternalScreenComparisonOperator is
       // handled above; this branch is unreachable at compile time.
@@ -138,22 +148,64 @@ function matchLogicNode(node: MaternalScreenLogicNode, input: MaternalScreenInpu
   return matchFieldCondition(node, input);
 }
 
-/**
- * A single provisional rule, transcribed from one YAML `rules[]` entry.
- * `condition` is present only for `LOCAL_PDF_TIER`-purpose rules —
- * `EMERGENCY_ACUITY`-purpose rules have no `SuspectedMaternalCondition`
- * (see the `condition?` doc comment on `MaternalScreenMatch`, GC3).
- */
-export interface MaternalScreenRule {
+/** Fields common to every rule variant, regardless of `purpose`. */
+interface MaternalScreenRuleBase {
   readonly id: string;
-  readonly purpose: MaternalScreenRulePurpose;
   readonly controllingSourceId: string;
   readonly supportingSourceIds: readonly string[];
-  readonly condition?: SuspectedMaternalCondition;
-  readonly localTier?: Exclude<MaternalScreenLocalTier, 'NO_LOCAL_MATCH'>;
-  readonly emergencyAcuity?: Exclude<MaternalEmergencyAcuity, 'UNKNOWN'>;
   readonly logic: MaternalScreenLogicNode;
 }
+
+/**
+ * A `LOCAL_PDF_TIER` rule: REQUIRES `condition` and `localTier`; FORBIDS
+ * `emergencyAcuity` (`?: never`). The compiler now rejects a local-tier rule
+ * that forgets `condition` (which would leak `undefined` into
+ * `suspectedConditions` downstream) or that mistakenly carries an acuity —
+ * GC3 enforced at compile time, not by convention.
+ */
+export interface LocalPdfTierRule extends MaternalScreenRuleBase {
+  readonly purpose: 'LOCAL_PDF_TIER';
+  readonly condition: SuspectedMaternalCondition;
+  readonly localTier: Exclude<MaternalScreenLocalTier, 'NO_LOCAL_MATCH'>;
+  readonly emergencyAcuity?: never;
+}
+
+/**
+ * An `EMERGENCY_ACUITY` rule: REQUIRES `emergencyAcuity`; FORBIDS `condition`
+ * and `localTier` (`?: never`). Instability findings have no
+ * `SuspectedMaternalCondition` (GC3).
+ */
+export interface EmergencyAcuityRule extends MaternalScreenRuleBase {
+  readonly purpose: 'EMERGENCY_ACUITY';
+  readonly emergencyAcuity: Exclude<MaternalEmergencyAcuity, 'UNKNOWN'>;
+  readonly condition?: never;
+  readonly localTier?: never;
+}
+
+/**
+ * An `EXTERNAL_SAFETY` rule: an external corroboration purpose that is
+ * neither a local PDF tier nor an emergency acuity (spec §7.1). No rule in
+ * `MATERNAL_SCREEN_RULES` uses this purpose yet
+ * (maternal-screen-rules-v1.yaml decision "7.5-15"), but the variant is
+ * retained so the union stays exhaustive over `MaternalScreenRulePurpose`
+ * and a future rule-set version can add one without a breaking type change.
+ * `condition` is optional; the tier/acuity discriminators are FORBIDDEN.
+ */
+export interface ExternalSafetyRule extends MaternalScreenRuleBase {
+  readonly purpose: 'EXTERNAL_SAFETY';
+  readonly condition?: SuspectedMaternalCondition;
+  readonly localTier?: never;
+  readonly emergencyAcuity?: never;
+}
+
+/**
+ * A single provisional rule, transcribed from one YAML `rules[]` entry,
+ * modeled as a discriminated union keyed on `purpose` (GC3). The shared
+ * `logic` tree + `matchRule()` interpreter live in the base; the per-purpose
+ * variants pin down which of `condition`/`localTier`/`emergencyAcuity` are
+ * required vs forbidden.
+ */
+export type MaternalScreenRule = LocalPdfTierRule | EmergencyAcuityRule | ExternalSafetyRule;
 
 /**
  * Pure predicate: does `rule` match `input`? Shared by every rule — see the
@@ -356,7 +408,13 @@ export const MATERNAL_SCREEN_RULES: readonly MaternalScreenRule[] = [
     condition: 'PREECLAMPSIA',
     localTier: 'LOCAL_SEVERE',
     logic: {
-      anyOf: [{ field: 'proteinuriaGrade', operator: 'in', value: ['TWO_PLUS', 'THREE_PLUS', 'FOUR_PLUS'] }],
+      anyOf: [
+        {
+          field: 'proteinuriaGrade',
+          operator: 'in',
+          value: ['TWO_PLUS', 'THREE_PLUS', 'FOUR_PLUS'],
+        },
+      ],
     },
   },
 
@@ -392,7 +450,11 @@ export const MATERNAL_SCREEN_RULES: readonly MaternalScreenRule[] = [
                 { field: 'abdominalOrBackPain', operator: '==', value: true },
                 { field: 'uterineTenderness', operator: '==', value: true },
                 { field: 'frequentContractions', operator: '==', value: true },
-                { field: 'fetalTracingPattern', operator: 'in', value: ['NON_REASSURING', 'SINUSOIDAL'] },
+                {
+                  field: 'fetalTracingPattern',
+                  operator: 'in',
+                  value: ['NON_REASSURING', 'SINUSOIDAL'],
+                },
                 { field: 'fetalHeartRateBpm', operator: '<', value: 110 },
                 { field: 'fetalHeartRateBpm', operator: '>', value: 160 },
               ],
