@@ -27,6 +27,22 @@ import { insertAncScreeningIfChanged } from '@/services/anc-screening';
 import { logger } from '@/lib/logger';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
 import { isoDatesEqual, toIsoDate } from '@/lib/dates';
+import { isMaternalScreenIngestEnabled } from '@/lib/feature-flags';
+import { normalizeProteinuriaGrade } from '@/services/maternal-screening';
+import {
+  saveMaternalScreenAssessment,
+  MaternalScreenStoreError,
+} from '@/services/maternal-screening-store';
+import type { MaternalScreenInput } from '@/types/maternal-screening';
+import {
+  MATERNAL_SCREEN_TRANSPORT_MAX_BYTES,
+  MATERNAL_SCREEN_ASSESSED_AT_MAX_FUTURE_MS,
+  MATERNAL_SCREEN_SOURCE_PK_MAX_LENGTH,
+  MATERNAL_SCREEN_ASSESSED_BY_MAX_LENGTH,
+  MATERNAL_SCREEN_NUMERIC_BOUNDS,
+  MATERNAL_SCREEN_ADMISSION_CONTEXT_BOUNDS,
+  MATERNAL_SCREEN_ENUM_VALUES,
+} from '@/config/maternal-screen-ingest';
 
 // ─── Webhook payload types ───
 
@@ -66,6 +82,69 @@ export interface WebhookPatientPayload {
   station_admit?: string | null; // free-form (-3 / -2 / -1 / 0 / +1 / etc)
   labor_status?: string; // ACTIVE (default), DELIVERED
   action?: 'upsert' | 'delete'; // default: 'upsert'
+  // OPTIONAL maternal labor-triage screening observations (Task 7, spec §9.1).
+  // Legacy senders that omit it are 100% unaffected (GC7); it is only ever
+  // read when isMaternalScreenIngestEnabled() is true. Evaluation is ALWAYS
+  // server-side — there is deliberately no field for a client-supplied
+  // tier/acuity/completeness (GC2).
+  maternal_screening?: WebhookMaternalScreeningPayload | null;
+}
+
+/**
+ * Transport shape (snake_case per spec §9.1) of one maternal screening
+ * assessment riding on a labor patient payload. Booleans are three-state:
+ * true (assessed, present) / false (assessed, absent) / null-or-absent (not
+ * assessed — never coerced to a normal finding, GC1). Categorical fields
+ * accept the enum members of `MaternalScreenInput` (case-insensitive);
+ * `proteinuria_grade` additionally accepts the free-text dipstick spellings
+ * recognized by `normalizeProteinuriaGrade`.
+ *
+ * Admission BP and GA are NOT part of this object: they are reused from the
+ * SAME payload's `bp_systolic_admit` / `bp_diastolic_admit` /
+ * `ga_weeks` / `ga_day` fields (same payload/assessment context only — never
+ * stale cached vitals, spec §9.1).
+ */
+export interface WebhookMaternalScreeningPayload {
+  /** Sender idempotency key — replays of the same key are no-ops. */
+  source_pk?: string | null;
+  /** ISO 8601 timestamp of the clinical assessment (required). */
+  assessed_at: string;
+  assessed_by?: string | null;
+  /** Transport casing is `pih_diagnosed`; mapped to `piHDiagnosed` internally. */
+  pih_diagnosed?: boolean | null;
+  proteinuria_grade?: string | null;
+  creatinine_mg_dl?: number | null;
+  creatinine_baseline_mg_dl?: number | null;
+  platelet_per_ul?: number | null;
+  ast_iu_l?: number | null;
+  alt_iu_l?: number | null;
+  urine_output_ml_per_hour?: number | null;
+  headache?: string | null;
+  blurred_vision?: boolean | null;
+  epigastric_pain?: boolean | null;
+  pulmonary_edema?: boolean | null;
+  right_upper_quadrant_pain?: boolean | null;
+  vaginal_bleeding?: boolean | null;
+  estimated_bleeding_ml?: number | null;
+  bleeding_rate?: string | null;
+  concealed_bleeding_suspected?: boolean | null;
+  abdominal_or_back_pain?: boolean | null;
+  uterine_tenderness?: boolean | null;
+  frequent_contractions?: boolean | null;
+  contraction_duration_exceeds_interval?: boolean | null;
+  suprapubic_tenderness?: boolean | null;
+  bandls_ring?: boolean | null;
+  membranes_ruptured?: boolean | null;
+  abnormal_presentation?: boolean | null;
+  fetal_heart_rate_bpm?: number | null;
+  fetal_tracing_pattern?: string | null;
+  maternal_pulse_bpm?: number | null;
+  respiratory_rate_per_min?: number | null;
+  oxygen_saturation_pct?: number | null;
+  consciousness?: string | null;
+  shock_signs_present?: boolean | null;
+  placenta_previa_excluded?: boolean | null;
+  placenta_location_source?: string | null;
 }
 
 export type WebhookMode = 'incremental' | 'full_snapshot';
@@ -88,6 +167,17 @@ export interface WebhookResult {
   discharges: number;
   transfers: number;
   deleted: number;
+  // Maternal screening ingest counters (Task 7). Present ONLY when
+  // isMaternalScreenIngestEnabled() is true AND at least one patient in the
+  // batch carried a `maternal_screening` object — legacy responses are
+  // byte-identical otherwise (GC7). All values are PHI-free (no name/cid).
+  /** Assessment rows persisted (created or corrected) in this batch. */
+  maternalScreenAssessments?: number;
+  /** Idempotent replays — same (source_system, source_pk) already stored. */
+  maternalScreenDuplicates?: number;
+  /** Actionable, PHI-free per-patient errors (`patients[i].maternal_screening…`).
+   *  A failed screening never aborts the batch or the patient's own upsert. */
+  maternalScreenIngestErrors?: string[];
 }
 
 // ─── ANC webhook payload ───
@@ -527,6 +617,294 @@ export function validatePayload(body: unknown): {
   return { valid: true, payload: obj as unknown as WebhookPayload };
 }
 
+// ─── Maternal screening transport validation + mapping (Task 7, spec §9.2) ───
+
+/** Validated, normalized screening candidate — ready for the Task 6 store. */
+export interface MaternalScreeningIngestCandidate {
+  sourcePk: string | null;
+  assessedAt: string;
+  assessedBy: string | null;
+  /** Fully mapped §6.1 input. Unassessed → null / 'UNKNOWN' (GC1). */
+  input: MaternalScreenInput;
+}
+
+// Transport (snake_case) → MaternalScreenInput (camelCase) key maps for the
+// three-state boolean and bounded numeric fields. Data-driven so the §6.1
+// field list lives in ONE place per value kind (constitution I: no scattered
+// per-field hardcoding).
+const MS_BOOLEAN_FIELD_MAP = {
+  // Boundary casing corrected per spec §9.1: transport `pih_diagnosed`.
+  pih_diagnosed: 'piHDiagnosed',
+  blurred_vision: 'blurredVision',
+  epigastric_pain: 'epigastricPain',
+  pulmonary_edema: 'pulmonaryEdema',
+  right_upper_quadrant_pain: 'rightUpperQuadrantPain',
+  vaginal_bleeding: 'vaginalBleeding',
+  concealed_bleeding_suspected: 'concealedBleedingSuspected',
+  abdominal_or_back_pain: 'abdominalOrBackPain',
+  uterine_tenderness: 'uterineTenderness',
+  frequent_contractions: 'frequentContractions',
+  contraction_duration_exceeds_interval: 'contractionDurationExceedsInterval',
+  suprapubic_tenderness: 'suprapubicTenderness',
+  bandls_ring: 'bandlsRing',
+  membranes_ruptured: 'membranesRuptured',
+  abnormal_presentation: 'abnormalPresentation',
+  shock_signs_present: 'shockSignsPresent',
+  placenta_previa_excluded: 'placentaPreviaExcluded',
+} as const satisfies Record<string, keyof MaternalScreenInput>;
+
+const MS_NUMERIC_FIELD_MAP = {
+  creatinine_mg_dl: 'creatinineMgDl',
+  creatinine_baseline_mg_dl: 'creatinineBaselineMgDl',
+  platelet_per_ul: 'plateletPerUl',
+  ast_iu_l: 'astIuL',
+  alt_iu_l: 'altIuL',
+  urine_output_ml_per_hour: 'urineOutputMlPerHour',
+  estimated_bleeding_ml: 'estimatedBleedingMl',
+  fetal_heart_rate_bpm: 'fetalHeartRateBpm',
+  maternal_pulse_bpm: 'maternalPulseBpm',
+  respiratory_rate_per_min: 'respiratoryRatePerMin',
+  oxygen_saturation_pct: 'oxygenSaturationPct',
+} as const satisfies Record<string, keyof MaternalScreenInput>;
+
+/**
+ * Validate one patient's OPTIONAL `maternal_screening` transport object
+ * (spec §9.2) and map it to a normalized `MaternalScreenInput` (spec §6.1).
+ *
+ * - Field errors use the repo's standard `patients[i].field message` shape.
+ * - Any error rejects the WHOLE screening object (never a partial summary
+ *   update); the patient's own upsert and the rest of the batch are the
+ *   caller's concern and are NOT affected by a rejection here.
+ * - Admission BP / GA are reused from the SAME payload only (spec §9.1) —
+ *   their provenance is this payload's admission snapshot, timestamped by the
+ *   payload's own `admit_date`/`assessed_at` context; they are validated here
+ *   (only when a screening rides along) because they become clinical inputs.
+ * - GC1: absent/null/blank → null or 'UNKNOWN'; nothing is ever invented.
+ * - GC2: there is no way to pass a tier/acuity/completeness through this.
+ */
+export function validateMaternalScreeningTransport(
+  patient: WebhookPatientPayload,
+  label: string,
+  now: Date = new Date(),
+): { ok: true; candidate: MaternalScreeningIngestCandidate } | { ok: false; errors: string[] } {
+  const ms = patient.maternal_screening;
+  const prefix = `${label}.maternal_screening`;
+
+  if (ms == null || typeof ms !== 'object' || Array.isArray(ms)) {
+    return { ok: false, errors: [`${prefix} must be a JSON object`] };
+  }
+
+  // Max transport size (spec §9.2), measured on the serialized object.
+  const serializedBytes = Buffer.byteLength(JSON.stringify(ms), 'utf8');
+  if (serializedBytes > MATERNAL_SCREEN_TRANSPORT_MAX_BYTES) {
+    return {
+      ok: false,
+      errors: [
+        `${prefix} exceeds the maximum size of ${MATERNAL_SCREEN_TRANSPORT_MAX_BYTES} bytes (got ${serializedBytes}) — remove unexpected fields`,
+      ],
+    };
+  }
+
+  const raw = ms as unknown as Record<string, unknown>;
+  const errors: string[] = [];
+
+  // assessed_at — required ISO timestamp with a bounded future tolerance.
+  let assessedAt = '';
+  const rawAssessedAt = raw.assessed_at;
+  if (typeof rawAssessedAt !== 'string' || Number.isNaN(new Date(rawAssessedAt).getTime())) {
+    errors.push(
+      `${prefix}.assessed_at is required and must be a valid ISO 8601 timestamp (got ${JSON.stringify(rawAssessedAt)})`,
+    );
+  } else if (
+    new Date(rawAssessedAt).getTime() >
+    now.getTime() + MATERNAL_SCREEN_ASSESSED_AT_MAX_FUTURE_MS
+  ) {
+    errors.push(
+      `${prefix}.assessed_at is more than ${MATERNAL_SCREEN_ASSESSED_AT_MAX_FUTURE_MS / 3_600_000} hours in the future (got "${rawAssessedAt}") — check the sender clock/timezone offset`,
+    );
+  } else {
+    assessedAt = rawAssessedAt;
+  }
+
+  // source_pk — optional idempotency key. Over-length is REJECTED (never
+  // truncated or nulled: that would silently change idempotency semantics).
+  let sourcePk: string | null = null;
+  if (raw.source_pk !== undefined && raw.source_pk !== null) {
+    if (typeof raw.source_pk !== 'string') {
+      errors.push(`${prefix}.source_pk must be a string or null`);
+    } else if (raw.source_pk.length > MATERNAL_SCREEN_SOURCE_PK_MAX_LENGTH) {
+      errors.push(
+        `${prefix}.source_pk must be at most ${MATERNAL_SCREEN_SOURCE_PK_MAX_LENGTH} characters (got ${raw.source_pk.length}) — it is the idempotency key and cannot be truncated`,
+      );
+    } else {
+      sourcePk = raw.source_pk;
+    }
+  }
+
+  let assessedBy: string | null = null;
+  if (raw.assessed_by !== undefined && raw.assessed_by !== null) {
+    if (typeof raw.assessed_by !== 'string') {
+      errors.push(`${prefix}.assessed_by must be a string or null`);
+    } else if (raw.assessed_by.length > MATERNAL_SCREEN_ASSESSED_BY_MAX_LENGTH) {
+      errors.push(
+        `${prefix}.assessed_by must be at most ${MATERNAL_SCREEN_ASSESSED_BY_MAX_LENGTH} characters (got ${raw.assessed_by.length})`,
+      );
+    } else {
+      assessedBy = raw.assessed_by;
+    }
+  }
+
+  // Three-state booleans: true / false / null-or-absent. Anything else
+  // (strings, 0/1) is rejected — coercion would fabricate an assessment (GC1).
+  const bool = (field: keyof typeof MS_BOOLEAN_FIELD_MAP): boolean | null => {
+    const v = raw[field];
+    if (v === undefined || v === null) return null;
+    if (typeof v !== 'boolean') {
+      errors.push(
+        `${prefix}.${field} must be true, false, or null (three-state assessed/absent/not-assessed; got ${JSON.stringify(v)})`,
+      );
+      return null;
+    }
+    return v;
+  };
+
+  // Bounded numerics: reject impossible values, keep clinically-extreme ones
+  // (bounds documented in src/config/maternal-screen-ingest.ts).
+  const num = (field: keyof typeof MS_NUMERIC_FIELD_MAP): number | null => {
+    const v = raw[field];
+    if (v === undefined || v === null) return null;
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      errors.push(`${prefix}.${field} must be a finite number or null (got ${JSON.stringify(v)})`);
+      return null;
+    }
+    const bounds = MATERNAL_SCREEN_NUMERIC_BOUNDS[field];
+    if (bounds && (v < bounds.min || v > bounds.max)) {
+      errors.push(
+        `${prefix}.${field} ${v} is outside the physiologically possible range ${bounds.min}–${bounds.max} — send null when not assessed`,
+      );
+      return null;
+    }
+    return v;
+  };
+
+  // Categorical enums: case-insensitive membership or rejection; absent /
+  // null / blank → 'UNKNOWN' (not assessed — GC1). Every allowed set contains
+  // 'UNKNOWN', so the cast below is safe.
+  const en = <T extends string>(
+    field: keyof typeof MATERNAL_SCREEN_ENUM_VALUES,
+    allowed: readonly T[],
+  ): T => {
+    const v = raw[field];
+    if (v === undefined || v === null) return 'UNKNOWN' as T;
+    if (typeof v !== 'string') {
+      errors.push(`${prefix}.${field} must be a string or null (got ${JSON.stringify(v)})`);
+      return 'UNKNOWN' as T;
+    }
+    const trimmed = v.trim();
+    if (trimmed === '') return 'UNKNOWN' as T;
+    const norm = trimmed.toUpperCase() as T;
+    if (!allowed.includes(norm)) {
+      errors.push(`${prefix}.${field} must be one of ${allowed.join('|')} or null (got "${v}")`);
+      return 'UNKNOWN' as T;
+    }
+    return norm;
+  };
+
+  // proteinuria_grade: free-text dipstick spellings via the shared
+  // normalizer; unrecognized spellings are 'UNKNOWN' by design (GC1), only a
+  // non-string type is rejected.
+  let proteinuriaGrade: MaternalScreenInput['proteinuriaGrade'] = 'UNKNOWN';
+  if (
+    raw.proteinuria_grade !== undefined &&
+    raw.proteinuria_grade !== null &&
+    typeof raw.proteinuria_grade !== 'string'
+  ) {
+    errors.push(`${prefix}.proteinuria_grade must be a string or null`);
+  } else {
+    proteinuriaGrade = normalizeProteinuriaGrade(raw.proteinuria_grade as string | null | undefined);
+  }
+
+  // Same-payload admission context (spec §9.1): GA and admission BP are
+  // reused ONLY from this payload — never stale cached vitals. Validated here
+  // (not in validatePayload) so legacy payloads without a screening keep
+  // their existing, unvalidated behavior (GC7).
+  const admissionNum = (
+    field: 'ga_weeks' | 'ga_day' | 'bp_systolic_admit' | 'bp_diastolic_admit',
+  ): number | null => {
+    const v = patient[field];
+    if (v === undefined || v === null) return null;
+    const bounds = MATERNAL_SCREEN_ADMISSION_CONTEXT_BOUNDS[field];
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < bounds.min || v > bounds.max) {
+      errors.push(
+        `${label}.${field} must be a number between ${bounds.min} and ${bounds.max} to be reused as a screening input (got ${JSON.stringify(v)}) — fix the value or send null`,
+      );
+      return null;
+    }
+    return v;
+  };
+
+  const placentaPreviaExcluded = bool('placenta_previa_excluded');
+  const placentaLocationSource = en(
+    'placenta_location_source',
+    MATERNAL_SCREEN_ENUM_VALUES.placenta_location_source,
+  );
+  // Spec §9.1: previa exclusion is never accepted without approved provenance
+  // (and the always-required assessed_at timestamp). It must not be able to
+  // downgrade a bleeding patient's safety posture on the sender's say-so.
+  if (placentaPreviaExcluded === true && placentaLocationSource === 'UNKNOWN') {
+    errors.push(
+      `${prefix}.placenta_previa_excluded=true requires placenta_location_source ULTRASOUND or OTHER_DOCUMENTED — previa exclusion is not accepted without documented provenance`,
+    );
+  }
+
+  const input: MaternalScreenInput = {
+    gaWeeks: admissionNum('ga_weeks'),
+    gaDays: admissionNum('ga_day'),
+    piHDiagnosed: bool('pih_diagnosed'),
+    systolicBp: admissionNum('bp_systolic_admit'),
+    diastolicBp: admissionNum('bp_diastolic_admit'),
+    proteinuriaGrade,
+    creatinineMgDl: num('creatinine_mg_dl'),
+    creatinineBaselineMgDl: num('creatinine_baseline_mg_dl'),
+    plateletPerUl: num('platelet_per_ul'),
+    astIuL: num('ast_iu_l'),
+    altIuL: num('alt_iu_l'),
+    urineOutputMlPerHour: num('urine_output_ml_per_hour'),
+    headache: en('headache', MATERNAL_SCREEN_ENUM_VALUES.headache),
+    blurredVision: bool('blurred_vision'),
+    epigastricPain: bool('epigastric_pain'),
+    pulmonaryEdema: bool('pulmonary_edema'),
+    rightUpperQuadrantPain: bool('right_upper_quadrant_pain'),
+    vaginalBleeding: bool('vaginal_bleeding'),
+    estimatedBleedingMl: num('estimated_bleeding_ml'),
+    bleedingRate: en('bleeding_rate', MATERNAL_SCREEN_ENUM_VALUES.bleeding_rate),
+    concealedBleedingSuspected: bool('concealed_bleeding_suspected'),
+    abdominalOrBackPain: bool('abdominal_or_back_pain'),
+    uterineTenderness: bool('uterine_tenderness'),
+    frequentContractions: bool('frequent_contractions'),
+    contractionDurationExceedsInterval: bool('contraction_duration_exceeds_interval'),
+    suprapubicTenderness: bool('suprapubic_tenderness'),
+    bandlsRing: bool('bandls_ring'),
+    membranesRuptured: bool('membranes_ruptured'),
+    abnormalPresentation: bool('abnormal_presentation'),
+    fetalHeartRateBpm: num('fetal_heart_rate_bpm'),
+    fetalTracingPattern: en(
+      'fetal_tracing_pattern',
+      MATERNAL_SCREEN_ENUM_VALUES.fetal_tracing_pattern,
+    ),
+    maternalPulseBpm: num('maternal_pulse_bpm'),
+    respiratoryRatePerMin: num('respiratory_rate_per_min'),
+    oxygenSaturationPct: num('oxygen_saturation_pct'),
+    consciousness: en('consciousness', MATERNAL_SCREEN_ENUM_VALUES.consciousness),
+    shockSignsPresent: bool('shock_signs_present'),
+    placentaPreviaExcluded,
+    placentaLocationSource,
+  };
+
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, candidate: { sourcePk, assessedAt, assessedBy, input } };
+}
+
 // Per-patient CID checks for ANC. A bad CID here corrupts cross-hospital
 // matching just like the labor path — a phantom maternal_journey gets created
 // because cidHash never collides with the real one. Old hospital-side clients
@@ -719,6 +1097,68 @@ export async function processWebhookPayload(
     );
   }
 
+  // ─── Maternal screening ingest (Task 7 — flag-gated, GC2/GC6/GC7) ───
+  // Runs AFTER the cached_patients upsert + journey link so the assessment
+  // attaches to the just-upserted admission row (labor_admission_id) and its
+  // journey. When the flag is OFF the object is ignored entirely: no
+  // validation, no evaluation, no write — legacy behavior is untouched (GC7).
+  // Evaluation is ALWAYS server-side inside the Task 6 store (GC2); the store
+  // writes the assessment row + summary atomically and emits NO events
+  // (Task 8 owns events). A failure for one patient never aborts the batch or
+  // touches other patients' data.
+  const screeningResult = { saved: 0, duplicates: 0, errors: [] as string[] };
+  let screeningCarriers = 0;
+  if (isMaternalScreenIngestEnabled()) {
+    for (let i = 0; i < payload.patients.length; i++) {
+      const p = payload.patients[i];
+      if (p.maternal_screening == null || p.action === 'delete') continue;
+      screeningCarriers++;
+      const label = `patients[${i}]`;
+      try {
+        const validated = validateMaternalScreeningTransport(p, label);
+        if (!validated.ok) {
+          screeningResult.errors.push(...validated.errors);
+          continue;
+        }
+        const admissionRows = await db.query<{ id: string; journey_id: string | null }>(
+          'SELECT id, journey_id FROM cached_patients WHERE hospital_id = ? AND an = ?',
+          [hospitalId, p.an],
+        );
+        if (admissionRows.length === 0) {
+          screeningResult.errors.push(
+            `${label}.maternal_screening: no labor admission row exists for this AN after upsert — assessment not stored; resend once the admission is accepted`,
+          );
+          continue;
+        }
+        const saveResult = await saveMaternalScreenAssessment(db, {
+          hospitalId,
+          laborAdmissionId: admissionRows[0].id,
+          journeyId: admissionRows[0].journey_id,
+          sourceSystem: 'WEBHOOK',
+          sourcePk: validated.candidate.sourcePk,
+          assessedAt: validated.candidate.assessedAt,
+          assessedBy: validated.candidate.assessedBy,
+          input: validated.candidate.input,
+          evaluatedAt: new Date().toISOString(),
+        });
+        if (saveResult.status === 'duplicate') screeningResult.duplicates++;
+        else screeningResult.saved++;
+      } catch (err) {
+        // Store errors are PHI-free by contract (ids/codes only — never
+        // name/cid/free text), so their message is safe and actionable.
+        const detail =
+          err instanceof MaternalScreenStoreError
+            ? `${err.code}: ${err.message}`
+            : 'assessment write failed and was rolled back — nothing persisted for this patient; the rest of the batch is unaffected';
+        screeningResult.errors.push(`${label}.maternal_screening: ${detail}`);
+        logger.error('maternal_screen_webhook_ingest_failed', {
+          hospitalId,
+          code: err instanceof MaternalScreenStoreError ? err.code : 'WRITE_FAILED',
+        });
+      }
+    }
+  }
+
   // Detect transfers
   const transfers = await detectTransfers(db, hospitalId, patients);
   for (const transfer of transfers) {
@@ -851,6 +1291,16 @@ export async function processWebhookPayload(
     discharges: dischargeCount,
     transfers: transfers.length,
     deleted: deletedCount,
+    // Screening counters appear ONLY when the ingest flag is on AND at least
+    // one patient carried a maternal_screening object — legacy responses stay
+    // byte-identical (GC7).
+    ...(screeningCarriers > 0
+      ? {
+          maternalScreenAssessments: screeningResult.saved,
+          maternalScreenDuplicates: screeningResult.duplicates,
+          maternalScreenIngestErrors: screeningResult.errors,
+        }
+      : {}),
   };
 }
 
