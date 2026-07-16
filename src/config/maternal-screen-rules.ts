@@ -266,6 +266,34 @@ export const MANDATORY_SCREEN_FIELDS: readonly (keyof MaternalScreenInput)[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Stability-determination fields (mirrors `stabilityDeterminationFields` /
+// decision "T1-ACUITY-DETERMINATION" in maternal-screen-acuity-v1.yaml).
+// EXACTLY these 6 fields, in YAML order — the ONLY fields consulted to decide
+// STABLE vs UNKNOWN emergency acuity when no EMERGENCY_ACUITY rule fires.
+//
+// This list is deliberately SEPARATE from (and narrower than)
+// MANDATORY_SCREEN_FIELDS above: `emergencyAcuity` completeness is orthogonal
+// to the overall `MaternalScreenResult.isComplete` (spec §6.2), so a case can
+// be `emergencyAcuity: STABLE` while `isComplete: false` and vice versa.
+//
+// The pure engine (src/services/maternal-screening.ts, Task 3) reads this
+// list rather than hardcoding the field names (constitution IV). STABLE
+// requires every field here to be explicitly assessed (non-null,
+// non-'UNKNOWN'); otherwise the acuity is UNKNOWN, NEVER STABLE by default
+// from missing data (GC1). Do not add or drop fields here without updating
+// the YAML fixture first — the config test asserts parity.
+// ---------------------------------------------------------------------------
+
+export const STABILITY_DETERMINATION_FIELDS: readonly (keyof MaternalScreenInput)[] = [
+  'shockSignsPresent',
+  'consciousness',
+  'oxygenSaturationPct',
+  'maternalPulseBpm',
+  'bleedingRate',
+  'fetalTracingPattern',
+];
+
+// ---------------------------------------------------------------------------
 // Rules — 19 LOCAL_PDF_TIER rules (maternal-screen-rules-v1.yaml) followed
 // by 7 EMERGENCY_ACUITY rules (maternal-screen-acuity-v1.yaml). IDs, sources,
 // and `logic` are transcribed verbatim; see the YAML files' `clinicalDecision`

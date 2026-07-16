@@ -21,6 +21,7 @@ import {
   LOCAL_TIER_RANK,
   EMERGENCY_ACUITY_RANK,
   MANDATORY_SCREEN_FIELDS,
+  STABILITY_DETERMINATION_FIELDS,
   matchRule,
   type MaternalScreenRule,
 } from '@/config/maternal-screen-rules';
@@ -53,6 +54,13 @@ function extractRuleSetVersion(yaml: string): string {
 function extractMandatoryFields(yaml: string): string[] {
   const block = yaml.match(/^mandatoryFields:\n((?:\s{2}-\s*\S+\n?)+)/m);
   if (!block) throw new Error('mandatoryFields block not found in fixture');
+  return [...block[1].matchAll(/^\s{2}-\s*(\S+)\s*$/gm)].map((m) => m[1]);
+}
+
+/** Extract the `stabilityDeterminationFields:` list from maternal-screen-acuity-v1.yaml. */
+function extractStabilityDeterminationFields(yaml: string): string[] {
+  const block = yaml.match(/^stabilityDeterminationFields:\n((?:\s{2}-\s*\S+\n?)+)/m);
+  if (!block) throw new Error('stabilityDeterminationFields block not found in fixture');
   return [...block[1].matchAll(/^\s{2}-\s*(\S+)\s*$/gm)].map((m) => m[1]);
 }
 
@@ -153,6 +161,12 @@ describe('maternal-screen-rules config', () => {
     const yamlFields = extractMandatoryFields(rulesYaml);
     expect(yamlFields).toHaveLength(11);
     expect([...MANDATORY_SCREEN_FIELDS]).toEqual(yamlFields);
+  });
+
+  it('STABILITY_DETERMINATION_FIELDS matches the acuity YAML stabilityDeterminationFields list exactly (order-sensitive)', () => {
+    const yamlFields = extractStabilityDeterminationFields(acuityYaml);
+    expect(yamlFields).toHaveLength(6);
+    expect([...STABILITY_DETERMINATION_FIELDS]).toEqual(yamlFields);
   });
 
   describe('LOCAL_TIER_RANK', () => {
