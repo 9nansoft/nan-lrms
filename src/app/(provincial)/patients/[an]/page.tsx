@@ -207,15 +207,11 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
   // only those feeds. The partograph tab additionally distinguishes its own
   // error state (below) from the "no data yet" empty state.
   // Maternal-screening fetch failures only join the shared banner when the
-  // feature is actually visible (uiEnabled) OR when we have no data at all
-  // to judge that from — a first-load failure defaults uiEnabled/latest to
-  // false/null via the hook's `?? false`/`?? null` unwrap, same as a real
-  // "flag currently off" response. If a *stale* successful response is still
-  // cached (uiEnabled false, an assessment already loaded once) and a later
-  // background revalidation errors, we deliberately stay silent — surfacing
-  // a banner for a feature staff can't see would be confusing noise.
-  const screeningsFailed =
-    Boolean(screenings.error) && (screenings.uiEnabled || screenings.latest === null);
+  // feature is actually visible (uiEnabled) — flag-on failures surface via
+  // the banner; flag-off failures stay silent in the UI by design (GC-U3 —
+  // the route logs server-side; the enabling operator verifies the section
+  // during rollout per spec §17.2 step 4).
+  const screeningsFailed = Boolean(screenings.error) && screenings.uiEnabled;
 
   const failedFeeds: Array<{ label: string; retry: () => void }> = [
     { failed: Boolean(vitalsError), label: 'สัญญาณชีพ', retry: mutateVitals },

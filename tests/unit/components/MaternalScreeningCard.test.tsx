@@ -213,6 +213,21 @@ describe('MaternalScreeningCard — GC-U1 no-green lock', () => {
         expect(el.style.borderColor).not.toBe(green);
         expect(el.style.background).not.toContain(green);
       });
+      // Longhand background-color must be checked too — `background` (the
+      // shorthand) and `backgroundColor` (longhand) are independent CSSOM
+      // properties; a value set via the longhand would not show up in
+      // `el.style.background` above.
+      expect(el.style.backgroundColor).not.toContain('green');
+      // Belt-and-braces: no Tailwind/utility class name should smuggle a
+      // green value in via className (e.g. `text-green-500`, `bg-green-50`)
+      // even though this codebase uses inline styles for color today.
+      // `getAttribute('class')` (not `.className`) because SVG elements
+      // (the ShieldAlert icon) expose `className` as an SVGAnimatedString,
+      // not a plain string.
+      const classAttr = el.getAttribute('class');
+      if (classAttr !== null) {
+        expect(classAttr).not.toMatch(/green/i);
+      }
     });
   });
 });
@@ -339,5 +354,62 @@ describe('MaternalScreeningCard — history', () => {
       />,
     );
     expect(screen.queryByText('มีประวัติเพิ่มเติม')).toBeNull();
+  });
+
+  // F4 — history-only: no `latest` row (e.g. it fell off the current page
+  // of history, or the API only returned superseded rows), but a history
+  // row exists. The shadow banner must still render (using the history
+  // row's ruleSetVersion, since `latest` is null) and the row itself must
+  // render — this is still "hasData" per the card's own hasData check.
+  it('renders the shadow banner (with the history row ruleSetVersion) and the row when latest is null but history has one row', () => {
+    const historyOnly = buildAssessment({ id: 'assess-hist-only', ruleSetVersion: '0.2.0-provisional' });
+    render(
+      <MaternalScreeningCard
+        data={buildResponse({ latest: null, history: [historyOnly], nextCursor: null })}
+        isLoading={false}
+      />,
+    );
+    const banner = screen.getByTestId('maternal-screen-shadow-banner');
+    expect(banner.textContent).toContain('0.2.0-provisional');
+    expect(screen.getAllByTestId('maternal-screen-history-row')).toHaveLength(1);
+    expect(screen.queryByTestId('maternal-screen-latest')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2 — stale-while-error: background revalidation errors must not blank a
+// card that already has data on screen (Constitution VI).
+// ---------------------------------------------------------------------------
+
+describe('MaternalScreeningCard — stale-while-error (F2)', () => {
+  it('error + data present: the severe assessment stays visible, no ErrorState', () => {
+    const assessment = buildAssessment({ localTier: 'LOCAL_SEVERE', emergencyAcuity: 'EMERGENCY' });
+    render(
+      <MaternalScreeningCard
+        data={buildResponse({ latest: assessment, history: [] })}
+        isLoading={false}
+        error={new Error('background revalidation failed')}
+      />,
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    const tierChip = screen.getByTestId('maternal-screen-tier-chip');
+    expect(tierChip.dataset.tier).toBe('LOCAL_SEVERE');
+    expect(screen.getByTestId('maternal-screen-shadow-banner')).toBeTruthy();
+  });
+
+  it('error + no data: ErrorState with retry still renders (existing behavior)', () => {
+    const onRetry = vi.fn();
+    render(
+      <MaternalScreeningCard
+        data={buildResponse({ latest: null, history: [] })}
+        isLoading={false}
+        error={new Error('boom')}
+        onRetry={onRetry}
+      />,
+    );
+    expect(screen.getByRole('alert')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /ลองใหม่/ }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('maternal-screen-shadow-banner')).toBeNull();
   });
 });

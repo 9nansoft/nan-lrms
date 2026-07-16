@@ -259,6 +259,31 @@ describe('PatientDetailPage — maternal screening shadow card (flag-gated)', ()
     expect(screen.queryByTestId('patient-maternal-screening')).toBeNull();
   });
 
+  // F1 — flag-off pages must never surface the screenings feed in the
+  // shared failedFeeds banner: a feature staff can't see should not produce
+  // banner noise naming it. The route logs the failure server-side; the
+  // operator enabling the flag verifies the section during rollout
+  // (spec §17.2 step 4).
+  it('flag off + fetch error: the failedFeeds banner does not mention maternal screening, and the section stays absent', async () => {
+    mockUseMaternalScreenings.mockReturnValue({
+      uiEnabled: false,
+      latest: null,
+      history: [],
+      nextCursor: null,
+      isLoading: false,
+      error: new Error('boom'),
+      mutate: vi.fn(),
+    });
+
+    await renderPage();
+
+    const banners = screen.queryAllByRole('alert');
+    banners.forEach((banner) => {
+      expect(banner.textContent).not.toContain('การคัดกรองความเสี่ยงมารดา');
+    });
+    expect(screen.queryByTestId('patient-maternal-screening')).toBeNull();
+  });
+
   it('flag on: section, shadow banner, and LOCAL_SEVERE tier chip render', async () => {
     mockUseMaternalScreenings.mockReturnValue({
       uiEnabled: true,

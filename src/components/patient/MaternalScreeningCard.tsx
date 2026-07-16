@@ -277,7 +277,13 @@ export function MaternalScreeningCard({ data, isLoading, error, onRetry }: Mater
         </div>
       )}
 
-      {!isLoading && error != null && (
+      {/* Constitution VI — stale-while-error: once data is on screen, a
+          background revalidation error must NOT blank the card out. The DATA
+          branch takes priority whenever hasData is true, even if `error` is
+          truthy; ErrorState only renders when there is no data to fall back
+          on. The page-level failedFeeds banner carries the failure signal
+          while stale data stays visible here. */}
+      {!isLoading && error != null && !hasData && (
         <ErrorState variant="banner" message={ERROR_MESSAGE} onRetry={onRetry} />
       )}
 
@@ -291,7 +297,7 @@ export function MaternalScreeningCard({ data, isLoading, error, onRetry }: Mater
         </div>
       )}
 
-      {!isLoading && error == null && hasData && data && (
+      {!isLoading && hasData && data && (
         <>
           <ShadowBanner ruleSetVersion={ruleSetVersion} />
           <div className="p-3">

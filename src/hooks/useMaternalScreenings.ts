@@ -10,7 +10,10 @@ import type { MaternalScreenAssessmentsResponse } from '@/types/api';
 export function useMaternalScreenings(patientId: string | undefined) {
   const { data, error, isLoading, mutate } = useSWR<MaternalScreenAssessmentsResponse>(
     patientId ? `/api/patients/${patientId}/maternal-screenings` : null,
-    { refreshInterval: 30000 },
+    {
+      // Flag-off pages fetch once to learn uiEnabled, then stop polling; SSE-triggered mutate still works when enabled.
+      refreshInterval: (data) => (data?.uiEnabled ? 30000 : 0),
+    },
   );
 
   return {
