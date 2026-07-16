@@ -21,6 +21,14 @@
 // decisions), never a routine styling change — see
 // tests/unit/config/maternal-screen-display.test.ts for the regression lock.
 //
+// GC-W1/GC-U1 (kiosk records, Phase 5 W2): `--kiosk-low` (src/app/globals.css)
+// is a green (`#4fb58a`) used elsewhere for "confirmed low risk" — it is
+// BANNED from `MATERNAL_SCREEN_TIER_COLOR_KIOSK` and
+// `EMERGENCY_ACUITY_COLOR_KIOSK` below for the exact same provisional-rule-set
+// reason as the light-mode Records above. Muted/dim states use
+// `var(--kiosk-dim)`, never `var(--kiosk-low)`, while the rule set remains
+// unapproved.
+//
 // All Records below are typed `Record<EnumType, string>` (not
 // `Record<string, string>`) so the compiler enforces totality over every
 // union member in src/types/maternal-screening.ts — a new enum member fails
@@ -75,6 +83,36 @@ export const EMERGENCY_ACUITY_COLOR: Record<MaternalEmergencyAcuity, string> = {
 
 /** Fallback chip color for any value not covered above (should be unreachable — totality is compiler-enforced). */
 export const MATERNAL_SCREEN_FALLBACK_COLOR = 'var(--ink-navy-muted)';
+
+/**
+ * Kiosk (dark-theme) chip color for each `localTier` value (Phase 5 W2,
+ * `docs/superpowers/plans/2026-07-16-maternal-screening-ward.md` GC-W1/GC-W4).
+ * Mirrors `MATERNAL_SCREEN_TIER_COLOR` but sourced from `--kiosk-*` vars —
+ * `--kiosk-low` (green) is NEVER used here; `NO_LOCAL_MATCH` uses the same
+ * muted `--kiosk-dim` as the light-mode fallback, never a distinct
+ * "confirmed-good" color (GC-U1).
+ */
+export const MATERNAL_SCREEN_TIER_COLOR_KIOSK: Record<MaternalScreenLocalTier, string> = {
+  LOCAL_SEVERE: 'var(--kiosk-high)',
+  LOCAL_MODERATE: 'var(--kiosk-med)',
+  LOCAL_MILD: 'var(--kiosk-med)',
+  NO_LOCAL_MATCH: 'var(--kiosk-dim)',
+};
+
+/**
+ * Kiosk (dark-theme) chip color for each `emergencyAcuity` value (Phase 5
+ * W2). `STABLE` is deliberately the same muted `--kiosk-dim` as `UNKNOWN` —
+ * NOT `--kiosk-low` — for the same GC-U1 reason as `EMERGENCY_ACUITY_COLOR`.
+ */
+export const EMERGENCY_ACUITY_COLOR_KIOSK: Record<MaternalEmergencyAcuity, string> = {
+  EMERGENCY: 'var(--kiosk-high)',
+  URGENT: 'var(--kiosk-med)',
+  STABLE: 'var(--kiosk-dim)', // NOT --kiosk-low (green) — GC-U1/GC-W1
+  UNKNOWN: 'var(--kiosk-dim)',
+};
+
+/** Kiosk fallback chip color for any value not covered above. Never `--kiosk-low`. */
+export const MATERNAL_SCREEN_FALLBACK_COLOR_KIOSK = 'var(--kiosk-dim)';
 
 /**
  * Thai label for each `SuspectedMaternalCondition` member, prefixed as

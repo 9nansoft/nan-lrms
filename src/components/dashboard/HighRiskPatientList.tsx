@@ -11,6 +11,7 @@ import { maskName } from '@/lib/pii-mask';
 import type { CdssSeverity } from '@/types/api';
 import type { MaternalScreenLocalTier, MaternalEmergencyAcuity } from '@/types/maternal-screening';
 import { PartographCell, SectionLabel } from './shared';
+import { MaternalScreenCell } from './MaternalScreenCell';
 
 export interface HighRiskPatient {
   an: string;
@@ -102,11 +103,11 @@ function SkeletonRow({ variant }: { variant: 'light' | 'kiosk' }) {
     <div
       className="grid items-center gap-2 border-b px-2 py-2"
       style={{
-        gridTemplateColumns: '62px 130px 1fr 44px 44px 150px 58px 80px 110px 220px',
+        gridTemplateColumns: '62px 130px 1fr 44px 44px 150px 58px 80px 110px 140px 220px',
         borderColor: variant === 'kiosk' ? 'var(--kiosk-rule)' : 'var(--rule-hair)',
       }}
     >
-      {Array.from({ length: 10 }).map((_, i) => (
+      {Array.from({ length: 11 }).map((_, i) => (
         <div key={i} className={cn('h-3 animate-pulse rounded', barBg)} />
       ))}
     </div>
@@ -146,7 +147,9 @@ export function HighRiskPatientList({
   const inkMuted = isKiosk ? 'var(--kiosk-dim)' : 'var(--ink-navy-muted)';
   const accent = isKiosk ? 'var(--kiosk-accent)' : 'var(--accent-navy)';
 
-  // Column widths — kiosk drops name + note (privacy + space)
+  // Column widths — kiosk drops name + note (privacy + space).
+  // 'screen' (GC-W2) is a SEPARATE slot from 'partograph' — maternal
+  // labor-triage screening axes never merge into partograph severity.
   const columns = isKiosk
     ? [
         { key: 'risk', label: 'RISK', w: 72 },
@@ -156,6 +159,7 @@ export function HighRiskPatientList({
         { key: 'hospital', label: 'HOSPITAL', w: 0 }, // flex 1
         { key: 'admit', label: 'ADMIT', w: 70 },
         { key: 'partograph', label: 'PARTOGRAPH', w: 120 },
+        { key: 'screen', label: 'คัดกรอง (เงา)', w: 130 },
       ]
     : [
         { key: 'risk', label: 'RISK', w: 62 },
@@ -167,6 +171,7 @@ export function HighRiskPatientList({
         { key: 'admit', label: 'ADMIT', w: 58 },
         { key: 'vital', label: 'LAST VITAL', w: 80 },
         { key: 'partograph', label: 'PARTOGRAPH', w: 110 },
+        { key: 'screen', label: 'คัดกรอง (เงา)', w: 140 },
         { key: 'note', label: 'NOTE', w: 220 },
       ];
 
@@ -373,6 +378,15 @@ export function HighRiskPatientList({
                   <PartographCell
                     severity={p.partographSeverity ?? null}
                     count={p.partographAlertCount ?? 0}
+                    variant={variant}
+                  />
+                </div>
+                <div>
+                  <MaternalScreenCell
+                    tier={p.maternalScreenLocalTier ?? null}
+                    acuity={p.maternalScreenEmergencyAcuity ?? null}
+                    isComplete={p.maternalScreenIsComplete ?? null}
+                    assessedAt={p.maternalScreenAssessedAt ?? null}
                     variant={variant}
                   />
                 </div>
