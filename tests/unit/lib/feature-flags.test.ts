@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { isSimulationEnabled } from '@/lib/feature-flags';
+import {
+  isSimulationEnabled,
+  isMaternalScreenIngestEnabled,
+  isMaternalScreenShadowMode,
+  isMaternalScreenUiEnabled,
+  isMaternalScreenEventsEnabled,
+} from '@/lib/feature-flags';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -28,5 +34,97 @@ describe('isSimulationEnabled', () => {
     vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('DEV_SIMULATION_ENABLED', 'false');
     expect(isSimulationEnabled()).toBe(false);
+  });
+});
+
+describe('isMaternalScreenIngestEnabled', () => {
+  it('defaults to false when unset', () => {
+    vi.stubEnv('MATERNAL_SCREEN_INGEST_ENABLED', '');
+    expect(isMaternalScreenIngestEnabled()).toBe(false);
+  });
+
+  it('returns true when explicitly set to true', () => {
+    vi.stubEnv('MATERNAL_SCREEN_INGEST_ENABLED', 'true');
+    expect(isMaternalScreenIngestEnabled()).toBe(true);
+  });
+
+  it('returns false for non-truthy values', () => {
+    vi.stubEnv('MATERNAL_SCREEN_INGEST_ENABLED', 'false');
+    expect(isMaternalScreenIngestEnabled()).toBe(false);
+
+    vi.stubEnv('MATERNAL_SCREEN_INGEST_ENABLED', '1');
+    expect(isMaternalScreenIngestEnabled()).toBe(false);
+
+    vi.stubEnv('MATERNAL_SCREEN_INGEST_ENABLED', 'yes');
+    expect(isMaternalScreenIngestEnabled()).toBe(false);
+  });
+});
+
+describe('isMaternalScreenShadowMode', () => {
+  it('defaults to true when unset', () => {
+    vi.stubEnv('MATERNAL_SCREEN_SHADOW_MODE', '');
+    expect(isMaternalScreenShadowMode()).toBe(true);
+  });
+
+  it('returns false when explicitly set to false', () => {
+    vi.stubEnv('MATERNAL_SCREEN_SHADOW_MODE', 'false');
+    expect(isMaternalScreenShadowMode()).toBe(false);
+  });
+
+  it('returns true when set to other values', () => {
+    vi.stubEnv('MATERNAL_SCREEN_SHADOW_MODE', 'true');
+    expect(isMaternalScreenShadowMode()).toBe(true);
+
+    vi.stubEnv('MATERNAL_SCREEN_SHADOW_MODE', '1');
+    expect(isMaternalScreenShadowMode()).toBe(true);
+
+    vi.stubEnv('MATERNAL_SCREEN_SHADOW_MODE', 'yes');
+    expect(isMaternalScreenShadowMode()).toBe(true);
+  });
+});
+
+describe('isMaternalScreenUiEnabled', () => {
+  it('defaults to false when unset', () => {
+    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', '');
+    expect(isMaternalScreenUiEnabled()).toBe(false);
+  });
+
+  it('returns true when explicitly set to true', () => {
+    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', 'true');
+    expect(isMaternalScreenUiEnabled()).toBe(true);
+  });
+
+  it('returns false for non-truthy values', () => {
+    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', 'false');
+    expect(isMaternalScreenUiEnabled()).toBe(false);
+
+    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', '1');
+    expect(isMaternalScreenUiEnabled()).toBe(false);
+
+    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', 'yes');
+    expect(isMaternalScreenUiEnabled()).toBe(false);
+  });
+});
+
+describe('isMaternalScreenEventsEnabled', () => {
+  it('defaults to false when unset', () => {
+    vi.stubEnv('MATERNAL_SCREEN_EVENTS_ENABLED', '');
+    expect(isMaternalScreenEventsEnabled()).toBe(false);
+  });
+
+  it('returns true when explicitly set to true', () => {
+    vi.stubEnv('MATERNAL_SCREEN_EVENTS_ENABLED', 'true');
+    expect(isMaternalScreenEventsEnabled()).toBe(true);
+  });
+
+  it('returns false for non-truthy values', () => {
+    vi.stubEnv('MATERNAL_SCREEN_EVENTS_ENABLED', 'false');
+    expect(isMaternalScreenEventsEnabled()).toBe(false);
+
+    vi.stubEnv('MATERNAL_SCREEN_EVENTS_ENABLED', '1');
+    expect(isMaternalScreenEventsEnabled()).toBe(false);
+
+    vi.stubEnv('MATERNAL_SCREEN_EVENTS_ENABLED', 'yes');
+    expect(isMaternalScreenEventsEnabled()).toBe(false);
   });
 });
