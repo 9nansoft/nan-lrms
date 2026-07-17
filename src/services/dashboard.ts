@@ -312,7 +312,8 @@ function projectMaternalScreenFields(
     };
   }
   return {
-    maternalScreenLocalTier: (row.maternal_screen_local_tier as MaternalScreenLocalTier | null) ?? null,
+    maternalScreenLocalTier:
+      (row.maternal_screen_local_tier as MaternalScreenLocalTier | null) ?? null,
     maternalScreenEmergencyAcuity:
       (row.maternal_screen_emergency_acuity as MaternalEmergencyAcuity | null) ?? null,
     maternalScreenIsComplete: row.maternal_screen_is_complete ?? null,

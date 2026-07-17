@@ -43,7 +43,13 @@ export interface MaternalScreenCellProps {
 const WRAPPER_TITLE = 'การคัดกรองท้องถิ่น (โหมดเงา — ยังไม่ได้รับการรับรอง)';
 const INCOMPLETE_TITLE = 'การประเมินไม่สมบูรณ์';
 
-function TierChip({ tier, variant }: { tier: MaternalScreenLocalTier; variant: 'light' | 'kiosk' }) {
+function TierChip({
+  tier,
+  variant,
+}: {
+  tier: MaternalScreenLocalTier;
+  variant: 'light' | 'kiosk';
+}) {
   const isKiosk = variant === 'kiosk';
   const table = isKiosk ? MATERNAL_SCREEN_TIER_COLOR_KIOSK : MATERNAL_SCREEN_TIER_COLOR;
   const fallback = isKiosk ? MATERNAL_SCREEN_FALLBACK_COLOR_KIOSK : MATERNAL_SCREEN_FALLBACK_COLOR;

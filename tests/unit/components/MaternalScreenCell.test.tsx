@@ -26,9 +26,7 @@ function assertNoGreenInTree(container: HTMLElement): void {
   for (const el of Array.from(all)) {
     const style = el.getAttribute('style') ?? '';
     for (const pattern of GREEN_PATTERNS) {
-      expect(pattern.test(style), `element style="${style}" must not match ${pattern}`).toBe(
-        false,
-      );
+      expect(pattern.test(style), `element style="${style}" must not match ${pattern}`).toBe(false);
     }
   }
 }
