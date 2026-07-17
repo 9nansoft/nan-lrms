@@ -20,8 +20,16 @@
 
 import type { BedOccupancyFull } from '@/types/maternity-ward';
 import type { ConnectionConfig } from '@/types/bms-browser';
+import type { MaternalScreenSummaryItem } from '@/types/api';
 import { maskName } from '@/lib/pii-mask';
 import { PatientPhoto } from '@/components/shared/PatientPhoto';
+import {
+  MATERNAL_SCREEN_TIER_LABEL_TH,
+  MATERNAL_SCREEN_TIER_COLOR,
+  EMERGENCY_ACUITY_LABEL_TH,
+  EMERGENCY_ACUITY_COLOR,
+  MATERNAL_SCREEN_FALLBACK_COLOR,
+} from '@/config/maternal-screen-display';
 
 export interface BedTileFullProps {
   bedno: string;
@@ -38,6 +46,16 @@ export interface BedTileFullProps {
    *  without a live session. */
   config?: ConnectionConfig | null;
   marketplaceToken?: string | null;
+  /**
+   * Cross-source maternal-screen summary for THIS occupant (Phase 6 Task H4,
+   * docs/superpowers/plans/2026-07-17-maternal-screening-hosxp.md GC-H3/GC-H4).
+   * Resolved by the caller (WardLayoutViewFull, keyed by `occupant.an`) from
+   * the central-DB `useMaternalScreenSummaries` fetch — this tile never
+   * fetches on its own. `undefined`/`null`, or a summary with both axes
+   * null, renders zero DOM here: a missing/failed central fetch must degrade
+   * to "no chips", never an error tile (GC-H4).
+   */
+  maternalScreenSummary?: MaternalScreenSummaryItem | null;
 }
 
 // Categorical clinical colors — kept as constants so the JSX inline `style`
@@ -110,6 +128,21 @@ function fmtBodyMetrics(o: BedOccupancyFull): string {
     o.last_bsa !== null && o.last_bsa !== undefined ? `BSA ${fmtDecimal(o.last_bsa, 2)}` : null,
   ].filter(Boolean);
   return items.length > 0 ? items.join(' · ') : '—';
+}
+
+// Short relative age ("5m" / "2h" / "3d") for the maternal-screen pill
+// tooltip, driven by the tile's `now` prop rather than src/lib/relative-time.ts's
+// formatRelativeAge (which calls Date.now() internally) — the tile's
+// render-purity contract (see the `now` prop doc above) forbids that.
+function fmtScreenAge(assessedAt: string | null, now: number): string | null {
+  if (!assessedAt) return null;
+  const ms = Date.parse(assessedAt);
+  if (!Number.isFinite(ms)) return null;
+  const diffMin = Math.floor(Math.max(0, now - ms) / 60_000);
+  if (diffMin < 60) return `${Math.max(1, diffMin)}m`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h`;
+  return `${Math.floor(diffHr / 24)}d`;
 }
 
 // Hours-since-admit, formatted HH:MM. Used both for severity and the tile
@@ -362,6 +395,27 @@ const compactKeyStyle: React.CSSProperties = {
   marginBottom: 1,
 };
 
+// Maternal-screen pill — same outlined-pill recipe as the blood_grp identity
+// pill above (mono, 9px, 700 weight, 0.16em tracking, 2px 6px padding,
+// uppercase, 1px radius, colored text + matching 1px border, no fill), but
+// colored from the maternal-screen-display LIGHT tokens instead of a fixed
+// C.* constant (GC-H3: this file's crit red stays reserved for the tile-level
+// alarm; a pill may reuse that same red value for its own text/border only).
+function screenPillStyle(color: string): React.CSSProperties {
+  return {
+    fontFamily: FONT_MONO,
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: '0.16em',
+    padding: '2px 6px',
+    textTransform: 'uppercase',
+    borderRadius: 1,
+    color,
+    border: `1px solid ${color}`,
+    whiteSpace: 'nowrap',
+  };
+}
+
 const compactValueStyle: React.CSSProperties = {
   fontFamily: FONT_SANS,
   fontSize: 11,
@@ -383,6 +437,7 @@ export function BedTileFull({
   onClick,
   config,
   marketplaceToken,
+  maternalScreenSummary,
 }: BedTileFullProps) {
   if (bedLock === 'Y') return <LockedTile bedno={bedno} />;
   if (!occupant) return <EmptyTile bedno={bedno} />;
@@ -390,6 +445,16 @@ export function BedTileFull({
   const stage = classify(occupant, now);
   const isCrit = stage.kind === 'crit';
   const age = calcAge(occupant.birthday, now);
+
+  // Cross-source maternal-screen pills (Task H4) — zero DOM unless at least
+  // one axis is present (GC-H4: absent/both-null summary ⇒ tile renders
+  // exactly as today).
+  const screenTier = maternalScreenSummary?.localTier ?? null;
+  const screenAcuity = maternalScreenSummary?.emergencyAcuity ?? null;
+  const showScreenPills = screenTier !== null || screenAcuity !== null;
+  const screenAgeLabel = showScreenPills
+    ? fmtScreenAge(maternalScreenSummary?.assessedAt ?? null, now)
+    : null;
 
   // Status pill background per stage
   const pillBg = isCrit
@@ -552,6 +617,46 @@ export function BedTileFull({
               }}
             >
               {occupant.blood_grp}
+            </span>
+          )}
+          {/* Cross-source maternal-screen pills (Task H4, GC-H3/GC-H4) — shadow-mode,
+              provisional/unapproved rule set. Zero DOM when no summary or both axes
+              are null; NEVER alters tile-level border/shadow/background (that stays
+              reserved for the crit bed alarm above). */}
+          {showScreenPills && (
+            <span
+              data-testid="bed-maternal-screen"
+              title="การคัดกรองท้องถิ่น (โหมดเงา — ยังไม่ได้รับการรับรอง)"
+              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              {screenTier && (
+                <span
+                  data-testid="bed-maternal-screen-tier"
+                  style={screenPillStyle(
+                    MATERNAL_SCREEN_TIER_COLOR[screenTier] ?? MATERNAL_SCREEN_FALLBACK_COLOR,
+                  )}
+                >
+                  {MATERNAL_SCREEN_TIER_LABEL_TH[screenTier]}
+                </span>
+              )}
+              {screenAcuity && (
+                <span
+                  data-testid="bed-maternal-screen-acuity"
+                  style={screenPillStyle(
+                    EMERGENCY_ACUITY_COLOR[screenAcuity] ?? MATERNAL_SCREEN_FALLBACK_COLOR,
+                  )}
+                >
+                  {EMERGENCY_ACUITY_LABEL_TH[screenAcuity]}
+                </span>
+              )}
+              {screenAgeLabel && (
+                <span
+                  data-testid="bed-maternal-screen-age"
+                  style={{ fontSize: 8.5, color: C.mute }}
+                >
+                  {screenAgeLabel}
+                </span>
+              )}
             </span>
           )}
         </div>

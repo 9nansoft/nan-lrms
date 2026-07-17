@@ -431,6 +431,38 @@ export interface MaternalScreenAssessmentsResponse {
 }
 
 /**
+ * One AN's cross-source screening summary, shaped for the ward bed-tile join
+ * (Phase 6 Task H4, docs/superpowers/plans/2026-07-17-maternal-screening-hosxp.md
+ * GC-H4). Mirrors the `cached_patients.maternal_screen_*` summary projection
+ * (same fields as `getHighRiskPatients`/`getHospitalPatientList` in
+ * src/services/dashboard.ts) but keyed by `an` instead of nested in a full
+ * patient row, since the ward page's occupancy comes from LIVE HOSxP (BMS
+ * Session), not this central-DB row.
+ *
+ * GC3: `localTier`/`emergencyAcuity`/`isComplete` are the same distinct
+ * vocabulary as `MaternalScreenAssessmentDto` above — never collapsed into
+ * `CdssSeverity` or `AncRiskLevel`.
+ */
+export interface MaternalScreenSummaryItem {
+  an: string;
+  localTier: MaternalScreenLocalTier | null;
+  emergencyAcuity: MaternalEmergencyAcuity | null;
+  isComplete: boolean | null;
+  assessedAt: string | null;
+}
+
+/**
+ * GET /api/hospitals/{hcode}/maternal-screen-summaries response (Task H4).
+ * `uiEnabled` is server-computed from MATERNAL_SCREEN_UI_ENABLED (GC-H4/W1);
+ * when false, `summaries` is always `[]` regardless of what's persisted, so
+ * a stale client can never render a chip the flag says should be hidden.
+ */
+export interface MaternalScreenSummariesResponse {
+  uiEnabled: boolean;
+  summaries: MaternalScreenSummaryItem[];
+}
+
+/**
  * SSE state-change event (spec §10.4). Broadcast on the `patient-update`
  * channel, POST-COMMIT, ONLY for a meaningful transition (localTier changed
  * OR emergencyAcuity changed), ONLY when `isMaternalScreenEventsEnabled()`

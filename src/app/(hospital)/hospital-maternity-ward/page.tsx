@@ -21,6 +21,7 @@ import { useMaternityWardStateFull } from '@/hooks/useMaternityWardStateFull';
 import { useOnboardHosxpWebhook } from '@/hooks/useOnboardHosxpWebhook';
 import { useOnboardHosxpSync } from '@/hooks/useOnboardHosxpSync';
 import { useBrowserPoll } from '@/hooks/useBrowserPoll';
+import { useMaternalScreenSummaries } from '@/hooks/useMaternalScreenSummaries';
 import { WardLayoutViewFull, type BedMovePayload } from '@/components/maternity/WardLayoutViewFull';
 import { PatientDrawer } from '@/components/maternity/PatientDrawer';
 import { getBedMoveReasons, movePatientBed } from '@/services/maternity-ward';
@@ -96,6 +97,12 @@ export default function HospitalMaternityWardPage() {
   // ipt_labour / partograph updates to the central cache after server-side
   // polling was disabled.
   useBrowserPoll();
+  // Cross-source maternal-screen summaries (Phase 6 Task H4, GC-H4) — a
+  // SEPARATE central-DB fetch, independent of the live HOSxP feed above. A
+  // failed/slow fetch here degrades `byAn` to an empty map (see the hook),
+  // so every bed tile renders exactly as it does today; it can never block
+  // or error the ward board.
+  const { byAn: maternalScreenSummaries } = useMaternalScreenSummaries(userInfo?.hospcode ?? null);
   const [onboardingErrorDismissed, setOnboardingErrorDismissed] = useState(false);
   const showOnboardingError = !!onboardingState?.error && !onboardingErrorDismissed;
 
@@ -573,6 +580,7 @@ export default function HospitalMaternityWardPage() {
           reasons={reasons}
           config={config}
           marketplaceToken={marketplaceToken}
+          maternalScreenSummaries={maternalScreenSummaries}
         />
       </div>
 

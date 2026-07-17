@@ -28,6 +28,7 @@ import { decideBedMoveAction, type BedMoveDecision } from './decideBedMoveAction
 import { BedMoveReasonModal } from './BedMoveReasonModal';
 import type { BedSlot, BedOccupancyFull } from '@/types/maternity-ward';
 import type { ConnectionConfig } from '@/types/bms-browser';
+import type { MaternalScreenSummaryItem } from '@/types/api';
 
 export interface BedMovePayload {
   an: string;
@@ -65,6 +66,16 @@ export interface WardLayoutViewFullProps {
   /** Active BMS connection — forwarded to each tile to enable patient photos. */
   config?: ConnectionConfig | null;
   marketplaceToken?: string | null;
+  /**
+   * Cross-source maternal-screen summaries, keyed by AN (Phase 6 Task H4,
+   * GC-H4). Looked up HERE (at the layout level, by `occupant.an`) rather
+   * than passed whole into DraggableBedTile — that keeps DraggableBedTile's
+   * change to a single passthrough prop (a resolved item, not a Map) and
+   * keeps BedTileFull's contract simple (one summary object, not a lookup).
+   * `undefined`/`null` (fetch not started, or failed) means every tile
+   * resolves to `null` — GC-H4 degrade-to-no-chips, never an error tile.
+   */
+  maternalScreenSummaries?: Map<string, MaternalScreenSummaryItem> | null;
 }
 
 interface RoomGroup {
@@ -117,6 +128,8 @@ interface DraggableBedTileProps {
   onBedClick?: (an: string) => void;
   config?: ConnectionConfig | null;
   marketplaceToken?: string | null;
+  /** Already resolved by the caller (WardLayoutViewFull) via occupant.an — see maternalScreenSummaries above. */
+  maternalScreenSummary?: MaternalScreenSummaryItem | null;
 }
 
 // Per-bed wrapper that enrols the tile as both droppable (always) and
@@ -130,6 +143,7 @@ function DraggableBedTile({
   onBedClick,
   config,
   marketplaceToken,
+  maternalScreenSummary,
 }: DraggableBedTileProps) {
   const id = dragId(bed);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id });
@@ -165,6 +179,7 @@ function DraggableBedTile({
         onClick={onBedClick}
         config={config}
         marketplaceToken={marketplaceToken}
+        maternalScreenSummary={maternalScreenSummary}
       />
     </div>
   );
@@ -180,6 +195,7 @@ export function WardLayoutViewFull({
   onMoveRejected,
   config,
   marketplaceToken,
+  maternalScreenSummaries,
 }: WardLayoutViewFullProps) {
   const rooms = groupByRoom(beds);
   const occupantByBedno = new Map(occupancy.map((o) => [o.bedno, o] as const));
@@ -324,17 +340,23 @@ export function WardLayoutViewFull({
                   gap: 20,
                 }}
               >
-                {room.beds.map((b) => (
-                  <DraggableBedTile
-                    key={b.bedno}
-                    bed={b}
-                    occupant={occupantByBedno.get(b.bedno) ?? null}
-                    now={now}
-                    onBedClick={onBedClick}
-                    config={config}
-                    marketplaceToken={marketplaceToken}
-                  />
-                ))}
+                {room.beds.map((b) => {
+                  const occupant = occupantByBedno.get(b.bedno) ?? null;
+                  return (
+                    <DraggableBedTile
+                      key={b.bedno}
+                      bed={b}
+                      occupant={occupant}
+                      now={now}
+                      onBedClick={onBedClick}
+                      config={config}
+                      marketplaceToken={marketplaceToken}
+                      maternalScreenSummary={
+                        occupant ? (maternalScreenSummaries?.get(occupant.an) ?? null) : null
+                      }
+                    />
+                  );
+                })}
               </div>
             </section>
           );

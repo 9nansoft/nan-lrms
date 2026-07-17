@@ -37,6 +37,7 @@ import { ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
 import { AncRiskLevel } from '@/types/domain';
 import { isMaternalScreenUiEnabled } from '@/lib/feature-flags';
 import type { MaternalScreenLocalTier, MaternalEmergencyAcuity } from '@/types/maternal-screening';
+import type { MaternalScreenSummaryItem } from '@/types/api';
 
 // Reusable subquery — every cached_*/maternal_journeys aggregate joins this
 // against the relevant hospital_id column to honor the operational
@@ -614,6 +615,67 @@ export async function getHospitalPatientList(
       totalPages: Math.ceil(total / perPage),
     },
   };
+}
+
+/**
+ * Phase 6 Task H4 (docs/superpowers/plans/2026-07-17-maternal-screening-hosxp.md,
+ * GC-H4) — per-AN maternal-screen summaries for one hospital's ACTIVE labor
+ * roster. Powers the ward-bed-tile cross-source join: the ward page's
+ * occupancy comes from LIVE HOSxP (BMS Session API), never this central DB,
+ * so the join happens client-side by `an` against this lean summary list.
+ *
+ * Lean sibling of `getHospitalPatientList` above — same
+ * `cached_patients JOIN hospitals WHERE hcode = ? AND labor_status = 'ACTIVE'`
+ * shape, but selects only the `an` + the four `maternal_screen_*` columns
+ * (no pagination, no CPD/partograph fields) since the caller only needs an
+ * `an → summary` lookup, not a patient list.
+ *
+ * GC-H4 flag gate: returns `[]` when `isMaternalScreenUiEnabled()` is false,
+ * mirroring `projectMaternalScreenFields`'s server-side null-out above — a
+ * flag-off hospital never has screening rows to join onto its bed tiles.
+ *
+ * Only rows with at least one non-null axis are returned (WHERE tier OR
+ * acuity IS NOT NULL) — an ACTIVE admission with no assessment yet has
+ * nothing to render as a pill, so it's excluded rather than returned as an
+ * all-null summary the caller would have to filter anyway.
+ */
+export async function listMaternalScreenSummariesForHospital(
+  db: DatabaseAdapter,
+  hcode: string,
+): Promise<MaternalScreenSummaryItem[]> {
+  if (!isMaternalScreenUiEnabled()) return [];
+
+  const rows = await db.query<{
+    an: string;
+    maternal_screen_local_tier: string | null;
+    maternal_screen_emergency_acuity: string | null;
+    maternal_screen_is_complete: boolean | null;
+    maternal_screen_assessed_at: string | Date | null;
+  }>(
+    `SELECT cp.an,
+            cp.maternal_screen_local_tier,
+            cp.maternal_screen_emergency_acuity,
+            cp.maternal_screen_is_complete,
+            cp.maternal_screen_assessed_at
+       FROM cached_patients cp
+       JOIN hospitals h ON h.id = cp.hospital_id
+      WHERE h.hcode = ?
+        AND cp.labor_status = 'ACTIVE'
+        AND (cp.maternal_screen_local_tier IS NOT NULL
+             OR cp.maternal_screen_emergency_acuity IS NOT NULL)`,
+    [hcode],
+  );
+
+  // Same raw-string cast + toIsoString normalization convention as
+  // projectMaternalScreenFields above (GC3: out-of-vocabulary values pass
+  // through as-is; the display-token layer's TOKEN[v] ?? FALLBACK handles it).
+  return rows.map((r) => ({
+    an: r.an,
+    localTier: (r.maternal_screen_local_tier as MaternalScreenLocalTier | null) ?? null,
+    emergencyAcuity: (r.maternal_screen_emergency_acuity as MaternalEmergencyAcuity | null) ?? null,
+    isComplete: r.maternal_screen_is_complete ?? null,
+    assessedAt: toIsoString(r.maternal_screen_assessed_at),
+  }));
 }
 
 // T14: Stage KPIs — pregnancy/labor/delivered counts by risk level
