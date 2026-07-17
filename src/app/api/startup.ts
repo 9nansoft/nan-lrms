@@ -12,6 +12,7 @@ import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { SseManager } from '@/lib/sse';
 import { stopPolling } from '@/services/sync';
+import { scheduleAuditLogRetention, stopAuditLogRetentionSchedule } from '@/services/audit-retention';
 import { logger } from '@/lib/logger';
 
 // HMR- and bundle-safe init flag (pair with ensure-init.ts singleton).
@@ -121,6 +122,20 @@ export async function initializeApp(): Promise<void> {
       logger.info('hosxp_polling_disabled_browser_only_mode', {});
     }
 
+    // 6. Audit log retention (operator-requested 2026-07-17): production
+    //    audit_logs reached 1.8GB / 4.3M rows with no retention policy.
+    //    scheduleAuditLogRetention fires the first batched purge a few
+    //    seconds from now (NOT awaited — a 4.3M-row backlog could take
+    //    minutes and must not delay this ~700ms startup path) and re-runs
+    //    it daily for the life of the process. Window is configurable via
+    //    AUDIT_LOG_RETENTION_DAYS (default 30 days); see
+    //    src/services/audit-retention.ts. Gated off in tests the same way
+    //    HOSxP polling is above — a background timer has no place in a unit
+    //    test process.
+    if (process.env.NODE_ENV !== 'test') {
+      scheduleAuditLogRetention(db);
+    }
+
     _flag.done = true;
     const elapsed = Date.now() - startTime;
     logger.info('initialization_completed', { elapsedMs: elapsed });
@@ -133,6 +148,7 @@ export async function initializeApp(): Promise<void> {
 export async function shutdownApp(): Promise<void> {
   logger.info('shutdown_started', {});
   stopPolling();
+  stopAuditLogRetentionSchedule();
   await closeDatabase();
   SseManager.getInstance().destroy();
   _flag.done = false;
