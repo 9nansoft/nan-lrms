@@ -601,8 +601,13 @@ describe('Suite 2: ANC Processing Validation', () => {
     const payload = loadFixture<WebhookAncPayload>('anc-patients.json');
     await processAncWebhook(db, hospitalId, payload, asSse(sseManager));
 
+    // Coalesced contract (2026-07-17): ONE bulk event per ingest call whose
+    // counts cover every processed patient — not one event per patient.
     const journeyEvents = sseManager.getEventsByType('journey_update');
-    expect(journeyEvents.length).toBe(payload.patients.length);
+    expect(journeyEvents).toHaveLength(1);
+    const evt = journeyEvents[0].data as Record<string, unknown>;
+    expect(evt.bulk).toBe(true);
+    expect(Number(evt.created) + Number(evt.updated)).toBe(payload.patients.length);
   });
 
   it('second call with same data updates rather than duplicates', async () => {

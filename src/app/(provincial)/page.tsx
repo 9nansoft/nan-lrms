@@ -4,7 +4,8 @@
 // institutional-navy accent, shared IA across normal + kiosk modes.
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { debounceLeadingTrailing, SSE_REFRESH_DEBOUNCE_MS } from '@/lib/debounce';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useHighRiskPatients } from '@/hooks/useHighRiskPatients';
 import { useSSE, type SseConnectionState } from '@/hooks/useSSE';
@@ -201,10 +202,22 @@ export default function DashboardPage() {
   };
   const syncing = browserPollState.isRunning;
 
+  // SSE reaction is debounced (leading+trailing): sync cycles from ~24
+  // hospitals arrive continuously, and an undebounced refetch-per-event was
+  // the 2026-07-17 79-req/s incident. Built over the stable SWR mutates so
+  // the debouncer's timer state survives re-renders.
+  const debouncedSseRefresh = useMemo(
+    () =>
+      debounceLeadingTrailing(() => {
+        mutate();
+        hrMutate();
+      }, SSE_REFRESH_DEBOUNCE_MS),
+    [mutate, hrMutate],
+  );
   const { connectionState: sseState } = useSSE({
-    onPatientUpdate: refreshAll,
+    onPatientUpdate: debouncedSseRefresh,
     onConnectionStatus: () => mutate(),
-    onSyncComplete: refreshAll,
+    onSyncComplete: debouncedSseRefresh,
   });
   const sseMeta = SSE_STATUS_META[sseState];
 

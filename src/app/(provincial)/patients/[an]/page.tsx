@@ -1,6 +1,7 @@
 'use client';
 
-import { use, useRef, useState } from 'react';
+import { use, useMemo, useRef, useState } from 'react';
+import { debounceLeadingTrailing, SSE_REFRESH_DEBOUNCE_MS } from '@/lib/debounce';
 import { useRouter } from 'next/navigation';
 import { usePatient } from '@/hooks/usePatient';
 import { usePartogram } from '@/hooks/usePartogram';
@@ -123,15 +124,20 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
 
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: `AN ${patientId}` }]);
 
+  // Debounced SSE reaction (2026-07-17 incident: refetch-per-event across
+  // continuous sync cycles). Stable across renders via the SWR mutates.
+  const screeningsMutate = screenings.mutate;
+  const debouncedSseRefresh = useMemo(
+    () =>
+      debounceLeadingTrailing(() => {
+        mutate();
+        screeningsMutate();
+      }, SSE_REFRESH_DEBOUNCE_MS),
+    [mutate, screeningsMutate],
+  );
   useSSE({
-    onPatientUpdate: () => {
-      mutate();
-      screenings.mutate();
-    },
-    onSyncComplete: () => {
-      mutate();
-      screenings.mutate();
-    },
+    onPatientUpdate: debouncedSseRefresh,
+    onSyncComplete: debouncedSseRefresh,
   });
 
   if (isLoading) {

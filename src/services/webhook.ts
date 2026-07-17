@@ -1612,13 +1612,9 @@ export async function processAncWebhook(
           await tx.execute(`DELETE FROM maternal_journeys WHERE id = ?`, [existing.id]);
         });
         deleted++;
-
-        sseManager.broadcast('patient-update', {
-          type: 'journey_update',
-          hcode,
-          journeyId: existing.id,
-          careStage: 'DELETED',
-        });
+        // No per-journey broadcast — the coalesced bulk journey_update after
+        // the loop covers deletes via its `deleted` count (2026-07-17
+        // dashboard incident: per-row events × every tab = 79 req/s).
       }
       continue;
     }
@@ -1721,8 +1717,10 @@ export async function processAncWebhook(
 
     // ONE transaction per patient (specs 3.2 + 3.3): journey update-or-create
     // (including pregnancy rollover), location update, and the risk screening
-    // commit or roll back together. SSE fires only after commit.
-    const sseEvents: Array<Record<string, unknown>> = [];
+    // commit or roll back together. SSE is coalesced: ONE bulk journey_update
+    // fires after the whole loop (see end of function) — per-pregnancy events
+    // at 300+ pregnancies/push amplified into ~79 req/s of dashboard refetch
+    // across connected tabs (2026-07-17 incident).
     const journeyId = await db.transaction(async (tx) => {
       let id: string;
       if (!shouldCreateNew && existing) {
@@ -1743,14 +1741,6 @@ export async function processAncWebhook(
           ],
         );
         id = existing.id;
-
-        sseEvents.push({
-          type: 'journey_update',
-          hcode,
-          journeyId: existing.id,
-          careStage: existing.careStage,
-          ancRiskLevel: persistedRisk ?? existing.ancRiskLevel ?? undefined,
-        });
         updated++;
       } else {
         // If the prior journey is still PREGNANCY/LABOR for this hospital,
@@ -1785,14 +1775,6 @@ export async function processAncWebhook(
           ancRiskLevel: canonicalRisk ?? AncRiskLevel.LOW,
         });
         id = journey.id;
-
-        sseEvents.push({
-          type: 'journey_update',
-          hcode,
-          journeyId: journey.id,
-          careStage: 'PREGNANCY',
-          ancRiskLevel: canonicalRisk ?? undefined,
-        });
         created++;
       }
 
@@ -1824,9 +1806,6 @@ export async function processAncWebhook(
 
       return id;
     });
-    for (const event of sseEvents) {
-      sseManager.broadcast('patient-update', event);
-    }
 
     // Persist ANC visit records — HOSPITAL-SCOPED replace (WHO containment T5).
     // The journey is shared cross-hospital via cid_hash, so an UNSCOPED delete
@@ -2125,6 +2104,23 @@ export async function processAncWebhook(
       updated,
       deleted,
       skippedInvalidCidChecksum,
+    });
+  }
+
+  // ONE coalesced broadcast per ANC ingest call (2026-07-17 dashboard
+  // incident: a per-pregnancy journey_update at 300+ pregnancies/push made
+  // every open tab refetch per event — ~79 req/s from four sessions).
+  // Clients treat any patient-update as "revalidate", so a single bulk
+  // event with counts carries the same refresh signal at 1/300th the rate.
+  // All per-patient transactions above have committed by this point.
+  if (created + updated + deleted > 0) {
+    sseManager.broadcast('patient-update', {
+      type: 'journey_update',
+      hcode,
+      bulk: true,
+      created,
+      updated,
+      deleted,
     });
   }
 

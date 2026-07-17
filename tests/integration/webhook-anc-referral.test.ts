@@ -120,9 +120,13 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(journeys[0].care_stage).toBe('PREGNANCY');
       expect(journeys[0].anc_risk_level).toBe('LOW');
 
-      // SSE journey_update broadcast
+      // ONE coalesced journey_update broadcast per ingest call (2026-07-17
+      // dashboard incident: per-pregnancy events amplified into ~79 req/s).
       const sse = sseManager.getEventsByType('journey_update');
-      expect(sse.length).toBeGreaterThanOrEqual(1);
+      expect(sse).toHaveLength(1);
+      const evt = sse[0].data as Record<string, unknown>;
+      expect(evt.bulk).toBe(true);
+      expect(evt.created).toBe(1);
     });
   });
 
@@ -239,12 +243,14 @@ describe('ANC/Referral Webhook Integration', () => {
       );
       expect(after[0].anc_risk_level).toBe('HR2');
 
-      // SSE journey_update must carry the level actually persisted (HR2), not
-      // the rejected LOW.
+      // WHO T4 invariant, coalesced-broadcast form: the event stream must
+      // never ANNOUNCE the rejected LOW. Bulk events carry only counts — no
+      // per-journey level exists to mislead; assert nothing carries a level.
       const sse = sseManager.getEventsByType('journey_update');
       expect(sse.length).toBeGreaterThanOrEqual(1);
-      const evt = sse[sse.length - 1].data as Record<string, unknown>;
-      expect(evt.ancRiskLevel).toBe('HR2');
+      for (const e of sse) {
+        expect((e.data as Record<string, unknown>).ancRiskLevel).toBeUndefined();
+      }
     });
 
     it('empty riskItemIds ([]) cannot lower a known journey risk — HR3 stays, no new screening row (WHO T4 prod bug)', async () => {
@@ -315,11 +321,13 @@ describe('ANC/Referral Webhook Integration', () => {
       );
       expect(screeningAfter[0].count).toBe(screeningBefore[0].count);
 
-      // SSE journey_update must carry the persisted HR3, not the rejected LOW.
+      // WHO T4 invariant, coalesced-broadcast form: no event may announce the
+      // rejected LOW (bulk events carry counts only — no level field at all).
       const sse = sseManager.getEventsByType('journey_update');
       expect(sse.length).toBeGreaterThanOrEqual(1);
-      const evt = sse[sse.length - 1].data as Record<string, unknown>;
-      expect(evt.ancRiskLevel).toBe('HR3');
+      for (const e of sse) {
+        expect((e.data as Record<string, unknown>).ancRiskLevel).toBeUndefined();
+      }
     });
   });
 
@@ -391,11 +399,12 @@ describe('ANC/Referral Webhook Integration', () => {
       ]);
       expect(visits).toHaveLength(0);
 
-      // SSE broadcast with DELETED stage
+      // Coalesced broadcast covers the delete via its counts.
       const sse = sseManager.getEventsByType('journey_update');
       expect(sse.length).toBeGreaterThanOrEqual(1);
-      const evt = sse[0].data as Record<string, unknown>;
-      expect(evt.careStage).toBe('DELETED');
+      const evt = sse[sse.length - 1].data as Record<string, unknown>;
+      expect(evt.bulk).toBe(true);
+      expect(evt.deleted).toBe(1);
     });
 
     it('delete of non-existent patient is a no-op (deleted = 0)', async () => {

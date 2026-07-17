@@ -157,6 +157,33 @@ export async function cacheSetJson<T>(key: string, value: T, ttlSeconds: number)
   await setRaw(key, JSON.stringify(value), ttlSeconds);
 }
 
+/**
+ * Atomic set-if-absent with TTL. Returns true when THIS caller claimed the
+ * key (it did not exist), false when someone else holds it. Used for
+ * single-flight recompute locks and once-per-window sampling (e.g. audit
+ * sampling on polled read routes — 2026-07-17 dashboard incident: 79 req/s
+ * each paying an audit INSERT). Falls back to the in-memory store when Redis
+ * is down — per-process-correct, which is acceptable for locks/sampling
+ * (worst case: one extra recompute or audit row per process).
+ */
+export async function cacheSetNx(key: string, ttlSeconds: number): Promise<boolean> {
+  const fullKey = namespaced(key);
+  const redis = await getRedisClient();
+  if (redis) {
+    try {
+      const res = await redis.set(fullKey, '1', { EX: ttlSeconds, NX: true });
+      return res !== null;
+    } catch (error) {
+      logger.warn('redis_command_failed_using_memory', { op: 'setnx', error });
+    }
+  }
+  cleanupExpiredMemory();
+  const store = memoryStore();
+  if (store.get(fullKey)) return false;
+  store.set(fullKey, { value: '1', expiresAt: Date.now() + ttlSeconds * 1000 });
+  return true;
+}
+
 export async function cacheKeys(pattern: string): Promise<string[]> {
   const fullPattern = namespaced(pattern);
   const prefix = namespaced('');

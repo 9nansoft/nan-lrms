@@ -7,7 +7,8 @@
 // tabular numerics, dense rows.
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { debounceLeadingTrailing, SSE_REFRESH_DEBOUNCE_MS } from '@/lib/debounce';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -203,9 +204,12 @@ function PregnanciesBoard() {
 
   // Real-time refresh on webhook/sync activity. Without this the table waits
   // up to 30s for the poll interval, which feels broken during simulation.
-  const refresh = useCallback(() => {
-    void mutate();
-  }, [mutate]);
+  // Debounced (leading+trailing) so continuous multi-hospital sync cycles
+  // can't turn every SSE event into a refetch (2026-07-17 incident).
+  const refresh = useMemo(
+    () => debounceLeadingTrailing(() => void mutate(), SSE_REFRESH_DEBOUNCE_MS),
+    [mutate],
+  );
   useSSE({ onPatientUpdate: refresh, onSyncComplete: refresh });
 
   const journeys = useMemo(() => data?.journeys ?? [], [data?.journeys]);

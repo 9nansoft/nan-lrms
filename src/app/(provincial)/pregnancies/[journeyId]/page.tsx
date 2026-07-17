@@ -4,7 +4,8 @@
 // and a WHO 8-contact tracker with next-due recommendation.
 'use client';
 
-import { use, useCallback } from 'react';
+import { use, useMemo } from 'react';
+import { debounceLeadingTrailing, SSE_REFRESH_DEBOUNCE_MS } from '@/lib/debounce';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import useSWR from 'swr';
@@ -972,10 +973,11 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
   );
 
   // Live updates: a webhook/sync touching this patient refreshes the page
-  // immediately instead of waiting for the poll. Matches the ANC list page.
-  const refresh = useCallback(() => {
-    void mutate();
-  }, [mutate]);
+  // (leading edge fires immediately; bursts coalesce — 2026-07-17 incident).
+  const refresh = useMemo(
+    () => debounceLeadingTrailing(() => void mutate(), SSE_REFRESH_DEBOUNCE_MS),
+    [mutate],
+  );
   useSSE({ onPatientUpdate: refresh, onSyncComplete: refresh });
 
   const journeyName = data?.journey?.name ?? 'Journey';
