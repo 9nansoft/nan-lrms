@@ -160,7 +160,7 @@ describe('POST /api/sync/browser-push — degraded newborn persist is diagnosabl
     // inside processBrowserNewborns, the fallback pass then throws out of it
     // → the route's persist_newborns catch runs.
     const wrapped = Object.create(real) as DatabaseAdapter;
-    wrapped.query = async <T,>(sql: string, params?: unknown[]): Promise<T[]> => {
+    wrapped.query = async <T>(sql: string, params?: unknown[]): Promise<T[]> => {
       if (sql.includes('FROM cached_patients')) {
         throw new Error('simulated cached_patients outage');
       }

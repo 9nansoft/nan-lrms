@@ -27,11 +27,7 @@ function loadCache(): Promise<CacheModule> {
 export type SyncRunOutcome = 'running' | 'success' | 'partial' | 'failed';
 // 'browser' = user's tab pulled HOSxP data via local-127.0.0.1 gateway and
 // pushed it to /api/sync/browser-push (avoids the rate-limited tunnel).
-export type SyncRunTrigger =
-  | 'scheduled'
-  | 'immediate'
-  | 'onboarding'
-  | 'browser';
+export type SyncRunTrigger = 'scheduled' | 'immediate' | 'onboarding' | 'browser';
 
 export interface SyncProgressStep extends PollHospitalStep {
   at: string;
@@ -118,9 +114,7 @@ export async function appendSyncStep(
 ): Promise<void> {
   try {
     const cache = await loadCache();
-    const run = await cache.cacheGetJson<SyncProgressRun>(
-      runKey(hospitalId, runId),
-    );
+    const run = await cache.cacheGetJson<SyncProgressRun>(runKey(hospitalId, runId));
     if (!run) return;
     run.steps.push({ ...step, at: new Date().toISOString() });
     await cache.cacheSetJson(runKey(hospitalId, runId), run, RUN_TTL_SEC);
@@ -139,14 +133,11 @@ export async function finalizeSyncRun(
 ): Promise<void> {
   try {
     const cache = await loadCache();
-    const run = await cache.cacheGetJson<SyncProgressRun>(
-      runKey(hospitalId, runId),
-    );
+    const run = await cache.cacheGetJson<SyncProgressRun>(runKey(hospitalId, runId));
     if (!run) return;
     const finishedAt = new Date().toISOString();
     run.finishedAt = finishedAt;
-    run.durationMs =
-      new Date(finishedAt).getTime() - new Date(run.startedAt).getTime();
+    run.durationMs = new Date(finishedAt).getTime() - new Date(run.startedAt).getTime();
     run.outcome = outcome;
     run.finalMessage = finalMessage;
     run.errorMessage = errorMessage;
@@ -157,9 +148,7 @@ export async function finalizeSyncRun(
   }
 }
 
-export async function getLatestSyncRun(
-  hospitalId: string,
-): Promise<SyncProgressRun | null> {
+export async function getLatestSyncRun(hospitalId: string): Promise<SyncProgressRun | null> {
   const cache = await loadCache();
   return cache.cacheGetJson<SyncProgressRun>(latestKey(hospitalId));
 }
@@ -204,17 +193,12 @@ export async function recordSkippedSyncRun(
   }
 }
 
-export async function listSyncRuns(
-  hospitalId: string,
-  limit = 20,
-): Promise<SyncProgressRun[]> {
+export async function listSyncRuns(hospitalId: string, limit = 20): Promise<SyncProgressRun[]> {
   const cache = await loadCache();
   const keys = await cache.cacheKeys(`sync:run:${hospitalId}:*`);
-  const runs = (
-    await Promise.all(
-      keys.map((k) => cache.cacheGetJson<SyncProgressRun>(k)),
-    )
-  ).filter((r): r is SyncProgressRun => r !== null);
+  const runs = (await Promise.all(keys.map((k) => cache.cacheGetJson<SyncProgressRun>(k)))).filter(
+    (r): r is SyncProgressRun => r !== null,
+  );
   // newest first — runId is ISO-timestamp-prefixed, so startedAt sort works.
   runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   return runs.slice(0, limit);

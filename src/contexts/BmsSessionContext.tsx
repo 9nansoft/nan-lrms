@@ -122,9 +122,7 @@ export function BmsSessionProvider({ children }: { children: ReactNode }) {
   // Bootstrap on mount: read URL session ID, persist to cookie, hydrate context.
   useEffect(() => {
     const authProvider =
-      typeof window !== 'undefined'
-        ? window.localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY)
-        : null;
+      typeof window !== 'undefined' ? window.localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) : null;
     if (authProvider === 'provider-id') {
       removeSessionCookie();
       removeMarketplaceToken();
