@@ -139,7 +139,7 @@ export function deriveTransportFromOracleInput(
     throw new Error(
       `deriveTransportFromOracleInput: oracle field "${camelKey}" has no known camelCase→snake_case ` +
         'mapping (checked MS_BOOLEAN_FIELD_MAP / MS_NUMERIC_FIELD_MAP from src/services/webhook.ts, ' +
-        'this file\'s ENUM_CAMEL_TO_SNAKE, and ADMISSION_CONTEXT_CAMEL_TO_SNAKE) — add it there before ' +
+        "this file's ENUM_CAMEL_TO_SNAKE, and ADMISSION_CONTEXT_CAMEL_TO_SNAKE) — add it there before " +
         'referencing it in a maternal-screening sim profile.',
     );
   }

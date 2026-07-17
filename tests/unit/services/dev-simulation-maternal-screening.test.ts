@@ -58,7 +58,8 @@ const ORACLE_CASES = clinicalCases as ClinicalCaseFixture[];
 
 function findOracleCase(name: string): ClinicalCaseFixture {
   const found = ORACLE_CASES.find((c) => c.name === name);
-  if (!found) throw new Error(`No oracle case named "${name}" in maternal-screen-clinical-cases.json`);
+  if (!found)
+    throw new Error(`No oracle case named "${name}" in maternal-screen-clinical-cases.json`);
   return found;
 }
 
@@ -72,22 +73,24 @@ describe('MATERNAL_SCREEN_SIM_PROFILES — static checks', () => {
   it('(c) every profile references an oracle case name that actually exists in the fixture', () => {
     for (const profile of MATERNAL_SCREEN_SIM_PROFILES) {
       const exists = ORACLE_CASES.some((c) => c.name === profile.oracleCase);
-      expect(exists, `profile "${profile.name}" references missing oracle case "${profile.oracleCase}"`).toBe(
-        true,
-      );
+      expect(
+        exists,
+        `profile "${profile.name}" references missing oracle case "${profile.oracleCase}"`,
+      ).toBe(true);
     }
   });
 
-  it('(c) every profile\'s oracleInput is copied verbatim from its named oracle case — no invented values', () => {
+  it("(c) every profile's oracleInput is copied verbatim from its named oracle case — no invented values", () => {
     for (const profile of MATERNAL_SCREEN_SIM_PROFILES) {
       const oracleCase = findOracleCase(profile.oracleCase);
-      expect(profile.oracleInput, `profile "${profile.name}" vs oracle case "${profile.oracleCase}"`).toEqual(
-        oracleCase.input,
-      );
+      expect(
+        profile.oracleInput,
+        `profile "${profile.name}" vs oracle case "${profile.oracleCase}"`,
+      ).toEqual(oracleCase.input);
     }
   });
 
-  it('(a) every profile\'s screening object uses ONLY MS_KNOWN_TRANSPORT_KEYS keys', () => {
+  it("(a) every profile's screening object uses ONLY MS_KNOWN_TRANSPORT_KEYS keys", () => {
     for (const profile of MATERNAL_SCREEN_SIM_PROFILES) {
       for (const key of Object.keys(profile.screening)) {
         expect(
@@ -199,10 +202,7 @@ describe('profile fidelity through the REAL ingest path (processWebhookPayload, 
    *  same shape generators.ts's generateLaborEvent() wires onto a real
    *  simulated labor payload (src/services/dev-simulation/generators.ts).
    *  hn/an are capped at 20 chars (src/db/tables/cached-patients.ts). */
-  function patientForProfile(
-    profile: MaternalScreenSimProfile,
-    an: string,
-  ): WebhookPatientPayload {
+  function patientForProfile(profile: MaternalScreenSimProfile, an: string): WebhookPatientPayload {
     return {
       hn: `H${an}`,
       an,
@@ -234,7 +234,10 @@ describe('profile fidelity through the REAL ingest path (processWebhookPayload, 
   for (const profileName of REPRESENTATIVE_PROFILE_NAMES) {
     it(`(b) profile "${profileName}" round-trips to its named oracle case's localTier/emergencyAcuity/isComplete`, async () => {
       const profile = MATERNAL_SCREEN_SIM_PROFILES.find((p) => p.name === profileName);
-      expect(profile, `profile "${profileName}" must exist in MATERNAL_SCREEN_SIM_PROFILES`).toBeDefined();
+      expect(
+        profile,
+        `profile "${profileName}" must exist in MATERNAL_SCREEN_SIM_PROFILES`,
+      ).toBeDefined();
       const oracleCase = findOracleCase(profile!.oracleCase);
 
       // hn/an are capped at 20 chars (src/db/tables/cached-patients.ts) —
