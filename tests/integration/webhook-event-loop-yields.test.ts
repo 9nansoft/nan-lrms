@@ -14,6 +14,8 @@
 //   3. On a realistically sized ANC bundle (~60 pregnancies through the real
 //      PGlite-backed path) at least one ACTUAL yield occurs (>= 1, never an
 //      exact count — yield counts are machine-speed-dependent by design).
+//   4. (Part 2) processPartographWebhook ticks per observation, and a
+//      budget-elapsed tick genuinely yields through that path.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import { createTestDb } from '../helpers/testDb';
@@ -26,8 +28,10 @@ import { CooperativeYielder } from '@/lib/event-loop';
 import {
   processAncWebhook,
   processWebhookPayload,
+  processPartographWebhook,
   type WebhookAncPayload,
   type WebhookPayload,
+  type WebhookPartographPayload,
 } from '@/services/webhook';
 
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
@@ -118,9 +122,65 @@ describe('Webhook processing — cooperative event-loop yields (page-stall fix)'
     const result = await processWebhookPayload(db, hospitalId, buildLaborPayload(), sse);
     expect(result.patientsProcessed).toBe(LABOR_BATCH_SIZE); // real path ran end-to-end
 
-    // Wiring proof: the journey-link loop ticks once per upserted patient.
-    // (The maternal-screening ingest loop is flag-gated and OFF here; the
-    // delete loop has no delete actions — so the floor is one batch's worth.)
-    expect(tickSpy.mock.calls.length).toBeGreaterThanOrEqual(LABOR_BATCH_SIZE);
+    // Wiring proof: part 2 also converted the AES transform `.map` to a
+    // ticking `for` loop, so with the journey-link loop the floor is TWO
+    // batches' worth of ticks. (The maternal-screening ingest loop is
+    // flag-gated and OFF here; the delete loop has no delete actions.)
+    expect(tickSpy.mock.calls.length).toBeGreaterThanOrEqual(2 * LABOR_BATCH_SIZE);
+  });
+
+  it('processPartographWebhook ticks per observation and a budget-elapsed tick actually yields', async () => {
+    // Seed an ACTIVE labor admission the observations can attach to.
+    const patientId = uuidv4();
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO cached_patients
+         (id, hospital_id, hn, an, name, age, admit_date,
+          labor_status, synced_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
+      [patientId, hospitalId, 'YLD-P-001', '68099001', 'enc', 27, now, now, now, now],
+    );
+
+    // The partograph transform loop is pure JS — far cheaper than 25ms per
+    // batch — so unlike the ANC test we cannot rely on wall-clock to elapse
+    // the budget. Deterministic seam instead: rewind the yielder's internal
+    // clock on every tick so the budget is ALWAYS elapsed, then delegate to
+    // the REAL tick. This proves both that the real path calls tick per
+    // observation AND that an actual setImmediate yield propagates through
+    // the path without corrupting processing.
+    const originalTick = CooperativeYielder.prototype.tick;
+    const tickSpy = vi
+      .spyOn(CooperativeYielder.prototype, 'tick')
+      .mockImplementation(async function (this: CooperativeYielder) {
+        (this as unknown as { last: number }).last = Date.now() - 60_000;
+        return originalTick.call(this);
+      });
+
+    const observationCount = 12;
+    const payload: WebhookPartographPayload = {
+      type: 'partograph',
+      hospitalCode: '99903',
+      observations: Array.from({ length: observationCount }, (_, i) => ({
+        an: '68099001',
+        externalObservationId: `yld-obs-${i + 1}`,
+        observeDatetime: new Date(Date.parse('2026-07-17T01:00:00Z') + i * 3600_000).toISOString(),
+        hourNo: i + 1,
+        fetalHeartRate: 140,
+        cervicalDilationCm: Math.min(4 + i, 10),
+      })),
+    };
+
+    const result = await processPartographWebhook(db, hospitalId, payload, sse);
+    expect(result.observationsAccepted).toBe(observationCount); // real path ran end-to-end
+    expect(result.observationsSkipped).toEqual([]);
+
+    // Wiring proof: one tick per observation in the transform loop.
+    expect(tickSpy.mock.calls.length).toBeGreaterThanOrEqual(observationCount);
+
+    // Behavior proof: with the budget forced elapsed, the real tick yielded
+    // through the partograph path at least once (>= 1, count-agnostic).
+    const yielders = new Set(tickSpy.mock.contexts as CooperativeYielder[]);
+    const totalYields = [...yielders].reduce((n, y) => n + y.yields, 0);
+    expect(totalYields).toBeGreaterThanOrEqual(1);
   });
 });

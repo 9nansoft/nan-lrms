@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'crypto';
 import { logger } from '@/lib/logger';
 import { normalizeHosxpDate, isPlausibleEventDate } from '@/lib/hosxp-date';
 import { transitionToDelivered } from '@/services/journey';
+import { CooperativeYielder } from '@/lib/event-loop';
 
 export async function syncNewbornData(
   db: DatabaseAdapter,
@@ -138,7 +139,12 @@ async function createRetroJourneysForUnresolved(
 ): Promise<number> {
   let created = 0;
   const key = getEncryptionKey();
+  // Bounded cooperative yielding (page-stall fix part 2): the 365-day
+  // backfill window can make this per-birth loop (query + insert each) large.
+  // No transaction is held here — callers pass the top-level adapter.
+  const yielder = new CooperativeYielder();
   for (const item of items) {
+    await yielder.tick();
     if (journeyByAn.has(item.an)) continue;
     const cid =
       item.motherCid && isValidThaiCidChecksum(String(item.motherCid))
@@ -332,7 +338,12 @@ export async function syncNewbornsFromRows(
     journeyByAn,
   );
 
+  // Bounded cooperative yielding (page-stall fix part 2): per-journey fan-out
+  // reachable from the browser-push newborn cycle; tick at the top of each
+  // outer iteration (syncNewbornData holds no transaction).
+  const yielder = new CooperativeYielder();
   for (const [an, infantRows] of byAn) {
+    await yielder.tick();
     const journeyId = journeyByAn.get(an);
     if (!journeyId) {
       result.skippedNoJourney += 1;
@@ -404,7 +415,12 @@ export async function syncNewbornsFromPregnancyRows(
     journeyByAn,
   );
 
+  // Bounded cooperative yielding (page-stall fix part 2): same rationale as
+  // syncNewbornsFromRows — per-delivery loop with per-item queries/upserts,
+  // no transaction held.
+  const yielder = new CooperativeYielder();
   for (const [an, row] of byAn) {
+    await yielder.tick();
     const journeyId = journeyByAn.get(an);
     if (!journeyId) {
       result.skippedNoJourney += 1;

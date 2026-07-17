@@ -1116,14 +1116,19 @@ export async function processWebhookPayload(
     deletedCount++;
   }
 
-  // Transform remaining patients (upsert) to SyncPatientData
+  // Transform remaining patients (upsert) to SyncPatientData. A `for` loop
+  // rather than `.map` so the per-patient AES work (name + cid encryption,
+  // SHA-256) can tick the yielder — mechanical conversion, identical output
+  // array (page-stall fix part 2).
   const toUpsert = payload.patients.filter((p) => p.action !== 'delete');
-  const patients: SyncPatientData[] = toUpsert.map((p) => {
+  const patients: SyncPatientData[] = [];
+  for (const p of toUpsert) {
+    await yielder.tick();
     const encryptedName = encrypt(p.name, encryptionKey);
     const encryptedCid = p.cid ? encrypt(p.cid, encryptionKey) : null;
     const cidHash = p.cid ? createHash('sha256').update(p.cid).digest('hex') : null;
 
-    return {
+    patients.push({
       hn: p.hn,
       an: p.an,
       name: encryptedName,
@@ -1156,8 +1161,8 @@ export async function processWebhookPayload(
       stationAdmit: p.station_admit ?? null,
       laborStatus: p.labor_status ?? 'ACTIVE',
       syncedAt: new Date().toISOString(),
-    };
-  });
+    });
+  }
 
   // Upsert patients (reuse existing sync pipeline)
   await upsertCachedPatients(db, hospitalId, patients);
@@ -2546,6 +2551,12 @@ export async function processPartographWebhook(
   payload: WebhookPartographPayload,
   sseManager: SseManager,
 ): Promise<WebhookPartographResult> {
+  // Bounded cooperative yielding (page-stall fix part 2): backfill pushes can
+  // carry large observation batches; tick the per-observation transform loop
+  // below so it never monopolizes the serving event loop. NOTE: the heavier
+  // per-row upsert + per-patient 32-rule CDSS analysis runs inside ONE batch
+  // db.transaction in upsertPartographObservations — never yield there.
+  const yielder = new CooperativeYielder();
   const hospitalRows = await db.query<{ hcode: string }>(
     'SELECT hcode FROM hospitals WHERE id = ?',
     [hospitalId],
@@ -2566,6 +2577,7 @@ export async function processPartographWebhook(
   const skipped: WebhookPartographResult['observationsSkipped'] = [];
   const rows: PartographRow[] = [];
   for (const o of payload.observations) {
+    await yielder.tick();
     const pid = byAn.get(o.an);
     if (!pid) {
       skipped.push({
