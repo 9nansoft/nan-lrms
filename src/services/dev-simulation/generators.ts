@@ -66,6 +66,7 @@ import {
   profileForPlannedEvent,
   type PlannedEvent,
 } from './planner';
+import { nextMaternalScreenSimProfile } from './maternal-screening-profiles';
 import type { SimEventType } from './types';
 
 export interface HospitalContext {
@@ -492,6 +493,28 @@ export async function generateLaborEvent(
   const evalRes = evaluateLaborEvent(profile, event);
   recordEvaluation(evalRes);
   void llmNote;
+
+  // OPTIONAL maternal labor-triage screening (Task H3, shadow-validation
+  // only — this whole module is only reachable while isSimulationEnabled()
+  // is true; see orchestrator.start()). Rotates deterministically through
+  // MATERNAL_SCREEN_SIM_PROFILES (all copied from the approved clinical
+  // oracle, tests/fixtures/maternal-screen-clinical-cases.json) so a
+  // simulation run produces real ingest→persist→summary traffic covering
+  // every local tier / emergency acuity / hemorrhage pattern for the
+  // shadow-validation cohort. Admission-context fields the profile defines
+  // OVERRIDE the profile-sampled labor vitals (ga_weeks / bp_*_admit) so the
+  // transported payload reproduces the exact oracle expectation end-to-end —
+  // see tests/unit/services/dev-simulation-maternal-screening.test.ts.
+  const msProfile = nextMaternalScreenSimProfile();
+  Object.assign(event, msProfile.admissionContext);
+  event.maternal_screening = {
+    ...msProfile.screening,
+    // Idempotency is scoped to (hospitalCode, source_pk) WITHIN one
+    // admission (spec §9.1) — the profile's source_pk is only a stable
+    // prefix; append this admission's AN so two different simulated
+    // admissions reusing the same profile never collide/reject.
+    source_pk: `${msProfile.screening.source_pk}:${an}`,
+  };
 
   // Mark the patient as LABOR-stage at THIS hospital (cross-hospital move
   // reflected by the currentHcode update). For CIDs with no prior pool entry

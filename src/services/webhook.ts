@@ -642,7 +642,14 @@ export interface MaternalScreeningIngestCandidate {
 // three-state boolean and bounded numeric fields. Data-driven so the §6.1
 // field list lives in ONE place per value kind (constitution I: no scattered
 // per-field hardcoding).
-const MS_BOOLEAN_FIELD_MAP = {
+//
+// Exported (in addition to internal use above) so any other in-repo code
+// that needs to speak this exact transport shape — currently only the
+// dev-simulation maternal-screening profiles (Task H3) and their tests —
+// derives it from THIS single source instead of hand-maintaining a second,
+// driftable copy. This does not change the transport contract (GC-H2); it
+// only makes the existing frozen contract visible for reuse/verification.
+export const MS_BOOLEAN_FIELD_MAP = {
   // Boundary casing corrected per spec §9.1: transport `pih_diagnosed`.
   pih_diagnosed: 'piHDiagnosed',
   blurred_vision: 'blurredVision',
@@ -663,7 +670,7 @@ const MS_BOOLEAN_FIELD_MAP = {
   placenta_previa_excluded: 'placentaPreviaExcluded',
 } as const satisfies Record<string, keyof MaternalScreenInput>;
 
-const MS_NUMERIC_FIELD_MAP = {
+export const MS_NUMERIC_FIELD_MAP = {
   creatinine_mg_dl: 'creatinineMgDl',
   creatinine_baseline_mg_dl: 'creatinineBaselineMgDl',
   platelet_per_ul: 'plateletPerUl',
@@ -686,7 +693,7 @@ const MS_NUMERIC_FIELD_MAP = {
  * finding with a 200 response and no operator trace (review IMPORTANT 2).
  * Derived from the maps so it can never drift out of sync with them.
  */
-const MS_KNOWN_TRANSPORT_KEYS: ReadonlySet<string> = new Set<string>([
+export const MS_KNOWN_TRANSPORT_KEYS: ReadonlySet<string> = new Set<string>([
   'source_pk',
   'assessed_at',
   'assessed_by',
