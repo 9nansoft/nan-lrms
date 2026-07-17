@@ -10,10 +10,15 @@ import { normalizeHosxpDate, isPlausibleEventDate } from '@/lib/hosxp-date';
 import { transitionToDelivered } from '@/services/journey';
 import { CooperativeYielder } from '@/lib/event-loop';
 
+/** A labour-infant row whose infant_number has passed hygiene: production
+ *  HOSxP ships NULL at some sites (10998/11008), but cached_newborns requires
+ *  it — see defaultMissingInfantNumbers. */
+export type SanitizedInfantRow = HosxpLabourInfantRow & { infant_number: number };
+
 export async function syncNewbornData(
   db: DatabaseAdapter,
   journeyId: string,
-  infantRows: HosxpLabourInfantRow[],
+  infantRows: SanitizedInfantRow[],
 ): Promise<number> {
   let count = 0;
 
@@ -84,6 +89,9 @@ export interface NewbornSyncResult {
   skippedNoJourney: number;
   /** Retrospective journeys created for pre-registry deliveries. */
   createdJourneys: number;
+  /** ANs whose persist threw and was isolated — the rest of the batch still
+   *  landed (10998/11008 incident: one poison row used to kill everything). */
+  failedAns: number;
 }
 
 /**
@@ -110,6 +118,70 @@ export async function newbornSyncCutoffDate(
   // Never let a poisoned future born_at push the cutoff past today — that
   // would make every subsequent HOSxP query return nothing, forever.
   return new Date(Math.min(baseMs, now.getTime())).toISOString().slice(0, 10);
+}
+
+function hasUsableInfantNumber(row: HosxpLabourInfantRow): boolean {
+  return row.infant_number != null && Number.isFinite(Number(row.infant_number));
+}
+
+/**
+ * infant_number hygiene (frozen-cutoff incident, hospitals 10998/11008):
+ * production ipt_labour_infant rows arrive with NULL infant_number, but
+ * cached_newborns.infant_number is NOT NULL and (journey_id, infant_number)
+ * is the upsert key — one NULL used to abort the whole batch INSERT.
+ *
+ * Rows missing a usable number get a deterministic fallback: their 1-based
+ * position within the AN group ordered by ipt_labour_infant_id (the HOSxP
+ * PK; ties or non-numeric PKs fall back to birth date+time, then input
+ * order), skipping upward past numbers another row explicitly claims — so
+ * re-running the same batch assigns the same numbers and the idempotent
+ * upsert keeps working. Original row order is preserved in the output.
+ */
+function defaultMissingInfantNumbers(
+  hospitalId: string,
+  an: string,
+  rows: HosxpLabourInfantRow[],
+): SanitizedInfantRow[] {
+  if (rows.every(hasUsableInfantNumber)) {
+    // Guarded by hasUsableInfantNumber — every infant_number is a number.
+    return rows as SanitizedInfantRow[];
+  }
+
+  const order = rows
+    .map((row, idx) => ({ row, idx }))
+    .sort((a, b) => {
+      const pkA = Number(a.row.ipt_labour_infant_id);
+      const pkB = Number(b.row.ipt_labour_infant_id);
+      if (Number.isFinite(pkA) && Number.isFinite(pkB) && pkA !== pkB) return pkA - pkB;
+      const bornA = `${a.row.birth_date ?? ''}T${a.row.birth_time ?? ''}`;
+      const bornB = `${b.row.birth_date ?? ''}T${b.row.birth_time ?? ''}`;
+      if (bornA !== bornB) return bornA < bornB ? -1 : 1;
+      return a.idx - b.idx;
+    });
+
+  const taken = new Set<number>();
+  for (const { row } of order) {
+    if (hasUsableInfantNumber(row)) taken.add(Number(row.infant_number));
+  }
+
+  const assigned = new Map<number, number>(); // original index → defaulted number
+  order.forEach(({ row, idx }, position) => {
+    if (hasUsableInfantNumber(row)) return;
+    let candidate = position + 1;
+    while (taken.has(candidate)) candidate += 1;
+    taken.add(candidate);
+    assigned.set(idx, candidate);
+  });
+
+  // Once per affected AN — same convention as newborn_rows_dropped_bad_date.
+  logger.warn('newborn_infant_number_defaulted', { hospitalId, an, count: assigned.size });
+
+  return rows.map((row, idx) => {
+    const fallback = assigned.get(idx);
+    return fallback === undefined
+      ? (row as SanitizedInfantRow)
+      : { ...row, infant_number: fallback };
+  });
 }
 
 interface BirthResolutionItem {
@@ -297,6 +369,7 @@ export async function syncNewbornsFromRows(
     journeys: 0,
     skippedNoJourney: 0,
     createdJourneys: 0,
+    failedAns: 0,
   };
   if (rows.length === 0) return result;
 
@@ -321,6 +394,15 @@ export async function syncNewbornsFromRows(
     byAn.set(an, list);
   }
 
+  // infant_number hygiene, alongside the date hygiene above: NULLs get a
+  // deterministic per-AN fallback instead of poisoning the batch INSERT.
+  // Row order inside each group is preserved, so the identity fields the
+  // BirthResolutionItem mapping reads from list[0] are unaffected.
+  const sanitizedByAn = new Map<string, SanitizedInfantRow[]>();
+  for (const [an, list] of byAn) {
+    sanitizedByAn.set(an, defaultMissingInfantNumbers(hospitalId, an, list));
+  }
+
   const items: BirthResolutionItem[] = Array.from(byAn.entries()).map(([an, list]) => ({
     an,
     motherHn: list[0].mother_hn ? String(list[0].mother_hn) : null,
@@ -342,15 +424,27 @@ export async function syncNewbornsFromRows(
   // reachable from the browser-push newborn cycle; tick at the top of each
   // outer iteration (syncNewbornData holds no transaction).
   const yielder = new CooperativeYielder();
-  for (const [an, infantRows] of byAn) {
+  for (const [an, infantRows] of sanitizedByAn) {
     await yielder.tick();
     const journeyId = journeyByAn.get(an);
     if (!journeyId) {
       result.skippedNoJourney += 1;
       continue;
     }
-    result.upserted += await syncNewbornData(db, journeyId, infantRows);
-    result.journeys += 1;
+    // Per-AN fault isolation: one poisoned AN must not abort the batch —
+    // every other birth still persists, MAX(born_at) advances, and the
+    // hospital's sync window keeps self-healing (frozen-cutoff incident).
+    try {
+      result.upserted += await syncNewbornData(db, journeyId, infantRows);
+      result.journeys += 1;
+    } catch (e) {
+      result.failedAns += 1;
+      logger.warn('newborn_an_failed', {
+        hospitalId,
+        an,
+        error: (e instanceof Error ? e.message : String(e)).slice(0, 120),
+      });
+    }
   }
 
   return result;
@@ -373,6 +467,34 @@ export interface PregnancyFallbackResult extends NewbornSyncResult {
   skippedHasDetail: number;
 }
 
+/** IN-list chunk size — matches the repo's multi-row statement chunking
+ *  precedent (db/seeds/thai-geo-seeder.ts) and stays well under parameter
+ *  limits on every dialect. */
+const DEDUP_CHUNK_SIZE = 500;
+
+/**
+ * One batched round-trip: which of these journeys already have any
+ * cached_newborns rows? Replaces the former per-delivery COUNT(*) —
+ * ~1,000 queries per cycle at hospital 10998 while the frozen cutoff kept
+ * re-shipping the same one-year window.
+ */
+async function fetchJourneysWithNewborns(
+  db: DatabaseAdapter,
+  journeyIds: string[],
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (let i = 0; i < journeyIds.length; i += DEDUP_CHUNK_SIZE) {
+    const chunk = journeyIds.slice(i, i + DEDUP_CHUNK_SIZE);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = await db.query<{ journey_id: string }>(
+      `SELECT journey_id FROM cached_newborns WHERE journey_id IN (${placeholders}) GROUP BY journey_id`,
+      chunk,
+    );
+    for (const r of rows) found.add(r.journey_id);
+  }
+  return found;
+}
+
 export async function syncNewbornsFromPregnancyRows(
   db: DatabaseAdapter,
   hospitalId: string,
@@ -385,6 +507,7 @@ export async function syncNewbornsFromPregnancyRows(
     skippedNoJourney: 0,
     skippedHasDetail: 0,
     createdJourneys: 0,
+    failedAns: 0,
   };
 
   // an is ipt_pregnancy's PK, but dedupe defensively; undelivered admissions
@@ -415,6 +538,15 @@ export async function syncNewbornsFromPregnancyRows(
     journeyByAn,
   );
 
+  // Never clobber richer per-infant data (from the labour module or an
+  // earlier cycle) with weight-less synthesized rows. Resolved once as a
+  // batched lookup; the set is kept current inside the loop so two
+  // summaries hitting the same journey keep the old per-row semantics.
+  const journeysWithNewborns = await fetchJourneysWithNewborns(
+    db,
+    Array.from(new Set(journeyByAn.values())),
+  );
+
   // Bounded cooperative yielding (page-stall fix part 2): same rationale as
   // syncNewbornsFromRows — per-delivery loop with per-item queries/upserts,
   // no transaction held.
@@ -427,13 +559,7 @@ export async function syncNewbornsFromPregnancyRows(
       continue;
     }
 
-    // Never clobber richer per-infant data (from the labour module or an
-    // earlier cycle) with weight-less synthesized rows.
-    const existing = await db.query<{ cnt: number }>(
-      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
-      [journeyId],
-    );
-    if (Number(existing[0]?.cnt) > 0) {
+    if (journeysWithNewborns.has(journeyId)) {
       result.skippedHasDetail += 1;
       continue;
     }
@@ -444,18 +570,31 @@ export async function syncNewbornsFromPregnancyRows(
     // with labor_date but zero counts stays open for the detailed source.
     if (live === 0 && dead === 0) continue;
 
-    for (let i = 1; i <= live; i++) {
-      await upsertNewborn(db, {
-        journeyId,
-        infantNumber: i,
-        bornAt: row.labor_date as string,
-        resuscitation: {},
-        vaccinations: {},
+    // Per-AN fault isolation — same rationale as syncNewbornsFromRows: this
+    // fallback is the recovery path for outcome-less DELIVERED journeys, so
+    // one poisoned summary must not re-freeze the whole pass.
+    try {
+      for (let i = 1; i <= live; i++) {
+        await upsertNewborn(db, {
+          journeyId,
+          infantNumber: i,
+          bornAt: row.labor_date as string,
+          resuscitation: {},
+          vaccinations: {},
+        });
+        result.upserted += 1;
+      }
+      if (live > 0) journeysWithNewborns.add(journeyId);
+      await transitionToDelivered(db, journeyId);
+      result.journeys += 1;
+    } catch (e) {
+      result.failedAns += 1;
+      logger.warn('newborn_fallback_an_failed', {
+        hospitalId,
+        an,
+        error: (e instanceof Error ? e.message : String(e)).slice(0, 120),
       });
-      result.upserted += 1;
     }
-    await transitionToDelivered(db, journeyId);
-    result.journeys += 1;
   }
 
   return result;
@@ -475,6 +614,9 @@ export interface BrowserNewbornsSection {
 export interface BrowserNewbornsResult {
   infants: NewbornSyncResult;
   fallback: PregnancyFallbackResult;
+  /** Set when the detailed infants pass threw wholesale (despite per-AN
+   *  isolation) — first 120 chars, PHI-free. The fallback still ran. */
+  infantsError?: string;
 }
 
 export async function processBrowserNewborns(
@@ -488,7 +630,28 @@ export async function processBrowserNewborns(
   const pregnancyRows = Array.isArray(section.pregnancies)
     ? (section.pregnancies as HosxpIptPregnancyRow[])
     : [];
-  const infants = await syncNewbornsFromRows(db, hospitalId, infantRows);
+  let infants: NewbornSyncResult = {
+    rowsRead: infantRows.length,
+    upserted: 0,
+    journeys: 0,
+    skippedNoJourney: 0,
+    createdJourneys: 0,
+    failedAns: 0,
+  };
+  let infantsError: string | undefined;
+  try {
+    infants = await syncNewbornsFromRows(db, hospitalId, infantRows);
+  } catch (e) {
+    // The detailed pass must never block the ipt_pregnancy fallback: during
+    // the 10998/11008 frozen-cutoff incident the fallback never ran, so the
+    // ~2,415 outcome-less DELIVERED journeys could not self-heal.
+    infantsError = (e instanceof Error ? e.message : String(e)).slice(0, 120);
+    logger.error('newborn_infants_pass_failed', {
+      hospitalId,
+      rows: infantRows.length,
+      error: infantsError,
+    });
+  }
   const fallback = await syncNewbornsFromPregnancyRows(db, hospitalId, pregnancyRows);
-  return { infants, fallback };
+  return infantsError === undefined ? { infants, fallback } : { infants, fallback, infantsError };
 }

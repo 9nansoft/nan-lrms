@@ -4,12 +4,12 @@ import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { syncAncData, linkJourneyToLabor, syncNewbornData } from '@/services/sync';
+import type { SanitizedInfantRow } from '@/services/sync/newborn';
 import type {
   HosxpPersonAncRow,
   HosxpAncServiceRow,
   HosxpAncRiskRow,
   HosxpAncClassifyingRow,
-  HosxpLabourInfantRow,
 } from '@/types/hosxp';
 import { CareStage, AncRiskLevel } from '@/types/domain';
 import { createJourney } from '@/services/journey';
@@ -712,7 +712,9 @@ describe('Sync Journey Extension', () => {
         journey.id,
       ]);
 
-      const infantRows: HosxpLabourInfantRow[] = [
+      // syncNewbornData receives rows AFTER infant_number hygiene — the
+      // sanitized type guarantees the NOT NULL upsert key is present.
+      const infantRows: SanitizedInfantRow[] = [
         {
           ipt_labour_infant_id: 9001,
           ipt_labour_id: 8001,

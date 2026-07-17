@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
         fieldOverflows: number;
       };
       partograph?: { accepted: number; skipped: number };
-      newborns?: { upserted: number; journeys: number };
+      newborns?: { upserted: number; journeys: number; failedAns: number };
     } = {};
 
     // Labor — main payload, mirrors webhook 'labor' default route.
@@ -404,7 +404,8 @@ export async function POST(request: NextRequest) {
         const r = await processBrowserNewborns(db, hospitalId, body.newborns);
         const upserted = r.infants.upserted + r.fallback.upserted;
         const journeys = r.infants.journeys + r.fallback.journeys;
-        result.newborns = { upserted, journeys };
+        const failedAns = r.infants.failedAns + r.fallback.failedAns;
+        result.newborns = { upserted, journeys, failedAns };
         // Same event name the polling path used — dashboards/log greps keep working.
         logger.info('newborn_sync_cycle', {
           hospitalId,
@@ -414,24 +415,37 @@ export async function POST(request: NextRequest) {
           journeys: r.infants.journeys,
           skippedNoJourney: r.infants.skippedNoJourney,
           createdJourneys: r.infants.createdJourneys + r.fallback.createdJourneys,
+          failedAns,
+          infantsPassError: r.infantsError ?? null,
           fallbackRows: r.fallback.rowsRead,
           fallbackUpserted: r.fallback.upserted,
           fallbackJourneys: r.fallback.journeys,
           fallbackSkippedHasDetail: r.fallback.skippedHasDetail,
         });
+        // Degraded-but-continuing outcomes must be visible in the Sync Log
+        // (frozen-cutoff incident: silent failure hid a year of data loss).
+        const degraded = failedAns > 0 || r.infantsError !== undefined;
+        if (degraded) hadWarning = true;
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_newborns',
-          status: 'success',
-          message: `Upserted ${upserted} newborns across ${journeys} journeys (${r.infants.skippedNoJourney + r.fallback.skippedNoJourney} ANs without a journey).`,
-          counts: { upserted, journeys },
+          status: degraded ? 'warning' : 'success',
+          message: `Upserted ${upserted} newborns across ${journeys} journeys (${r.infants.skippedNoJourney + r.fallback.skippedNoJourney} ANs without a journey${
+            failedAns > 0 ? `; ${failedAns} AN(s) failed and were isolated` : ''
+          }${r.infantsError ? `; infants pass failed: ${r.infantsError}` : ''}).`,
+          counts: { upserted, journeys, failedAns },
         });
       } catch (e) {
         hadWarning = true;
+        const msg = e instanceof Error ? e.message : String(e);
+        // Mirror persist_anc: the warning must be diagnosable from the Sync
+        // Log alone — error text (PHI-free primary message) + payload counts,
+        // not a bare 'failed'.
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_newborns',
           status: 'warning',
-          message: 'Newborn persist failed (continuing).',
-          detail: e instanceof Error ? e.message : String(e),
+          message: `Newborn persist failed (continuing): ${msg.slice(0, 120)} — payload had ${infantsCount} infant rows, ${pregCount} delivery summaries.`,
+          counts: { infants: infantsCount, pregnancies: pregCount },
+          detail: msg,
         });
       }
     }

@@ -164,7 +164,11 @@ export interface HosxpLabourInfantRow {
   ipt_labour_infant_id: number;
   ipt_labour_id: number;
   an: string;
-  infant_number: number;
+  /** 1-based birth order within the delivery. NULLABLE in production HOSxP
+   *  (hospitals 10998/11008 ship NULL here) while cached_newborns.infant_number
+   *  is NOT NULL — the sync layer MUST default missing values before
+   *  persisting (defaultMissingInfantNumbers in services/sync/newborn.ts). */
+  infant_number: number | null;
   sex: string | null;
   birth_weight: number | null;
   body_length: number | null;

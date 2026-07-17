@@ -1,10 +1,11 @@
 // Newborn polling-sync glue — TDD for wiring syncNewbornData into the cycle.
 // Covers the AN→journey resolution via cached_patients, idempotent re-runs,
 // and the self-healing cutoff-date window.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey, decrypt } from '@/lib/encryption';
+import { logger } from '@/lib/logger';
 import { beforeAll } from 'vitest';
 import {
   syncNewbornsFromRows,
@@ -86,6 +87,7 @@ describe('newborn polling sync', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await db.close();
   });
 
@@ -104,6 +106,7 @@ describe('newborn polling sync', () => {
       journeys: 1,
       skippedNoJourney: 1,
       createdJourneys: 0,
+      failedAns: 0,
     });
 
     const newborns = await db.query<{ infant_number: number }>(
@@ -212,6 +215,7 @@ describe('newborn polling sync', () => {
       skippedNoJourney: 1,
       skippedHasDetail: 0,
       createdJourneys: 0,
+      failedAns: 0,
     });
 
     const newborns = await db.query<{ infant_number: number; born_at: string | Date }>(
@@ -462,5 +466,202 @@ describe('newborn polling sync', () => {
 
     const cutoff = await newbornSyncCutoffDate(db, HOSPITAL_ID, new Date('2026-07-09T12:00:00Z'));
     expect(cutoff).toBe('2026-06-29');
+  });
+
+  // ── NULL infant_number poison rows (10998/11008 frozen-cutoff incident) ──
+  // HOSxP at some sites stores NULL infant_number in ipt_labour_infant.
+  // cached_newborns.infant_number is NOT NULL and the upsert key is
+  // (journey_id, infant_number), so before sanitization ONE such row killed
+  // the entire batch, MAX(born_at) never advanced, and the client re-shipped
+  // the same >1000-row window every cycle forever.
+
+  it('defaults NULL infant_number rows to their 1-based AN-group position and persists them', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const result = await syncNewbornsFromRows(db, HOSPITAL_ID, [
+      makeInfantRow('AN001', 1, { infant_number: null }),
+      makeInfantRow('AN001', 2, { infant_number: null }),
+    ]);
+
+    expect(result.upserted).toBe(2);
+    expect(result.failedAns).toBe(0);
+    const newborns = await db.query<{ infant_number: number }>(
+      `SELECT infant_number FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
+      [JOURNEY_ID],
+    );
+    expect(newborns.map((n) => Number(n.infant_number))).toEqual([1, 2]);
+
+    // One defaulted-log per affected AN — dropped-bad-date convention.
+    expect(warnSpy).toHaveBeenCalledWith(
+      'newborn_infant_number_defaulted',
+      expect.objectContaining({ hospitalId: HOSPITAL_ID, an: 'AN001', count: 2 }),
+    );
+
+    // The frozen-cutoff symptom heals: MAX(born_at) now advances.
+    const cutoff = await newbornSyncCutoffDate(db, HOSPITAL_ID, new Date('2026-07-09T12:00:00Z'));
+    expect(cutoff).toBe('2026-06-29');
+  });
+
+  it('defaulted infant_number skips upward past numbers explicitly taken in the AN group', async () => {
+    // NULL row sorts AFTER the explicit row (higher ipt_labour_infant_id):
+    // its 1-based position is 2, which collides with the explicit 2 → 3.
+    await syncNewbornsFromRows(db, HOSPITAL_ID, [
+      makeInfantRow('AN001', 2, { ipt_labour_infant_id: 10 }),
+      makeInfantRow('AN001', 3, { ipt_labour_infant_id: 11, infant_number: null }),
+    ]);
+    const newborns = await db.query<{ infant_number: number }>(
+      `SELECT infant_number FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
+      [JOURNEY_ID],
+    );
+    expect(newborns.map((n) => Number(n.infant_number))).toEqual([2, 3]);
+  });
+
+  it('defaulted infant_number takes a free lower slot when the NULL row sorts first', async () => {
+    // NULL row sorts FIRST (lower ipt_labour_infant_id): position 1 is free.
+    await syncNewbornsFromRows(db, HOSPITAL_ID, [
+      makeInfantRow('AN001', 9, { ipt_labour_infant_id: 5, infant_number: null }),
+      makeInfantRow('AN001', 2, { ipt_labour_infant_id: 6 }),
+    ]);
+    const newborns = await db.query<{ infant_number: number }>(
+      `SELECT infant_number FROM cached_newborns WHERE journey_id = ? ORDER BY infant_number`,
+      [JOURNEY_ID],
+    );
+    expect(newborns.map((n) => Number(n.infant_number))).toEqual([1, 2]);
+  });
+
+  // ── Per-AN fault isolation ────────────────────────────────────────────
+  // A poisoned AN (any per-row DB error) must not abort the other ANs in
+  // the batch — that was the data-loss half of the incident.
+
+  it('one poisoned AN does not prevent other ANs from persisting; failedAns counted', async () => {
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
+       VALUES ('journey-002', ?, ?, 'HN-P2', 'Second Mother', 'enc_cid_p2', 'cidhash_p2', 30, 1, 0, 'LABOR', 'LOW', 4, ?, ?, ?, ?, ?)`,
+      [HOSPITAL_ID, HOSPITAL_ID, now, now, now, now, now],
+    );
+    await db.execute(
+      `INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, journey_id, synced_at, created_at, updated_at)
+       VALUES ('pat-2', ?, 'HN-P2', 'AN002', 'enc-name2', 30, ?, 'ACTIVE', 'journey-002', ?, ?, ?)`,
+      [HOSPITAL_ID, now, now, now, now],
+    );
+
+    const warnSpy = vi.spyOn(logger, 'warn');
+    // AN002 poisoned: infant_hn overflows varchar(20) → per-row INSERT error.
+    // It is FIRST in the batch, so without isolation AN001 would be lost.
+    const result = await syncNewbornsFromRows(db, HOSPITAL_ID, [
+      makeInfantRow('AN002', 1, { infant_hn: 'X'.repeat(30) }),
+      makeInfantRow('AN001', 1),
+    ]);
+
+    expect(result.failedAns).toBe(1);
+    expect(result.upserted).toBe(1);
+    expect(result.journeys).toBe(1);
+
+    const ok = await db.query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(Number(ok[0].cnt)).toBe(1);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'newborn_an_failed',
+      expect.objectContaining({ hospitalId: HOSPITAL_ID, an: 'AN002' }),
+    );
+    const failLog = warnSpy.mock.calls.find(([event]) => event === 'newborn_an_failed');
+    expect(String((failLog![1] as { error: string }).error).length).toBeLessThanOrEqual(120);
+  });
+
+  it('processBrowserNewborns: infants-pass hard failure still runs the pregnancy fallback', async () => {
+    const original = db.query.bind(db);
+    let crashed = false;
+    vi.spyOn(db, 'query').mockImplementation(async (sql: string, params?: unknown[]) => {
+      // First cached_patients resolution (the infants pass) crashes; the
+      // fallback pass re-resolves and must be allowed through.
+      if (!crashed && sql.includes('FROM cached_patients')) {
+        crashed = true;
+        throw new Error('simulated infants-pass crash');
+      }
+      return original(sql, params);
+    });
+
+    const result = await processBrowserNewborns(db, HOSPITAL_ID, {
+      infants: [makeInfantRow('AN001', 1) as unknown as Record<string, unknown>],
+      pregnancies: [makePregnancyRow('AN001') as unknown as Record<string, unknown>],
+    });
+
+    expect(crashed).toBe(true);
+    expect(result.infantsError).toContain('simulated infants-pass crash');
+    expect(result.infants.upserted).toBe(0);
+    expect(result.fallback.upserted).toBe(1);
+
+    const rows = await db.query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(Number(rows[0].cnt)).toBe(1);
+    const journey = await db.query<{ care_stage: string }>(
+      `SELECT care_stage FROM maternal_journeys WHERE id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(journey[0].care_stage).toBe('DELIVERED');
+  });
+
+  // ── Batched fallback dedup ────────────────────────────────────────────
+  // The per-row COUNT(*) on cached_newborns (1000 round-trips per cycle at
+  // 10998) is replaced by ONE batched lookup; skip semantics must not move.
+
+  it('fallback: one batched cached_newborns lookup, zero per-row COUNT(*) calls', async () => {
+    // AN001's journey gains detailed rows first → must be skipped.
+    await syncNewbornsFromRows(db, HOSPITAL_ID, [makeInfantRow('AN001', 1)]);
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
+       VALUES ('journey-003', ?, ?, 'HN-B3', 'Batch Mother', 'enc_cid_b3', 'cidhash_b3', 27, 1, 0, 'LABOR', 'LOW', 2, ?, ?, ?, ?, ?)`,
+      [HOSPITAL_ID, HOSPITAL_ID, now, now, now, now, now],
+    );
+    await db.execute(
+      `INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, journey_id, synced_at, created_at, updated_at)
+       VALUES ('pat-3', ?, 'HN-B3', 'AN003', 'enc-name3', 27, ?, 'ACTIVE', 'journey-003', ?, ?, ?)`,
+      [HOSPITAL_ID, now, now, now, now],
+    );
+
+    const spy = vi.spyOn(db, 'query');
+    const result = await syncNewbornsFromPregnancyRows(db, HOSPITAL_ID, [
+      makePregnancyRow('AN001'),
+      makePregnancyRow('AN003'),
+    ]);
+
+    // Skip semantics identical: journey WITH detail skipped, WITHOUT processed.
+    expect(result.skippedHasDetail).toBe(1);
+    expect(result.upserted).toBe(1);
+    expect(result.journeys).toBe(1);
+
+    const dedupCalls = spy.mock.calls.filter(([sql]) =>
+      String(sql).includes('FROM cached_newborns WHERE journey_id IN'),
+    );
+    const perRowCalls = spy.mock.calls.filter(([sql]) =>
+      String(sql).includes('COUNT(*) as cnt FROM cached_newborns'),
+    );
+    expect(dedupCalls).toHaveLength(1);
+    expect(perRowCalls).toHaveLength(0);
+  });
+
+  it('fallback: two summaries resolving to the same journey — second still skips as has-detail', async () => {
+    // Both unknown ANs resolve to JOURNEY_ID via mother HN. The first
+    // inserts a synthesized infant; the per-row COUNT(*) used to make the
+    // second skip — the in-memory set must preserve that within one batch.
+    const result = await syncNewbornsFromPregnancyRows(db, HOSPITAL_ID, [
+      makePregnancyRow('AN-DUP-1', { mother_hn: 'HN001' }),
+      makePregnancyRow('AN-DUP-2', { mother_hn: 'HN001' }),
+    ]);
+
+    expect(result.upserted).toBe(1);
+    expect(result.journeys).toBe(1);
+    expect(result.skippedHasDetail).toBe(1);
+    const rows = await db.query<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM cached_newborns WHERE journey_id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(Number(rows[0].cnt)).toBe(1);
   });
 });
