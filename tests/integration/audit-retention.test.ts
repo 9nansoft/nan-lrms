@@ -76,7 +76,11 @@ describe('purgeOldAuditLogs', () => {
   it('is a no-op when there are no rows past the cutoff', async () => {
     await insertAuditLog(db, new Date(now.getTime() - 1 * DAY_MS));
     const result = await purgeOldAuditLogs(db, { retentionDays: 30, now });
-    expect(result).toEqual({ deleted: 0, batches: 0, cutoff: new Date(now.getTime() - 30 * DAY_MS) });
+    expect(result).toEqual({
+      deleted: 0,
+      batches: 0,
+      cutoff: new Date(now.getTime() - 30 * DAY_MS),
+    });
     expect(await countAuditLogs(db)).toBe(1);
   });
 

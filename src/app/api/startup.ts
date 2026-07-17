@@ -12,7 +12,10 @@ import { ALL_TABLES } from '@/db/tables/index';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import { SseManager } from '@/lib/sse';
 import { stopPolling } from '@/services/sync';
-import { scheduleAuditLogRetention, stopAuditLogRetentionSchedule } from '@/services/audit-retention';
+import {
+  scheduleAuditLogRetention,
+  stopAuditLogRetentionSchedule,
+} from '@/services/audit-retention';
 import { logger } from '@/lib/logger';
 
 // HMR- and bundle-safe init flag (pair with ensure-init.ts singleton).
