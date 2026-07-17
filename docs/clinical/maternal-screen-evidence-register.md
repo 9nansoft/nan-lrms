@@ -56,6 +56,11 @@ so the current behavior is explicit, not accidental:
   yields `UNKNOWN` (conservative); Phase 0 must decide between adding `NONE`
   or treating `vaginalBleeding: false` as bleeding-stable.
 
+The clinician-facing vehicle for resolving all of the above (and every
+`clinicalDecision` entry in both YAML fixtures) is the Phase 0 sign-off bundle:
+`docs/clinical/maternal-screen-phase0-signoff.md` — a bilingual decision-table
+document for the authorized obstetric owner to review and sign.
+
 ## Outstanding evidence gap
 
 The local PDF's own cited Thai-language source manual ("คู่มือการดูแลรักษาสตรีตั้งครรภ์ที่มีความเสี่ยงสูงฯ
