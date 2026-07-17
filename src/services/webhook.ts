@@ -25,6 +25,7 @@ import { classifyAncItems } from '@/config/anc-classifying-canon';
 import { ANC_RISK_CONFIGS, ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
 import { insertAncScreeningIfChanged } from '@/services/anc-screening';
 import { logger } from '@/lib/logger';
+import { CooperativeYielder } from '@/lib/event-loop';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
 import { isoDatesEqual, toIsoDate } from '@/lib/dates';
 import { isMaternalScreenIngestEnabled, isMaternalScreenEventsEnabled } from '@/lib/feature-flags';
@@ -1071,6 +1072,12 @@ export async function processWebhookPayload(
   sseManager: SseManager,
 ): Promise<WebhookResult> {
   const encryptionKey = getEncryptionKey();
+  // Bounded cooperative yielding (2026-07-17 page-latency incident): this
+  // runs on the ONE serving event loop, so every ~25ms of per-patient work
+  // hands control back so concurrent HTTP requests interleave. Ticks go at
+  // the TOP of each outer per-patient iteration, always OUTSIDE any
+  // db.transaction body (a yield inside a tx would lengthen its lock hold).
+  const yielder = new CooperativeYielder();
 
   // Get hospital hcode for SSE events
   const hospitalRows = await db.query<{ hcode: string }>(
@@ -1093,6 +1100,7 @@ export async function processWebhookPayload(
   const toDelete = payload.patients.filter((p) => p.action === 'delete');
   let deletedCount = 0;
   for (const p of toDelete) {
+    await yielder.tick(); // before entering the per-patient transaction
     await db.transaction(async (tx) => {
       for (const table of ['cpd_scores', 'cached_vital_signs', 'cached_partograph_observations']) {
         await tx.execute(
@@ -1161,6 +1169,7 @@ export async function processWebhookPayload(
   // One transaction per patient (spec 3.1): the journey_id link and the
   // stage transition (or walk-in creation) commit together.
   for (const p of patients) {
+    await yielder.tick();
     if ((p.laborStatus ?? 'ACTIVE') !== 'ACTIVE') continue;
     const rows = await db.query<{ id: string }>(
       'SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?',
@@ -1185,6 +1194,7 @@ export async function processWebhookPayload(
   let screeningCarriers = 0;
   if (isMaternalScreenIngestEnabled()) {
     for (let i = 0; i < payload.patients.length; i++) {
+      await yielder.tick();
       const p = payload.patients[i];
       if (p.maternal_screening == null) continue;
       screeningCarriers++;
@@ -1513,6 +1523,12 @@ export async function processAncWebhook(
   sseManager: SseManager,
 ): Promise<WebhookAncResult> {
   const encryptionKey = getEncryptionKey();
+  // Bounded cooperative yielding (2026-07-17 page-latency incident): ANC
+  // bundles run hundreds of pregnancies × classification × per-field AES on
+  // the ONE serving event loop; without yields, page TTFB spiked 3-7s during
+  // push bursts. Tick at the TOP of the per-pregnancy iteration — OUTSIDE
+  // the per-patient transactions below (never yield inside a tx).
+  const yielder = new CooperativeYielder();
 
   const hospitalRows = await db.query<{ hcode: string }>(
     'SELECT hcode FROM hospitals WHERE id = ?',
@@ -1546,6 +1562,7 @@ export async function processAncWebhook(
   let skippedInvalidCidChecksum = 0;
 
   for (const patient of payload.patients) {
+    await yielder.tick();
     // Per-row Thai-CID checksum gate. validateAncPayload (called by both
     // /api/webhooks/patient-data and /api/sync/browser-push) only enforces
     // 13-digit format; old HOSxP versions can still emit 13-digit-but-fake
