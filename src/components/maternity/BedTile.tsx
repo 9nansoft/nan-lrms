@@ -3,6 +3,12 @@
 // Design: ui-ux-pro-max healthcare-ops dashboard pattern. Severity is encoded
 // via color AND position (left-edge bar) AND text so it's still distinguishable
 // under color-blindness or monochrome printing (WCAG color-not-only).
+//
+// NOTE (Phase 6 Task H4, docs/superpowers/plans/2026-07-17-maternal-screening-hosxp.md):
+// this compact tile deliberately does NOT render the maternal-screen tier/
+// acuity pills — no room in this card's layout. BedTileFull is the ward's
+// working view and is where the pills live (see BedTileFull.tsx's
+// `maternalScreenSummary` prop / `bed-maternal-screen` slot).
 'use client';
 
 import { useState } from 'react';

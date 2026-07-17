@@ -4,7 +4,8 @@
 document — the clinical decision tables live in
 `docs/clinical/maternal-screen-phase0-signoff.md`.
 **Grounds:** `docs/maternal-screen-plan.md` §17 (rollout/rollback), `src/lib/feature-flags.ts`,
-`docker-compose.yml`, `docs/WEBHOOK-SPEC.md` §2.7, `docs/hosxp/maternal-screening-field-map.md`,
+`docker-compose.yml`, `docs/WEBHOOK-SPEC.md` §1 (Optional Fields — Maternal Labor-Triage
+Screening), `docs/hosxp/maternal-screening-field-map.md`,
 `docs/hosxp/KKLRMSWebhookUnit.pas`.
 **No PHI in this document, in commands you run from it, or in anything you paste into an
 incident channel while following it.**
@@ -13,8 +14,10 @@ incident channel while following it.**
 
 ## 0. Current state (honest, as of this writing)
 
-- **Branch:** `feat/maternal-screening`, 41 commits ahead of `main`, **not merged, not
-  deployed**. Nothing in this document has run against production yet.
+- **Branch:** `feat/maternal-screening`, ~40+ commits ahead of `main` (recompute with
+  `git rev-list --count main..HEAD` — this number drifts every commit, so it's kept
+  approximate rather than pinned), **not merged, not deployed**. Nothing in this document has
+  run against production yet.
 - **Phase 0 clinical sign-off:** `docs/clinical/maternal-screen-phase0-signoff.md` status is
   `PROVISIONAL_UNAPPROVED` — **both** sign-off blocks (§6.1 local-tier, §6.2 emergency-acuity)
   are blank. Until both are signed, the rule set stays `0.1.0-provisional` and no alert may
@@ -216,8 +219,9 @@ Pick the branch that matches the pilot hospital's integration:
 - **Webhook hospital (non-HOSxP):** the hospital's integrator adds the optional
   `maternal_screening` sub-object to the existing labor patient entries it already POSTs to
   `/api/webhooks/patient-data` (or pushes via `/api/sync/browser-push`), per
-  `docs/WEBHOOK-SPEC.md` §2.7. No other sender needs to change anything — the object is
-  ignored (not validated, not stored) on every hospital that doesn't send it.
+  `docs/WEBHOOK-SPEC.md` §1 (Optional Fields — Maternal Labor-Triage Screening). No other
+  sender needs to change anything — the object is ignored (not validated, not stored) on
+  every hospital that doesn't send it.
 - **HOSxP hospital:** deploy the H2 Pascal unit
   (`docs/hosxp/KKLRMSWebhookUnit.pas`) to that hospital's integration server with:
   ```pascal
@@ -252,7 +256,7 @@ carrying a `maternal_screening` object:
    the JSON response now carries `maternalScreenAssessments` / `maternalScreenDuplicates` /
    `maternalScreenIngestErrors` — present only when the flag is on **and** a screening rode
    along (legacy responses for every other hospital stay byte-identical, per
-   `docs/WEBHOOK-SPEC.md` §2.7).
+   `docs/WEBHOOK-SPEC.md` §1, Optional Fields — Maternal Labor-Triage Screening).
 3. **Assessment rows persisted:** the patient's `cached_patients` row now has non-null
    `maternal_screen_local_tier` / `maternal_screen_emergency_acuity`, and a row exists in the
    assessment history table reachable via

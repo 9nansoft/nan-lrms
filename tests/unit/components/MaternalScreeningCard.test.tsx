@@ -11,6 +11,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MaternalScreeningCard } from '@/components/patient/MaternalScreeningCard';
 import type { MaternalScreenAssessmentDto, MaternalScreenAssessmentsResponse } from '@/types/api';
 import type { MaternalScreenInput, MaternalScreenMatch } from '@/types/maternal-screening';
+import { assertNoGreenInTree } from '../../helpers/assertNoGreen';
 
 // ---------------------------------------------------------------------------
 // Fixture builders
@@ -222,30 +223,12 @@ describe('MaternalScreeningCard — GC-U1 no-green lock', () => {
         isLoading={false}
       />,
     );
-    const GREEN_VALUES = ['#22c55e', 'var(--risk-low)', '#16a34a', '#dcfce7'];
-    const all = container.querySelectorAll<HTMLElement>('*');
-    all.forEach((el) => {
-      GREEN_VALUES.forEach((green) => {
-        expect(el.style.color).not.toBe(green);
-        expect(el.style.borderColor).not.toBe(green);
-        expect(el.style.background).not.toContain(green);
-      });
-      // Longhand background-color must be checked too — `background` (the
-      // shorthand) and `backgroundColor` (longhand) are independent CSSOM
-      // properties; a value set via the longhand would not show up in
-      // `el.style.background` above.
-      expect(el.style.backgroundColor).not.toContain('green');
-      // Belt-and-braces: no Tailwind/utility class name should smuggle a
-      // green value in via className (e.g. `text-green-500`, `bg-green-50`)
-      // even though this codebase uses inline styles for color today.
-      // `getAttribute('class')` (not `.className`) because SVG elements
-      // (the ShieldAlert icon) expose `className` as an SVGAnimatedString,
-      // not a plain string.
-      const classAttr = el.getAttribute('class');
-      if (classAttr !== null) {
-        expect(classAttr).not.toMatch(/green/i);
-      }
-    });
+    // Shared scan (tests/helpers/assertNoGreen.ts, Phase 6 M1): checks the
+    // full serialized style attribute — which covers color/borderColor/
+    // background/backgroundColor in one pass — against hex, var(), AND the
+    // rgb() forms jsdom normalizes inline hex colors into, plus a class-name
+    // green scan.
+    assertNoGreenInTree(container);
   });
 });
 

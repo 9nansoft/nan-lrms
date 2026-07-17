@@ -502,9 +502,13 @@ export async function generateLaborEvent(
   // simulation run produces real ingest→persist→summary traffic covering
   // every local tier / emergency acuity / hemorrhage pattern for the
   // shadow-validation cohort. Admission-context fields the profile defines
-  // OVERRIDE the profile-sampled labor vitals (ga_weeks / bp_*_admit) so the
-  // transported payload reproduces the exact oracle expectation end-to-end —
-  // see tests/unit/services/dev-simulation-maternal-screening.test.ts.
+  // are applied onto `event` via Object.assign below: `ga_weeks` OVERRIDES
+  // the value applyProfileToLabor already set (same field, profile wins);
+  // `bp_systolic_admit` / `bp_diastolic_admit` aren't set by
+  // applyProfileToLabor at all, so those are newly added, not overridden.
+  // Either way the transported payload ends up matching the exact oracle
+  // expectation end-to-end — see
+  // tests/unit/services/dev-simulation-maternal-screening.test.ts.
   const msProfile = nextMaternalScreenSimProfile();
   Object.assign(event, msProfile.admissionContext);
   event.maternal_screening = {

@@ -489,7 +489,15 @@ begin
   Result := Null;
   try
     cLp := TClientDataSet.Create(nil);
-    cNn := TClientDataSet.Create(nil);
+    try
+      cNn := TClientDataSet.Create(nil);
+    except
+      // M4: if the second Create raises (e.g. resource exhaustion), free
+      // the first before re-raising so it doesn't leak — the outer except
+      // below still catches and logs the re-raised exception.
+      cLp.Free;
+      raise;
+    end;
     try
       // PRIMARY anchor candidate: latest partograph row.
       cLp.Data := hosxp_getdataset(
@@ -499,7 +507,13 @@ begin
         'WHERE lp.an = ''' + AN + ''' ' +
         'ORDER BY lp.observe_datetime DESC, lp.ipt_labour_partograph_id DESC LIMIT 1');
 
-      if cLp.RecordCount > 0 then
+      // I1: a partograph row can exist with a NULL observe_datetime (bad
+      // data entry) — AsDateTime on a null field returns the Delphi epoch
+      // (0 = 1899-12-30), which would fabricate assessed_at rather than
+      // report a real observation. Require a non-null timestamp to take
+      // the primary path; otherwise fall through to the nurse-note
+      // fallback below exactly as if there were no partograph row at all.
+      if (cLp.RecordCount > 0) and (not cLp.FieldByName('observe_datetime').IsNull) then
       begin
         // ── Primary anchor: ipt_labour_partograph ──────────────────────
         dtAnchor := cLp.FieldByName('observe_datetime').AsDateTime;

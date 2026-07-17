@@ -5,27 +5,11 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { BedTileFull } from '@/components/maternity/BedTileFull';
 import type { BedOccupancyFull } from '@/types/maternity-ward';
 import type { MaternalScreenSummaryItem } from '@/types/api';
+import { assertNoGreenInTree } from '../../../helpers/assertNoGreen';
 
-/** Forbidden green tokens — mirrors tests/unit/components/MaternalScreenCell.test.tsx
- *  and tests/unit/config/maternal-screen-display.test.ts (GC-U1 regression lock). */
-const GREEN_PATTERNS: RegExp[] = [
-  /var\(--risk-low\)/i,
-  /#22c55e/i,
-  /#16a34a/i,
-  /#dcfce7/i,
-  /\bgreen\b/i,
-  /var\(--kiosk-low\)/i,
-];
-
-function assertNoGreenInTree(container: HTMLElement): void {
-  const all = container.querySelectorAll<HTMLElement>('*');
-  for (const el of Array.from(all)) {
-    const style = el.getAttribute('style') ?? '';
-    for (const pattern of GREEN_PATTERNS) {
-      expect(pattern.test(style), `element style="${style}" must not match ${pattern}`).toBe(false);
-    }
-  }
-}
+// Forbidden green tokens — mirrors tests/unit/components/MaternalScreenCell.test.tsx
+// and tests/unit/config/maternal-screen-display.test.ts (GC-U1 regression lock);
+// shared scan now lives in tests/helpers/assertNoGreen.ts (rgb()-aware, Phase 6 M1).
 
 const now = new Date('2026-04-19T14:00:00').getTime();
 

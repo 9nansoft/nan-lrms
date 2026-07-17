@@ -10,26 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MaternalScreenCell } from '@/components/dashboard/MaternalScreenCell';
-
-/** Forbidden green tokens — mirrors tests/unit/config/maternal-screen-display.test.ts. */
-const GREEN_PATTERNS: RegExp[] = [
-  /var\(--risk-low\)/i,
-  /#22c55e/i,
-  /#16a34a/i,
-  /#dcfce7/i,
-  /\bgreen\b/i,
-  /var\(--kiosk-low\)/i,
-];
-
-function assertNoGreenInTree(container: HTMLElement): void {
-  const all = container.querySelectorAll<HTMLElement>('*');
-  for (const el of Array.from(all)) {
-    const style = el.getAttribute('style') ?? '';
-    for (const pattern of GREEN_PATTERNS) {
-      expect(pattern.test(style), `element style="${style}" must not match ${pattern}`).toBe(false);
-    }
-  }
-}
+import { assertNoGreenInTree } from '../../helpers/assertNoGreen';
 
 describe('MaternalScreenCell', () => {
   it('renders both chips with correct data-* attributes and light colors for a severe fixture', () => {
