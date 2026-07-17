@@ -18,6 +18,7 @@ import { bangkokStartOfMonth, bangkokStartOfToday } from '@/lib/bangkok-time';
 import { referralSlaCutoffs } from '@/config/referral-sla';
 import { ancOpsCutoffs } from '@/config/anc-ops';
 import { ancFreshnessCutoffs, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
+import { toIsoString } from '@/lib/dates';
 import type {
   DashboardHospital,
   DashboardSummary,
@@ -316,11 +317,9 @@ function projectMaternalScreenFields(
       (row.maternal_screen_emergency_acuity as MaternalEmergencyAcuity | null) ?? null,
     maternalScreenIsComplete: row.maternal_screen_is_complete ?? null,
     // pg returns timestamptz columns as Date objects, SQLite/PGlite as
-    // strings — normalize to ISO (same convention as admit_date below).
-    maternalScreenAssessedAt:
-      row.maternal_screen_assessed_at == null
-        ? null
-        : new Date(row.maternal_screen_assessed_at).toISOString(),
+    // strings — toIsoString normalizes both and returns null (not a throw)
+    // on an unparseable value, per the service-mapper convention.
+    maternalScreenAssessedAt: toIsoString(row.maternal_screen_assessed_at),
   };
 }
 
@@ -589,12 +588,11 @@ export async function getHospitalPatientList(
     // maternal_screen_* fields) so `delete` is valid under TS 4.4+'s
     // "operand of delete must be optional" rule.
     const rest: Record<string, unknown> = { ...r };
-    delete rest.maternal_screen_local_tier;
-    delete rest.maternal_screen_emergency_acuity;
-    delete rest.maternal_screen_condition_codes;
-    delete rest.maternal_screen_assessed_at;
-    delete rest.maternal_screen_is_complete;
-    delete rest.maternal_screen_rule_set_version;
+    // Prefix loop, not a name list: a future maternal_screen_* column added
+    // to cached_patients must not silently start leaking through cp.*.
+    for (const key of Object.keys(rest)) {
+      if (key.startsWith('maternal_screen_')) delete rest[key];
+    }
 
     return {
       ...rest,

@@ -564,9 +564,10 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
 
       {/* Section 3.7: Maternal labor-triage screening (Phase 4, shadow mode).
           Flag-gated per GC-U3: the API always computes `uiEnabled`
-          server-side from MATERNAL_SCREEN_UI_ENABLED, and with the flag off
-          (today's production default) this block renders nothing — the page
-          is byte-identical to before this feature existed. Placed as its own
+          server-side from MATERNAL_SCREEN_UI_ENABLED (default ON since the
+          2026-07-16 operator decision; explicit 'false' opts out) — when
+          disabled this block renders nothing and the page is byte-identical
+          to before this feature existed. Placed as its own
           section here (not inside a workspace tab) so the card stays visible
           regardless of which tab (Summary/Partograph/Contractions) is active
           — it is independent of partogram/CPD data, same reasoning as the

@@ -190,7 +190,9 @@ describe('maternal-screening ward roundtrip — browser-push → DB → high-ris
   it('full chain with ingest + events ON: assessment row, summary columns, high-risk projection, state-change broadcast', async () => {
     vi.stubEnv('MATERNAL_SCREEN_INGEST_ENABLED', 'true');
     vi.stubEnv('MATERNAL_SCREEN_EVENTS_ENABLED', 'true');
-    // MATERNAL_SCREEN_UI_ENABLED deliberately untouched — display defaults ON.
+    // Guard against an ambient CI export of MATERNAL_SCREEN_UI_ENABLED=false;
+    // stubbing undefined exercises the default-ON path deterministically.
+    vi.stubEnv('MATERNAL_SCREEN_UI_ENABLED', undefined);
 
     const res = await pushSeverePatient();
     const body = await res.json();
