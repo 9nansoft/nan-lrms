@@ -39,12 +39,28 @@ import {
 } from '@/services/sync/progress-store';
 
 interface BrowserPushBody {
+  /** BMS PasteJSON session id the client pulled under — see readBmsSessionId. */
+  bms_session_id?: unknown;
   labor?: Omit<WebhookPayload, 'hospitalCode'>;
   anc?: Omit<WebhookAncPayload, 'hospitalCode' | 'type'>;
   partograph?: Omit<WebhookPartographPayload, 'hospitalCode' | 'type'>;
   /** Raw HOSxP delivery rows (labour infants + ipt_pregnancy summaries)
    *  since the server-issued cutoff — see GET below. */
   newborns?: BrowserNewbornsSection;
+}
+
+// Validate the optional client-supplied BMS session id: non-empty string,
+// length-capped. It is an infrastructure credential-ish handle (logger.ts
+// SENSITIVE_KEYS redacts session ids), so it is stored ONLY in the Redis
+// sync-run record (24h TTL) — never emitted through logger — where operators
+// read it via the Sync Log / redis-cli to run diagnostic SQL against the
+// hospital's HOSxP through the BMS Session API.
+const BMS_SESSION_ID_MAX_LEN = 100;
+function readBmsSessionId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > BMS_SESSION_ID_MAX_LEN) return null;
+  return trimmed;
 }
 
 export async function POST(request: NextRequest) {
@@ -86,7 +102,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
     }
 
-    runId = await startSyncRun(hospitalId, hcode, 'browser');
+    runId = await startSyncRun(hospitalId, hcode, 'browser', {
+      bmsSessionId: readBmsSessionId(body.bms_session_id),
+    });
 
     const sseManager = SseManager.getInstance();
     const result: {

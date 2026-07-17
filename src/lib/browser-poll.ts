@@ -126,6 +126,14 @@ interface BrowserAncPatient {
 }
 
 export interface BrowserPushBody {
+  /**
+   * BMS PasteJSON session id this pull ran under. Optional — older clients
+   * omit it. The server stamps it on the SyncProgressRun record so operators
+   * can run diagnostic SQL against this hospital's HOSxP via the BMS Session
+   * API (e.g. to check ward.is_maternity_ward / ipt.ipt_admit_type_id when a
+   * hospital's labor feed is unexpectedly empty).
+   */
+  bms_session_id?: string;
   labor?: {
     patients: BrowserLaborPatient[];
     mode?: 'incremental' | 'full_snapshot';
@@ -528,6 +536,8 @@ function mapAncBundle(
 interface RunOptions {
   config: ConnectionConfig;
   marketplaceToken?: string | null;
+  /** BMS PasteJSON session id — attached to the push body when available. */
+  bmsSessionId?: string | null;
   signal?: AbortSignal;
 }
 
@@ -1054,6 +1064,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     }
 
     const body: BrowserPushBody = {};
+    if (opts.bmsSessionId) body.bms_session_id = opts.bmsSessionId;
     if (decision.labor) body.labor = decision.labor;
     if (partographs.length > 0) body.partograph = { observations: partographs };
     if (ancPatients.length > 0) body.anc = { patients: ancPatients };
