@@ -447,7 +447,8 @@ function PregnanciesBoard() {
                   className="flex flex-col gap-0.5 px-4 py-3 text-left transition-colors hover:bg-[var(--accent-navy-soft)]"
                   style={{
                     borderLeft: `2px solid ${c.color}`,
-                    borderRight: i < opsCells.length - 1 ? '1px solid var(--rule-strong)' : undefined,
+                    borderRight:
+                      i < opsCells.length - 1 ? '1px solid var(--rule-strong)' : undefined,
                     background: active ? 'var(--accent-navy-soft)' : undefined,
                   }}
                 />
