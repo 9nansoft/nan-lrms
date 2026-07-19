@@ -542,8 +542,8 @@ export interface JourneyListResponse {
   /**
    * DB-wide totals by ANC risk level over the stage+freshness(+hospital)
    * filtered set — independent of pagination, the risk_level filter, and the
-   * `q` search. Present on GET /api/journeys so the KPI strip shows true
-   * totals; omitted by the per-hospital journeys endpoint.
+   * `q` search. Present on GET /api/journeys and the per-hospital journeys
+   * endpoint so KPI strips show true totals, never capped-row lengths.
    */
   counts?: JourneyRiskCounts;
   /** Present on GET /api/journeys when stage=PREGNANCY; see AncOpsCounts. */

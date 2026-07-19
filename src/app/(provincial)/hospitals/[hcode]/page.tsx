@@ -1164,7 +1164,10 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
     isLoading: ancLoading,
     error: ancError,
     mutate: ancMutate,
-  } = useSWR<JourneyListResponse>(`/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=200`, {
+    // per_page must exceed the largest hospital registry (435 today) or the
+    // roster silently drops women — KPIs no longer depend on it (they read the
+    // server's DB-wide counts), but the visible list should still be complete.
+  } = useSWR<JourneyListResponse>(`/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=1000`, {
     refreshInterval: 60000,
   });
   // Pregnancies elsewhere whose capability rules say they'll be referred
@@ -1252,7 +1255,15 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
     return m;
   }, [labor]);
 
+  // True registry size + risk mix come from the server's DB-wide aggregates
+  // (pagination.total / counts) — deriving them from the fetched rows showed
+  // the fetch cap as the registry size (e.g. "200" for 435 pregnancies).
+  // Row-derived values remain only as a fallback for a cached response from
+  // a build without `counts`.
+  const ancTotal = ancData?.pagination.total ?? journeys.length;
   const ancMix = useMemo(() => {
+    const c = ancData?.counts;
+    if (c) return { low: c.low, medium: c.hr1 + c.hr2, high: c.hr3 };
     const m = { low: 0, medium: 0, high: 0 };
     for (const j of journeys) {
       const t = ancTier(j.ancRiskLevel);
@@ -1261,7 +1272,7 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
       else m.low++;
     }
     return m;
-  }, [journeys]);
+  }, [ancData?.counts, journeys]);
   const ancHr3 = ancMix.high;
   const ancOverdue = useMemo(
     () =>
@@ -1412,7 +1423,7 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
         <KpiCell
           group="ANC"
           label="ANC ลงทะเบียน"
-          value={String(journeys.length)}
+          value={String(ancTotal)}
           unit="ราย"
           riskMix={ancMix}
         />
@@ -1422,11 +1433,7 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
           value={String(ancHr3)}
           unit="ราย"
           valueColor={ancHr3 > 0 ? 'var(--risk-high)' : undefined}
-          sub={
-            journeys.length > 0
-              ? `${((ancHr3 / journeys.length) * 100).toFixed(1)}% ของลงทะเบียน`
-              : '—'
-          }
+          sub={ancTotal > 0 ? `${((ancHr3 / ancTotal) * 100).toFixed(1)}% ของลงทะเบียน` : '—'}
         />
         <KpiCell
           group="ANC"
@@ -1624,7 +1631,7 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
               color: tab === 'anc' ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
             }}
           >
-            {journeys.length}
+            {ancTotal}
           </span>
           {ancHr3 > 0 && (
             <span
@@ -1662,7 +1669,12 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
                 : 'ANC LIST · เรียงตามไตรมาส / ความเสี่ยง'}
             </div>
             <div className="font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
-              {tab === 'labor' ? `${labor.length} PATIENTS` : `${journeys.length} PATIENTS`} · LIVE
+              {tab === 'labor'
+                ? `${labor.length} PATIENTS`
+                : journeys.length < ancTotal
+                  ? `แสดง ${journeys.length} จาก ${ancTotal} PATIENTS`
+                  : `${ancTotal} PATIENTS`}{' '}
+              · LIVE
             </div>
           </div>
 

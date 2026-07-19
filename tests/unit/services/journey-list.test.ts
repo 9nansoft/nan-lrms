@@ -369,14 +369,51 @@ describe('journey-list service', () => {
   });
 
   describe('listHospitalJourneys', () => {
-    it('scopes to the hospital by hcode and omits counts', async () => {
+    it('scopes to the hospital by hcode', async () => {
       await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30 });
       await insertJourney(db, { currentHospitalId: HOSP_B, gaWeeks: 30 });
 
       const res = await listHospitalJourneys(db, '10670', { stage: 'PREGNANCY' });
       expect(res).not.toBeNull();
       expect(res!.journeys).toHaveLength(1);
-      expect(res!.counts).toBeUndefined();
+    });
+
+    // The hospital console KPI strip showed `journeys.length` from a capped
+    // fetch — hospitals above the cap displayed the cap (e.g. "200" for 435
+    // pregnancies) and every risk-mix number undercounted. True totals must
+    // come from the service, independent of pagination.
+    it('returns DB-wide risk counts independent of pagination', async () => {
+      for (let i = 0; i < 3; i++) {
+        await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'LOW' });
+      }
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'HR2' });
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'HR3' });
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'HR3' });
+      // Out-of-population rows that must NOT leak into the counts:
+      await insertJourney(db, { currentHospitalId: HOSP_B, gaWeeks: 30, ancRiskLevel: 'HR3' });
+      await insertJourney(db, {
+        currentHospitalId: HOSP_A,
+        careStage: 'DELIVERED',
+        ancRiskLevel: 'HR3',
+      });
+
+      const res = await listHospitalJourneys(db, '10670', { stage: 'PREGNANCY', perPage: 2 });
+      expect(res!.journeys).toHaveLength(2);
+      expect(res!.pagination.total).toBe(6);
+      expect(res!.counts).toEqual({ low: 3, hr1: 0, hr2: 1, hr3: 2, total: 6 });
+    });
+
+    it('counts ignore the riskLevel filter (stable KPI contract, same as province board)', async () => {
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'LOW' });
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'HR3' });
+
+      const res = await listHospitalJourneys(db, '10670', {
+        stage: 'PREGNANCY',
+        riskLevel: 'HR3',
+      });
+      expect(res!.journeys).toHaveLength(1);
+      expect(res!.pagination.total).toBe(1);
+      expect(res!.counts).toEqual({ low: 1, hr1: 0, hr2: 0, hr3: 1, total: 2 });
     });
 
     it('applies PREGNANCY freshness gates (count query uses a consistent alias)', async () => {

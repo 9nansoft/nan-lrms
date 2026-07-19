@@ -422,8 +422,10 @@ async function computeHospitalCounts(
 
 /**
  * Per-hospital journey list for GET /api/hospitals/[hcode]/journeys.
- * Returns null when the hcode is unknown (route maps to 404). Preserves the
- * existing response shape exactly — no `counts` field.
+ * Returns null when the hcode is unknown (route maps to 404). Includes a
+ * DB-wide `counts` risk breakdown over the hospital+stage set (independent of
+ * pagination and the riskLevel filter) so KPI strips never derive totals from
+ * a capped row list.
  */
 export async function listHospitalJourneys(
   db: DatabaseAdapter,
@@ -454,9 +456,18 @@ export async function listHospitalJourneys(
   );
   const journeys = rows.map((row) => mapJourneyListItem(row));
 
+  const counts = await computeRiskCounts(
+    db,
+    '1=1',
+    [],
+    { stage: filters.stage, hospitalId },
+    now,
+  );
+
   return {
     journeys,
     pagination: { total, page, perPage, totalPages: Math.ceil(total / perPage) },
+    counts,
   };
 }
 
