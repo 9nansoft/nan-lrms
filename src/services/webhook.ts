@@ -1625,9 +1625,40 @@ export async function processAncWebhook(
 
     // Primary lookup by CID (cross-hospital), fallback to HN+hospital (skip if HN is null)
     const patientHn = patient.hn;
+    const cidMatch = await getActiveJourneyByCid(db, cidHash);
+
+    // CID-collision guard (2026-07-19 ghost-journey incident): when TWO
+    // different women at the SAME hospital share one CID (data-entry error /
+    // placeholder), each one's push finds the OTHER's active journey via the
+    // CID lookup, sees a different pregNo/lmp, declares "new pregnancy",
+    // DELIVERS the other's journey and creates a fresh one — the pair then
+    // ghost-delivers each other every sync cycle (~1,760 ghost DELIVERED
+    // journeys per identity observed in production). Same hospital + same
+    // CID + DIFFERENT HN is that collision signature (one hospital does not
+    // issue one woman two HNs); a different-HOSPITAL journey is legitimate
+    // cross-hospital continuity (referrals) and stays untouched. On
+    // collision: route this patient to her own HN's journey and never roll
+    // over the CID-matched one.
+    const cidCollision =
+      cidMatch != null &&
+      patientHn != null &&
+      cidMatch.hn !== '' &&
+      cidMatch.hn !== patientHn &&
+      cidMatch.hospitalId === hospitalId;
+    if (cidCollision) {
+      logger.warn('anc_cid_collision', {
+        hospitalId,
+        cidHashPrefix: cidHash.slice(0, 8),
+        journeyHn: cidMatch.hn,
+        patientHn,
+      });
+    }
     const existing =
-      (await getActiveJourneyByCid(db, cidHash)) ??
-      (patientHn != null ? await getJourneyByHn(db, patientHn, hospitalId) : null);
+      cidMatch != null && !cidCollision
+        ? cidMatch
+        : patientHn != null
+          ? await getJourneyByHn(db, patientHn, hospitalId)
+          : null;
 
     // Detect if incoming data is a NEW pregnancy vs update to existing.
     // The pg driver returns lmp as a Date (the column is `timestamp with

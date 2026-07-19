@@ -130,6 +130,60 @@ describe('ANC/Referral Webhook Integration', () => {
     });
   });
 
+  describe('Scenario 1b: CID collision — two women sharing one CID must not ping-pong', () => {
+    it('same-hospital patients with one CID but different HN/pregNo keep separate journeys and never ghost-deliver each other', async () => {
+      // 2026-07-19 ghost-journey incident: two cohort members shared a CID;
+      // each cycle, each one found the OTHER's active journey via the CID
+      // lookup, saw a different pregNo/lmp, declared "new pregnancy",
+      // DELIVERED the other's journey and created a fresh one — two ghost
+      // DELIVERED rows per cycle (~1,760 per identity in production).
+      const sharedCid = '2345678900017';
+      const payload: WebhookAncPayload = {
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'COLL-A',
+            name: 'นาง ก ชนซีไอดี',
+            cid: sharedCid,
+            birthday: '1996-01-15',
+            pregNo: 3,
+            lmp: '2025-08-01',
+            edc: '2026-05-08',
+            riskLevel: 'LOW',
+          },
+          {
+            hn: 'COLL-B',
+            name: 'นาง ข ชนซีไอดี',
+            cid: sharedCid,
+            birthday: '1992-02-20',
+            pregNo: 4,
+            lmp: '2025-10-01',
+            edc: '2026-07-08',
+            riskLevel: 'LOW',
+          },
+        ],
+      };
+
+      // Three cycles — the production loop compounded once per cycle.
+      await processAncWebhook(db, webhookHospitalId, payload, asSse(sseManager));
+      await processAncWebhook(db, webhookHospitalId, payload, asSse(sseManager));
+      await processAncWebhook(db, webhookHospitalId, payload, asSse(sseManager));
+
+      const cidHash = createHash('sha256').update(sharedCid).digest('hex');
+      const journeys = await db.query<{ hn: string; care_stage: string }>(
+        'SELECT hn, care_stage FROM maternal_journeys WHERE cid_hash = ? ORDER BY hn',
+        [cidHash],
+      );
+      // Exactly one journey per woman, both still ACTIVE — zero ghosts.
+      expect(journeys).toHaveLength(2);
+      expect(journeys.map((j) => j.hn).sort()).toEqual(['COLL-A', 'COLL-B']);
+      for (const j of journeys) {
+        expect(j.care_stage).toBe('PREGNANCY');
+      }
+    });
+  });
+
   describe('Scenario 2: ANC update — resending same patient updates existing journey', () => {
     it('updates anc_risk_level when same HN is sent again', async () => {
       // First: create
