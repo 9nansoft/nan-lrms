@@ -432,7 +432,7 @@ export default function OutcomesPage() {
           idx={3}
           right={
             <span>
-              LATEST {kpis.recent.length} · {rangeLabel}
+              LATEST {kpis.recent.length} จาก {kpis.totalBirths} · {rangeLabel}
             </span>
           }
         >

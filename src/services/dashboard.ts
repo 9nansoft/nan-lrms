@@ -327,7 +327,12 @@ function projectMaternalScreenFields(
 
 export async function getHighRiskPatients(
   db: DatabaseAdapter,
-  limit: number = 50,
+  // Safety cap only — the panel's "ALL ACTIVE" tab promises the COMPLETE
+  // province labor roster, so the cap must sit far above any real census
+  // (historical peak 34–39 concurrent; stale-ACTIVE incidents inflate it
+  // further). At 50 it silently truncated the roster the panel claims to
+  // show in full.
+  limit: number = 500,
 ): Promise<HighRiskPatient[]> {
   // Flag read once per request (GC-W3), not per row.
   const maternalScreenUiEnabled = isMaternalScreenUiEnabled();

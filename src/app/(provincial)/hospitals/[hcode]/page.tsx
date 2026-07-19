@@ -88,6 +88,8 @@ interface HospitalInfo {
 interface LaborResponse {
   hospital?: HospitalInfo;
   patients: LaborPatient[];
+  /** True COUNT(*) over the ward census — the rows above are a paged subset. */
+  pagination?: { total: number };
   partographAudit?: PartographAudit | null;
 }
 
@@ -1158,7 +1160,13 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
     isLoading: laborLoading,
     error: laborError,
     mutate: laborMutate,
-  } = useSWR<LaborResponse>(`/api/hospitals/${hcode}/patients`, { refreshInterval: 30000 });
+    // Without per_page the route defaults to 20 rows — below the historical
+    // ward-census peak (34–39), so the floor roster silently dropped the
+    // oldest admissions and every KPI undercounted. 500 covers any real
+    // census; the registered-KPI itself reads pagination.total regardless.
+  } = useSWR<LaborResponse>(`/api/hospitals/${hcode}/patients?per_page=500`, {
+    refreshInterval: 30000,
+  });
   const {
     data: ancData,
     isLoading: ancLoading,
@@ -1167,9 +1175,12 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
     // per_page must exceed the largest hospital registry (435 today) or the
     // roster silently drops women — KPIs no longer depend on it (they read the
     // server's DB-wide counts), but the visible list should still be complete.
-  } = useSWR<JourneyListResponse>(`/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=1000`, {
-    refreshInterval: 60000,
-  });
+  } = useSWR<JourneyListResponse>(
+    `/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=1000`,
+    {
+      refreshInterval: 60000,
+    },
+  );
   // Pregnancies elsewhere whose capability rules say they'll be referred
   // here for delivery. Only meaningful for hub hospitals (spokes return 0).
   const { data: incomingData } = useSWR<IncomingPregnanciesResponse>(
@@ -1194,6 +1205,8 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
       (a, b) => (order[a.cpd_risk_level ?? 'LOW'] ?? 3) - (order[b.cpd_risk_level ?? 'LOW'] ?? 3),
     );
   }, [laborData]);
+  // True ward census from the server COUNT — same contract as ancTotal below.
+  const laborTotal = laborData?.pagination?.total ?? labor.length;
 
   // Stable reference for downstream memos — `ancData?.journeys ?? []` would
   // otherwise create a new array on every render.
@@ -1401,7 +1414,7 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
         <KpiCell
           group="LABOR"
           label="ON FLOOR"
-          value={String(labor.length)}
+          value={String(laborTotal)}
           unit="ราย"
           riskMix={laborMix}
         />
@@ -1603,7 +1616,7 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
               color: tab === 'labor' ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
             }}
           >
-            {labor.length}
+            {laborTotal}
           </span>
           {laborAlarmCount > 0 && (
             <span
@@ -1670,7 +1683,9 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
             </div>
             <div className="font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
               {tab === 'labor'
-                ? `${labor.length} PATIENTS`
+                ? labor.length < laborTotal
+                  ? `แสดง ${labor.length} จาก ${laborTotal} PATIENTS`
+                  : `${laborTotal} PATIENTS`
                 : journeys.length < ancTotal
                   ? `แสดง ${journeys.length} จาก ${ancTotal} PATIENTS`
                   : `${ancTotal} PATIENTS`}{' '}

@@ -309,6 +309,8 @@ export default function DashboardPage() {
                 variant="kiosk"
                 maxRows={8}
                 ancFallback={ancFallback}
+                totalActive={summary?.totalActive}
+                totalHigh={summary?.totalHigh}
               />
             </div>
             <div
@@ -599,6 +601,8 @@ export default function DashboardPage() {
               patients={highRiskPatients}
               isLoading={hrLoading}
               ancFallback={ancFallback}
+              totalActive={summary?.totalActive}
+              totalHigh={summary?.totalHigh}
             />
 
             {/* 05 — Stage KPIs */}

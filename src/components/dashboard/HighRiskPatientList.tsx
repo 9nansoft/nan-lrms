@@ -46,6 +46,12 @@ export interface HighRiskPatientListProps {
    *  panel would otherwise read as "nothing to watch" while high-risk
    *  pregnancies are approaching term. */
   ancFallback?: { hr3: number; dueSoon: number } | null;
+  /** True population counts for the header/tab badges. The patients array is
+   *  a row-limited fetch, so deriving counts from its length undercounts once
+   *  the roster exceeds the cap — callers that hold real COUNTs (dashboard
+   *  summary, per-hospital counts) pass them here. */
+  totalActive?: number | null;
+  totalHigh?: number | null;
 }
 
 function RiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' | 'kiosk' }) {
@@ -120,6 +126,8 @@ export function HighRiskPatientList({
   variant = 'light',
   maxRows,
   ancFallback,
+  totalActive,
+  totalHigh,
 }: HighRiskPatientListProps) {
   const router = useRouter();
   const [tab, setTab] = useState<'high' | 'all'>('high');
@@ -133,10 +141,10 @@ export function HighRiskPatientList({
 
   const counts = useMemo(
     () => ({
-      high: sorted.filter((p) => p.riskLevel === 'HIGH').length,
-      total: sorted.length,
+      high: totalHigh ?? sorted.filter((p) => p.riskLevel === 'HIGH').length,
+      total: totalActive ?? sorted.length,
     }),
-    [sorted],
+    [sorted, totalActive, totalHigh],
   );
 
   const isKiosk = variant === 'kiosk';

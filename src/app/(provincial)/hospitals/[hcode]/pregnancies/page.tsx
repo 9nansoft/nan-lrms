@@ -58,7 +58,7 @@ export default function HospitalPregnanciesPage({
   // ANC tab). No local fetcher — the global SWRProvider fetcher throws on
   // non-2xx so failures surface as `error` instead of a broken JSON body.
   const { data, isLoading, error, mutate } = useSWR<JourneyListResponse>(
-    `/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=200`,
+    `/api/hospitals/${hcode}/journeys?stage=PREGNANCY&per_page=1000`,
     { refreshInterval: 60000 },
   );
 
@@ -133,7 +133,7 @@ export default function HospitalPregnanciesPage({
         </select>
         {riskFilter && (
           <span className="text-xs text-slate-400">
-            แสดง {filtered.length} / {allJourneys.length} ราย
+            แสดง {filtered.length} / {totalCount} ราย
           </span>
         )}
       </div>

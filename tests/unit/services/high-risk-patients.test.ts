@@ -285,6 +285,29 @@ describe('getHighRiskPatients', () => {
     expect(result[2].cpdScore).toBe(12);
   });
 
+  // The panel's "ALL ACTIVE" tab promises the complete province roster; the
+  // old default cap (50) sat above nothing — historical census peaked 34–39
+  // and stale-ACTIVE incidents push past 50, silently truncating the roster
+  // and every count derived from it.
+  it('default cap sits far above any real ward census (no truncation at 60 active)', async () => {
+    const hospitals = await db.query<{ id: string }>(
+      "SELECT id FROM hospitals WHERE hcode = '10670'",
+    );
+    const hospitalId = hospitals[0].id;
+    const now = new Date().toISOString();
+
+    for (let i = 0; i < 60; i++) {
+      const patId = uuidv4();
+      await db.execute(
+        'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [patId, hospitalId, `HN-C${i}`, `AN-C${i}`, 'enc-name', 28, now, 'ACTIVE', now, now, now],
+      );
+    }
+
+    const result = await getHighRiskPatients(db);
+    expect(result).toHaveLength(60);
+  });
+
   it('should include patients from multiple hospitals', async () => {
     const hospitals = await db.query<{ id: string; hcode: string }>(
       "SELECT id, hcode FROM hospitals WHERE hcode IN ('10670', '11000') ORDER BY hcode",

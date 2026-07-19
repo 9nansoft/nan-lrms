@@ -456,13 +456,7 @@ export async function listHospitalJourneys(
   );
   const journeys = rows.map((row) => mapJourneyListItem(row));
 
-  const counts = await computeRiskCounts(
-    db,
-    '1=1',
-    [],
-    { stage: filters.stage, hospitalId },
-    now,
-  );
+  const counts = await computeRiskCounts(db, '1=1', [], { stage: filters.stage, hospitalId }, now);
 
   return {
     journeys,
