@@ -36,9 +36,7 @@ interface AuthorizeProvider {
 
 function bmsAuthorize(): NonNullable<AuthorizeProvider['authorize']> {
   const config = vi.mocked(NextAuth).mock.calls[0][0] as { providers: AuthorizeProvider[] };
-  const provider = config.providers.find(
-    (p) => (p.options?.name ?? p.name) === 'BMS Session',
-  );
+  const provider = config.providers.find((p) => (p.options?.name ?? p.name) === 'BMS Session');
   const authorize = provider?.options?.authorize ?? provider?.authorize;
   if (!authorize) throw new Error('BMS Session provider authorize() not found');
   return authorize;

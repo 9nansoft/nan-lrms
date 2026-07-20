@@ -10,20 +10,14 @@ export async function POST(request: NextRequest) {
     const { sessionId } = body;
 
     if (!sessionId) {
-      return NextResponse.json(
-        { error: 'Session ID is required' },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: 'Session ID is required' }, { status: 400 });
     }
 
     const tunnelUrl = process.env.DEV_HOSPITAL_TUNNEL_URL ?? '';
     const identity = await validateBmsSession(sessionId, tunnelUrl);
 
     if (!identity) {
-      return NextResponse.json(
-        { error: 'Session ID ไม่ถูกต้องหรือหมดอายุ' },
-        { status: 401 },
-      );
+      return NextResponse.json({ error: 'Session ID ไม่ถูกต้องหรือหมดอายุ' }, { status: 401 });
     }
 
     return NextResponse.json({
@@ -41,9 +35,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     logger.error('bms_session_validation_failed', { error });
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
