@@ -63,6 +63,9 @@ export interface BrowserReferinRow {
 export interface BrowserVisitEvidenceRow {
   cid?: string | null;
   visit_date?: string | Date | null;
+  /** `YYYY-MM-DD HH:MM:SS` (Bangkok local) — carries the ovst vsttime so the
+   *  arrival isn't stamped midnight. Preferred over visit_date when present. */
+  visit_datetime?: string | null;
 }
 
 export interface ReferralArrivalProbeEntry {
@@ -308,13 +311,18 @@ export async function processBrowserVisitEvidences(
   for (const row of rows) {
     try {
       const cid = row.cid?.trim();
-      const visitDate = dateOnly(row.visit_date);
+      const rawDate = row.visit_datetime ?? row.visit_date;
+      const visitDate = dateOnly(rawDate);
       if (!cid || !visitDate) {
         result.skippedInvalid++;
         continue;
       }
+      const visitTime =
+        typeof row.visit_datetime === 'string'
+          ? (row.visit_datetime.match(/\d{2}:\d{2}(:\d{2})?/)?.[0] ?? null)
+          : null;
       const cidHash = createHash('sha256').update(cid).digest('hex');
-      const arrivalIso = toEventIso(visitDate, null) ?? new Date().toISOString();
+      const arrivalIso = toEventIso(visitDate, visitTime) ?? new Date().toISOString();
       await applyArrivalEvidence(db, hospitalId, { cidHash, arrivalIso }, result);
     } catch {
       result.failed++;

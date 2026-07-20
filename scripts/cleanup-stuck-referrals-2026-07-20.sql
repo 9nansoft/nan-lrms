@@ -51,11 +51,21 @@ SELECT
 FROM cached_referrals s
 LEFT JOIN LATERAL (
   SELECT
-    (SELECT MIN(av.visit_date) FROM cached_anc_visits av
+    -- cached_anc_visits.visit_date stores date-only visits as UTC midnight,
+    -- which renders as 07:00 in Bangkok; shift those to Bangkok midnight so a
+    -- date-precision arrival honestly displays as 00:00. Real times pass
+    -- through untouched.
+    (SELECT CASE
+              WHEN to_char(MIN(av.visit_date) AT TIME ZONE 'UTC', 'HH24MISS') = '000000'
+                THEN MIN(av.visit_date) - interval '7 hours'
+              ELSE MIN(av.visit_date)
+            END
+     FROM cached_anc_visits av
      WHERE av.journey_id = s.journey_id
        AND av.hospital_id = s.to_hospital_id
        AND av.visit_date >= s.initiated_at)                    AS anc_date,
-    (SELECT MIN(cp.admit_date)::timestamptz FROM cached_patients cp
+    -- admit_date is timestamptz with real admission times — no cast needed.
+    (SELECT MIN(cp.admit_date) FROM cached_patients cp
      WHERE cp.journey_id = s.journey_id
        AND cp.hospital_id = s.to_hospital_id
        AND cp.admit_date >= s.initiated_at::date)              AS labor_date

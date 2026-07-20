@@ -433,12 +433,12 @@ export const REFEROUT_MATERNITY_SINCE: SqlQueryTemplate = {
 // big hubs.
 export const REFERIN_SINCE: SqlQueryTemplate = {
   postgresql: `
-      SELECT ri.hn, p.cid, ri.refer_hospcode, ri.refer_date
+      SELECT ri.hn, p.cid, ri.refer_hospcode, ri.refer_date, ri.refer_time
       FROM referin ri
       JOIN patient p ON p.hn = ri.hn
       WHERE ri.refer_date >= '{{CUTOFF}}'`,
   mysql: `
-      SELECT ri.hn, p.cid, ri.refer_hospcode, ri.refer_date
+      SELECT ri.hn, p.cid, ri.refer_hospcode, ri.refer_date, ri.refer_time
       FROM referin ri
       JOIN patient p ON p.hn = ri.hn
       WHERE ri.refer_date >= '{{CUTOFF}}'`,
@@ -451,14 +451,16 @@ export const REFERIN_SINCE: SqlQueryTemplate = {
 // 13-digit CID before interpolation. {{CUTOFF}} = min(since) across the probe.
 export const OVST_FIRST_VISIT_FOR_CIDS: SqlQueryTemplate = {
   postgresql: `
-      SELECT p.cid, MIN(o.vstdate) AS visit_date
+      SELECT p.cid,
+             MIN(CONCAT(o.vstdate, ' ', COALESCE(o.vsttime, '00:00:00'))) AS visit_datetime
       FROM ovst o
       JOIN patient p ON p.hn = o.hn
       WHERE p.cid IN ({{CIDS}})
         AND o.vstdate >= '{{CUTOFF}}'
       GROUP BY p.cid`,
   mysql: `
-      SELECT p.cid, MIN(o.vstdate) AS visit_date
+      SELECT p.cid,
+             MIN(CONCAT(o.vstdate, ' ', COALESCE(o.vsttime, '00:00:00'))) AS visit_datetime
       FROM ovst o
       JOIN patient p ON p.hn = o.hn
       WHERE p.cid IN ({{CIDS}})

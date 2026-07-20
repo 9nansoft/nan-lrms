@@ -230,6 +230,21 @@ describe('processBrowserReferins (Phase 2 — destination gateway push)', () => 
     expect(journey[0].current_hospital_id).toBe(DEST_ID);
   });
 
+  it('carries the real refer_time into arrived_at (not a midnight stamp)', async () => {
+    await processBrowserReferins(db, DEST_ID, [
+      referinRow({ refer_time: '14:45:00' }),
+    ]);
+    const rows = await db.query<{ arrived_at: string | Date }>(
+      `SELECT arrived_at FROM cached_referrals`,
+    );
+    const iso =
+      rows[0].arrived_at instanceof Date
+        ? rows[0].arrived_at.toISOString()
+        : new Date(String(rows[0].arrived_at)).toISOString();
+    // 14:45 Bangkok = 07:45 UTC
+    expect(iso).toContain('T07:45:00');
+  });
+
   it('is idempotent: a second referin push finds no candidate', async () => {
     await processBrowserReferins(db, DEST_ID, [referinRow()]);
     const second = await processBrowserReferins(db, DEST_ID, [referinRow()]);
@@ -325,6 +340,21 @@ describe('processBrowserReferins (Phase 2 — destination gateway push)', () => 
       [JOURNEY_ID],
     );
     expect(journey[0].current_hospital_id).toBe(DEST_ID);
+  });
+
+  it('carries the ovst visit time into arrived_at when visit_datetime is provided', async () => {
+    await processBrowserVisitEvidences(db, DEST_ID, [
+      { cid: CID, visit_datetime: '2026-07-19 10:15:00' },
+    ]);
+    const rows = await db.query<{ arrived_at: string | Date }>(
+      `SELECT arrived_at FROM cached_referrals`,
+    );
+    const iso =
+      rows[0].arrived_at instanceof Date
+        ? rows[0].arrived_at.toISOString()
+        : new Date(String(rows[0].arrived_at)).toISOString();
+    // 10:15 Bangkok = 03:15 UTC
+    expect(iso).toContain('T03:15:00');
   });
 
   it('visit evidence respects the 30-day stale-initiation guard', async () => {
