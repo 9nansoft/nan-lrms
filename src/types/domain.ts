@@ -230,6 +230,9 @@ export enum ReferralStatus {
   REJECTED = 'REJECTED',
   IN_TRANSIT = 'IN_TRANSIT',
   ARRIVED = 'ARRIVED',
+  /** Closed by data cleanup: no arrival evidence within the matching window.
+   *  Terminal; never set by the live state machine, only by operator scripts. */
+  EXPIRED = 'EXPIRED',
 }
 
 export enum UrgencyLevel {

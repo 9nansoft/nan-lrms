@@ -19,6 +19,7 @@ export const STATUS_META: Record<string, StatusMeta> = {
   IN_TRANSIT: { color: 'var(--risk-medium)', label: 'กำลังเดินทาง' },
   ARRIVED: { color: 'var(--accent-navy)', label: 'ถึงแล้ว' },
   REJECTED: { color: 'var(--risk-high)', label: 'ปฏิเสธ' },
+  EXPIRED: { color: 'var(--ink-navy-muted)', label: 'หมดอายุ' },
 };
 
 export const URGENCY_META: Record<string, StatusMeta> = {
