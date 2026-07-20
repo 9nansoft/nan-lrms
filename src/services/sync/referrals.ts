@@ -28,6 +28,7 @@ import { createHash } from 'crypto';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { getActiveJourneyByCid } from '@/services/journey';
 import { normalizeHosxpDate } from '@/lib/hosxp-date';
+import { decryptSafe } from '@/lib/encryption';
 import { logger } from '@/lib/logger';
 
 export interface BrowserReferoutRow {
@@ -54,6 +55,23 @@ export interface BrowserReferinRow {
   refer_hospcode?: string | null;
   refer_date?: string | Date | null;
   refer_time?: string | null;
+}
+
+/** ovst fallback: some hospitals never fill the refer-in form, so ANY visit
+ *  at the destination after the referral date is arrival evidence. The
+ *  gateway only probes CIDs the server handed out (getReferralArrivalProbe). */
+export interface BrowserVisitEvidenceRow {
+  cid?: string | null;
+  visit_date?: string | Date | null;
+}
+
+export interface ReferralArrivalProbeEntry {
+  /** เลขบัตรประชาชน of a woman with an open referral TO the requesting
+   *  hospital — a legitimate care-communication disclosure to the readwrite
+   *  destination session only. */
+  cid: string;
+  /** Earliest visit date worth probing (initiation date - 1d slack). */
+  since: string;
 }
 
 export interface BrowserReferoutsResult {
@@ -254,71 +272,7 @@ export async function processBrowserReferins(
 
       const cidHash = createHash('sha256').update(cid).digest('hex');
       const arrivalIso = toEventIso(referDate, row.refer_time) ?? new Date().toISOString();
-      const arrivalMs = new Date(arrivalIso).getTime();
-      const windowEnd = new Date(arrivalMs + REFERIN_MATCH_SLACK_MS).toISOString();
-      const windowStart = new Date(arrivalMs - REFERIN_MATCH_MAX_AGE_MS).toISOString();
-
-      // Candidate: open referral origin→here for this patient, initiated
-      // inside [referin-30d, referin+1d]. The dedupe NOT EXISTS makes one
-      // evidence row (journey+destination+arrival timestamp) arrive at most
-      // one referral even across re-pulled cycles.
-      const candidates = await db.query<{ id: string; journey_id: string }>(
-        `SELECT cr.id, cr.journey_id
-         FROM cached_referrals cr
-         JOIN maternal_journeys mj ON mj.id = cr.journey_id
-         WHERE cr.from_hospital_id = ?
-           AND cr.to_hospital_id = ?
-           AND cr.status IN ('INITIATED', 'ACCEPTED', 'IN_TRANSIT')
-           AND mj.cid_hash = ?
-           AND cr.initiated_at <= ?
-           AND cr.initiated_at >= ?
-           AND NOT EXISTS (
-             SELECT 1 FROM cached_referrals dup
-             WHERE dup.journey_id = cr.journey_id
-               AND dup.to_hospital_id = cr.to_hospital_id
-               AND dup.status = 'ARRIVED'
-               AND dup.arrived_at = ?
-           )
-         ORDER BY cr.initiated_at DESC
-         LIMIT 1`,
-        [fromHospitalId, hospitalId, cidHash, windowEnd, windowStart, arrivalIso],
-      );
-      if (candidates.length === 0) {
-        result.skippedNoMatch++;
-        continue;
-      }
-
-      const now = new Date().toISOString();
-      await db.execute(
-        `UPDATE cached_referrals SET status = 'ARRIVED', arrived_at = ?, updated_at = ? WHERE id = ?`,
-        [arrivalIso, now, candidates[0].id],
-      );
-      result.arrived++;
-
-      // Ownership follows the journey's NEWEST arrival evidence only, and
-      // never moves after delivery — an out-of-order 60-day backfill must not
-      // strand a round-trip patient at the wrong hospital. (Adapter execute()
-      // returns void, so the guard is evaluated explicitly to keep the
-      // ownershipMoves counter honest.)
-      const movable = await db.query<{ id: string }>(
-        `SELECT mj.id FROM maternal_journeys mj
-         WHERE mj.id = ?
-           AND mj.care_stage <> 'DELIVERED'
-           AND NOT EXISTS (
-             SELECT 1 FROM cached_referrals newer
-             WHERE newer.journey_id = mj.id
-               AND newer.status = 'ARRIVED'
-               AND newer.arrived_at > ?
-           )`,
-        [candidates[0].journey_id, arrivalIso],
-      );
-      if (movable.length > 0) {
-        await db.execute(
-          `UPDATE maternal_journeys SET current_hospital_id = ?, updated_at = ? WHERE id = ?`,
-          [hospitalId, now, candidates[0].journey_id],
-        );
-        result.ownershipMoves++;
-      }
+      await applyArrivalEvidence(db, hospitalId, { cidHash, arrivalIso, fromHospitalId }, result);
     } catch {
       result.failed++;
     }
@@ -328,4 +282,164 @@ export async function processBrowserReferins(
     logger.info('browser_referins_arrived', { hospitalId, ...result });
   }
   return result;
+}
+
+/**
+ * ovst fallback (operator knowledge: some hospitals never fill the refer-in
+ * form): any visit at the destination after the referral date is arrival
+ * evidence. Rows come from the gateway probing ONLY the CIDs the server
+ * handed out via getReferralArrivalProbe. No origin constraint — the match is
+ * destination + CID + the same bounded initiation window and guards.
+ */
+export async function processBrowserVisitEvidences(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  rows: BrowserVisitEvidenceRow[],
+): Promise<BrowserReferinsResult> {
+  const result: BrowserReferinsResult = {
+    rowsRead: rows.length,
+    arrived: 0,
+    ownershipMoves: 0,
+    skippedNoMatch: 0,
+    skippedInvalid: 0,
+    failed: 0,
+  };
+
+  for (const row of rows) {
+    try {
+      const cid = row.cid?.trim();
+      const visitDate = dateOnly(row.visit_date);
+      if (!cid || !visitDate) {
+        result.skippedInvalid++;
+        continue;
+      }
+      const cidHash = createHash('sha256').update(cid).digest('hex');
+      const arrivalIso = toEventIso(visitDate, null) ?? new Date().toISOString();
+      await applyArrivalEvidence(db, hospitalId, { cidHash, arrivalIso }, result);
+    } catch {
+      result.failed++;
+    }
+  }
+
+  if (result.arrived > 0 || result.failed > 0) {
+    logger.info('browser_visit_evidence_arrived', { hospitalId, ...result });
+  }
+  return result;
+}
+
+/**
+ * The server-issued probe list for the ovst fallback: CIDs of women with an
+ * open referral TO the requesting hospital, initiated recently enough to
+ * still be matchable. The route MUST only hand this to a readwrite session of
+ * that same active hospital (care-communication disclosure to the legitimate
+ * destination).
+ */
+export async function getReferralArrivalProbe(
+  db: DatabaseAdapter,
+  hospitalId: string,
+): Promise<ReferralArrivalProbeEntry[]> {
+  const horizon = new Date(Date.now() - REFERIN_MATCH_MAX_AGE_MS).toISOString();
+  const rows = await db.query<{ cid: string | null; initiated_at: string | Date }>(
+    `SELECT mj.cid, cr.initiated_at
+     FROM cached_referrals cr
+     JOIN maternal_journeys mj ON mj.id = cr.journey_id
+     WHERE cr.to_hospital_id = ?
+       AND cr.status IN ('INITIATED', 'ACCEPTED', 'IN_TRANSIT')
+       AND cr.initiated_at >= ?
+     ORDER BY cr.initiated_at DESC
+     LIMIT 100`,
+    [hospitalId, horizon],
+  );
+  const entries: ReferralArrivalProbeEntry[] = [];
+  for (const row of rows) {
+    const cid = decryptSafe(row.cid);
+    if (!/^\d{13}$/.test(cid)) continue;
+    const initiatedMs = toMs(row.initiated_at);
+    if (initiatedMs == null) continue;
+    const since = new Date(initiatedMs - REFERIN_MATCH_SLACK_MS).toISOString().slice(0, 10);
+    entries.push({ cid, since });
+  }
+  return entries;
+}
+
+/** Shared guarded arrival core for referin + ovst visit evidence. */
+async function applyArrivalEvidence(
+  db: DatabaseAdapter,
+  destHospitalId: string,
+  evidence: { cidHash: string; arrivalIso: string; fromHospitalId?: string },
+  result: BrowserReferinsResult,
+): Promise<void> {
+  const arrivalMs = new Date(evidence.arrivalIso).getTime();
+  const windowEnd = new Date(arrivalMs + REFERIN_MATCH_SLACK_MS).toISOString();
+  const windowStart = new Date(arrivalMs - REFERIN_MATCH_MAX_AGE_MS).toISOString();
+
+  // Candidate: open referral →here for this patient, initiated inside
+  // [evidence-30d, evidence+1d]. The dedupe NOT EXISTS makes one evidence row
+  // (journey+destination+arrival timestamp) arrive at most one referral even
+  // across re-pulled cycles.
+  const originFilter = evidence.fromHospitalId ? 'AND cr.from_hospital_id = ?' : '';
+  const params: unknown[] = [
+    destHospitalId,
+    evidence.cidHash,
+    windowEnd,
+    windowStart,
+    evidence.arrivalIso,
+  ];
+  if (evidence.fromHospitalId) params.push(evidence.fromHospitalId);
+  const candidates = await db.query<{ id: string; journey_id: string }>(
+    `SELECT cr.id, cr.journey_id
+     FROM cached_referrals cr
+     JOIN maternal_journeys mj ON mj.id = cr.journey_id
+     WHERE cr.to_hospital_id = ?
+       AND cr.status IN ('INITIATED', 'ACCEPTED', 'IN_TRANSIT')
+       AND mj.cid_hash = ?
+       AND cr.initiated_at <= ?
+       AND cr.initiated_at >= ?
+       AND NOT EXISTS (
+         SELECT 1 FROM cached_referrals dup
+         WHERE dup.journey_id = cr.journey_id
+           AND dup.to_hospital_id = cr.to_hospital_id
+           AND dup.status = 'ARRIVED'
+           AND dup.arrived_at = ?
+       )
+       ${originFilter}
+     ORDER BY cr.initiated_at DESC
+     LIMIT 1`,
+    params,
+  );
+  if (candidates.length === 0) {
+    result.skippedNoMatch++;
+    return;
+  }
+
+  const now = new Date().toISOString();
+  await db.execute(
+    `UPDATE cached_referrals SET status = 'ARRIVED', arrived_at = ?, updated_at = ? WHERE id = ?`,
+    [evidence.arrivalIso, now, candidates[0].id],
+  );
+  result.arrived++;
+
+  // Ownership follows the journey's NEWEST arrival evidence only, and never
+  // moves after delivery — an out-of-order backfill must not strand a
+  // round-trip patient at the wrong hospital. (Adapter execute() returns
+  // void, so the guard is evaluated explicitly to keep the counter honest.)
+  const movable = await db.query<{ id: string }>(
+    `SELECT mj.id FROM maternal_journeys mj
+     WHERE mj.id = ?
+       AND mj.care_stage <> 'DELIVERED'
+       AND NOT EXISTS (
+         SELECT 1 FROM cached_referrals newer
+         WHERE newer.journey_id = mj.id
+           AND newer.status = 'ARRIVED'
+           AND newer.arrived_at > ?
+       )`,
+    [candidates[0].journey_id, evidence.arrivalIso],
+  );
+  if (movable.length > 0) {
+    await db.execute(
+      `UPDATE maternal_journeys SET current_hospital_id = ?, updated_at = ? WHERE id = ?`,
+      [destHospitalId, now, candidates[0].journey_id],
+    );
+    result.ownershipMoves++;
+  }
 }

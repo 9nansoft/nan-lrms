@@ -10,8 +10,13 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vite
 import { createHash } from 'crypto';
 import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
-import { generateKey } from '@/lib/encryption';
-import { processBrowserReferouts, processBrowserReferins } from '@/services/sync/referrals';
+import { generateKey, encrypt, getEncryptionKey } from '@/lib/encryption';
+import {
+  processBrowserReferouts,
+  processBrowserReferins,
+  processBrowserVisitEvidences,
+  getReferralArrivalProbe,
+} from '@/services/sync/referrals';
 
 const ORIGIN_ID = 'hosp-origin';
 const ORIGIN_HCODE = '10001';
@@ -180,7 +185,13 @@ describe('processBrowserReferouts (Phase 1 — origin gateway push)', () => {
     const rows = await db.query<{ initiated_at: string | Date }>(
       `SELECT initiated_at FROM cached_referrals`,
     );
-    expect(String(rows[0].initiated_at instanceof Date ? rows[0].initiated_at.toISOString() : rows[0].initiated_at)).toContain('2026-07-18');
+    expect(
+      String(
+        rows[0].initiated_at instanceof Date
+          ? rows[0].initiated_at.toISOString()
+          : rows[0].initiated_at,
+      ),
+    ).toContain('2026-07-18');
   });
 
   it('does not overwrite an old referral when HOSxP reuses the refer_number (yearly reset)', async () => {
@@ -299,6 +310,44 @@ describe('processBrowserReferins (Phase 2 — destination gateway push)', () => 
     expect(journey[0].current_hospital_id).toBe(ORIGIN_ID);
   });
 
+  it('ovst visit evidence at the destination arrives the referral without a referin row', async () => {
+    // Some hospitals never fill the refer-in form (operator knowledge) — the
+    // OPD visit registry (ovst) is the fallback arrival evidence.
+    const result = await processBrowserVisitEvidences(db, DEST_ID, [
+      { cid: CID, visit_date: '2026-07-19' },
+    ]);
+
+    expect(result).toMatchObject({ rowsRead: 1, arrived: 1, ownershipMoves: 1 });
+    const rows = await allReferrals();
+    expect(rows[0].status).toBe('ARRIVED');
+    const journey = await db.query<{ current_hospital_id: string }>(
+      `SELECT current_hospital_id FROM maternal_journeys WHERE id = ?`,
+      [JOURNEY_ID],
+    );
+    expect(journey[0].current_hospital_id).toBe(DEST_ID);
+  });
+
+  it('visit evidence respects the 30-day stale-initiation guard', async () => {
+    const staleInitiated = new Date(Date.now() - 65 * 86_400_000).toISOString();
+    await db.execute(`UPDATE cached_referrals SET initiated_at = ? WHERE refer_number = 'RF-001'`, [
+      staleInitiated,
+    ]);
+
+    const result = await processBrowserVisitEvidences(db, DEST_ID, [
+      { cid: CID, visit_date: new Date().toISOString().slice(0, 10) },
+    ]);
+
+    expect(result).toMatchObject({ arrived: 0, skippedNoMatch: 1 });
+    expect((await allReferrals())[0].status).toBe('INITIATED');
+  });
+
+  it('visit evidence dated before initiation does not arrive the referral', async () => {
+    const result = await processBrowserVisitEvidences(db, DEST_ID, [
+      { cid: CID, visit_date: '2026-07-10' },
+    ]);
+    expect(result).toMatchObject({ arrived: 0, skippedNoMatch: 1 });
+  });
+
   it('does not let an older backfilled arrival override newer arrival evidence (round-trip ordering)', async () => {
     // The journey already arrived somewhere else LATER (July 19, at ORIGIN —
     // i.e. she was referred back and is in active care there).
@@ -323,5 +372,29 @@ describe('processBrowserReferins (Phase 2 — destination gateway push)', () => 
       [JOURNEY_ID],
     );
     expect(journey[0].current_hospital_id).toBe(ORIGIN_ID);
+  });
+});
+
+describe('getReferralArrivalProbe (server-issued CID list for the ovst fallback)', () => {
+  beforeEach(async () => {
+    // The probe decrypts journey.cid — reseed the journey with a real ciphertext.
+    await db.execute(`UPDATE maternal_journeys SET cid = ? WHERE id = ?`, [
+      encrypt(CID, getEncryptionKey()),
+      JOURNEY_ID,
+    ]);
+    await processBrowserReferouts(db, ORIGIN_ID, [referoutRow()]);
+  });
+
+  it('lists CIDs of open referrals headed to this hospital with a since date', async () => {
+    const probe = await getReferralArrivalProbe(db, DEST_ID);
+    expect(probe).toHaveLength(1);
+    expect(probe[0].cid).toBe(CID);
+    expect(probe[0].since <= '2026-07-18').toBe(true);
+  });
+
+  it('excludes referrals headed elsewhere and non-open statuses', async () => {
+    expect(await getReferralArrivalProbe(db, ORIGIN_ID)).toHaveLength(0);
+    await db.execute(`UPDATE cached_referrals SET status = 'ARRIVED'`);
+    expect(await getReferralArrivalProbe(db, DEST_ID)).toHaveLength(0);
   });
 });

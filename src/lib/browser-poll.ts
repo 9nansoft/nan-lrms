@@ -27,6 +27,7 @@ import {
   IPT_PREGNANCY_DELIVERIES_SINCE,
   REFEROUT_MATERNITY_SINCE,
   REFERIN_SINCE,
+  OVST_FIRST_VISIT_FOR_CIDS,
 } from '@/config/hosxp-queries';
 import { isStaleAdmission } from '@/config/hospital-network';
 import type { ConnectionConfig, SqlApiResponse } from '@/types/bms-browser';
@@ -154,11 +155,13 @@ export interface BrowserPushBody {
     infants: Record<string, unknown>[];
     pregnancies: Record<string, unknown>[];
   };
-  /** Raw HOSxP referral rows: referouts (this hospital = origin) + referins
-   *  (this hospital = destination, arrival evidence). Rolling 60-day window. */
+  /** Raw HOSxP referral rows: referouts (this hospital = origin), referins
+   *  (this hospital = destination, arrival evidence), plus ovst visit
+   *  evidence for the server-issued probe CIDs. Rolling windows. */
   referrals?: {
     referouts: Record<string, unknown>[];
     referins: Record<string, unknown>[];
+    visitEvidences: Record<string, unknown>[];
   };
 }
 
@@ -1030,6 +1033,9 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       infants: Record<string, unknown>[];
       pregnancies: Record<string, unknown>[];
     } | null = null;
+    // Server-issued CIDs with open referrals TO this hospital — probed against
+    // ovst below as fallback arrival evidence (referral gateway sync).
+    let arrivalProbe: { cid: string; since: string }[] = [];
     try {
       const bootRes = await fetch('/api/sync/browser-push', {
         method: 'GET',
@@ -1037,7 +1043,19 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
         credentials: 'same-origin',
       });
       if (bootRes.ok) {
-        const boot = (await bootRes.json()) as { newbornCutoff?: string };
+        const boot = (await bootRes.json()) as {
+          newbornCutoff?: string;
+          referralArrivalProbe?: { cid?: unknown; since?: unknown }[];
+        };
+        if (Array.isArray(boot.referralArrivalProbe)) {
+          arrivalProbe = boot.referralArrivalProbe.filter(
+            (e): e is { cid: string; since: string } =>
+              typeof e?.cid === 'string' &&
+              /^\d{13}$/.test(e.cid) &&
+              typeof e?.since === 'string' &&
+              /^\d{4}-\d{2}-\d{2}$/.test(e.since),
+          );
+        }
         const cutoff = boot.newbornCutoff;
         if (typeof cutoff === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cutoff)) {
           const infantsSql =
@@ -1069,6 +1087,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     let referralsSection: {
       referouts: Record<string, unknown>[];
       referins: Record<string, unknown>[];
+      visitEvidences: Record<string, unknown>[];
     } | null = null;
     try {
       const referoutCutoff = new Date(Date.now() - 60 * 86_400_000).toISOString().slice(0, 10);
@@ -1082,13 +1101,30 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       const referinsSql =
         REFERIN_SINCE.mysql.replace('{{CUTOFF}}', referinCutoff) +
         ' ORDER BY ri.refer_date DESC LIMIT 500';
-      const [referoutRows, referinRows] = await Promise.all([
+      // ovst fallback probe — only for the server-issued CIDs (hospitals that
+      // never fill the refer-in form still record the arrival visit in ovst).
+      // CIDs are validated 13-digit strings before SQL interpolation.
+      const visitEvidencePromise: Promise<Record<string, unknown>[]> =
+        arrivalProbe.length > 0
+          ? runQuery<Record<string, unknown>>(
+              OVST_FIRST_VISIT_FOR_CIDS.mysql
+                .replace('{{CIDS}}', arrivalProbe.map((e) => `'${e.cid}'`).join(','))
+                .replace('{{CUTOFF}}', arrivalProbe.map((e) => e.since).sort()[0]),
+              opts,
+            )
+          : Promise.resolve([]);
+      const [referoutRows, referinRows, visitEvidenceRows] = await Promise.all([
         runQuery<Record<string, unknown>>(referoutsSql, opts),
         runQuery<Record<string, unknown>>(referinsSql, opts),
+        visitEvidencePromise,
       ]);
       result.referrals = { referoutsRead: referoutRows.length, referinsRead: referinRows.length };
-      if (referoutRows.length > 0 || referinRows.length > 0) {
-        referralsSection = { referouts: referoutRows, referins: referinRows };
+      if (referoutRows.length > 0 || referinRows.length > 0 || visitEvidenceRows.length > 0) {
+        referralsSection = {
+          referouts: referoutRows,
+          referins: referinRows,
+          visitEvidences: visitEvidenceRows,
+        };
       }
     } catch {
       // Referral feed is best-effort; the next cycle re-pulls the same window.

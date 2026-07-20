@@ -23,8 +23,11 @@ import { autoArriveReferrals } from '@/services/referral';
 import {
   processBrowserReferouts,
   processBrowserReferins,
+  processBrowserVisitEvidences,
+  getReferralArrivalProbe,
   type BrowserReferoutRow,
   type BrowserReferinRow,
+  type BrowserVisitEvidenceRow,
   type BrowserReferoutsResult,
   type BrowserReferinsResult,
 } from '@/services/sync/referrals';
@@ -56,8 +59,14 @@ interface BrowserPushBody {
    *  since the server-issued cutoff — see GET below. */
   newborns?: BrowserNewbornsSection;
   /** Raw HOSxP referral rows: referouts from the origin hospital's gateway,
-   *  referins observed at the destination. Optional and best-effort. */
-  referrals?: { referouts?: BrowserReferoutRow[]; referins?: BrowserReferinRow[] };
+   *  referins observed at the destination, plus ovst visit evidence for the
+   *  server-issued probe CIDs (hospitals that never fill the refer-in form).
+   *  Optional and best-effort. */
+  referrals?: {
+    referouts?: BrowserReferoutRow[];
+    referins?: BrowserReferinRow[];
+    visitEvidences?: BrowserVisitEvidenceRow[];
+  };
 }
 
 // Validate the optional client-supplied BMS session id: non-empty string,
@@ -147,7 +156,11 @@ export async function POST(request: NextRequest) {
       };
       partograph?: { accepted: number; skipped: number };
       newborns?: { upserted: number; journeys: number; failedAns: number };
-      referrals?: { referouts: BrowserReferoutsResult; referins: BrowserReferinsResult };
+      referrals?: {
+        referouts: BrowserReferoutsResult;
+        referins: BrowserReferinsResult;
+        visitEvidences: BrowserReferinsResult;
+      };
     } = {};
 
     // Labor — main payload, mirrors webhook 'labor' default route.
@@ -487,22 +500,32 @@ export async function POST(request: NextRequest) {
     if (body.referrals && typeof body.referrals === 'object') {
       const referouts = Array.isArray(body.referrals.referouts) ? body.referrals.referouts : [];
       const referins = Array.isArray(body.referrals.referins) ? body.referrals.referins : [];
+      const visitEvidences = Array.isArray(body.referrals.visitEvidences)
+        ? body.referrals.visitEvidences
+        : [];
       try {
         const referoutResult = await processBrowserReferouts(db, hospitalId, referouts);
         const referinResult = await processBrowserReferins(db, hospitalId, referins);
-        result.referrals = { referouts: referoutResult, referins: referinResult };
-        if (referoutResult.created + referoutResult.upserted > 0 || referinResult.arrived > 0) {
+        const visitResult = await processBrowserVisitEvidences(db, hospitalId, visitEvidences);
+        result.referrals = {
+          referouts: referoutResult,
+          referins: referinResult,
+          visitEvidences: visitResult,
+        };
+        const arrivedTotal = referinResult.arrived + visitResult.arrived;
+        if (referoutResult.created + referoutResult.upserted > 0 || arrivedTotal > 0) {
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_referrals',
             status: 'success',
-            message: `Referrals: ${referoutResult.created} new, ${referoutResult.upserted} refreshed, ${referinResult.arrived} arrived.`,
+            message: `Referrals: ${referoutResult.created} new, ${referoutResult.upserted} refreshed, ${arrivedTotal} arrived (${visitResult.arrived} via visit evidence).`,
             counts: {
               referoutsRead: referoutResult.rowsRead,
               created: referoutResult.created,
               upserted: referoutResult.upserted,
               skippedNoJourney: referoutResult.skippedNoJourney,
               referinsRead: referinResult.rowsRead,
-              arrived: referinResult.arrived,
+              visitEvidencesRead: visitResult.rowsRead,
+              arrived: arrivedTotal,
             },
           });
         }
@@ -512,8 +535,12 @@ export async function POST(request: NextRequest) {
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_referrals',
           status: 'warning',
-          message: `Referral persist failed (continuing): ${msg.slice(0, 120)} — payload had ${referouts.length} referout rows, ${referins.length} referin rows.`,
-          counts: { referouts: referouts.length, referins: referins.length },
+          message: `Referral persist failed (continuing): ${msg.slice(0, 120)} — payload had ${referouts.length} referout rows, ${referins.length} referin rows, ${visitEvidences.length} visit evidences.`,
+          counts: {
+            referouts: referouts.length,
+            referins: referins.length,
+            visitEvidences: visitEvidences.length,
+          },
           detail: msg,
         });
       }
@@ -597,7 +624,19 @@ export async function GET() {
       return NextResponse.json({ error: 'hospital_not_registered', hcode }, { status: 403 });
     }
     const newbornCutoff = await newbornSyncCutoffDate(db, rows[0].id);
-    return NextResponse.json({ newbornCutoff });
+    // ovst arrival-probe CIDs are a care-communication disclosure to the
+    // legitimate destination only: readwrite session of that same hospital.
+    // (GET is also used by readonly viewers for the cutoff — never hand them
+    // patient identifiers.)
+    let referralArrivalProbe: Awaited<ReturnType<typeof getReferralArrivalProbe>> = [];
+    if (session.user.accessMode !== 'readonly') {
+      try {
+        referralArrivalProbe = await getReferralArrivalProbe(db, rows[0].id);
+      } catch (e) {
+        logger.warn('referral_arrival_probe_failed', { hcode, error: String(e) });
+      }
+    }
+    return NextResponse.json({ newbornCutoff, referralArrivalProbe });
   } catch (error) {
     logger.error('browser_push_bootstrap_failed', { error });
     return NextResponse.json({ error: 'internal_error' }, { status: 500 });

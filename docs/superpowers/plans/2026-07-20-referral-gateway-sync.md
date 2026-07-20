@@ -63,6 +63,18 @@ Confirmed findings fixed before first commit:
   decision (they ride along with regular pushes).
 - Per-row try/catch isolation + failed counters in both processors.
 
+## ovst fallback (operator request, same day)
+
+Some hospitals never fill the refer-in form (operator knowledge), so referin
+evidence alone under-detects arrivals. Fallback: the GET bootstrap returns a
+probe list (getReferralArrivalProbe — CIDs of open referrals TO the requesting
+hospital, ≤100, initiated ≤30d, readwrite sessions of active hospitals only);
+the gateway queries ovst for just those CIDs (OVST_FIRST_VISIT_FOR_CIDS,
+validated 13-digit CIDs interpolated) and pushes `visitEvidences`
+[{cid, visit_date}]. processBrowserVisitEvidences shares the exact guarded
+arrival core with referin (30d window, per-evidence dedupe, DELIVERED +
+newest-evidence ownership guards) — just without the origin constraint.
+
 ## Files
 
 - `src/config/hosxp-queries.ts` — REFEROUT_MATERNITY_SINCE, REFERIN_SINCE (retire dead

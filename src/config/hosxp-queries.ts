@@ -444,6 +444,28 @@ export const REFERIN_SINCE: SqlQueryTemplate = {
       WHERE ri.refer_date >= '{{CUTOFF}}'`,
 };
 
+// ovst fallback for arrival evidence — some hospitals never fill the refer-in
+// form, so the earliest OPD visit after the referral date stands in for it.
+// {{CIDS}} is a quoted, comma-separated list the gateway builds ONLY from the
+// server-issued probe (getReferralArrivalProbe), each entry validated as a
+// 13-digit CID before interpolation. {{CUTOFF}} = min(since) across the probe.
+export const OVST_FIRST_VISIT_FOR_CIDS: SqlQueryTemplate = {
+  postgresql: `
+      SELECT p.cid, MIN(o.vstdate) AS visit_date
+      FROM ovst o
+      JOIN patient p ON p.hn = o.hn
+      WHERE p.cid IN ({{CIDS}})
+        AND o.vstdate >= '{{CUTOFF}}'
+      GROUP BY p.cid`,
+  mysql: `
+      SELECT p.cid, MIN(o.vstdate) AS visit_date
+      FROM ovst o
+      JOIN patient p ON p.hn = o.hn
+      WHERE p.cid IN ({{CIDS}})
+        AND o.vstdate >= '{{CUTOFF}}'
+      GROUP BY p.cid`,
+};
+
 // Retained for reference; superseded by REFEROUT_MATERNITY_SINCE (this one was
 // never consumed by any live code path).
 export const REFEROUT_PREGNANCY: SqlQueryTemplate = {
