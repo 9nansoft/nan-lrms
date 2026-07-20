@@ -94,3 +94,4 @@ public/*-deck-*.zip
 
 # Production DB dumps (PHI) — never commit
 backups/
+logs/
