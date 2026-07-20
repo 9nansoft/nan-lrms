@@ -62,15 +62,11 @@ export function HospitalDetailDialog({
 }: HospitalDetailDialogProps) {
   const capability = hcode ? HOSPITAL_CAPABILITIES.find((c) => c.hcode === hcode) : undefined;
   const coord = hcode ? HOSPITAL_COORDS[hcode] : undefined;
-  const patients = hcode
-    ? allHighRiskPatients.filter((p) => p.hcode === hcode)
-    : [];
+  const patients = hcode ? allHighRiskPatients.filter((p) => p.hcode === hcode) : [];
 
   const counts = hospital?.counts ?? { low: 0, medium: 0, high: 0, total: 0 };
   const referTo = capability?.referTo;
-  const referToHospital = referTo
-    ? HOSPITAL_CAPABILITIES.find((c) => c.hcode === referTo)
-    : null;
+  const referToHospital = referTo ? HOSPITAL_CAPABILITIES.find((c) => c.hcode === referTo) : null;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -89,12 +85,18 @@ export function HospitalDetailDialog({
             </DialogTitle>
             <DialogDescription className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-white/80">
               <span>{hcode ?? ''}</span>
-              {hospital?.level && <Badge variant="outline" className="bg-white/10 text-white border-white/30">{hospital.level}</Badge>}
+              {hospital?.level && (
+                <Badge variant="outline" className="bg-white/10 text-white border-white/30">
+                  {hospital.level}
+                </Badge>
+              )}
               {hospital && <ConnectionPill status={hospital.connectionStatus} />}
               {coord && (
                 <span>
                   {coord.lat.toFixed(4)}°N · {coord.lon.toFixed(4)}°E
-                  <span className="ml-1 opacity-60">({coord.source === 'osm' ? 'OSM' : 'district centroid'})</span>
+                  <span className="ml-1 opacity-60">
+                    ({coord.source === 'osm' ? 'OSM' : 'district centroid'})
+                  </span>
                 </span>
               )}
             </DialogDescription>
@@ -112,10 +114,7 @@ export function HospitalDetailDialog({
 
         <div className="overflow-y-auto" style={{ maxHeight: 'calc(90vh - 72px)' }}>
           {/* 01 — Active labor vitals */}
-          <section
-            className="grid bg-white"
-            style={{ gridTemplateColumns: '1.3fr 1fr 1fr 1fr' }}
-          >
+          <section className="grid bg-white" style={{ gridTemplateColumns: '1.3fr 1fr 1fr 1fr' }}>
             <div
               className="border-b border-r px-5 py-4"
               style={{ borderColor: 'var(--rule-strong)' }}
@@ -163,8 +162,10 @@ export function HospitalDetailDialog({
           </section>
 
           {/* 02 — Capability metadata */}
-          <section className="border-b bg-white px-5 py-3"
-                   style={{ borderColor: 'var(--rule-strong)' }}>
+          <section
+            className="border-b bg-white px-5 py-3"
+            style={{ borderColor: 'var(--rule-strong)' }}
+          >
             <div className="grid grid-cols-4 gap-4 text-[14px]">
               <div>
                 <div className="font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
@@ -204,7 +205,9 @@ export function HospitalDetailDialog({
                       {referToHospital?.name ?? referTo}
                     </Link>
                   ) : (
-                    <span className="text-[var(--ink-navy-muted)]">terminal (no onward referral)</span>
+                    <span className="text-[var(--ink-navy-muted)]">
+                      terminal (no onward referral)
+                    </span>
                   )}
                 </div>
               </div>
@@ -222,7 +225,9 @@ export function HospitalDetailDialog({
                 <span
                   className={cn(
                     'font-semibold',
-                    hospital?.lastSyncAt ? 'text-[var(--ink-navy)]' : 'text-[var(--ink-navy-muted)]',
+                    hospital?.lastSyncAt
+                      ? 'text-[var(--ink-navy)]'
+                      : 'text-[var(--ink-navy-muted)]',
                   )}
                 >
                   {hospital?.lastSyncAt ? formatRelativeTime(hospital.lastSyncAt) : 'never'}
@@ -230,7 +235,9 @@ export function HospitalDetailDialog({
               </span>
               <span>
                 {hospital?.lastSyncAt
-                  ? new Date(hospital.lastSyncAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })
+                  ? new Date(hospital.lastSyncAt).toLocaleString('th-TH', {
+                      timeZone: 'Asia/Bangkok',
+                    })
                   : ''}
               </span>
             </div>

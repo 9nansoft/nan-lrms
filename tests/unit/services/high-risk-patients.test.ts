@@ -318,7 +318,19 @@ describe('getHighRiskPatients', () => {
       const patId = uuidv4();
       await db.execute(
         'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [patId, hosp.id, `HN-${hosp.hcode}`, `AN-${hosp.hcode}`, 'enc-name', 30, now, 'ACTIVE', now, now, now],
+        [
+          patId,
+          hosp.id,
+          `HN-${hosp.hcode}`,
+          `AN-${hosp.hcode}`,
+          'enc-name',
+          30,
+          now,
+          'ACTIVE',
+          now,
+          now,
+          now,
+        ],
       );
       await db.execute(
         'INSERT INTO cpd_scores (id, patient_id, score, risk_level, calculated_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -344,7 +356,20 @@ describe('getHighRiskPatients', () => {
     const patId = uuidv4();
     await db.execute(
       'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, ga_weeks, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [patId, hospitalId, 'HN-001', 'AN-001', 'enc-patient-name', 28, 38, admitDate, 'ACTIVE', now, now, now],
+      [
+        patId,
+        hospitalId,
+        'HN-001',
+        'AN-001',
+        'enc-patient-name',
+        28,
+        38,
+        admitDate,
+        'ACTIVE',
+        now,
+        now,
+        now,
+      ],
     );
     await db.execute(
       'INSERT INTO cpd_scores (id, patient_id, score, risk_level, calculated_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
