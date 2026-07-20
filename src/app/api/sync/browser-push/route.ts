@@ -21,6 +21,14 @@ import {
 } from '@/services/sync/newborn';
 import { autoArriveReferrals } from '@/services/referral';
 import {
+  processBrowserReferouts,
+  processBrowserReferins,
+  type BrowserReferoutRow,
+  type BrowserReferinRow,
+  type BrowserReferoutsResult,
+  type BrowserReferinsResult,
+} from '@/services/sync/referrals';
+import {
   processWebhookPayload,
   processAncWebhook,
   processPartographWebhook,
@@ -47,6 +55,9 @@ interface BrowserPushBody {
   /** Raw HOSxP delivery rows (labour infants + ipt_pregnancy summaries)
    *  since the server-issued cutoff — see GET below. */
   newborns?: BrowserNewbornsSection;
+  /** Raw HOSxP referral rows: referouts from the origin hospital's gateway,
+   *  referins observed at the destination. Optional and best-effort. */
+  referrals?: { referouts?: BrowserReferoutRow[]; referins?: BrowserReferinRow[] };
 }
 
 // Validate the optional client-supplied BMS session id: non-empty string,
@@ -136,6 +147,7 @@ export async function POST(request: NextRequest) {
       };
       partograph?: { accepted: number; skipped: number };
       newborns?: { upserted: number; journeys: number; failedAns: number };
+      referrals?: { referouts: BrowserReferoutsResult; referins: BrowserReferinsResult };
     } = {};
 
     // Labor — main payload, mirrors webhook 'labor' default route.
@@ -463,6 +475,45 @@ export async function POST(request: NextRequest) {
           status: 'warning',
           message: `Newborn persist failed (continuing): ${msg.slice(0, 120)} — payload had ${infantsCount} infant rows, ${pregCount} delivery summaries.`,
           counts: { infants: infantsCount, pregnancies: pregCount },
+          detail: msg,
+        });
+      }
+    }
+
+    // Referral gateway sync — referouts (origin side) + referins (destination
+    // side). Best-effort: a referral failure never blocks the main push. Runs
+    // BEFORE autoArriveReferrals below so rows ingested this cycle are visible
+    // to the same cycle's reconciliation.
+    if (body.referrals && typeof body.referrals === 'object') {
+      const referouts = Array.isArray(body.referrals.referouts) ? body.referrals.referouts : [];
+      const referins = Array.isArray(body.referrals.referins) ? body.referrals.referins : [];
+      try {
+        const referoutResult = await processBrowserReferouts(db, hospitalId, referouts);
+        const referinResult = await processBrowserReferins(db, hospitalId, referins);
+        result.referrals = { referouts: referoutResult, referins: referinResult };
+        if (referoutResult.created + referoutResult.upserted > 0 || referinResult.arrived > 0) {
+          await appendSyncStep(hospitalId, runId, {
+            name: 'persist_referrals',
+            status: 'success',
+            message: `Referrals: ${referoutResult.created} new, ${referoutResult.upserted} refreshed, ${referinResult.arrived} arrived.`,
+            counts: {
+              referoutsRead: referoutResult.rowsRead,
+              created: referoutResult.created,
+              upserted: referoutResult.upserted,
+              skippedNoJourney: referoutResult.skippedNoJourney,
+              referinsRead: referinResult.rowsRead,
+              arrived: referinResult.arrived,
+            },
+          });
+        }
+      } catch (e) {
+        hadWarning = true;
+        const msg = e instanceof Error ? e.message : String(e);
+        await appendSyncStep(hospitalId, runId, {
+          name: 'persist_referrals',
+          status: 'warning',
+          message: `Referral persist failed (continuing): ${msg.slice(0, 120)} — payload had ${referouts.length} referout rows, ${referins.length} referin rows.`,
+          counts: { referouts: referouts.length, referins: referins.length },
           detail: msg,
         });
       }

@@ -383,6 +383,69 @@ export const IPT_PREGNANCY_DELIVERIES_SINCE: SqlQueryTemplate = {
       WHERE ipr.labor_date IS NOT NULL AND ipr.labor_date >= '{{CUTOFF}}'`,
 };
 
+// Referral gateway sync (plan: docs/superpowers/plans/2026-07-20-referral-gateway-sync.md).
+// Same {{CUTOFF}} (YYYY-MM-DD) contract as LABOUR_INFANTS_SINCE. The maternity
+// EXISTS filter only trims payload volume — final relevance is enforced
+// server-side (journey-must-exist in processBrowserReferouts).
+export const REFEROUT_MATERNITY_SINCE: SqlQueryTemplate = {
+  postgresql: `
+      SELECT ro.refer_number, ro.refer_date, ro.refer_time, ro.refer_hospcode,
+             ro.pre_diagnosis, ro.pdx, ro.referout_emergency_type_id,
+             p.hn, p.cid
+      FROM referout ro
+      JOIN ovst o ON o.vn = ro.vn
+      JOIN patient p ON p.hn = o.hn
+      WHERE ro.refer_date >= '{{CUTOFF}}'
+        AND (
+          EXISTS (SELECT 1 FROM person_anc pa
+                  JOIN person pe ON pe.person_id = pa.person_id
+                  WHERE pe.cid = p.cid AND COALESCE(pa.discharge, 'N') <> 'Y')
+          OR EXISTS (SELECT 1 FROM ipt i
+                     JOIN ipt_pregnancy ip ON ip.an = i.an
+                     WHERE i.vn = ro.vn)
+        )`,
+  mysql: `
+      SELECT ro.refer_number, ro.refer_date, ro.refer_time, ro.refer_hospcode,
+             ro.pre_diagnosis, ro.pdx, ro.referout_emergency_type_id,
+             p.hn, p.cid
+      FROM referout ro
+      JOIN ovst o ON o.vn = ro.vn
+      JOIN patient p ON p.hn = o.hn
+      WHERE ro.refer_date >= '{{CUTOFF}}'
+        AND (
+          EXISTS (SELECT 1 FROM person_anc pa
+                  JOIN person pe ON pe.person_id = pa.person_id
+                  WHERE pe.cid = p.cid AND COALESCE(pa.discharge, 'N') <> 'Y')
+          OR EXISTS (SELECT 1 FROM ipt i
+                     JOIN ipt_pregnancy ip ON ip.an = i.an
+                     WHERE i.vn = ro.vn)
+        )`,
+};
+
+// Incoming referrals observed at the DESTINATION hospital — the arrival
+// evidence that advances cached_referrals to ARRIVED (processBrowserReferins).
+// referin's referout_number column is unpopulated at live sites, so the
+// server matches by origin hcode + patient CID + date window. Deliberately NO
+// maternity filter here: a referred woman is often not yet ANC-registered at
+// the destination when she arrives (review finding) — the server-side
+// open-referral match is the real filter, and unmatched rows are discarded.
+// Window kept short (browser-poll passes a ~14-day cutoff) to bound volume at
+// big hubs.
+export const REFERIN_SINCE: SqlQueryTemplate = {
+  postgresql: `
+      SELECT ri.hn, p.cid, ri.refer_hospcode, ri.refer_date
+      FROM referin ri
+      JOIN patient p ON p.hn = ri.hn
+      WHERE ri.refer_date >= '{{CUTOFF}}'`,
+  mysql: `
+      SELECT ri.hn, p.cid, ri.refer_hospcode, ri.refer_date
+      FROM referin ri
+      JOIN patient p ON p.hn = ri.hn
+      WHERE ri.refer_date >= '{{CUTOFF}}'`,
+};
+
+// Retained for reference; superseded by REFEROUT_MATERNITY_SINCE (this one was
+// never consumed by any live code path).
 export const REFEROUT_PREGNANCY: SqlQueryTemplate = {
   postgresql: `
       SELECT ro.refer_number, ro.refer_date, p.hn,

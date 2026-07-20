@@ -22,7 +22,12 @@
 
 import { executeSql } from '@/lib/bms-browser-client';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
-import { LABOUR_INFANTS_SINCE, IPT_PREGNANCY_DELIVERIES_SINCE } from '@/config/hosxp-queries';
+import {
+  LABOUR_INFANTS_SINCE,
+  IPT_PREGNANCY_DELIVERIES_SINCE,
+  REFEROUT_MATERNITY_SINCE,
+  REFERIN_SINCE,
+} from '@/config/hosxp-queries';
 import { isStaleAdmission } from '@/config/hospital-network';
 import type { ConnectionConfig, SqlApiResponse } from '@/types/bms-browser';
 
@@ -149,6 +154,12 @@ export interface BrowserPushBody {
     infants: Record<string, unknown>[];
     pregnancies: Record<string, unknown>[];
   };
+  /** Raw HOSxP referral rows: referouts (this hospital = origin) + referins
+   *  (this hospital = destination, arrival evidence). Rolling 60-day window. */
+  referrals?: {
+    referouts: Record<string, unknown>[];
+    referins: Record<string, unknown>[];
+  };
 }
 
 export interface BrowserPollResult {
@@ -166,6 +177,8 @@ export interface BrowserPollResult {
   anc: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
   /** Delivery rows read since the server-issued newborn cutoff. */
   newborns?: { infantsRead: number; pregnanciesRead: number };
+  /** Referral rows read from the rolling 60-day HOSxP window. */
+  referrals?: { referoutsRead: number; referinsRead: number };
   pushedToServer: boolean;
   /** Verdict of the name round-trip probe — present whenever a probe ran. */
   authenticity?: {
@@ -1047,6 +1060,40 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       // Newborn feed is best-effort; the next cycle retries from the same cutoff.
     }
 
+    // ─── Referrals (referout = this hospital as origin, referin = arrival
+    // evidence at this hospital as destination) ───────────────────────────
+    // Rolling 60-day window computed client-side — referrals are a bounded
+    // rolling set, not append-only history, so re-pulling the window every
+    // cycle IS the resync (same self-healing property as the ANC pull).
+    // Additive best-effort feed: failure never blocks the main push.
+    let referralsSection: {
+      referouts: Record<string, unknown>[];
+      referins: Record<string, unknown>[];
+    } | null = null;
+    try {
+      const referoutCutoff = new Date(Date.now() - 60 * 86_400_000).toISOString().slice(0, 10);
+      // Referin evidence only matters within days of the send (server match
+      // window is 30d) and has no maternity filter, so keep it short to bound
+      // volume at big hubs.
+      const referinCutoff = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
+      const referoutsSql =
+        REFEROUT_MATERNITY_SINCE.mysql.replace('{{CUTOFF}}', referoutCutoff) +
+        ' ORDER BY ro.refer_date DESC LIMIT 200';
+      const referinsSql =
+        REFERIN_SINCE.mysql.replace('{{CUTOFF}}', referinCutoff) +
+        ' ORDER BY ri.refer_date DESC LIMIT 500';
+      const [referoutRows, referinRows] = await Promise.all([
+        runQuery<Record<string, unknown>>(referoutsSql, opts),
+        runQuery<Record<string, unknown>>(referinsSql, opts),
+      ]);
+      result.referrals = { referoutsRead: referoutRows.length, referinsRead: referinRows.length };
+      if (referoutRows.length > 0 || referinRows.length > 0) {
+        referralsSection = { referouts: referoutRows, referins: referinRows };
+      }
+    } catch {
+      // Referral feed is best-effort; the next cycle re-pulls the same window.
+    }
+
     const decision = decideLaborPush({
       laborPatients,
       laborActiveAns,
@@ -1058,6 +1105,11 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // Skip the POST when there's nothing to upsert AND the active set is
     // unchanged — keeps the Sync Log clean for perpetually-empty wards while
     // still firing a reconciliation when the ward empties/shrinks (Mantis #9505).
+    // Referrals deliberately do NOT defeat the skip decision: the rolling
+    // window re-pulls the same rows every cycle, so letting it force a push
+    // would re-send them each minute even on idle wards. They ride along
+    // whenever a push happens anyway (ANC actives make that every cycle at
+    // practically all hospitals).
     if (decision.skip && !newbornsSection) {
       result.durationMs = Date.now() - startedAt;
       return result;
@@ -1069,6 +1121,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     if (partographs.length > 0) body.partograph = { observations: partographs };
     if (ancPatients.length > 0) body.anc = { patients: ancPatients };
     if (newbornsSection) body.newborns = newbornsSection;
+    if (referralsSection) body.referrals = referralsSection;
 
     const pushRes = await fetch('/api/sync/browser-push', {
       method: 'POST',
