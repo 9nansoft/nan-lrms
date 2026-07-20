@@ -1,9 +1,14 @@
-// W6 (TDD, tests FIRST): the single source of truth for "is this identity
-// allowed into /admin". Both src/middleware.ts (Edge) and
-// src/lib/admin-guard.ts (Node route handlers) MUST route through
-// isAdminAuthorized so the role/CID/readonly rule can never diverge.
+// W6 (TDD, tests FIRST): the single source of truth for admin authorization.
+// Both src/middleware.ts (Edge) and src/lib/admin-guard.ts (Node route
+// handlers) MUST route through isAdminAuthorized so the role/CID/readonly rule
+// can never diverge, and the BMS authorize() in src/lib/auth.ts routes through
+// promoteRoleByAllowedCid so the allow-list's GRANT side lives here too.
 import { describe, it, expect, afterEach } from 'vitest';
-import { isAdminAuthorized, parseAdminAllowedCids } from '@/lib/admin-access';
+import {
+  isAdminAuthorized,
+  parseAdminAllowedCids,
+  promoteRoleByAllowedCid,
+} from '@/lib/admin-access';
 import { UserRole } from '@/types/domain';
 
 describe('parseAdminAllowedCids', () => {
@@ -94,6 +99,148 @@ describe('isAdminAuthorized', () => {
     it('still enforces the CID gate in production when the list is non-empty', () => {
       expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '1' }, ['1'], true)).toBe(true);
       expect(isAdminAuthorized({ role: UserRole.ADMIN, userCid: '2' }, ['1'], true)).toBe(false);
+    });
+  });
+
+  describe('promotion via allow-list (promoteRoleByAllowedCid)', () => {
+    const LIST = ['1111111111111', '2222222222222'];
+
+    it('promotes a readwrite identity whose CID is on the allow-list to ADMIN', () => {
+      expect(
+        promoteRoleByAllowedCid(
+          UserRole.NURSE,
+          {
+            userCid: '1111111111111',
+            accessMode: 'readwrite',
+          },
+          LIST,
+        ),
+      ).toBe(UserRole.ADMIN);
+      expect(
+        promoteRoleByAllowedCid(
+          UserRole.OBSTETRICIAN,
+          {
+            userCid: '2222222222222',
+            accessMode: 'readwrite',
+          },
+          LIST,
+        ),
+      ).toBe(UserRole.ADMIN);
+    });
+
+    it('keeps an already-ADMIN role as ADMIN', () => {
+      expect(
+        promoteRoleByAllowedCid(
+          UserRole.ADMIN,
+          {
+            userCid: '1111111111111',
+            accessMode: 'readwrite',
+          },
+          LIST,
+        ),
+      ).toBe(UserRole.ADMIN);
+    });
+
+    it('leaves the role unchanged when the CID is not on the list', () => {
+      expect(
+        promoteRoleByAllowedCid(
+          UserRole.NURSE,
+          {
+            userCid: '9999999999999',
+            accessMode: 'readwrite',
+          },
+          LIST,
+        ),
+      ).toBe(UserRole.NURSE);
+    });
+
+    it('NEVER promotes a readonly (ProviderID) session even when its CID is listed', () => {
+      expect(
+        promoteRoleByAllowedCid(
+          UserRole.NURSE,
+          {
+            userCid: '1111111111111',
+            accessMode: 'readonly',
+          },
+          LIST,
+        ),
+      ).toBe(UserRole.NURSE);
+    });
+
+    it('fails closed when accessMode is missing — promotion requires an explicit readwrite session', () => {
+      expect(promoteRoleByAllowedCid(UserRole.NURSE, { userCid: '1111111111111' }, LIST)).toBe(
+        UserRole.NURSE,
+      );
+      expect(
+        promoteRoleByAllowedCid(
+          UserRole.NURSE,
+          {
+            userCid: '1111111111111',
+            accessMode: null,
+          },
+          LIST,
+        ),
+      ).toBe(UserRole.NURSE);
+    });
+
+    it('does not promote with an empty allow-list or an empty / missing CID', () => {
+      expect(
+        promoteRoleByAllowedCid(
+          UserRole.NURSE,
+          {
+            userCid: '1111111111111',
+            accessMode: 'readwrite',
+          },
+          [],
+        ),
+      ).toBe(UserRole.NURSE);
+      expect(
+        promoteRoleByAllowedCid(UserRole.NURSE, { userCid: '', accessMode: 'readwrite' }, LIST),
+      ).toBe(UserRole.NURSE);
+      expect(
+        promoteRoleByAllowedCid(
+          UserRole.NURSE,
+          {
+            userCid: undefined,
+            accessMode: 'readwrite',
+          },
+          LIST,
+        ),
+      ).toBe(UserRole.NURSE);
+    });
+
+    const ORIGINAL_CIDS = process.env.ADMIN_ALLOWED_CIDS;
+    afterEach(() => {
+      if (ORIGINAL_CIDS === undefined) delete process.env.ADMIN_ALLOWED_CIDS;
+      else process.env.ADMIN_ALLOWED_CIDS = ORIGINAL_CIDS;
+    });
+
+    it('falls back to process.env.ADMIN_ALLOWED_CIDS when no list arg is passed', () => {
+      process.env.ADMIN_ALLOWED_CIDS = '1111111111111';
+      expect(
+        promoteRoleByAllowedCid(UserRole.NURSE, {
+          userCid: '1111111111111',
+          accessMode: 'readwrite',
+        }),
+      ).toBe(UserRole.ADMIN);
+    });
+
+    it('a promoted identity passes isAdminAuthorized end-to-end (menu + /admin gates agree)', () => {
+      const promoted = promoteRoleByAllowedCid(
+        UserRole.OBSTETRICIAN,
+        {
+          userCid: '1111111111111',
+          accessMode: 'readwrite',
+        },
+        LIST,
+      );
+      expect(
+        isAdminAuthorized(
+          { role: promoted, userCid: '1111111111111', accessMode: 'readwrite' },
+          LIST,
+          true,
+        ),
+      ).toBe(true);
     });
   });
 

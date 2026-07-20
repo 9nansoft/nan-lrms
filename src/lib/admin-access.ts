@@ -33,6 +33,27 @@ export function parseAdminAllowedCids(
 }
 
 /**
+ * Login-time role promotion: the ADMIN_ALLOWED_CIDS list is not only a
+ * restriction on position-derived ADMINs — it is also a GRANT. A readwrite
+ * (BMS) session whose CID is on the list gets ADMIN regardless of what
+ * mapPositionToRole derived from the BMS position string, because the
+ * operator-controlled allow-list is a stronger signal of intent than a
+ * free-text position. Promotion fails closed: it requires an explicit
+ * accessMode === 'readwrite' — readonly (ProviderID) sessions and identities
+ * with no accessMode are never promoted, and an empty list grants nobody.
+ */
+export function promoteRoleByAllowedCid(
+  role: UserRole,
+  identity: Pick<AdminIdentity, 'userCid' | 'accessMode'>,
+  allowedCids: string[] = parseAdminAllowedCids(),
+): UserRole {
+  if (identity.accessMode !== 'readwrite') return role;
+  const cid = identity.userCid ?? '';
+  if (cid && allowedCids.includes(cid)) return UserRole.ADMIN;
+  return role;
+}
+
+/**
  * The /admin authorization rule. Three gates, all must pass:
  *   1. role === 'ADMIN'  (BMS-derived; may be promoted by DEV_AUTH_BYPASS).
  *   2. accessMode !== 'readonly'  (ProviderID read-only sessions never admin).
@@ -40,6 +61,10 @@ export function parseAdminAllowedCids(
  *      EMPTY, production fails closed (no CID-authorized administrators) and
  *      only outside production does the role-only gate survive, for local
  *      dev/test back-compat.
+ *
+ * Gate 1 is normally satisfied either by the BMS position ("director" /
+ * "ผู้อำนวยการ") or by promoteRoleByAllowedCid above, which grants ADMIN at BMS
+ * sign-in to CIDs on the same allow-list.
  *
  * The CID gate exists because (a) mapPositionToRole grants ADMIN to any BMS
  * position containing "director"/"ผู้อำนวยการ", and (b) DEV_AUTH_BYPASS promotes

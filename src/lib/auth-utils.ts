@@ -24,9 +24,11 @@ export function mapPositionToRole(position: string): UserRole {
 
 export interface BmsUserIdentity {
   name: string;
-  /** เลขบัตรประชาชน 13 หลัก of the BMS user. Used by middleware to enforce
-   *  the ADMIN_ALLOWED_CIDS allow-list — even when role=ADMIN (or when
-   *  DEV_AUTH_BYPASS forces ADMIN), only CIDs on the list reach /admin. */
+  /** เลขบัตรประชาชน 13 หลัก of the BMS user. Checked against the
+   *  ADMIN_ALLOWED_CIDS allow-list, which both GRANTS (listed CIDs are
+   *  promoted to ADMIN at BMS sign-in — see promoteRoleByAllowedCid) and
+   *  CAPS (even role=ADMIN, incl. DEV_AUTH_BYPASS, only reaches /admin
+   *  when the CID is listed). */
   userCid: string;
   role: UserRole;
   hospitalCode: string;

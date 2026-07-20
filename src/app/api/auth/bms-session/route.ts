@@ -1,6 +1,7 @@
 // T087: POST /api/auth/bms-session — pre-validate BMS session
 import { NextRequest, NextResponse } from 'next/server';
 import { validateBmsSession } from '@/lib/auth-utils';
+import { promoteRoleByAllowedCid } from '@/lib/admin-access';
 import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
@@ -28,7 +29,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       user: {
         name: identity.name,
-        role: identity.role,
+        // Same ADMIN_ALLOWED_CIDS promotion the BMS authorize() applies, so
+        // the pre-validated role matches the session signIn() will create.
+        role: promoteRoleByAllowedCid(identity.role, {
+          userCid: identity.userCid,
+          accessMode: 'readwrite',
+        }),
         hospitalCode: identity.hospitalCode,
       },
       expiresAt: identity.expiresAt,
