@@ -70,7 +70,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Docker image
-        run: docker build -t ghcr.io/github_username/nan-lrms:${GITHUB_SHA} .
+        run: docker build -t ghcr.io/9nansoft/nan-lrms:${GITHUB_SHA} .
 
       - name: Push Docker image to GitHub Container Registry
-        run: docker push ghcr.io/github_username/nan-lrms:${GITHUB_SHA}
+        run: docker push ghcr.io/9nansoft/nan-lrms:${GITHUB_SHA}
