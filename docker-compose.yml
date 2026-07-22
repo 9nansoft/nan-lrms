@@ -27,11 +27,7 @@ services:
       retries: 10
 
   app:
-    build:
-      context: .
-      args:
-        NEXT_PUBLIC_BUILD_ID: ${BUILD_SHA:-dev}
-        NEXT_PUBLIC_BUILD_TIME: ${BUILD_TIME:-}
+    image: ghcr.io/9nansoft/nan-lrms:latest
     restart: unless-stopped
     depends_on:
       postgres:
@@ -53,8 +49,6 @@ services:
       DEV_HOSPITAL_TUNNEL_URL: ${DEV_HOSPITAL_TUNNEL_URL:-}
       DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}
       DEV_SIMULATION_ENABLED: ${DEV_SIMULATION_ENABLED:-false}
-      # Maternal labor-triage screening flags (defaults mirror src/lib/feature-flags.ts;
-      # see docs/maternal-screen-rollout-runbook.md — flip via .env, no rebuild needed).
       MATERNAL_SCREEN_UI_ENABLED: ${MATERNAL_SCREEN_UI_ENABLED:-true}
       MATERNAL_SCREEN_SHADOW_MODE: ${MATERNAL_SCREEN_SHADOW_MODE:-true}
       MATERNAL_SCREEN_INGEST_ENABLED: ${MATERNAL_SCREEN_INGEST_ENABLED:-false}
@@ -73,3 +67,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 90s
+
+logging:
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"

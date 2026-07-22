@@ -6,15 +6,10 @@ on:
     branches: [main]
 
 # Cancel older runs of the same branch when a new push lands.
-# Saves CI minutes and prevents stale "passing" reports on forced pushes.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Opt actions into Node 24 runtime ahead of GitHub's June 2026 default.
-# This affects only the runtime that runs the actions themselves (e.g.
-# actions/checkout); the Node version used for our build is set via
-# actions/setup-node below.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -25,9 +20,6 @@ jobs:
     timeout-minutes: 15
 
     env:
-      # Tests use in-memory pglite (embedded Postgres); no database server needed.
-      # ENCRYPTION_KEY is generated per-test in tests/integration/* setup,
-      # but defining one here lets any code path that reads process.env work.
       ENCRYPTION_KEY: ci_test_encryption_key_64_hex_chars_____________________________padding
       NODE_ENV: test
 
@@ -51,16 +43,34 @@ jobs:
         run: npm run lint
 
       - name: Unit + integration tests
-        # E2E tests need real HOSxP credentials and live network access —
-        # they run manually or on a future staging-deploy workflow.
         run: npx vitest run --exclude="tests/e2e/**"
 
       - name: Build (Next.js production)
         run: npm run build
 
       - name: Security audit (advisory — does not fail the run)
-        # Reports HIGH/CRITICAL CVEs in production deps but doesn't block,
-        # so a transitive dep getting an advisory doesn't lock everyone out
-        # of merging. Treat audit failures as a follow-up task instead.
         run: npm audit --omit=dev --audit-level=high
         continue-on-error: true
+
+  deploy:
+    name: Build and push Docker image
+    runs-on: ubuntu-latest
+    needs: test  # Ensure tests pass before deploying
+    if: github.ref == 'refs/heads/main'  # Only deploy on the main branch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: docker build -t ghcr.io/github_username/nan-lrms:${GITHUB_SHA} .
+
+      - name: Push Docker image to GitHub Container Registry
+        run: docker push ghcr.io/github_username/nan-lrms:${GITHUB_SHA}
