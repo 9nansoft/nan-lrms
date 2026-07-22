@@ -213,8 +213,8 @@ function LoginForm() {
               <Building2 className="h-7 w-7 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white">KK-LRMS</h1>
-              <p className="text-sm text-slate-400">Khon Kaen Labor Room Monitoring System</p>
+              <h1 className="text-2xl font-bold text-white">NN-LRMS</h1>
+              <p className="text-sm text-slate-400">Nan Labor Room Monitoring System</p>
             </div>
           </div>
         </div>
@@ -225,7 +225,7 @@ function LoginForm() {
             <br />
             การคลอด
             <br />
-            จังหวัดขอนแก่น
+            จังหวัดน่าน
           </h2>
 
           <div className="space-y-3">
@@ -249,7 +249,7 @@ function LoginForm() {
         </div>
 
         <p className="relative z-10 text-xs text-slate-500">
-          v1.0.0 — สำนักงานสาธารณสุขจังหวัดขอนแก่น
+          v1.0.0 — สำนักงานสาธารณสุขจังหวัดน่าน
         </p>
       </div>
 
@@ -264,8 +264,8 @@ function LoginForm() {
                   <Building2 className="h-6 w-6 text-white" />
                 </div>
               </div>
-              <h1 className="text-lg font-bold text-white">KK-LRMS</h1>
-              <p className="text-sm text-slate-400">ระบบติดตามการคลอดจังหวัดขอนแก่น</p>
+              <h1 className="text-lg font-bold text-white">NN-LRMS</h1>
+              <p className="text-sm text-slate-400">ระบบติดตามการคลอดจังหวัดน่าน</p>
             </div>
           </div>
 
@@ -319,8 +319,8 @@ function LoginForm() {
                 </div>
                 <div className="text-red-700 text-xs leading-relaxed border-t border-red-200 pt-2">
                   {accessDenied.reason === 'deactivated'
-                    ? 'โรงพยาบาลของท่านถูกปิดการใช้งานในระบบ KK-LRMS หากท่านคิดว่าเป็นความผิดพลาด กรุณาติดต่อผู้ดูแลระบบ (สสจ.ขอนแก่น) เพื่อขอเปิดใช้งานอีกครั้ง'
-                    : 'โรงพยาบาลของท่านยังไม่ได้รับการลงทะเบียนในระบบ KK-LRMS หากท่านคิดว่าเป็นความผิดพลาด หรือต้องการเข้าร่วมเครือข่าย กรุณาติดต่อผู้ดูแลระบบ (สสจ.ขอนแก่น) เพื่อขอลงทะเบียนโรงพยาบาลของท่านในระบบ'}
+                    ? 'โรงพยาบาลของท่านถูกปิดการใช้งานในระบบ NN-LRMS หากท่านคิดว่าเป็นความผิดพลาด กรุณาติดต่อผู้ดูแลระบบ (สสจ.น่าน) เพื่อขอเปิดใช้งานอีกครั้ง'
+                    : 'โรงพยาบาลของท่านยังไม่ได้รับการลงทะเบียนในระบบ NN-LRMS หากท่านคิดว่าเป็นความผิดพลาด หรือต้องการเข้าร่วมเครือข่าย กรุณาติดต่อผู้ดูแลระบบ (สสจ.น่าน) เพื่อขอลงทะเบียนโรงพยาบาลของท่านในระบบ'}
                 </div>
               </div>
             )}
@@ -404,7 +404,7 @@ function LoginForm() {
 
           <div className="text-center space-y-2">
             <p className="text-xs text-slate-400">
-              ระบบตรวจสอบสิทธิ์ผ่าน BMS Session ของ สสจ.ขอนแก่น
+              ระบบตรวจสอบสิทธิ์ผ่าน BMS Session ของ สสจ.น่าน
             </p>
             <a
               href="/about"

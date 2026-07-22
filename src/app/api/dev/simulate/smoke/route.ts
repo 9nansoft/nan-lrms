@@ -78,7 +78,7 @@ export async function GET() {
   // a schema or profile miss will show up.
   const profile = getProfileById('preeclampsia_severe')!;
   const hcode = '10670';
-  const hospitalName = 'รพ.ขอนแก่น';
+  const hospitalName = 'รพ.น่าน';
   const cases: SmokeCase[] = [];
 
   // ────────────────────── CASE 1 — planner ──────────────────────
@@ -86,7 +86,7 @@ export async function GET() {
     const eventTypes: SimEventType[] = ['labor', 'anc', 'referral', 'partograph'];
     const prompt = [
       `Plan a realistic 8-event shift at ${hospitalName} (hcode ${hcode}),`,
-      'a community hospital in Khon Kaen Province, Thailand.',
+      'a community hospital in Nan Province, Thailand.',
       `Allowed event types: ${eventTypes.join(', ')}.`,
       'Each event: {order, eventType, profileId, name, note}.',
       `profileId must be from [${PROFILE_IDS.slice(0, 5).join(', ')}, ...].`,
@@ -306,7 +306,7 @@ export async function GET() {
   // ────────────────────── CASE 4 — referral narrative ──────────────────────
   {
     const prompt = [
-      `Referral from ${hospitalName} (${hcode}) to รพ.ศูนย์ขอนแก่น (99999).`,
+      `Referral from ${hospitalName} (${hcode}) to รพ.น่าน (10716).`,
       profilePromptHint(profile),
       'Output {name, reason, diagnosisCode, urgency}.',
     ].join('\n');

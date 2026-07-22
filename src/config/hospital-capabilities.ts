@@ -23,7 +23,7 @@ export interface HospitalCapability {
 //   - F2 small: GA>=36, FW>=2200, HR1 max — refer to nearest mid-tier or M1
 export const HOSPITAL_CAPABILITIES: HospitalCapability[] = [
   // Terminal A_S
-  { hcode: '10670', name: 'รพ.ขอนแก่น', minGaWeeks: 0, minFetalWeightG: 0, maxRiskLevel: AncRiskLevel.HR3, referTo: null },
+  { hcode: '10716', name: 'รพ.น่าน', minGaWeeks: 0, minFetalWeightG: 0, maxRiskLevel: AncRiskLevel.HR3, referTo: null },
   // M1 referrals
   { hcode: '12275', name: 'รพ.สิรินธร จังหวัดขอนแก่น', minGaWeeks: 32, minFetalWeightG: 1500, maxRiskLevel: AncRiskLevel.HR3, referTo: '10670' },
   { hcode: '10998', name: 'รพ.ชุมแพ', minGaWeeks: 32, minFetalWeightG: 1500, maxRiskLevel: AncRiskLevel.HR3, referTo: '10670' },

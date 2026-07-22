@@ -11,21 +11,34 @@ services:
       timeout: 5s
       retries: 10
 
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kklrms}
+      POSTGRES_USER: ${POSTGRES_USER:-kklrms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kklrms} -d ${POSTGRES_DB:-kklrms}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   app:
     image: ghcr.io/9nansoft/nan-lrms:latest
     restart: unless-stopped
-    # Docker Desktop supplies this hostname automatically, but Linux Docker
-    # does not. Map it to the host gateway for an externally hosted Postgres.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     ports:
       - "${APP_PORT:-3003}:3000"
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgres://${POSTGRES_USER:-nnlrms}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-db_nnlrms}
+      DATABASE_URL: postgres://${POSTGRES_USER:-kklrms}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-kklrms}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-kk-lrms}
       AUTH_TRUST_HOST: "true"
@@ -54,8 +67,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 90s
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "5"
+
+logging:
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"

@@ -198,19 +198,19 @@ export default function AboutPage() {
               <Building2 className="h-8 w-8 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold">KK-LRMS</h1>
-              <p className="text-slate-400">Khon Kaen Labor Room Monitoring System</p>
+              <h1 className="text-3xl font-bold">NN-LRMS</h1>
+              <p className="text-slate-400">Nan Labor Room Monitoring System</p>
             </div>
           </div>
 
           <h2 className="text-4xl font-bold leading-tight mb-4">
             ระบบติดตามการคลอด
             <br />
-            แบบรวมศูนย์ จังหวัดขอนแก่น
+            แบบรวมศูนย์ จังหวัดน่าน
           </h2>
           <p className="text-lg text-slate-300 max-w-2xl leading-relaxed">
             ระบบ Real-time สำหรับสูติแพทย์และพยาบาลห้องคลอด ใช้ติดตามและประเมินความเสี่ยง
-            ผู้คลอดในโรงพยาบาลชุมชนทั่วจังหวัดขอนแก่น จากศูนย์กลางที่ รพ.ขอนแก่น
+            ผู้คลอดในโรงพยาบาลชุมชนทั่วจังหวัดน่าน จากศูนย์กลางที่ รพ.น่าน
           </p>
         </div>
       </header>
@@ -225,18 +225,18 @@ export default function AboutPage() {
           </SectionTitle>
           <div className="rounded-2xl bg-white p-8 shadow-sm space-y-6">
             <p className="text-slate-600 leading-relaxed text-lg">
-              <strong>KK-LRMS</strong> (Khon Kaen Labor Room Monitoring System)
+              <strong>NN-LRMS</strong> (Nan Labor Room Monitoring System)
               คือระบบติดตามการคลอดแบบรวมศูนย์ ระดับจังหวัด
               ที่ออกแบบมาเพื่อให้สูติแพทย์และพยาบาลห้องคลอดของ<strong>โรงพยาบาลแม่ข่าย</strong>
-              (รพ.ขอนแก่น และ รพ.ศรีนครินทร์) สามารถ<strong>ติดตามผู้คลอด</strong>ที่รอคลอดใน
-              <strong>โรงพยาบาลชุมชน (รพช.) ทุกแห่ง</strong>ในจังหวัดขอนแก่นได้แบบ Real-time
+              (รพ.น่าน และ รพ.ศรีนครินทร์) สามารถ<strong>ติดตามผู้คลอด</strong>ที่รอคลอดใน
+              <strong>โรงพยาบาลชุมชน (รพช.) ทุกแห่ง</strong>ในจังหวัดน่านได้แบบ Real-time
             </p>
             <p className="text-slate-600 leading-relaxed">
               ระบบดึงข้อมูลอัตโนมัติจาก <strong>HOSxP HIS</strong> (ระบบสารสนเทศโรงพยาบาล)
               ที่ใช้งานอยู่ใน รพช. ทุกแห่ง ผ่าน <strong>BMS Central API</strong>{' '}
               ซึ่งทำหน้าที่เป็นตัวกลางเชื่อมต่อข้อมูล ทำให้เจ้าหน้าที่{' '}
               <strong>ไม่ต้องบันทึกข้อมูลซ้ำ</strong> — ข้อมูลที่บันทึกใน HOSxP จะไหลเข้ามาที่
-              KK-LRMS โดยอัตโนมัติภายใน 30 วินาที
+              NN-LRMS โดยอัตโนมัติภายใน 30 วินาที
             </p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
               <div className="text-center p-4 bg-teal-50 rounded-xl">
@@ -321,7 +321,7 @@ export default function AboutPage() {
             <FeatureCard
               icon={<Network className="h-6 w-6" />}
               title="เชื่อมต่อ 26 โรงพยาบาล"
-              description="ครอบคลุมโรงพยาบาลชุมชนทุกระดับในจังหวัดขอนแก่น ตั้งแต่ระดับ A (S) จนถึง F3 แสดงสถานะเชื่อมต่อ (ออนไลน์/ออฟไลน์) และเวลาอัปเดตข้อมูลล่าสุดของแต่ละ รพ."
+              description="ครอบคลุมโรงพยาบาลชุมชนทุกระดับในจังหวัดน่าน ตั้งแต่ระดับ A (S) จนถึง F3 แสดงสถานะเชื่อมต่อ (ออนไลน์/ออฟไลน์) และเวลาอัปเดตข้อมูลล่าสุดของแต่ละ รพ."
             />
             <FeatureCard
               icon={<Bell className="h-6 w-6" />}
@@ -441,19 +441,19 @@ export default function AboutPage() {
           </SectionTitle>
           <div className="rounded-2xl bg-white p-8 shadow-sm space-y-6">
             <p className="text-slate-600 leading-relaxed">
-              ระบบ KK-LRMS ใช้โมเดล <strong>Hub-and-Spoke</strong> โดยมี รพ.ขอนแก่น เป็นศูนย์กลาง
-              (Hub) เชื่อมต่อกับ รพช. ทุกระดับในจังหวัดขอนแก่น:
+              ระบบ NN-LRMS ใช้โมเดล <strong>Hub-and-Spoke</strong> โดยมี รพ.น่าน เป็นศูนย์กลาง
+              (Hub) เชื่อมต่อกับ รพช. ทุกระดับในจังหวัดน่าน:
             </p>
             <div className="space-y-1">
               <HospitalLevelRow
                 level="Hub"
-                name="รพ.ขอนแก่น / รพ.ศรีนครินทร์"
-                description="โรงพยาบาลศูนย์ — ศูนย์กลาง KK-LRMS สูติแพทย์และพยาบาลห้องคลอดใช้ Monitor ผู้คลอดจากทุก รพ."
+                name="รพ.น่าน"
+                description="โรงพยาบาลศูนย์ — ศูนย์กลาง NN-LRMS สูติแพทย์และพยาบาลห้องคลอดใช้ Monitor ผู้คลอดจากทุก รพ."
               />
               <HospitalLevelRow
                 level="A (S)"
                 name="รพช.ขนาดใหญ่"
-                description="เช่น รพ.ชุมแพ รพ.พล รพ.บ้านไผ่ รพ.น้ำพอง — มีสูติแพทย์ประจำ สามารถผ่าตัดคลอดได้"
+                description="เช่น รพร.ปัว — มีสูติแพทย์ประจำ สามารถผ่าตัดคลอดได้"
               />
               <HospitalLevelRow
                 level="M1"
@@ -510,8 +510,8 @@ export default function AboutPage() {
               </div>
               <StepItem
                 step={3}
-                title="KK-LRMS ประมวลผลและแสดงข้อมูล"
-                description="ระบบ KK-LRMS รับข้อมูลจาก BMS API คำนวณ CPD Risk Score อัตโนมัติจาก 8 ปัจจัยเสี่ยง สร้าง Partogram และแสดงบน Dashboard กลาง โดยอัปเดตทุก 30 วินาที"
+                title="NN-LRMS ประมวลผลและแสดงข้อมูล"
+                description="ระบบ NN-LRMS รับข้อมูลจาก BMS API คำนวณ CPD Risk Score อัตโนมัติจาก 8 ปัจจัยเสี่ยง สร้าง Partogram และแสดงบน Dashboard กลาง โดยอัปเดตทุก 30 วินาที"
               />
               <div className="flex justify-center">
                 <ChevronRight className="h-6 w-6 text-slate-300 rotate-90" />
@@ -519,7 +519,7 @@ export default function AboutPage() {
               <StepItem
                 step={4}
                 title="สูติแพทย์ติดตามและให้คำแนะนำ"
-                description="สูติแพทย์ที่ รพ.ขอนแก่น เปิด Dashboard ดูผู้คลอดทั้งจังหวัด หากพบผู้คลอดเสี่ยงสูง สามารถประสานงานส่งต่อ ให้คำแนะนำ หรือเตรียมรับผู้ป่วยได้ทันที"
+                description="สูติแพทย์ที่ รพ.น่าน เปิด Dashboard ดูผู้คลอดทั้งจังหวัด หากพบผู้คลอดเสี่ยงสูง สามารถประสานงานส่งต่อ ให้คำแนะนำ หรือเตรียมรับผู้ป่วยได้ทันที"
               />
             </div>
           </div>
@@ -559,7 +559,7 @@ export default function AboutPage() {
               </div>
               <p className="text-slate-600 leading-relaxed">
                 ใช้ <strong>Bearer Token</strong> ผ่าน HTTP Header ทุกโรงพยาบาลจะได้รับ API Key
-                เฉพาะ ที่ออกให้โดยผู้ดูแลระบบ สสจ.ขอนแก่น API Key จะแสดงเพียงครั้งเดียวตอนสร้าง —
+                เฉพาะ ที่ออกให้โดยผู้ดูแลระบบ สสจ.น่าน API Key จะแสดงเพียงครั้งเดียวตอนสร้าง —
                 กรุณาบันทึกไว้ให้ดี
               </p>
               <CodeBlock title="HTTP Header">
@@ -1004,22 +1004,22 @@ export default function AboutPage() {
                 <tbody className="text-sm text-slate-600">
                   <tr className="border-b border-slate-100">
                     <td className="py-3 pr-4 font-medium">สูติแพทย์</td>
-                    <td className="py-3 pr-4">แพทย์เฉพาะทาง รพ.ขอนแก่น / รพ.ศรีนครินทร์</td>
+                    <td className="py-3 pr-4">แพทย์เฉพาะทาง รพ.น่าน</td>
                     <td className="py-3">Monitor Case ให้คำแนะนำส่งต่อ ประเมินความเสี่ยง</td>
                   </tr>
                   <tr className="border-b border-slate-100">
                     <td className="py-3 pr-4 font-medium">พยาบาลห้องคลอด รพ.แม่ข่าย</td>
-                    <td className="py-3 pr-4">พยาบาลวิชาชีพ รพ.ขอนแก่น / รพ.ศรีนครินทร์</td>
+                    <td className="py-3 pr-4">พยาบาลวิชาชีพ รพ.น่าน</td>
                     <td className="py-3">ติดตาม Partogram รับแจ้งเตือน ประสานงานส่งต่อ</td>
                   </tr>
                   <tr className="border-b border-slate-100">
                     <td className="py-3 pr-4 font-medium">พยาบาล รพช.</td>
-                    <td className="py-3 pr-4">พยาบาลวิชาชีพ รพช. ในจังหวัดขอนแก่น</td>
+                    <td className="py-3 pr-4">พยาบาลวิชาชีพ รพช. ในจังหวัดน่าน</td>
                     <td className="py-3">บันทึกข้อมูลผู้คลอดใน HOSxP อัปเดตสถานะ</td>
                   </tr>
                   <tr>
                     <td className="py-3 pr-4 font-medium">ผู้ดูแลระบบ</td>
-                    <td className="py-3 pr-4">IT Admin สสจ.ขอนแก่น</td>
+                    <td className="py-3 pr-4">IT Admin สสจ.น่าน</td>
                     <td className="py-3">ตั้งค่าการเชื่อมต่อ HOSxP จัดการสิทธิ์ผู้ใช้งาน</td>
                   </tr>
                 </tbody>
@@ -1050,7 +1050,7 @@ export default function AboutPage() {
                 <Shield className="h-5 w-5 shrink-0 text-teal-500 mt-0.5" />
                 <span>
                   <strong>ระบบยืนยันตัวตน</strong> — ผู้ใช้ต้องลงชื่อเข้าใช้ด้วย BMS Session ID
-                  ที่ได้รับจาก สสจ.ขอนแก่น ไม่สามารถเข้าถึงข้อมูลได้โดยไม่ผ่านการยืนยันตัวตน
+                  ที่ได้รับจาก สสจ.น่าน ไม่สามารถเข้าถึงข้อมูลได้โดยไม่ผ่านการยืนยันตัวตน
                 </span>
               </li>
               <li className="flex gap-3">
@@ -1081,9 +1081,9 @@ export default function AboutPage() {
         {/* --- Footer --- */}
         <footer className="border-t border-slate-200 pt-8 pb-4 text-center text-sm text-slate-400 space-y-2">
           <p className="font-semibold text-slate-500">
-            KK-LRMS v1.0.0 — ระบบติดตามการคลอดแบบรวมศูนย์ จังหวัดขอนแก่น
+            NN-LRMS v1.0.0 — ระบบติดตามการคลอดแบบรวมศูนย์ จังหวัดน่าน
           </p>
-          <p>สำนักงานสาธารณสุขจังหวัดขอนแก่น — เขตสุขภาพที่ 7</p>
+          <p>สำนักงานสาธารณสุขจังหวัดน่าน — เขตสุขภาพที่ 7</p>
           <p className="pt-4">
             <Link
               href="/login"

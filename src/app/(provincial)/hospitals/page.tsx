@@ -439,7 +439,7 @@ export default function HospitalsPage() {
             className="mt-0.5 text-[26px] font-bold leading-tight tracking-tight"
             style={{ color: 'var(--ink-navy)' }}
           >
-            โรงพยาบาล จังหวัดขอนแก่น
+            โรงพยาบาล จังหวัดน่าน
           </h1>
         </div>
         <p className="ml-auto font-mono text-[12px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
@@ -461,7 +461,7 @@ export default function HospitalsPage() {
       >
         <KpiTip
           title="โรงพยาบาลในเครือข่าย"
-          body="จำนวน รพ.ในแท็บที่เลือก (จ.ขอนแก่น / ภายนอก) และจำนวนแห่งที่มีผู้ป่วยในระบบ — นับจากภาระงานรวมห้องคลอด + ทะเบียนฝากครรภ์"
+          body="จำนวน รพ.ในแท็บที่เลือก (จ.น่าน / ภายนอก) และจำนวนแห่งที่มีผู้ป่วยในระบบ — นับจากภาระงานรวมห้องคลอด + ทะเบียนฝากครรภ์"
           trigger={<div className="cursor-help border-r border-[var(--rule-strong)] px-5 py-3" />}
         >
           <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
@@ -632,7 +632,7 @@ export default function HospitalsPage() {
           {[
             {
               k: 'khonkaen' as const,
-              label: 'จ.ขอนแก่น',
+              label: 'จ.น่าน',
               count: kkHospitals.length,
               icon: Building2,
             },
@@ -707,7 +707,7 @@ export default function HospitalsPage() {
                 </span>
               }
             >
-              Network map · เขตจังหวัดขอนแก่น
+              Network map · เขตจังหวัดน่าน
             </SectionLabel>
           </div>
           <div

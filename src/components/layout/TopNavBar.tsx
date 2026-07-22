@@ -137,7 +137,7 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
               KK-LRMS
             </span>
             <span className="block text-[10px] font-medium tracking-wide text-white/70">
-              {isHospital ? 'ห้องคลอด' : 'OneLR · ขอนแก่น'}
+              {isHospital ? 'ห้องคลอด' : 'OneLR · น่าน'}
             </span>
           </span>
         </Link>

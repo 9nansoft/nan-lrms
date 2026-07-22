@@ -362,7 +362,7 @@ export default function HospitalMaternityWardPage() {
             <span style={{ color: SLATE_INK, fontWeight: 800, letterSpacing: '0.24em' }}>
               KK-LRMS / OneLR
             </span>
-            <span>· จังหวัดขอนแก่น · Provincial Maternity Network</span>
+            <span>· จังหวัดน่าน · Provincial Maternity Network</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, flexWrap: 'wrap' }}>
             <h1

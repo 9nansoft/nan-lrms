@@ -21,8 +21,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'KK-LRMS — ระบบติดตามการคลอดจังหวัดขอนแก่น',
-  description: 'ระบบติดตามการคลอดแบบรวมศูนย์ จังหวัดขอนแก่น (Khon Kaen Labor Room Monitoring System)',
+  title: 'KK-LRMS — ระบบติดตามการคลอดจังหวัดน่าน',
+  description: 'ระบบติดตามการคลอดแบบรวมศูนย์ จังหวัดน่าน (Nan Labor Room Monitoring System)',
 };
 
 export const viewport: Viewport = {
