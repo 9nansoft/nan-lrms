@@ -28,6 +28,10 @@ const HCODE = '10670';
 const CID = '1111111111113';
 const CID_HASH = createHash('sha256').update(CID).digest('hex');
 
+function todayInBangkok(): string {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 function jsonRequest(body: unknown): Request {
   return new Request('http://test/api/sync/browser-push', {
     method: 'POST',
@@ -110,6 +114,9 @@ describe('POST /api/sync/browser-push — referral sections', () => {
     const originHid = await hospitalIdOf(originHcode);
     const journeyId = await seedJourney(originHid);
     const now = new Date().toISOString();
+    // Referin evidence is matched within one day after its HOSxP local date.
+    // A fixed historical date eventually falls outside that safety window.
+    const referDate = todayInBangkok();
     await db.execute(
       `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id, status, reason, urgency_level, initiated_at, created_at, updated_at)
        VALUES ('ref-in-1', ?, 'RF-IN-1', ?, ?, 'INITIATED', 'r', 'ROUTINE', ?, ?, ?)`,
@@ -121,7 +128,7 @@ describe('POST /api/sync/browser-push — referral sections', () => {
         referrals: {
           referouts: [],
           referins: [
-            { hn: 'DHN-1', cid: CID, refer_hospcode: originHcode, refer_date: '2026-07-20' },
+            { hn: 'DHN-1', cid: CID, refer_hospcode: originHcode, refer_date: referDate },
           ],
         },
       }) as never,
