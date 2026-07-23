@@ -8,9 +8,9 @@ import { AncRiskLevel } from '@/types/domain';
 
 describe('Hospital Capabilities Configuration', () => {
   it('has capabilities for key hospitals', () => {
-    const kkHosp = HOSPITAL_CAPABILITIES.find((h) => h.hcode === '10670');
+    const kkHosp = HOSPITAL_CAPABILITIES.find((h) => h.hcode === '10716');
     expect(kkHosp).toBeDefined();
-    expect(kkHosp!.name).toBe('รพ.ขอนแก่น');
+    expect(kkHosp!.name).toBe('รพ.น่าน');
     expect(kkHosp!.referTo).toBeNull();
 
     // รพ.สิรินธร — MOPH hcode 12275, M1 referral
@@ -43,9 +43,9 @@ describe('Hospital Capabilities Configuration', () => {
 
   describe('getHospitalCapability', () => {
     it('returns capability for known hospital', () => {
-      const cap = getHospitalCapability('10670');
+      const cap = getHospitalCapability('10716');
       expect(cap).toBeDefined();
-      expect(cap!.name).toBe('รพ.ขอนแก่น');
+      expect(cap!.name).toBe('รพ.น่าน');
     });
 
     it('returns undefined for unknown hospital', () => {
@@ -54,8 +54,8 @@ describe('Hospital Capabilities Configuration', () => {
   });
 
   describe('findCapableHospital', () => {
-    it('returns null for terminal hospital (รพ.ขอนแก่น)', () => {
-      const result = findCapableHospital('10670', 28, 1200, AncRiskLevel.HR3);
+    it('returns null for terminal hospital (รพ.น่าน)', () => {
+      const result = findCapableHospital('10716', 28, 1200, AncRiskLevel.HR3);
       expect(result).toBeNull();
     });
 

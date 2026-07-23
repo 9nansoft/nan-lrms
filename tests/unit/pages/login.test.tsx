@@ -54,10 +54,10 @@ describe('Login Page', () => {
     expect(screen.getByText('BMS Session ID')).toBeTruthy();
   });
 
-  it('renders KK-LRMS title', () => {
+  it('renders NN-LRMS title', () => {
     render(<LoginPage />);
-    // KK-LRMS appears in both mobile header and desktop left panel
-    const elements = screen.getAllByText('KK-LRMS');
+    // NN-LRMS appears in both mobile header and desktop left panel
+    const elements = screen.getAllByText('NN-LRMS');
     expect(elements.length).toBeGreaterThanOrEqual(1);
   });
 });
