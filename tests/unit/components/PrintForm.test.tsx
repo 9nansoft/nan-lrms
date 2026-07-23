@@ -70,9 +70,9 @@ describe('PrintForm', () => {
     expect(screen.getByText('หมายเหตุ')).toBeTruthy();
   });
 
-  it('shows "พิมพ์จาก KK-LRMS" footer text', () => {
+  it('shows "พิมพ์จาก NN-LRMS" footer text', () => {
     render(<PrintForm patient={basePatient} hospitalName="รพ.ขอนแก่น" vitals={[]} />);
-    const footer = screen.getByText(/พิมพ์จาก KK-LRMS/);
+    const footer = screen.getByText(/พิมพ์จาก NN-LRMS/);
     expect(footer).toBeTruthy();
   });
 
