@@ -214,7 +214,7 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
         `เปิดใช้งาน Sync ของ ${h.name} (${h.hcode}) อีกครั้ง?\n` +
           `\n` +
           `การกดยืนยันจะล้างสถานะระงับฝั่งเซิร์ฟเวอร์เท่านั้น — Sync จริงจะเริ่มทำงานอีกครั้งเมื่อ\n` +
-          `ผู้ใช้จากโรงพยาบาลนี้เปิด KK-LRMS จาก HOSxP (ระบบจะใช้ marketplace_token จากเซสชันใหม่)`,
+          `ผู้ใช้จากโรงพยาบาลนี้เปิด NN-LRMS จาก HOSxP (ระบบจะใช้ marketplace_token จากเซสชันใหม่)`,
       )
     ) {
       return;
@@ -320,7 +320,7 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
                     <button
                       type="button"
                       onClick={() => handleClearPurge(h)}
-                      title="ล้างสถานะระงับ Sync ฝั่งเซิร์ฟเวอร์ — Sync จริงจะเริ่มอีกครั้งเมื่อผู้ใช้จากโรงพยาบาลนี้เปิด KK-LRMS จาก HOSxP"
+                      title="ล้างสถานะระงับ Sync ฝั่งเซิร์ฟเวอร์ — Sync จริงจะเริ่มอีกครั้งเมื่อผู้ใช้จากโรงพยาบาลนี้เปิด NN-LRMS จาก HOSxP"
                       className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide hover:bg-emerald-100"
                       style={{
                         borderColor: '#86efac',

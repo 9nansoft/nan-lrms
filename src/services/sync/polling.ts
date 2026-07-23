@@ -212,7 +212,7 @@ async function fingerprintFirstRow(
       // that are 13 digits but checksum-invalid (the "13-digit-but-fake"
       // pattern observed at hcode 10996). Those CIDs ARE persisted in the
       // upstream `patient` table — so the round-trip succeeds — yet they're
-      // garbage from KK-LRMS's perspective (cidHash never collides with the
+      // garbage from NN-LRMS's perspective (cidHash never collides with the
       // real person, transfer detection breaks). Reject the cycle here so
       // the data never lands in cached_patients / maternal_journeys.
       if (!isValidThaiCidChecksum(rawCid)) {
@@ -959,7 +959,7 @@ export async function pollHospital(
     emitStep(options, {
       name: 'read_local_active_patients',
       status: 'running',
-      message: 'Reading existing active cached patients from KK-LRMS.',
+      message: 'Reading existing active cached patients from NN-LRMS.',
     });
     const existing = await db.query<{ an: string }>(
       "SELECT an FROM cached_patients WHERE hospital_id = ? AND labor_status = 'ACTIVE'",
@@ -1467,7 +1467,7 @@ export async function pollHospital(
         emitStep(options, {
           name: 'persist_anc',
           status: 'running',
-          message: `Upserting ${ancPatients.length} ANC pregnancies and ${ancServices.length} ANC visits into KK-LRMS.`,
+          message: `Upserting ${ancPatients.length} ANC pregnancies and ${ancServices.length} ANC visits into NN-LRMS.`,
           counts: { pregnancies: ancPatients.length, visits: ancServices.length },
         });
         const ancSynced = await syncAncData(

@@ -26,7 +26,7 @@ import {
 } from '@/utils/bms-session-storage';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
 
-const AUTH_PROVIDER_STORAGE_KEY = 'kk-lrms:auth-provider';
+const AUTH_PROVIDER_STORAGE_KEY = 'nn-lrms:auth-provider';
 
 export interface BmsSessionContextValue {
   config: ConnectionConfig | null;

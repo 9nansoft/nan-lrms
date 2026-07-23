@@ -3,7 +3,7 @@
 // booting the auth stack.
 //
 // NOTE: X-Frame-Options is intentionally NOT set, and CSP frame-ancestors is
-// wide open (*) so KK-LRMS can be embedded inside HOSxP / marketplace / other
+// wide open (*) so NN-LRMS can be embedded inside HOSxP / marketplace / other
 // partner hospital portals. Product requirement, not a misconfiguration.
 // Clickjacking mitigations (session binding to bms-session-id, no destructive
 // one-click actions without confirm) live at the app layer instead.

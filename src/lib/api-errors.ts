@@ -95,7 +95,7 @@ export const ApiErrors = {
     error: 'Cross-site request rejected',
     code: 'CSRF_ORIGIN_REJECTED',
     message: 'คำขอถูกปฏิเสธ: ต้นทางของคำขอ (Origin) ไม่ได้รับอนุญาต',
-    suggestedAction: 'โปรดใช้งานผ่านหน้าเว็บ KK-LRMS โดยตรง',
+    suggestedAction: 'โปรดใช้งานผ่านหน้าเว็บ NN-LRMS โดยตรง',
   },
   RATE_LIMITED: {
     error: 'Too many requests',

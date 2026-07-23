@@ -6,7 +6,7 @@
 // hospitals end up with different cidHashes for the same person, so the
 // journey never merges.
 //
-// Old hospital-side clients of KK-LRMS sometimes send:
+// Old hospital-side clients of NN-LRMS sometimes send:
 //   - empty / null cid
 //   - 12- or 14-character strings
 //   - the encrypted blob from HOSxP when marketplace_token was missing

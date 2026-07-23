@@ -54,7 +54,7 @@ function isTitle(token: string): boolean {
 /**
  * Mask a patient name for display.
  *
- * Convention used across KK-LRMS dashboards:
+ * Convention used across NN-LRMS dashboards:
  *   - Honorific title (นาย/นาง/นพ./พญ./...) is kept as-is when present.
  *   - First name (the first non-title token) is kept as-is — operators
  *     need it to recognise patients in clinical conversation, and PDPA

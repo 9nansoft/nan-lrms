@@ -117,7 +117,7 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
         <Link
           href={logoHref}
           className="flex shrink-0 items-center gap-2.5"
-          aria-label="KK-LRMS home"
+          aria-label="NN-LRMS home"
         >
           <span
             className="grid h-8 w-8 place-items-center rounded-sm bg-white font-mono text-[12px] font-extrabold shadow-md"
@@ -134,7 +134,7 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
                 textShadow: '0 1px 2px rgba(0,0,0,0.25)',
               }}
             >
-              KK-LRMS
+              NN-LRMS
             </span>
             <span className="block text-[10px] font-medium tracking-wide text-white/70">
               {isHospital ? 'ห้องคลอด' : 'OneLR · น่าน'}

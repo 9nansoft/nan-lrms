@@ -360,7 +360,7 @@ export default function HospitalMaternityWardPage() {
               style={{ display: 'inline-block', width: 28, height: 5, background: ACCENT_BLUE }}
             />
             <span style={{ color: SLATE_INK, fontWeight: 800, letterSpacing: '0.24em' }}>
-              KK-LRMS / OneLR
+              NN-LRMS / OneLR
             </span>
             <span>· จังหวัดน่าน · Provincial Maternity Network</span>
           </div>

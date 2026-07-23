@@ -4,8 +4,8 @@ import { buildProviderAuthorizeUrl } from '@/lib/provider-id';
 import { sanitizeCallbackUrl } from '@/lib/safe-callback-url';
 import { logger } from '@/lib/logger';
 
-const STATE_COOKIE = 'kk-lrms-provider-oauth-state';
-const CALLBACK_COOKIE = 'kk-lrms-provider-callback-url';
+const STATE_COOKIE = 'nn-lrms-provider-oauth-state';
+const CALLBACK_COOKIE = 'nn-lrms-provider-callback-url';
 const COOKIE_MAX_AGE_SECONDS = 5 * 60;
 
 function getBaseUrl(request: NextRequest): string {

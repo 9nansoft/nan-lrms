@@ -3,7 +3,7 @@
 // failed to pull data without needing log access. Each "run" represents
 // one invocation of pollHospital().
 //
-// Storage shape (cacheSetJson namespaces with `kk-lrms:` automatically):
+// Storage shape (cacheSetJson namespaces with `nn-lrms:` automatically):
 //   sync:run:<hospitalId>:<runId>  → SyncProgressRun, TTL 24h
 //   sync:latest:<hospitalId>       → most recent SyncProgressRun, TTL 24h
 //

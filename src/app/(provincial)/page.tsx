@@ -88,7 +88,7 @@ function buildHosxpSyncReport(
   help: string,
 ): string {
   const lines = [
-    'KK-LRMS HOSxP Sync Report',
+    'NN-LRMS HOSxP Sync Report',
     `Generated: ${new Date().toISOString()}`,
     '',
     `STATUS: ${status}`,
@@ -361,7 +361,7 @@ export default function DashboardPage() {
           className="flex gap-5 border-t px-7 py-2 font-mono text-[13px] tracking-[0.14em]"
           style={{ borderColor: 'var(--kiosk-rule)', color: 'var(--kiosk-dim)' }}
         >
-          <span>KK-LRMS</span>
+          <span>NN-LRMS</span>
           <span>PPHO WAR-ROOM</span>
           <span>MCH PROVINCIAL NETWORK</span>
           <span className="flex-1" />
@@ -415,7 +415,7 @@ export default function DashboardPage() {
           : 'CONNECTING';
   const hosxpSyncHelp =
     hosxpSyncState?.error === 'hospital_not_registered'
-      ? 'โรงพยาบาลนี้ยังไม่ได้เปิดใช้งานในทะเบียน KK-LRMS'
+      ? 'โรงพยาบาลนี้ยังไม่ได้เปิดใช้งานในทะเบียน NN-LRMS'
       : hosxpSyncState?.error === 'missing_bms_session'
         ? 'ยังไม่ได้รับ BMS session จาก HOSxP launcher'
         : hosxpSyncState?.error === 'invalid_bms_url'
@@ -783,7 +783,7 @@ export default function DashboardPage() {
         className="flex justify-between border-t border-[var(--rule-strong)] px-5 py-2.5 font-mono text-[12px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
         style={{ background: 'var(--surface-cool)' }}
       >
-        <span>KK-LRMS · PPHO WAR-ROOM · MCH PROVINCIAL NETWORK</span>
+        <span>NN-LRMS · PPHO WAR-ROOM · MCH PROVINCIAL NETWORK</span>
         <span className="flex items-center gap-3">
           <span
             className="inline-flex items-center gap-1"
@@ -1118,7 +1118,7 @@ export default function DashboardPage() {
               </div>
               <div className="mt-1 leading-relaxed">
                 The sync starts only when the user opens this page from a valid HOSxP/BMS session
-                and the hospital code is active in KK-LRMS. If status is ERROR, fix the item above
+                and the hospital code is active in NN-LRMS. If status is ERROR, fix the item above
                 and reload this page.
               </div>
             </div>

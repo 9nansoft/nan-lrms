@@ -410,7 +410,7 @@ function LoginForm() {
               href="/about"
               className="inline-block text-sm text-slate-400 hover:text-teal-600 transition-colors"
             >
-              เกี่ยวกับระบบ KK-LRMS
+              เกี่ยวกับระบบ NN-LRMS
             </a>
           </div>
         </div>
@@ -434,7 +434,7 @@ function LoginForm() {
                     ต้องอัปเดต HOSxP ก่อนใช้งาน
                   </DialogTitle>
                   <DialogDescription className="text-xs text-red-700/80 mt-1">
-                    เวอร์ชัน HOSxP API ของโรงพยาบาลเก่ากว่าที่ระบบ KK-LRMS รองรับ
+                    เวอร์ชัน HOSxP API ของโรงพยาบาลเก่ากว่าที่ระบบ NN-LRMS รองรับ
                   </DialogDescription>
                 </DialogHeader>
               </div>
@@ -481,7 +481,7 @@ function LoginForm() {
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
                 กรุณาติดต่อผู้ดูแลระบบ HOSxP ของโรงพยาบาลเพื่ออัปเดต HOSxP เป็นเวอร์ชัน{' '}
                 <span className="font-mono font-semibold">{versionRejection.minVersion}</span>{' '}
-                ขึ้นไป จากนั้นจึงเข้าใช้งาน KK-LRMS อีกครั้ง
+                ขึ้นไป จากนั้นจึงเข้าใช้งาน NN-LRMS อีกครั้ง
               </div>
             </div>
           )}

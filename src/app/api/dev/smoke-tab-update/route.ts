@@ -216,7 +216,7 @@ export async function POST(request: NextRequest) {
   const config: ConnectionConfig = {
     apiUrl: identity.tunnelUrl,
     bearerToken: sessionId,
-    appIdentifier: 'KK-LRMS.SmokeTest',
+    appIdentifier: 'NN-LRMS.SmokeTest',
   };
 
   // Set the marketplace-token in the module singleton so service helpers

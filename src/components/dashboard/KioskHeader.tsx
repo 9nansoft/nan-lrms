@@ -77,7 +77,7 @@ export function KioskHeader({
             className="text-[26px] font-semibold leading-tight"
             style={{ color: 'var(--kiosk-ink)', letterSpacing: '-0.01em' }}
           >
-            KK-LRMS ·{' '}
+            NN-LRMS ·{' '}
             <span style={{ color: 'var(--kiosk-dim)', fontWeight: 500 }}>
               OneLR ห้องคลอดหนึ่งเดียว
             </span>
@@ -86,7 +86,7 @@ export function KioskHeader({
             className="mt-0.5 font-mono text-[13px] tracking-[0.18em]"
             style={{ color: 'var(--kiosk-dim)' }}
           >
-            PROVINCIAL LABOR-ROOM NETWORK · KHON KAEN · WAR-ROOM DISPLAY
+            PROVINCIAL LABOR-ROOM NETWORK · NAN· WAR-ROOM DISPLAY
           </div>
         </div>
 

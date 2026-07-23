@@ -1,5 +1,5 @@
 // Gate that decides whether an authenticated identity (BMS or ProviderID) is
-// allowed to hold a KK-LRMS session at all. Called from the NextAuth authorize
+// allowed to hold a NN-LRMS session at all. Called from the NextAuth authorize
 // callback — if the gate denies, the login is rejected (authorize returns
 // null) and the user never gets a JWT.
 //

@@ -9,7 +9,7 @@ import type {
 } from '@/types/bms-browser';
 
 export const PASTE_JSON_URL = 'https://hosxp.net/phapi/PasteJSON';
-export const APP_IDENTIFIER = 'KK-LRMS.Web';
+export const APP_IDENTIFIER = 'NN-LRMS.Web';
 export const SESSION_TIMEOUT_MS = 30_000;
 export const QUERY_TIMEOUT_MS = 60_000;
 /**
@@ -22,7 +22,7 @@ export const CHART_TIMEOUT_MS = 90_000;
 
 /**
  * Local HOSxP API gateway URL. The HOSxP marketplace gateway commonly runs
- * on the same workstation that the user opens KK-LRMS from (the BMS bundle
+ * on the same workstation that the user opens NN-LRMS from (the BMS bundle
  * binds 127.0.0.1:45011 by default). When reachable, we swap the remote
  * tunnel URL out for the local one to avoid the Cloudflare-tunnel hop —
  * cuts ~50–300 ms off every browser-initiated SQL/REST call (live ward

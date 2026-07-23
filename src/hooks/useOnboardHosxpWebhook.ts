@@ -1,19 +1,19 @@
-// Hook that auto-provisions the HOSxP webhook_setting row for KK-LRMS
+// Hook that auto-provisions the HOSxP webhook_setting row for NN-LRMS
 // when a user lands on `/` with a valid BMS session + marketplace_token.
 //
 // Flow:
 //   1. Query HOSxP via BMS /api/sql:
 //        SELECT COUNT(*) AS n FROM webhook_setting
-//        WHERE webhook_module_id = 3 AND webhook_setting_code = 'KK-LRMS'
+//        WHERE webhook_module_id = 3 AND webhook_setting_code = 'NN-LRMS'
 //   2. If a row already exists → done, remember for this tab.
 //   3. If not:
-//        a. POST /api/onboarding/webhook-key  (mints a KK-LRMS API key
+//        a. POST /api/onboarding/webhook-key  (mints a NN-LRMS API key
 //           bound to the session's hospital, returns the raw key once).
 //        b. POST /api/rest/webhook_setting via BMS with:
 //             webhook_module_id        = 3
-//             webhook_setting_code     = 'KK-LRMS'
+//             webhook_setting_code     = 'NN-LRMS'
 //             webhook_authorization_key = <the raw key>
-//             webhook_url              = <KK-LRMS public webhook URL>
+//             webhook_url              = <NN-LRMS public webhook URL>
 //
 // Ref-guarded so it runs at most once per tab/session even under
 // React-strict-mode double mount. SessionStorage persists two separate
@@ -30,10 +30,10 @@ import { useBmsSession } from '@/contexts/BmsSessionContext';
 import { executeSql, restInsert, restUpdate } from '@/lib/bms-browser-client';
 import { mintSerial } from '@/lib/bms-serial';
 
-const DONE_STORAGE_KEY = 'kk-lrms:hosxp-webhook-onboarded';
-const PENDING_STORAGE_KEY = 'kk-lrms:hosxp-webhook-pending-key';
+const DONE_STORAGE_KEY = 'nn-lrms:hosxp-webhook-onboarded';
+const PENDING_STORAGE_KEY = 'nn-lrms:hosxp-webhook-pending-key';
 const WEBHOOK_MODULE_ID = 3;
-const WEBHOOK_SETTING_CODE = 'KK-LRMS';
+const WEBHOOK_SETTING_CODE = 'NN-LRMS';
 
 function resolveKkLrmsWebhookUrl(): string {
   if (typeof window === 'undefined') return '';
@@ -171,7 +171,7 @@ export function useOnboardHosxpWebhook(): {
     ranRef.current = true;
     void (async () => {
       try {
-        // Step 1 — reuse-or-mint the KK-LRMS webhook key on the server side.
+        // Step 1 — reuse-or-mint the NN-LRMS webhook key on the server side.
         // The endpoint returns { alreadyExists: true, ... } if a key is
         // already on file for this hospital; in that case we intentionally
         // do NOT touch HOSxP's webhook_setting, trusting the original
@@ -184,7 +184,7 @@ export function useOnboardHosxpWebhook(): {
           const res = await fetch('/api/onboarding/webhook-key', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ label: 'HOSxP webhook_setting auto-provision' }),
+            body: JSON.stringify({ label: 'NN-LRMS HOSxP webhook_setting auto-provision' }),
           });
           if (!res.ok) {
             const err = (await res.json().catch(() => null)) as { error?: string } | null;

@@ -21,7 +21,7 @@ declare global {
   var __kkLrmsMemoryCache: Map<string, MemoryEntry> | undefined;
 }
 
-const DEFAULT_PREFIX = 'kk-lrms';
+const DEFAULT_PREFIX = 'nn-lrms';
 const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 300_000;
 

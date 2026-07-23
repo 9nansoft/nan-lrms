@@ -4,8 +4,8 @@ import { storeProviderPendingSession } from '@/lib/provider-id-session-store';
 import { sanitizeCallbackUrl } from '@/lib/safe-callback-url';
 import { logger } from '@/lib/logger';
 
-const STATE_COOKIE = 'kk-lrms-provider-oauth-state';
-const CALLBACK_COOKIE = 'kk-lrms-provider-callback-url';
+const STATE_COOKIE = 'nn-lrms-provider-oauth-state';
+const CALLBACK_COOKIE = 'nn-lrms-provider-callback-url';
 
 function getBaseUrl(request: NextRequest): string {
   if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL.replace(/\/$/, '');

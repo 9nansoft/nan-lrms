@@ -210,7 +210,7 @@ export function CallRoomClient({ callId }: { callId: string }) {
   const others = call.participants.filter((p) => p.userId !== myUserId);
   const displayName = session?.user?.name
     ? `${session.user.name} (${session.user.hospitalName ?? ''})`
-    : 'KK-LRMS';
+    : 'NN-LRMS';
 
   return (
     <div className="flex h-screen flex-col">

@@ -53,7 +53,7 @@ function ProviderCompleteContent() {
       setError(null);
       removeSessionCookie();
       removeMarketplaceToken();
-      window.localStorage.setItem('kk-lrms:auth-provider', 'provider-id');
+      window.localStorage.setItem('nn-lrms:auth-provider', 'provider-id');
 
       // Keep the spinner up during the success navigation; only the failure
       // paths below unwind `signingIn` (via the finally block).

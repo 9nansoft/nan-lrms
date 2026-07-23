@@ -1525,7 +1525,7 @@ function DangerZoneSection({
         }
       />
 
-      {/* Live counts — what's currently in kk-lrms for this hospital */}
+      {/* Live counts — what's currently in nn-lrms for this hospital */}
       <div
         className="border bg-white"
         style={{ borderColor: 'var(--rule-strong)' }}
@@ -1903,7 +1903,7 @@ function SyncLogSection({ hospital }: { hospital: AdminHospital }) {
           className="border bg-white px-4 py-6 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]"
           style={{ borderColor: 'var(--rule-strong)' }}
         >
-          ยังไม่มีรอบ sync บันทึกใน 24 ชม.ที่ผ่านมา — ตรวจสอบว่าผู้ใช้จากโรงพยาบาลนี้เปิด KK-LRMS แล้วหรือยัง
+          ยังไม่มีรอบ sync บันทึกใน 24 ชม.ที่ผ่านมา — ตรวจสอบว่าผู้ใช้จากโรงพยาบาลนี้เปิด NN-LRMS แล้วหรือยัง
         </div>
       )}
 

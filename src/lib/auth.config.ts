@@ -14,7 +14,7 @@ export const authConfig: NextAuthConfig = {
     strategy: 'jwt',
     maxAge: 8 * 60 * 60, // 8 hours
   },
-  // SameSite=None + Secure required so the session cookie travels when KK-LRMS
+  // SameSite=None + Secure required so the session cookie travels when NN-LRMS
   // is embedded as an iframe inside HOSxP / marketplace / partner portals
   // (cross-origin). In dev over http://localhost we fall back to Lax because
   // browsers reject Secure cookies on plain HTTP.

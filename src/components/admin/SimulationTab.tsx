@@ -47,7 +47,7 @@ export function SimulationTab() {
                 <strong className="font-semibold" style={{ color: 'var(--ink-navy)' }}>
                   คำเตือน
                 </strong>{' '}
-                · ข้อมูลที่สร้างจะเขียนจริงลงในตาราง cache ของ kk-lrms และแสดงในแดชบอร์ด
+                · ข้อมูลที่สร้างจะเขียนจริงลงในตาราง cache ของ nn-lrms และแสดงในแดชบอร์ด
                 · ใช้กับ DB ทดสอบเท่านั้น · API /api/dev/simulate
                 จะถูกบล็อกโดยเซิร์ฟเวอร์เมื่อ DEV_SIMULATION_ENABLED ไม่ได้เปิดไว้
               </div>
