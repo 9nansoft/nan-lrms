@@ -62,9 +62,18 @@ describe('POST /api/referrals/check — auth + minimization', () => {
   });
 
   it('429s after the per-hospital limit inside one window', async () => {
+    // Pin Date.now() so the window ID never changes mid-loop in slow CI runs
+    // (31 requests * ~0.5 s/req can straddle a 60-second window boundary,
+    // splitting the counter across two windows and making neither hit the
+    // limit). Only Date is faked — real timers keep PGlite async ops working.
+    vi.useFakeTimers({ toFake: ['Date'] });
     let last: Response | null = null;
-    for (let i = 0; i < 31; i++) {
-      last = await POST(checkRequest({ cid: VALID_CID }, apiKey) as never);
+    try {
+      for (let i = 0; i < 31; i++) {
+        last = await POST(checkRequest({ cid: VALID_CID }, apiKey) as never);
+      }
+    } finally {
+      vi.useRealTimers();
     }
     expect(last!.status).toBe(429);
   });
