@@ -10,7 +10,16 @@ interface StoredProviderSession {
   flowId: string;
 }
 
-const pendingSessions = new Map<string, StoredProviderSession>();
+// Pin to `global` so the same Map is shared across all Next.js route bundles
+// in a single Node.js process. Without this, the OAuth callback route bundle
+// and the NextAuth [...nextauth] route bundle each get their own module
+// instance — the session stored during the callback would be invisible to
+// the `authorize()` call, causing spurious "token_not_found" rejections.
+const _g = global as unknown as { __providerPendingSessions?: Map<string, StoredProviderSession> };
+if (!_g.__providerPendingSessions) {
+  _g.__providerPendingSessions = new Map<string, StoredProviderSession>();
+}
+const pendingSessions = _g.__providerPendingSessions;
 
 function cleanupExpiredSessions(): void {
   const now = Date.now();

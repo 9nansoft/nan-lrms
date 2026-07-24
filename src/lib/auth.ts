@@ -146,11 +146,30 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           readonlyRole,
         });
 
-        const access = await assertHospitalAccess({
-          hospitalCode: org.hcode,
-          role: readonlyRole,
-          accessMode: 'readonly',
-        });
+        // Wrap the DB-dependent hospital-access check so that a transient DB
+        // error (connection timeout, cold-start init still running) returns
+        // null (NextAuth reports "CredentialsSignin") instead of propagating
+        // as an unhandled exception. An unhandled throw here crashes the route
+        // handler and the reverse-proxy returns 502 HTML, which the client
+        // cannot parse as JSON and surfaces as "Unexpected token '<'" in the
+        // browser.
+        let access: Awaited<ReturnType<typeof assertHospitalAccess>>;
+        try {
+          access = await assertHospitalAccess({
+            hospitalCode: org.hcode,
+            role: readonlyRole,
+            accessMode: 'readonly',
+          });
+        } catch (err) {
+          logger.error('provider_id_authorize_db_error', {
+            flowId,
+            hospitalCode: org.hcode,
+            providerId: data.user.provider_id,
+            error: err,
+          });
+          return null;
+        }
+
         if (!access.allowed) {
           logger.warn('provider_id_login_rejected', {
             flowId,

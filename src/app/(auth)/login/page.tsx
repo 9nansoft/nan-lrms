@@ -166,7 +166,7 @@ function LoginForm() {
         // only surviving channel.
         setSessionCookie(trimmed);
         if (marketplaceToken) setMarketplaceToken(marketplaceToken);
-        window.localStorage.setItem('kk-lrms:auth-provider', 'bms');
+        window.localStorage.setItem('nn-lrms:auth-provider', 'bms');
         router.push(callbackUrl);
       }
     } catch (err) {

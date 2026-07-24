@@ -79,8 +79,18 @@ function ProviderCompleteContent() {
         // A thrown network/CSRF error previously left signingIn=true forever
         // (stuck spinner). Log it and show an actionable Thai message.
         console.error('[provider-complete] signIn failed', err);
-        const detail = err instanceof Error ? err.message : String(err);
-        setError(`ไม่สามารถเข้าสู่ระบบด้วย ProviderID ได้ กรุณาลองใหม่อีกครั้ง (${detail})`);
+        const msg = err instanceof Error ? err.message : String(err);
+        // NextAuth's signIn() throws a JSON-parse error when the auth
+        // endpoint returns an HTML error page (e.g. 502 Bad Gateway from the
+        // reverse-proxy).  Give the user an actionable message instead of the
+        // raw parse error.
+        const isHtmlResponse =
+          msg.includes("Unexpected token '<'") || msg.includes('is not valid JSON');
+        setError(
+          isHtmlResponse
+            ? 'เซิร์ฟเวอร์ไม่ตอบสนอง กรุณารอสักครู่แล้วลองใหม่อีกครั้ง (server error 502)'
+            : `ไม่สามารถเข้าสู่ระบบด้วย ProviderID ได้ กรุณาลองใหม่อีกครั้ง (${msg})`,
+        );
       } finally {
         if (!navigating) setSigningIn(false);
       }
