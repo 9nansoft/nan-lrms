@@ -7,6 +7,7 @@ import type {
   BmsApiError,
 } from '@/types/bms-session';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
+import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 
 export class BmsApiErrorClass extends Error {
@@ -184,4 +185,56 @@ export class BmsSessionClient {
       return null;
     }
   }
+}
+
+/**
+ * Resolve a usable BMS session id for a hospital, for the MOPH alert drain
+ * (codex #6a: the in-band session from the sync request may have expired by
+ * the time the drain runs).
+ *
+ * Fast path: return the cached `session_id` from `hospital_bms_config` if it
+ * is still valid (`session_expires_at` in the future with a safety margin).
+ * Slow path: fetch a fresh session id from the hospital's tunnel via
+ * `BmsSessionClient.getSessionId()`. Throws on missing config / tunnel failure
+ * — the drain catches and defers all pending rows to the next run.
+ *
+ * NOTE: this only fetches the *session id* (the MOPH API resolves the hospital
+ * JWT server-side from it). It does not validate the session or fetch a JWT —
+ * that is the BMS Session API's job, not ours.
+ */
+export async function resolveSessionIdForHospital(
+  db: DatabaseAdapter,
+  hospitalId: string,
+): Promise<string> {
+  const rows = await db.query<{
+    tunnel_url: string;
+    session_id: string | null;
+    session_expires_at: Date | string | null;
+  }>(
+    `SELECT tunnel_url, session_id, session_expires_at
+     FROM hospital_bms_config
+     WHERE hospital_id = $1
+     LIMIT 1`,
+    [hospitalId],
+  );
+  if (rows.length === 0 || !rows[0].tunnel_url) {
+    throw new BmsApiErrorClass({
+      code: 'CONNECTION_ERROR',
+      message: `no tunnel_url configured for hospital ${hospitalId}`,
+      statusCode: 0,
+    });
+  }
+  const cfg = rows[0];
+
+  // Fast path: cached session still valid (>60s margin).
+  if (cfg.session_id) {
+    const expires = cfg.session_expires_at ? new Date(cfg.session_expires_at).getTime() : 0;
+    if (expires && expires - Date.now() > 60_000) {
+      return cfg.session_id;
+    }
+  }
+
+  // Slow path: pull a fresh session id from the tunnel.
+  const client = new BmsSessionClient(cfg.tunnel_url);
+  return client.getSessionId();
 }
