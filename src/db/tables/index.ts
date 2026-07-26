@@ -22,6 +22,8 @@ import { mophHospitalsTable } from './moph-hospitals';
 import { systemConfigTable } from './system-config';
 import { videoCallsTable } from './video-calls';
 import { videoCallParticipantsTable } from './video-call-participants';
+import { mophAlertLogTable } from './moph-alert-log';
+import { mophCenterMonitorsTable } from './moph-center-monitors';
 
 export {
   hospitalsTable,
@@ -47,6 +49,8 @@ export {
   systemConfigTable,
   videoCallsTable,
   videoCallParticipantsTable,
+  mophAlertLogTable,
+  mophCenterMonitorsTable,
 };
 
 // All tables in creation order (respects foreign key dependencies)
@@ -59,6 +63,10 @@ export const ALL_TABLES: TableDefinition[] = [
   hospitalsTable,
   hospitalBmsConfigTable,
   hospitalConsultDoctorsTable,
+  // MOPH Prompt alerts — both reference hospitals, so after hospitalsTable.
+  // moph_center_monitors is province-scoped (no FK); moph_alert_log FKs hospitals.
+  mophCenterMonitorsTable,
+  mophAlertLogTable,
   usersTable,
   maternalJourneysTable,
   cachedPatientsTable,
