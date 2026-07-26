@@ -34,6 +34,8 @@ import {
   saveMaternalScreenAssessment,
   MaternalScreenStoreError,
 } from '@/services/maternal-screening-store';
+import { enqueueEmergencyAlert } from '@/services/risk-alert';
+import { EMERGENCY_ACUITY_LABEL_TH } from '@/config/maternal-screen-display';
 import {
   shouldEmitMaternalScreenTransition,
   buildMaternalScreenStateChangedEvent,
@@ -1310,6 +1312,45 @@ export async function processWebhookPayload(
               assessedAt: projected.assessedAt ?? validated.candidate.assessedAt,
             }),
           );
+
+          // MOPH Prompt EMERGENCY alert enqueue (codex #2 EMERGENCY producer).
+          // Fires only on a real transition into EMERGENCY/URGENT acuity (not
+          // STABLE/UNKNOWN). Best-effort: a failure never breaks screening.
+          // ruleId = emerg_<acuity> so distinct levels co-fire (codex #5); the
+          // drain (browser-push path) is the only LINE I/O site.
+          const acuity = projected.emergencyAcuity;
+          if (acuity === 'EMERGENCY' || acuity === 'URGENT') {
+            try {
+              const hosp = await db.query<{ name: string; province_code: string | null }>(
+                'SELECT name, province_code FROM hospitals WHERE id = ?',
+                [hospitalId],
+              );
+              await enqueueEmergencyAlert(db, {
+                hospitalId,
+                originHcode: hcode,
+                hospitalName: hosp[0]?.name ?? hcode,
+                province: hosp[0]?.province_code ?? '',
+                caseRef: admission.journey_id
+                  ? `LABOR-${admission.journey_id}`
+                  : `LABOR-AN-${p.an}`,
+                localDate: new Date().toLocaleDateString('en-CA', {
+                  timeZone: 'Asia/Bangkok',
+                }),
+                patientName: typeof p.name === 'string' ? p.name : null,
+                confirmUrl: null,
+                acuityLabel: EMERGENCY_ACUITY_LABEL_TH[acuity],
+                ruleId: `emerg_${acuity.toLowerCase()}`,
+              });
+            } catch (e) {
+              // Alerting is best-effort — never let it break maternal screening.
+              logger.warn('moph_alert_emergency_enqueue_failed', {
+                hospitalId,
+                an: p.an,
+                acuity,
+                error: e,
+              });
+            }
+          }
         }
       } catch (err) {
         // Store errors are PHI-free by contract (ids/codes only — never
