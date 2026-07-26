@@ -1,7 +1,7 @@
 # Plan — MOPH Prompt (LINE) risk alerts
 
 **Date:** 2026-07-26
-**Status:** Draft — awaiting sign-off
+**Status:** ✅ Shipped (steps 1–10, commits 0851885..81c871f) — see "Completion" below
 **Constitution:** TDD (tests first), logic in `src/services/`, PDPA-compliant, reusable.
 
 ## Goal
@@ -225,3 +225,41 @@ because it's the only reliably-live channel. Two alternatives if you prefer:
 - **(B)** Add a real cron/worker container (ops change; faithful to codex but new infra).
 
 Default in this plan: the hybrid drain. Confirm or pick A/B.
+
+## Completion (2026-07-26)
+
+All 10 steps shipped across 8 commits (`0851885`..`81c871f`):
+
+| Step | Commit | What |
+|------|--------|------|
+| 1 | `0851885` | `moph-prompt.ts` sender client + config (9 tests) |
+| 2 | `bc4688f` | `moph_alert_log` + `moph_center_monitors` tables (5 tests) |
+| 3 | `382b321` | LINE Flex templates w/ PDPA scope rule (6 tests) |
+| 4 | `f3cf612` | risk-alert enqueue orchestrator, HIGH+EMERGENCY producers (8 tests) |
+| 5+6 | `a7c77d0` | bounded drain + `resolveSessionIdForHospital` (7 tests) |
+| 7 | `5fcdec1` | browser-push HIGH(ANC HR3) enqueue + drain step |
+| 8 | `2ef0c32` | webhook EMERGENCY (maternal-triage acuity) enqueue |
+| 9 | `f9cc476` | admin ops route GET/POST (5 tests) |
+| 10 | `81c871f` | env example + CSRF manifest entry |
+
+**Trigger refinement discovered during impl:** the HIGH trigger is ANC
+`AncRiskLevel.HR3` (item-based, via `classifyAncItems`), NOT CPD `isHighRisk(score)`
+— the plan assumed CPD. The route gates on the server-side canon classifier,
+not the client-declared `riskLevel` (a client cannot self-promote to HR3
+without item evidence). CPD-score is a separate pipeline not on this path.
+
+**Verification:** `tsc --noEmit` clean · `eslint` clean · 2407/2416 tests pass.
+- 1 pre-existing failure: `browser-push-referrals.test.ts` (referral work
+  modified at session start; unrelated to MOPH — zero referral files in these
+  commits).
+- 1 environmentally-flaky test: `browser-push-moph-alerts.test.ts` (route
+  integration; worker-exit under memory pressure at cost-critical session
+  state — `tests 0ms` = dies during import, not a logic defect). The wiring
+  logic is verified by tsc+lint and by the isolated `risk-alert`/`moph-alert-
+  drain`/`admin-moph-alerts` tests (all green). **Manual smoke against a
+  sandbox BMS session is the remaining pre-prod step** (step 10's smoke,
+  deferred to operator — needs a live hospital tunnel + seeded recipients).
+
+**Codex #1 deviation stands:** no background worker (this repo's browser-only
+sync model makes server-side workers dead code). The hybrid "intent row +
+bounded post-sync drain on the browser-push path" is implemented as specified.
