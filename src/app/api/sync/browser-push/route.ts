@@ -31,6 +31,10 @@ import {
   type BrowserReferoutsResult,
   type BrowserReferinsResult,
 } from '@/services/sync/referrals';
+import { enqueueHighRiskAlert } from '@/services/risk-alert';
+import { drainMophAlerts } from '@/services/moph-alert-drain';
+import { classifyAncItems } from '@/config/anc-classifying-canon';
+import { AncRiskLevel } from '@/types/domain';
 import {
   processWebhookPayload,
   processAncWebhook,
@@ -361,6 +365,52 @@ export async function POST(request: NextRequest) {
             fieldOverflows: r.fieldOverflows,
           });
         }
+
+        // MOPH Prompt HIGH-risk alert enqueue (codex #2 HIGH producer). For
+        // each ANC patient the server classifies as HR3 (top tier), enqueue a
+        // pending moph_alert_log row — no LINE I/O here; the drain step below
+        // sends. Best-effort: a failure never aborts the sync run.
+        try {
+          const hosp = await db.query<{ name: string; province_code: string | null }>(
+            'SELECT name, province_code FROM hospitals WHERE id = ?',
+            [hospitalId],
+          );
+          const hospitalName = hosp[0]?.name ?? hcode;
+          const province = hosp[0]?.province_code ?? '';
+          const localDate = new Date().toLocaleDateString('en-CA', {
+            timeZone: 'Asia/Bangkok',
+          });
+          let enqueued = 0;
+          for (const p of patients) {
+            // Trust the server-side canon classifier, not the client-declared
+            // riskLevel — a client can claim HR3 without the item evidence.
+            const classified = classifyAncItems(p.riskItemIds ?? []);
+            if (classified.level !== AncRiskLevel.HR3) continue;
+            const n = await enqueueHighRiskAlert(db, {
+              hospitalId,
+              originHcode: hcode,
+              hospitalName,
+              province,
+              caseRef: `ANC-${p.cid}-G${p.pregNo}`,
+              localDate,
+              patientName: p.name,
+              confirmUrl: null,
+              score: 0, // HR3 is item-based, not CPD-score-based; field kept for the type
+            });
+            enqueued += n;
+          }
+          if (enqueued > 0) {
+            await appendSyncStep(hospitalId, runId, {
+              name: 'moph_alerts_enqueue',
+              status: 'success',
+              message: `Enqueued ${enqueued} HIGH-risk (HR3) MOPH alert(s) for drain.`,
+              counts: { enqueued },
+            });
+          }
+        } catch (e) {
+          // Alerting is best-effort — never let it break the sync run.
+          logger.warn('moph_alert_enqueue_failed', { hospitalId, error: e });
+        }
       } catch (e) {
         hadWarning = true;
         await appendSyncStep(hospitalId, runId, {
@@ -570,6 +620,39 @@ export async function POST(request: NextRequest) {
       "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE id = ?",
       [new Date().toISOString(), hospitalId],
     );
+
+    // MOPH Prompt alert drain (codex #1 hybrid) — the ONLY LINE I/O site, run
+    // as a bounded final step on this live browser-push path. Sends pending
+    // alert rows for this hospital within a hard budget. Best-effort: failures
+    // are logged and the sync run still succeeds (pending rows retry next push).
+    try {
+      await appendSyncStep(hospitalId, runId, {
+        name: 'moph_alerts_drain',
+        status: 'running',
+        message: 'Draining pending MOPH alerts (bounded).',
+      });
+      const summary = await drainMophAlerts(db, hospitalId);
+      await appendSyncStep(hospitalId, runId, {
+        name: 'moph_alerts_drain',
+        status: 'success',
+        message: `Drained MOPH alerts: ${summary.sent} sent, ${summary.retryable} deferred, ${summary.failed} failed, ${summary.skipped} skipped.`,
+        counts: {
+          sent: summary.sent,
+          retryable: summary.retryable,
+          failed: summary.failed,
+          skipped: summary.skipped,
+        },
+      });
+    } catch (e) {
+      // Drain failure must never abort the sync run — pending rows retry next push.
+      logger.warn('moph_alert_drain_step_failed', { hospitalId, error: e });
+      await appendSyncStep(hospitalId, runId, {
+        name: 'moph_alerts_drain',
+        status: 'warning',
+        message: 'MOPH alert drain step errored (pending alerts will retry next sync).',
+        detail: e instanceof Error ? e.message : String(e),
+      });
+    }
 
     const outcome: SyncRunOutcome = hadWarning ? 'partial' : 'success';
     void finalizeSyncRun(
