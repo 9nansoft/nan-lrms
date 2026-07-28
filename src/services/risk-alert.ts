@@ -1,13 +1,16 @@
 // Risk-alert enqueue orchestrator (codex #2: one orchestrator, two producers).
 //
-// HIGH (ANC CPD) and EMERGENCY (maternal labor-triage) producers both call
-// `enqueueAlertEvent()` with a normalized event. The orchestrator:
+// HIGH (ANC HR3 item-based) and EMERGENCY (maternal labor-triage) producers
+// both call `enqueueAlertEvent()` with a normalized event. The orchestrator:
 //   1. resolves recipients — active hospital_consult_doctors (hospital_staff)
 //      + active moph_center_monitors for the province (province_center);
-//   2. builds a Thai Flex per recipient via moph-alert-templates (PDPA: center
-//      scope gets no patient name);
-//   3. writes a status='pending' moph_alert_log row per recipient, using
-//      ON CONFLICT DO NOTHING on the dedup unique index (codex #5) so a repeat
+//   2. writes a status='pending' moph_alert_log row per recipient, persisting
+//      hospital_name + the ENCRYPTED patient name (staff-scope only — PDPA:
+//      center rows get NULL patient_name_enc). The drain rebuilds the Flex
+//      from these stored fields, so no Flex is built/discarded here (codex
+//      review P1 fix: the old `void flex` built a staff Flex then threw it
+//      away, so staff never received the patient name);
+//   3. ON CONFLICT DO NOTHING on the dedup unique index (codex #5) so a repeat
 //      enqueue for the same (case,recipient,source,severity,rule,day) is a no-op.
 //
 // NO LINE I/O happens here — the drain (moph-alert-drain.ts) is the only site
@@ -15,13 +18,9 @@
 
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
+import { encrypt, getEncryptionKey } from '@/lib/encryption';
 import { mophAlertsEnabled } from '@/config/moph-alert-config';
-import {
-  buildAlertFlex,
-  alertTitle,
-  type AlertSeverity,
-  type AlertRecipientScope,
-} from '@/config/moph-alert-templates';
+import { alertTitle, type AlertSeverity, type AlertRecipientScope } from '@/config/moph-alert-templates';
 
 export interface AlertEventContext {
   hospitalId: string;
@@ -33,16 +32,17 @@ export interface AlertEventContext {
   caseRef: string;
   /** 'YYYY-MM-DD' Asia/Bangkok calendar date — part of the dedup key. */
   localDate: string;
-  /** Patient name — rendered ONLY for hospital_staff scope (PDPA). */
+  /** Patient name — encrypted at rest for hospital_staff scope; never stored
+   *  for province_center (PDPA). */
   patientName?: string | null;
   /** Optional action-button URL. */
   confirmUrl?: string | null;
 }
 
-export interface HighRiskEventContext extends AlertEventContext {
-  /** CPD score (>=10 is HIGH). Kept for audit/labeling; the caller gates on isHighRisk. */
-  score: number;
-}
+// NOTE: there is deliberately NO `score` field here. The HIGH trigger is ANC
+// AncRiskLevel.HR3 (item-based via classifyAncItems), not a CPD numeric score.
+// The old `score: number` was vestigial CPD vocabulary (codex review P1/P2:
+// HR3/CPD semantic drift) and is removed. The caller gates on HR3, not score.
 
 export interface EmergencyEventContext extends AlertEventContext {
   /** Maternal-triage acuity Thai label (e.g. 'ฉุกเฉิน'). */
@@ -58,8 +58,10 @@ interface Recipient {
   scope: AlertRecipientScope;
 }
 
-const HIGH_RULE_ID = 'cpd_high';
-const HIGH_ALERT_SOURCE = 'anc_cpd';
+// HR3/item-based HIGH-risk vocabulary (codex review P1/P2: was anc_cpd/cpd_high,
+// misleading because the trigger is ANC HR3, not a CPD score).
+const HIGH_RULE_ID = 'hr3';
+const HIGH_ALERT_SOURCE = 'anc_hr3';
 const EMERGENCY_ALERT_SOURCE = 'maternal_triage';
 
 /** Resolve active recipients for a hospital + province. */
@@ -87,6 +89,8 @@ async function resolveRecipients(
 /**
  * Insert one pending alert row per recipient, conflict-skipping on the dedup
  * unique index. Returns the number of rows actually inserted (0 = all dupes).
+ * Persists hospital_name + encrypted patient name (staff-scope only) so the
+ * drain can rebuild a correct, scope-aware Flex without re-fetching patient data.
  */
 async function enqueueAlertEvent(
   db: DatabaseAdapter,
@@ -94,7 +98,6 @@ async function enqueueAlertEvent(
   severity: AlertSeverity,
   alertSource: string,
   ruleId: string,
-  acuityLabel?: string | null,
 ): Promise<number> {
   if (!mophAlertsEnabled()) {
     logger.debug('moph_alert_skipped_disabled', { caseRef: ctx.caseRef });
@@ -107,28 +110,23 @@ async function enqueueAlertEvent(
   }
 
   const title = alertTitle({ severity, hospitalName: ctx.hospitalName });
+  // Encrypt the patient name ONCE per enqueue (staff scope only). Center rows
+  // store NULL — they must never carry patient PII at rest or in the message.
+  const key = getEncryptionKey();
+  const patientNameEnc = ctx.patientName && key ? encrypt(ctx.patientName, key) : null;
+
   let inserted = 0;
   for (const r of recipients) {
-    // Flex is rebuilt by the drain from the row (severity/scope/title) so we do
-    // NOT persist patient data at rest. We still build it here only to validate
-    // the template path compiles against the inputs; the drain is authoritative.
-    const flex = buildAlertFlex({
-      severity,
-      recipientScope: r.scope,
-      hospitalName: ctx.hospitalName,
-      caseRef: ctx.caseRef,
-      patientName: r.scope === 'hospital_staff' ? ctx.patientName : null,
-      acuityLabel: acuityLabel ?? null,
-      confirmUrl: ctx.confirmUrl ?? null,
-    });
+    const isStaff = r.scope === 'hospital_staff';
     // ON CONFLICT DO NOTHING on the dedup unique index — repeat enqueues are
     // idempotent (codex #5).
     const result = await db.query<{ c: number }>(
       `INSERT INTO moph_alert_log
-         (id, case_id, hospital_id, origin_hcode, recipient_cid, recipient_scope,
-          alert_source, severity, rule_id, title, status, attempts, local_date,
-          confirm_url, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',0,$11,$12,NOW(),NOW())
+         (id, case_id, hospital_id, origin_hcode, hospital_name, recipient_cid,
+          recipient_scope, alert_source, severity, rule_id, title,
+          patient_name_enc, status, attempts, local_date, confirm_url,
+          created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',0,$13,$14,NOW(),NOW())
        ON CONFLICT (case_id, hospital_id, recipient_cid, alert_source, severity, rule_id, local_date)
        DO NOTHING
        RETURNING 1::int as c`,
@@ -137,18 +135,19 @@ async function enqueueAlertEvent(
         ctx.caseRef,
         ctx.hospitalId,
         ctx.originHcode,
+        ctx.hospitalName,
         r.cid,
         r.scope,
         alertSource,
         severity,
         ruleId,
         title,
+        isStaff ? patientNameEnc : null, // PDPA: center rows never store the name
         ctx.localDate,
         ctx.confirmUrl ?? null,
       ],
     );
     if (result.length > 0) inserted++;
-    void flex;
   }
   logger.info('moph_alert_enqueued', {
     caseRef: ctx.caseRef,
@@ -160,10 +159,13 @@ async function enqueueAlertEvent(
   return inserted;
 }
 
-/** HIGH-risk (ANC CPD) producer. Caller MUST have already gated on isHighRisk. */
+/**
+ * HIGH-risk (ANC HR3) producer. Caller MUST have already gated on
+ * classifyAncItems(riskItemIds).level === AncRiskLevel.HR3.
+ */
 export async function enqueueHighRiskAlert(
   db: DatabaseAdapter,
-  ctx: HighRiskEventContext,
+  ctx: AlertEventContext,
 ): Promise<number> {
   return enqueueAlertEvent(db, ctx, 'high', HIGH_ALERT_SOURCE, HIGH_RULE_ID);
 }
@@ -173,7 +175,7 @@ export async function enqueueEmergencyAlert(
   db: DatabaseAdapter,
   ctx: EmergencyEventContext,
 ): Promise<number> {
-  return enqueueAlertEvent(db, ctx, 'emergency', EMERGENCY_ALERT_SOURCE, ctx.ruleId, ctx.acuityLabel);
+  return enqueueAlertEvent(db, ctx, 'emergency', EMERGENCY_ALERT_SOURCE, ctx.ruleId);
 }
 
 // crypto.randomUUID is available in Node 20+; isolated here so tests/dev can

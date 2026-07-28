@@ -395,7 +395,6 @@ export async function POST(request: NextRequest) {
               localDate,
               patientName: p.name,
               confirmUrl: null,
-              score: 0, // HR3 is item-based, not CPD-score-based; field kept for the type
             });
             enqueued += n;
           }

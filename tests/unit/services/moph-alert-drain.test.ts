@@ -6,7 +6,11 @@ import { PgliteAdapter, createPglite } from '@/db/pglite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables/index';
 import { randomUUID } from 'node:crypto';
+import { generateKey, encrypt } from '@/lib/encryption';
 import { drainMophAlerts } from '@/services/moph-alert-drain';
+
+// Drain decrypts patient_name_enc (staff scope) — needs an encryption key.
+process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
 
 // Mock the sender: default success, per-test override via mockSend.
 const mockSend = vi.fn();
@@ -42,26 +46,36 @@ async function seedPendingRow(
     ruleId: string;
     recipientScope: string;
     alertSource: string;
+    patientName: string | null;
   }> = {},
 ): Promise<string> {
   const id = randomUUID();
+  const scope = overrides.recipientScope ?? 'hospital_staff';
+  // patient_name_enc only for staff scope (mirrors the orchestrator's PDPA rule).
+  const patientName = overrides.patientName ?? (scope === 'hospital_staff' ? 'น.ส. A' : null);
+  const patientNameEnc =
+    patientName && scope === 'hospital_staff'
+      ? encrypt(patientName, process.env.ENCRYPTION_KEY!)
+      : null;
   await db.query(
     `INSERT INTO moph_alert_log
-       (id, case_id, hospital_id, origin_hcode, recipient_cid, recipient_scope,
-        alert_source, severity, rule_id, title, status, attempts, local_date,
-        created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending',0,$11,NOW(),NOW())`,
+       (id, case_id, hospital_id, origin_hcode, hospital_name, recipient_cid, recipient_scope,
+        alert_source, severity, rule_id, title, patient_name_enc, status, attempts,
+        local_date, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',0,$13,NOW(),NOW())`,
     [
       id,
       overrides.severity === 'emergency' ? 'case-em' : 'case-high',
       hospitalId,
       '10682',
+      'รพ.ขอนแก่น',
       overrides.recipientCid ?? '3320500282121',
-      overrides.recipientScope ?? 'hospital_staff',
-      overrides.alertSource ?? 'anc_cpd',
+      scope,
+      overrides.alertSource ?? 'anc_hr3',
       overrides.severity ?? 'high',
-      overrides.ruleId ?? 'cpd_high',
+      overrides.ruleId ?? 'hr3',
       'แจ้งเตือน',
+      patientNameEnc,
       '2026-07-26',
     ],
   );
@@ -191,5 +205,51 @@ describe('drainMophAlerts', () => {
     });
     expect(summary.sent).toBe(0);
     expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('staff row: drain decrypts patient_name_enc and passes it to the Flex (codex P1 fix)', async () => {
+    await seedPendingRow(db, hospitalId, { recipientScope: 'hospital_staff', patientName: 'นาง บ' });
+    await drainMophAlerts(db, hospitalId, { maxAlerts: 5, perSendTimeoutMs: 1000, budgetMs: 5000 });
+    // The sender received a flex whose JSON contains the decrypted patient name.
+    const call = mockSend.mock.calls[0][0] as { flex: Record<string, unknown> };
+    const json = JSON.stringify(call.flex);
+    expect(json).toContain('นาง บ');
+    expect(json).toContain('รพ.ขอนแก่น'); // hospital_name, not origin_hcode
+  });
+
+  it('center row: drain never includes the patient name in the Flex (PDPA)', async () => {
+    await seedPendingRow(db, hospitalId, { recipientScope: 'province_center', patientName: null });
+    await drainMophAlerts(db, hospitalId, { maxAlerts: 5, perSendTimeoutMs: 1000, budgetMs: 5000 });
+    const call = mockSend.mock.calls[0][0] as { flex: Record<string, unknown> };
+    expect(JSON.stringify(call.flex)).not.toContain('นาง');
+  });
+
+  it('row claiming: a concurrent drain does not double-send the same row (codex P1 race fix)', async () => {
+    await seedPendingRow(db, hospitalId, { recipientCid: '3320500282121' });
+    // Two drains racing on the same hospital — both should not send the same row.
+    // (PGlite serializes, but the claim UPDATE...FOR UPDATE SKIP LOCKED means the
+    // second drain sees no pending rows and sends nothing.)
+    const [a, b] = await Promise.all([
+      drainMophAlerts(db, hospitalId, { maxAlerts: 5, perSendTimeoutMs: 1000, budgetMs: 5000 }),
+      drainMophAlerts(db, hospitalId, { maxAlerts: 5, perSendTimeoutMs: 1000, budgetMs: 5000 }),
+    ]);
+    expect(a.sent + b.sent).toBe(1); // exactly one send, not two
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a stale processing row (crashed mid-send) back to pending on next drain', async () => {
+    const id = await seedPendingRow(db, hospitalId);
+    // Simulate a crashed drain: row stuck in processing with an old claimed_at.
+    await db.query(
+      `UPDATE moph_alert_log SET status='processing', claimed_at = NOW() - interval '1 hour' WHERE id = $1`,
+      [id],
+    );
+    const summary = await drainMophAlerts(db, hospitalId, {
+      maxAlerts: 5,
+      perSendTimeoutMs: 1000,
+      budgetMs: 5000,
+    });
+    expect(summary.sent).toBe(1); // recovered + sent
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 });

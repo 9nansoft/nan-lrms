@@ -7,13 +7,16 @@ import { PgliteAdapter, createPglite } from '@/db/pglite-adapter';
 import { SchemaSync } from '@/db/schema-sync';
 import { ALL_TABLES } from '@/db/tables/index';
 import { randomUUID } from 'node:crypto';
+import { generateKey, decryptSafe } from '@/lib/encryption';
 import {
   enqueueHighRiskAlert,
   enqueueEmergencyAlert,
   type AlertEventContext,
-  type HighRiskEventContext,
   type EmergencyEventContext,
 } from '@/services/risk-alert';
+
+// The orchestrator now encrypts patient_name at rest (mirrors cached_patients).
+process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
 
 // Stub the sender so we can assert enqueue NEVER touches LINE I/O.
 vi.mock('@/services/moph-prompt', () => ({
@@ -54,26 +57,30 @@ describe('risk-alert enqueue orchestrator', () => {
     vi.restoreAllMocks();
   });
 
-  const baseCtx = <T extends AlertEventContext>(overrides: Partial<T> = {}): T => ({
-    hospitalId,
-    originHcode: '10682',
-    hospitalName: 'รพ.ขอนแก่น',
-    caseRef: 'ANC-2026-0001',
-    province: '30',
-    confirmUrl: 'https://app/case/ANC-2026-0001',
-    patientName: 'น.ส. A',
-    localDate: '2026-07-26',
-    ...overrides,
-  } as T);
+  const baseCtx = <T extends AlertEventContext>(overrides: Partial<T> = {}): T =>
+    ({
+      hospitalId,
+      originHcode: '10682',
+      hospitalName: 'รพ.ขอนแก่น',
+      caseRef: 'ANC-2026-0001',
+      province: '30',
+      confirmUrl: 'https://app/case/ANC-2026-0001',
+      patientName: 'น.ส. A',
+      localDate: '2026-07-26',
+      ...overrides,
+    }) as T;
 
   it('HIGH producer enqueues one row per active consult doctor + per active center monitor', async () => {
-    const n = await enqueueHighRiskAlert(db, baseCtx<HighRiskEventContext>({ score: 12 }));
+    const n = await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
     // 1 active consult doctor + 1 center monitor = 2
     expect(n).toBe(2);
     const rows = await db.query<{ recipient_scope: string; recipient_cid: string }>(
       `SELECT recipient_scope, recipient_cid FROM moph_alert_log ORDER BY recipient_scope, recipient_cid`,
     );
-    expect(rows.map((r) => r.recipient_scope).sort()).toEqual(['hospital_staff', 'province_center']);
+    expect(rows.map((r) => r.recipient_scope).sort()).toEqual([
+      'hospital_staff',
+      'province_center',
+    ]);
     // inactive consult doctor (cid ...22) must NOT be a recipient
     expect(rows.find((r) => r.recipient_cid === '3320500282122')).toBeUndefined();
   });
@@ -91,27 +98,51 @@ describe('risk-alert enqueue orchestrator', () => {
     expect(rows[0].rule_id).toBe('emerg_hemorrhage');
   });
 
-  it('HIGH producer sets source=anc_cpd, severity=high, rule_id=cpd_high', async () => {
-    await enqueueHighRiskAlert(db, baseCtx<HighRiskEventContext>({ score: 12 }));
+  it('HIGH producer sets source=anc_hr3, severity=high, rule_id=hr3', async () => {
+    await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
     const rows = await db.query<{ alert_source: string; severity: string; rule_id: string }>(
       `SELECT alert_source, severity, rule_id FROM moph_alert_log LIMIT 1`,
     );
-    expect(rows[0].alert_source).toBe('anc_cpd');
+    expect(rows[0].alert_source).toBe('anc_hr3');
     expect(rows[0].severity).toBe('high');
-    expect(rows[0].rule_id).toBe('cpd_high');
+    expect(rows[0].rule_id).toBe('hr3');
+  });
+
+  it('persists hospital_name + encrypted patient name for staff; center row has NULL name (PDPA)', async () => {
+    await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({ patientName: 'น.ส. เอ' }));
+    const rows = await db.query<{
+      recipient_scope: string;
+      hospital_name: string | null;
+      patient_name_enc: string | null;
+    }>(`SELECT recipient_scope, hospital_name, patient_name_enc FROM moph_alert_log`);
+    const staff = rows.find((r) => r.recipient_scope === 'hospital_staff')!;
+    const center = rows.find((r) => r.recipient_scope === 'province_center')!;
+    // hospital_name stored on both (it's the sender context, not patient PII)
+    expect(staff.hospital_name).toBe('รพ.ขอนแก่น');
+    expect(center.hospital_name).toBe('รพ.ขอนแก่น');
+    // staff row carries the ENCRYPTED patient name (decrypts back); center is NULL
+    expect(staff.patient_name_enc).not.toBeNull();
+    expect(decryptSafe(staff.patient_name_enc)).toBe('น.ส. เอ');
+    expect(center.patient_name_enc).toBeNull();
   });
 
   it('dedup: second enqueue same key same day → no new rows (conflict-skip)', async () => {
-    const first = await enqueueHighRiskAlert(db, baseCtx<HighRiskEventContext>({ score: 12 }));
-    const second = await enqueueHighRiskAlert(db, baseCtx<HighRiskEventContext>({ score: 15 }));
+    const first = await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
+    const second = await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
     expect(second).toBe(0);
     const count = await db.query<{ c: number }>(`SELECT COUNT(*)::int as c FROM moph_alert_log`);
     expect(count[0].c).toBe(first);
   });
 
   it('distinct rule_id on same case → both kept (emergencies co-fire)', async () => {
-    await enqueueEmergencyAlert(db, baseCtx<EmergencyEventContext>({ acuityLabel: 'ฉุกเฉิน', ruleId: 'emerg_hemorrhage' }));
-    await enqueueEmergencyAlert(db, baseCtx<EmergencyEventContext>({ acuityLabel: 'ฉุกเฉิน', ruleId: 'emerg_preeclampsia' }));
+    await enqueueEmergencyAlert(
+      db,
+      baseCtx<EmergencyEventContext>({ acuityLabel: 'ฉุกเฉิน', ruleId: 'emerg_hemorrhage' }),
+    );
+    await enqueueEmergencyAlert(
+      db,
+      baseCtx<EmergencyEventContext>({ acuityLabel: 'ฉุกเฉิน', ruleId: 'emerg_preeclampsia' }),
+    );
     const rules = await db.query<{ rule_id: string }>(
       `SELECT DISTINCT rule_id FROM moph_alert_log ORDER BY rule_id`,
     );
@@ -120,14 +151,14 @@ describe('risk-alert enqueue orchestrator', () => {
 
   it('writes status=pending and never calls sendMophPrompt (no LINE I/O)', async () => {
     const { sendMophPrompt } = await import('@/services/moph-prompt');
-    await enqueueHighRiskAlert(db, baseCtx<HighRiskEventContext>({ score: 12 }));
+    await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
     const rows = await db.query<{ status: string }>(`SELECT status FROM moph_alert_log LIMIT 1`);
     expect(rows[0].status).toBe('pending');
     expect(sendMophPrompt).not.toHaveBeenCalled();
   });
 
   it('center rows carry recipient_scope=province_center; hospital rows hospital_staff', async () => {
-    await enqueueHighRiskAlert(db, baseCtx<HighRiskEventContext>({ score: 12 }));
+    await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
     const rows = await db.query<{ recipient_scope: string; recipient_cid: string }>(
       `SELECT recipient_scope, recipient_cid FROM moph_alert_log`,
     );
@@ -140,7 +171,7 @@ describe('risk-alert enqueue orchestrator', () => {
   it('enqueues nothing when MOPH_ALERTS_ENABLED=false', async () => {
     process.env.MOPH_ALERTS_ENABLED = 'false';
     try {
-      const n = await enqueueHighRiskAlert(db, baseCtx<HighRiskEventContext>({ score: 12 }));
+      const n = await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
       expect(n).toBe(0);
       const count = await db.query<{ c: number }>(`SELECT COUNT(*)::int as c FROM moph_alert_log`);
       expect(count[0].c).toBe(0);
