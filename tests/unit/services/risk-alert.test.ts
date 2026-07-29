@@ -18,12 +18,17 @@ import {
 // The orchestrator now encrypts patient_name at rest (mirrors cached_patients).
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
 
-// Stub the sender so we can assert enqueue NEVER touches LINE I/O.
-vi.mock('@/services/moph-prompt', () => ({
-  sendMophPrompt: vi.fn(async () => {
-    throw new Error('sendMophPrompt must NOT be called during enqueue');
-  }),
-}));
+// Stub the sender so we can assert enqueue NEVER touches LINE I/O. Keep
+// isValidCid real (risk-alert now imports it to filter malformed recipient CIDs).
+vi.mock('@/services/moph-prompt', async () => {
+  const actual = await vi.importActual<typeof import('@/services/moph-prompt')>('@/services/moph-prompt');
+  return {
+    ...actual,
+    sendMophPrompt: vi.fn(async () => {
+      throw new Error('sendMophPrompt must NOT be called during enqueue');
+    }),
+  };
+});
 
 describe('risk-alert enqueue orchestrator', () => {
   let db: PgliteAdapter;
@@ -38,12 +43,14 @@ describe('risk-alert enqueue orchestrator', () => {
        VALUES ($1,'10682','รพ.ขอนแก่น','P_PLUS','30',true,NOW(),NOW())`,
       [hospitalId],
     );
-    // one active + one inactive consult doctor
+    // one active + one inactive consult doctor + one active with a MALFORMED cid
+    // (codex gap-sweep: enqueue must skip recipients whose cid isn't 13 digits).
     await db.query(
       `INSERT INTO hospital_consult_doctors (id, hospital_id, cid, name, position, is_active, created_at, updated_at)
        VALUES ($1,$2,'3320500282121','นพ. ก','สูตินรี',true,NOW(),NOW()),
-              ($3,$4,'3320500282122','นพ. ข','สูตินรี',false,NOW(),NOW())`,
-      [randomUUID(), hospitalId, randomUUID(), hospitalId],
+              ($3,$4,'3320500282122','นพ. ข','สูตินรี',false,NOW(),NOW()),
+              ($5,$6,'123','นพ. หมดเลข','สูตินรี',true,NOW(),NOW())`,
+      [randomUUID(), hospitalId, randomUUID(), hospitalId, randomUUID(), hospitalId],
     );
     // one active province center monitor
     await db.query(
@@ -178,5 +185,15 @@ describe('risk-alert enqueue orchestrator', () => {
     } finally {
       delete process.env.MOPH_ALERTS_ENABLED;
     }
+  });
+
+  it('skips recipients with a malformed (non-13-digit) CID (codex gap-sweep)', async () => {
+    const n = await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
+    // 1 valid active consult doctor + 1 center monitor = 2 (malformed-cid doctor skipped)
+    expect(n).toBe(2);
+    const rows = await db.query<{ recipient_cid: string }>(
+      `SELECT recipient_cid FROM moph_alert_log`,
+    );
+    expect(rows.find((r) => r.recipient_cid === '123')).toBeUndefined();
   });
 });

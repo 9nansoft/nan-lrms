@@ -62,11 +62,12 @@ export async function GET(request: NextRequest) {
       params,
     );
     // PDPA: mask recipient CID (show last 4) in the ops view — operators see
-    // delivery status without full national IDs.
+    // delivery status without full national IDs. Mask ANY length (codex gap-
+    // sweep: the 13-digit-only branch exposed malformed CIDs raw).
     const masked = rows.map((r) => ({
       ...r,
       recipient_cid:
-        r.recipient_cid.length === 13 ? `********${r.recipient_cid.slice(-4)}` : r.recipient_cid,
+        r.recipient_cid.length >= 4 ? `********${r.recipient_cid.slice(-4)}` : '****',
     }));
     return NextResponse.json({ alerts: masked, count: masked.length });
   } catch (error) {
@@ -83,7 +84,9 @@ export async function POST(request: NextRequest) {
     const db = await getDatabase();
     const body = (await request.json().catch(() => null)) as { hospitalId?: unknown } | null;
     const hospitalId =
-      typeof body?.hospitalId === 'string' && body.hospitalId.trim() ? body.hospitalId.trim() : null;
+      typeof body?.hospitalId === 'string' && body.hospitalId.trim()
+        ? body.hospitalId.trim()
+        : null;
     if (!hospitalId) {
       return NextResponse.json({ error: 'hospitalId required' }, { status: 400 });
     }

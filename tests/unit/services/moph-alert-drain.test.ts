@@ -208,7 +208,10 @@ describe('drainMophAlerts', () => {
   });
 
   it('staff row: drain decrypts patient_name_enc and passes it to the Flex (codex P1 fix)', async () => {
-    await seedPendingRow(db, hospitalId, { recipientScope: 'hospital_staff', patientName: 'นาง บ' });
+    await seedPendingRow(db, hospitalId, {
+      recipientScope: 'hospital_staff',
+      patientName: 'นาง บ',
+    });
     await drainMophAlerts(db, hospitalId, { maxAlerts: 5, perSendTimeoutMs: 1000, budgetMs: 5000 });
     // The sender received a flex whose JSON contains the decrypted patient name.
     const call = mockSend.mock.calls[0][0] as { flex: Record<string, unknown> };
@@ -251,5 +254,64 @@ describe('drainMophAlerts', () => {
     });
     expect(summary.sent).toBe(1); // recovered + sent
     expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('dead-letters a retryable row after maxAttempts (codex gap-sweep: poison-row starvation)', async () => {
+    // Seed a row already at attempts = maxAttempts (so the next failure dead-letters it).
+    const id = await seedPendingRow(db, hospitalId);
+    await db.query(`UPDATE moph_alert_log SET attempts = 4 WHERE id = $1`, [id]); // max502Retries=4
+    mockSend.mockRejectedValueOnce(
+      Object.assign(new Error('502'), { code: 'RETRYABLE_EXHAUSTED', statusCode: 502 }),
+    );
+    const summary = await drainMophAlerts(db, hospitalId, {
+      maxAlerts: 5,
+      perSendTimeoutMs: 1000,
+      budgetMs: 5000,
+    });
+    expect(summary.failed).toBe(1); // dead-lettered, not retryable
+    const rows = await db.query<{ status: string }>(`SELECT status FROM moph_alert_log WHERE id = $1`, [id]);
+    expect(rows[0].status).toBe('failed');
+  });
+
+  it('budget exhaustion releases un-sent claimed rows back to pending (codex gap-sweep P1)', async () => {
+    // Seed 3 rows; budget=0 so the loop releases all claimed rows before any send.
+    await seedPendingRow(db, hospitalId, { recipientCid: '3320500282121' });
+    await seedPendingRow(db, hospitalId, { recipientCid: '3320500282122' });
+    await seedPendingRow(db, hospitalId, { recipientCid: '3320500282123' });
+    const summary = await drainMophAlerts(db, hospitalId, {
+      maxAlerts: 5,
+      perSendTimeoutMs: 1000,
+      budgetMs: 0,
+    });
+    expect(summary.sent).toBe(0);
+    // The un-sent claimed rows must be back to pending (not stuck in processing).
+    const stuck = await db.query<{ c: number }>(
+      `SELECT COUNT(*)::int as c FROM moph_alert_log WHERE status = 'processing'`,
+    );
+    expect(stuck[0].c).toBe(0);
+    const pending = await db.query<{ c: number }>(
+      `SELECT COUNT(*)::int as c FROM moph_alert_log WHERE status = 'pending'`,
+    );
+    expect(pending[0].c).toBe(3); // all 3 claimed then released, none sent
+  });
+
+  it('purges terminal rows older than retentionDays after a drain (codex gap-sweep: no retention)', async () => {
+    process.env.MOPH_ALERT_RETENTION_DAYS = '30';
+    try {
+      const id = randomUUID();
+      await db.query(
+        `INSERT INTO moph_alert_log
+           (id, case_id, hospital_id, origin_hcode, hospital_name, recipient_cid, recipient_scope,
+            alert_source, severity, rule_id, title, status, attempts, local_date, created_at, updated_at)
+         VALUES ($1,'old',$2,'10682','รพ.ขอนแก่น','3320500282121','hospital_staff','anc_hr3','high','hr3',
+                 't','sent',1,'2026-01-01', NOW() - interval '90 days', NOW() - interval '90 days')`,
+        [id, hospitalId],
+      );
+      await drainMophAlerts(db, hospitalId, { maxAlerts: 5, perSendTimeoutMs: 1000, budgetMs: 5000 });
+      const rows = await db.query<{ c: number }>(`SELECT COUNT(*)::int as c FROM moph_alert_log WHERE id = $1`, [id]);
+      expect(rows[0].c).toBe(0); // purged
+    } finally {
+      delete process.env.MOPH_ALERT_RETENTION_DAYS;
+    }
   });
 });

@@ -112,46 +112,91 @@ export async function drainMophAlerts(
               patient_name_enc, confirm_url, attempts`,
     [hospitalId, maxAlerts],
   );
+
+  // Purge terminal rows older than the retention window so moph_alert_log
+  // doesn't grow forever (codex gap-sweep: no retention). Runs even when there
+  // are no pending rows to send — retention is independent of delivery. Best-
+  // effort, never throws.
+  try {
+    await purgeOldMophAlerts(db, limits.retentionDays);
+  } catch (err) {
+    logger.warn('moph_alert_purge_failed', { hospitalId, error: String(err) });
+  }
+
   if (claimed.length === 0) return summary;
 
   // Re-derive a session once per drain (covers codex #6a session expiry). If it
-  // fails, release the claims back to pending — no LINE I/O attempted.
+  // fails, release the claims back to pending with a per-row last_error so
+  // operators can see the cause (codex gap-sweep: was silent).
   let sessionId: string;
   try {
     sessionId = await resolveSessionIdForHospital(db, hospitalId);
   } catch (err) {
     logger.warn('moph_alert_drain_no_session', { hospitalId, error: String(err) });
-    await releaseClaimsToPending(db, claimed.map((r) => r.id));
+    const msg = `session re-derive failed: ${String((err as Error)?.message ?? err)}`;
+    await db.query(
+      `UPDATE moph_alert_log
+       SET status = 'pending', claimed_at = NULL, attempts = attempts + 1,
+           last_error = $1, updated_at = NOW()
+       WHERE id::text = ANY($2::text[]) AND status = 'processing'`,
+      [msg, claimed.map((r) => r.id)],
+    );
     summary.retryable = claimed.length; // all deferred to next drain
     return summary;
   }
 
   const deadline = Date.now() + budgetMs;
+  let sentIdx = 0;
   for (const row of claimed) {
-    if (Date.now() >= deadline) break; // budget exhausted — rest re-recovered next drain
-    await sendOne(db, row, sessionId, summary);
+    if (Date.now() >= deadline) {
+      // Budget exhausted — release the UN-sent claimed rows back to pending so
+      // they're not stuck in processing (codex gap-sweep P1: was just `break`,
+      // leaving them for a future drain's stale recovery, which may never run).
+      const unsent = claimed.slice(sentIdx).map((r) => r.id);
+      await releaseClaimsToPending(db, unsent);
+      break;
+    }
+    sentIdx++;
+    await sendOne(db, row, sessionId, summary, limits.max502Retries);
   }
   logger.info('moph_alert_drain_done', { hospitalId, ...summary });
   return summary;
 }
 
+/** Delete terminal (sent/failed/skipped) rows older than `retentionDays`.
+ *  0 = keep forever. Pending/processing rows are never purged. */
+async function purgeOldMophAlerts(db: DatabaseAdapter, retentionDays: number): Promise<void> {
+  if (!retentionDays || retentionDays <= 0) return;
+  await db.query(
+    `DELETE FROM moph_alert_log
+     WHERE status IN ('sent', 'failed', 'skipped')
+       AND created_at < NOW() - ($1 || ' days')::interval`,
+    [String(retentionDays)],
+  );
+}
+
 /** Release the given row ids back to pending (un-claim). */
 async function releaseClaimsToPending(db: DatabaseAdapter, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
+  // Cast to text[] comparison — PGlite's param binding doesn't reliably cast
+  // $1::uuid[] when the column is uuid, and this works identically on Postgres.
   await db.query(
     `UPDATE moph_alert_log
      SET status = 'pending', claimed_at = NULL, updated_at = NOW()
-     WHERE id = ANY($1::uuid[]) AND status = 'processing'`,
+     WHERE id::text = ANY($1::text[]) AND status = 'processing'`,
     [ids],
   );
 }
 
-/** Send one claimed row and finalize its status. Never throws (logs + marks). */
+/** Send one claimed row and finalize its status. Never throws (logs + marks).
+ *  Dead-letters a retryable row to `failed` once attempts exceed maxAttempts
+ *  (codex gap-sweep: poison retryables otherwise starve newer alerts). */
 async function sendOne(
   db: DatabaseAdapter,
   row: ClaimedRow,
   sessionId: string,
   summary: DrainSummary,
+  maxAttempts: number,
 ): Promise<void> {
   try {
     const severity = row.severity as AlertSeverity;
@@ -185,7 +230,13 @@ async function sendOne(
        SET status = $1, message_id = $2, api_status = $3, attempts = attempts + 1,
            sent_at = $4, last_error = NULL, claimed_at = NULL, updated_at = NOW()
        WHERE id = $5`,
-      [finalStatus, res.messageId, apiStatus, finalStatus === 'sent' ? new Date().toISOString() : null, row.id],
+      [
+        finalStatus,
+        res.messageId,
+        apiStatus,
+        finalStatus === 'sent' ? new Date().toISOString() : null,
+        row.id,
+      ],
     );
     if (finalStatus === 'sent') summary.sent++;
     else if (finalStatus === 'skipped') summary.skipped++;
@@ -200,7 +251,17 @@ async function sendOne(
         ? String((err as { code: unknown }).code)
         : 'UNKNOWN';
     const isRetryable = RETRYABLE_CODES.has(code);
-    const status = isRetryable ? 'pending' : TERMINAL_CODES.has(code) ? 'failed' : 'pending';
+    const nextAttempts = row.attempts + 1;
+    // Dead-letter: a retryable row that has exhausted maxAttempts goes to
+    // `failed` (terminal) so it can't loop forever and starve newer alerts.
+    const status =
+      isRetryable && nextAttempts >= maxAttempts
+        ? 'failed'
+        : isRetryable
+          ? 'pending'
+          : TERMINAL_CODES.has(code)
+            ? 'failed'
+            : 'pending';
     await db.query(
       `UPDATE moph_alert_log
        SET status = $1, attempts = attempts + 1, last_error = $2,
@@ -208,8 +269,8 @@ async function sendOne(
        WHERE id = $3`,
       [status, String((err as Error)?.message ?? err), row.id],
     );
-    if (isRetryable || code === 'UNKNOWN') summary.retryable++;
-    else summary.failed++;
-    logger.warn('moph_alert_send_failed', { id: row.id, code, status });
+    if (status === 'failed') summary.failed++;
+    else summary.retryable++;
+    logger.warn('moph_alert_send_failed', { id: row.id, code, status, attempts: nextAttempts });
   }
 }

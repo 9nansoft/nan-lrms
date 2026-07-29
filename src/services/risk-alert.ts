@@ -20,7 +20,12 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
 import { mophAlertsEnabled } from '@/config/moph-alert-config';
-import { alertTitle, type AlertSeverity, type AlertRecipientScope } from '@/config/moph-alert-templates';
+import { isValidCid } from '@/services/moph-prompt';
+import {
+  alertTitle,
+  type AlertSeverity,
+  type AlertRecipientScope,
+} from '@/config/moph-alert-templates';
 
 export interface AlertEventContext {
   hospitalId: string;
@@ -64,7 +69,9 @@ const HIGH_RULE_ID = 'hr3';
 const HIGH_ALERT_SOURCE = 'anc_hr3';
 const EMERGENCY_ALERT_SOURCE = 'maternal_triage';
 
-/** Resolve active recipients for a hospital + province. */
+/** Resolve active recipients for a hospital + province. Filters out any
+ *  recipient whose CID is not exactly 13 digits (the MOPH API would 400 at drain
+ *  time, wasting a claim — codex gap-sweep: validate at enqueue instead). */
 async function resolveRecipients(
   db: DatabaseAdapter,
   hospitalId: string,
@@ -75,15 +82,31 @@ async function resolveRecipients(
      WHERE hospital_id = $1 AND is_active = true`,
     [hospitalId],
   );
-  const center = await db.query<{ cid: string; name: string }>(
-    `SELECT cid, name FROM moph_center_monitors
-     WHERE province = $1 AND is_active = true`,
-    [province],
-  );
-  return [
+  const center =
+    province && province.trim()
+      ? await db.query<{ cid: string; name: string }>(
+          `SELECT cid, name FROM moph_center_monitors
+           WHERE province = $1 AND is_active = true`,
+          [province],
+        )
+      : [];
+  if (!province || !province.trim()) {
+    // Empty province silently skips center monitors — surface it so the
+    // hospital's province_code gets fixed (codex gap-sweep edge case).
+    logger.warn('moph_alert_empty_province', { hospitalId });
+  }
+  const all = [
     ...staff.map((r) => ({ cid: r.cid, name: r.name, scope: 'hospital_staff' as const })),
     ...center.map((r) => ({ cid: r.cid, name: r.name, scope: 'province_center' as const })),
   ];
+  const valid = all.filter((r) => isValidCid(r.cid));
+  if (valid.length !== all.length) {
+    logger.warn('moph_alert_invalid_recipient_cid_skipped', {
+      hospitalId,
+      skipped: all.length - valid.length,
+    });
+  }
+  return valid;
 }
 
 /**
@@ -113,6 +136,11 @@ async function enqueueAlertEvent(
   // Encrypt the patient name ONCE per enqueue (staff scope only). Center rows
   // store NULL — they must never carry patient PII at rest or in the message.
   const key = getEncryptionKey();
+  if (ctx.patientName && !key) {
+    // Fail loud: a missing ENCRYPTION_KEY silently drops the staff patient name
+    // (codex gap-sweep). This is a misconfiguration, not a normal path.
+    logger.error('moph_alert_encryption_key_missing', { hospitalId: ctx.hospitalId });
+  }
   const patientNameEnc = ctx.patientName && key ? encrypt(ctx.patientName, key) : null;
 
   let inserted = 0;

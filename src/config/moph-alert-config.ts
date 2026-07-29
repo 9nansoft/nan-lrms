@@ -30,6 +30,9 @@ export interface MophAlertLimits {
   max502Retries: number;
   /** Base backoff (ms) for 502 retries — doubled per attempt. */
   retryBackoffMs: number;
+  /** Retention window (days) for terminal (sent/failed) moph_alert_log rows.
+   *  0 = keep forever. The drain purges rows older than this after each run. */
+  retentionDays: number;
 }
 
 export function mophAlertLimits(): MophAlertLimits {
@@ -39,6 +42,7 @@ export function mophAlertLimits(): MophAlertLimits {
     drainBudgetMs: numEnv('MOPH_DRAIN_BUDGET_MS', 10000),
     max502Retries: numEnv('MOPH_MAX_502_RETRIES', 4),
     retryBackoffMs: numEnv('MOPH_RETRY_BACKOFF_MS', 500),
+    retentionDays: numEnv('MOPH_ALERT_RETENTION_DAYS', 90),
   };
 }
 
