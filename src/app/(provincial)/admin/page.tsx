@@ -16,6 +16,7 @@ import {
   FlaskConical,
   UsersRound,
   Activity,
+  Bell,
 } from 'lucide-react';
 import { BmsConfigTab } from '@/components/admin/BmsConfigTab';
 import { WebhookKeysTab } from '@/components/admin/WebhookKeysTab';
@@ -25,6 +26,7 @@ import { AdminMapPane } from '@/components/admin/AdminMapPane';
 import { SimulationTab } from '@/components/admin/SimulationTab';
 import { OnlineUsersTab } from '@/components/admin/OnlineUsersTab';
 import { SyncOverviewTab } from '@/components/admin/SyncOverviewTab';
+import { MophAlertsTab } from '@/components/admin/MophAlertsTab';
 import { cn } from '@/lib/utils';
 
 type TabKey =
@@ -34,7 +36,8 @@ type TabKey =
   | 'webhook-keys'
   | 'sync-overview'
   | 'online-users'
-  | 'simulation';
+  | 'simulation'
+  | 'moph-alerts';
 
 export default function AdminPage() {
   useSetBreadcrumbs([
@@ -98,6 +101,7 @@ export default function AdminPage() {
               { k: 'sync-overview' as const, label: 'Sync Status', icon: Activity },
               { k: 'online-users' as const, label: 'Online Users', icon: UsersRound },
               { k: 'simulation' as const, label: 'จำลองข้อมูล', icon: FlaskConical },
+              { k: 'moph-alerts' as const, label: 'MOPH Alerts', icon: Bell },
             ]
           ).map((t, i) => {
             const active = activeTab === t.k;
@@ -150,6 +154,8 @@ export default function AdminPage() {
             <SyncOverviewTab />
           ) : activeTab === 'online-users' ? (
             <OnlineUsersTab />
+          ) : activeTab === 'moph-alerts' ? (
+            <MophAlertsTab />
           ) : (
             <SimulationTab />
           )}
