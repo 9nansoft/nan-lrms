@@ -18,7 +18,7 @@ KK-LRMS เชื่อมข้อมูลจาก HOSxP ผ่าน browser
 | การส่งต่อ | ติดตาม `INITIATED → ACCEPTED → IN_TRANSIT → ARRIVED` หรือ `REJECTED`, ระดับความเร่งด่วน, SLA aging, เส้นทางส่งต่อ และแนวโน้ม 7 วัน |
 | ผลลัพธ์ทารก | จำนวนคลอด, น้ำหนักแรกเกิดต่ำ, Apgar 5 นาที, การกู้ชีพ, ครรภ์แฝด, น้ำหนักเฉลี่ย, แนวโน้ม และรายละเอียดแยกโรงพยาบาล |
 | วิดีโอปรึกษา | เรียกผู้ใช้ออนไลน์หรือโรงพยาบาลเข้ากลุ่มสูงสุด 8 คนผ่าน Jitsi; สื่อเสียง/ภาพไม่วิ่งผ่านเซิร์ฟเวอร์ KK-LRMS |
-| ผู้ดูแลระบบ | จังหวัดหลัก, โรงพยาบาล, BMS Tunnel, consult doctors, Webhook keys, ภาพรวม sync, ผู้ใช้ออนไลน์, reconciliation API และเครื่องมือ simulation สำหรับ development |
+| ผู้ดูแลระบบ | จังหวัดหลัก, โรงพยาบาล, BMS Tunnel, consult doctors, Webhook keys, ภาพรวม sync, ผู้ใช้ออนไลน์, reconciliation API, MOPH Alerts (ผู้รับการแจ้งเตือน LINE ศูนย์กลางจังหวัด) และเครื่องมือ simulation สำหรับ development |
 
 ### เส้นทางข้อมูลการตั้งครรภ์
 
