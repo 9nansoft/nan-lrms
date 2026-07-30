@@ -23,12 +23,15 @@ vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 
 // Mock the drain so no LINE I/O happens; capture the call. (enqueueHighRiskAlert
 // never calls the sender itself — it only writes pending rows — so moph-prompt
-// need not be mocked here.)
-vi.mock('@/services/moph-alert-drain', () => ({
-  drainMophAlerts: vi.fn(async () => ({ sent: 0, retryable: 0, failed: 0, skipped: 0 })),
+// need not be mocked here.) vi.hoisted gives a stable handle that survives the
+// route's import-time module resolution (codex flaky-test fix: the inline
+// factory + post-import cast can race under memory pressure).
+const { mockDrain } = vi.hoisted(() => ({
+  mockDrain: vi.fn(async () => ({ sent: 0, retryable: 0, failed: 0, skipped: 0 })),
 }));
-import { drainMophAlerts } from '@/services/moph-alert-drain';
-const mockDrain = drainMophAlerts as unknown as ReturnType<typeof vi.fn>;
+vi.mock('@/services/moph-alert-drain', () => ({
+  drainMophAlerts: mockDrain,
+}));
 
 import { POST } from '@/app/api/sync/browser-push/route';
 
@@ -82,7 +85,9 @@ describe('POST /api/sync/browser-push — MOPH alert wiring (HIGH/HR3)', () => {
   });
 
   it('HR3 ANC patient enqueues a pending moph_alert_log row + appends a moph_alerts_drain step', async () => {
-    const res = await POST(jsonRequest({ anc: { patients: [hr3Patient('1007000100131')] } }) as never);
+    const res = await POST(
+      jsonRequest({ anc: { patients: [hr3Patient('1007000100131')] } }) as never,
+    );
     expect(res.status).toBe(200);
 
     const hid = await hospitalId();
@@ -107,7 +112,9 @@ describe('POST /api/sync/browser-push — MOPH alert wiring (HIGH/HR3)', () => {
   });
 
   it('non-HR3 patient enqueues no alert row (drain step still runs, no-op)', async () => {
-    const res = await POST(jsonRequest({ anc: { patients: [lowPatient('1007000100140')] } }) as never);
+    const res = await POST(
+      jsonRequest({ anc: { patients: [lowPatient('1007000100140')] } }) as never,
+    );
     expect(res.status).toBe(200);
     const hid = await hospitalId();
     const rows = await db.query<{ c: number }>(
