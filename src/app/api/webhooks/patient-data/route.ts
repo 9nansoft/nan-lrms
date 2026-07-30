@@ -23,6 +23,7 @@ import type {
 import { SseManager } from '@/lib/sse';
 import { logger } from '@/lib/logger';
 import { apiError } from '@/lib/api-errors';
+import { drainMophAlerts } from '@/services/moph-alert-drain';
 
 export async function POST(request: NextRequest) {
   // Captured for the catch-all error log — without sender identity the
@@ -221,6 +222,19 @@ export async function POST(request: NextRequest) {
       validation.payload,
       sseManager,
     );
+
+    // Bounded MOPH alert drain (codex #1 first-week risk: webhook EMERGENCY
+    // alerts would otherwise sit pending until a browser-push drain runs — the
+    // webhook path has no drain of its own). Best-effort: a failure never
+    // breaks the webhook response; pending rows retry on the next drain.
+    try {
+      await drainMophAlerts(db, keyInfo.hospitalId);
+    } catch (e) {
+      logger.warn('webhook_moph_alert_drain_failed', {
+        hospitalId: keyInfo.hospitalId,
+        error: e,
+      });
+    }
 
     return NextResponse.json({
       success: true,
