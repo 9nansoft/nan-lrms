@@ -269,7 +269,10 @@ describe('drainMophAlerts', () => {
       budgetMs: 5000,
     });
     expect(summary.failed).toBe(1); // dead-lettered, not retryable
-    const rows = await db.query<{ status: string }>(`SELECT status FROM moph_alert_log WHERE id = $1`, [id]);
+    const rows = await db.query<{ status: string }>(
+      `SELECT status FROM moph_alert_log WHERE id = $1`,
+      [id],
+    );
     expect(rows[0].status).toBe('failed');
   });
 
@@ -307,8 +310,15 @@ describe('drainMophAlerts', () => {
                  't','sent',1,'2026-01-01', NOW() - interval '90 days', NOW() - interval '90 days')`,
         [id, hospitalId],
       );
-      await drainMophAlerts(db, hospitalId, { maxAlerts: 5, perSendTimeoutMs: 1000, budgetMs: 5000 });
-      const rows = await db.query<{ c: number }>(`SELECT COUNT(*)::int as c FROM moph_alert_log WHERE id = $1`, [id]);
+      await drainMophAlerts(db, hospitalId, {
+        maxAlerts: 5,
+        perSendTimeoutMs: 1000,
+        budgetMs: 5000,
+      });
+      const rows = await db.query<{ c: number }>(
+        `SELECT COUNT(*)::int as c FROM moph_alert_log WHERE id = $1`,
+        [id],
+      );
       expect(rows[0].c).toBe(0); // purged
     } finally {
       delete process.env.MOPH_ALERT_RETENTION_DAYS;

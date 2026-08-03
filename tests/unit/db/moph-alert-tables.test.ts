@@ -31,10 +31,26 @@ describe('moph_alert_log + moph_center_monitors tables', () => {
     );
     const logNames = logCols.map((c) => c.column_name);
     for (const col of [
-      'id', 'case_id', 'hospital_id', 'origin_hcode', 'recipient_cid',
-      'recipient_scope', 'alert_source', 'severity', 'rule_id', 'title',
-      'status', 'message_id', 'api_status', 'attempts', 'last_error',
-      'confirm_url', 'local_date', 'sent_at', 'created_at', 'updated_at',
+      'id',
+      'case_id',
+      'hospital_id',
+      'origin_hcode',
+      'recipient_cid',
+      'recipient_scope',
+      'alert_source',
+      'severity',
+      'rule_id',
+      'title',
+      'status',
+      'message_id',
+      'api_status',
+      'attempts',
+      'last_error',
+      'confirm_url',
+      'local_date',
+      'sent_at',
+      'created_at',
+      'updated_at',
     ]) {
       expect(logNames).toContain(col);
     }
@@ -44,7 +60,16 @@ describe('moph_alert_log + moph_center_monitors tables', () => {
        WHERE table_name = 'moph_center_monitors' ORDER BY column_name`,
     );
     const monNames = monCols.map((c) => c.column_name);
-    for (const col of ['id', 'province', 'cid', 'name', 'position', 'is_active', 'created_at', 'updated_at']) {
+    for (const col of [
+      'id',
+      'province',
+      'cid',
+      'name',
+      'position',
+      'is_active',
+      'created_at',
+      'updated_at',
+    ]) {
       expect(monNames).toContain(col);
     }
   });
@@ -58,11 +83,25 @@ describe('moph_alert_log + moph_center_monitors tables', () => {
         alert_source, severity, rule_id, title, status, attempts, local_date,
         created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW(),NOW())`,
-      [id, 'case-1', hospitalId, '10682', '3320500282121', 'hospital_staff',
-       'anc_cpd', 'high', 'cpd_high', 'แจ้งเตือน', 'pending', 0, '2026-07-26'],
+      [
+        id,
+        'case-1',
+        hospitalId,
+        '10682',
+        '3320500282121',
+        'hospital_staff',
+        'anc_cpd',
+        'high',
+        'cpd_high',
+        'แจ้งเตือน',
+        'pending',
+        0,
+        '2026-07-26',
+      ],
     );
     const rows = await db.query<{ status: string; recipient_cid: string }>(
-      `SELECT status, recipient_cid FROM moph_alert_log WHERE id = $1`, [id],
+      `SELECT status, recipient_cid FROM moph_alert_log WHERE id = $1`,
+      [id],
     );
     expect(rows[0].status).toBe('pending');
     expect(rows[0].recipient_cid).toBe('3320500282121');
@@ -71,8 +110,19 @@ describe('moph_alert_log + moph_center_monitors tables', () => {
   it('enforces the dedup unique index — duplicate key same day is rejected', async () => {
     const hospitalId = (await db.query<{ id: string }>(`SELECT id FROM hospitals LIMIT 1`))[0].id;
     const base = [
-      randomUUID(), 'case-dup', hospitalId, '10682', '3320500282121', 'hospital_staff',
-      'anc_cpd', 'high', 'cpd_high', 'แจ้งเตือน', 'pending', 0, '2026-07-26',
+      randomUUID(),
+      'case-dup',
+      hospitalId,
+      '10682',
+      '3320500282121',
+      'hospital_staff',
+      'anc_cpd',
+      'high',
+      'cpd_high',
+      'แจ้งเตือน',
+      'pending',
+      0,
+      '2026-07-26',
     ];
     await db.query(
       `INSERT INTO moph_alert_log
@@ -97,7 +147,15 @@ describe('moph_alert_log + moph_center_monitors tables', () => {
 
   it('allows distinct rule_id on the same case (distinct emergencies co-fire)', async () => {
     const hospitalId = (await db.query<{ id: string }>(`SELECT id FROM hospitals LIMIT 1`))[0].id;
-    const common = ['case-multi', hospitalId, '10682', '3320500282121', 'hospital_staff', 'maternal_triage', 'emergency'];
+    const common = [
+      'case-multi',
+      hospitalId,
+      '10682',
+      '3320500282121',
+      'hospital_staff',
+      'maternal_triage',
+      'emergency',
+    ];
     for (const ruleId of ['emerg_hemorrhage', 'emerg_preeclampsia']) {
       await db.query(
         `INSERT INTO moph_alert_log

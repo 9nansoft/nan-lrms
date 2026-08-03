@@ -13,8 +13,14 @@ vi.mock('@/lib/auth', () => ({
   auth: async () => (mockSessionUser ? { user: mockSessionUser } : null),
 }));
 
-import { GET as listGET, POST as createPOST } from '@/app/api/admin/provinces/[provinceCode]/center-monitors/route';
-import { PUT as itemPUT, DELETE as itemDELETE } from '@/app/api/admin/provinces/[provinceCode]/center-monitors/[monitorId]/route';
+import {
+  GET as listGET,
+  POST as createPOST,
+} from '@/app/api/admin/provinces/[provinceCode]/center-monitors/route';
+import {
+  PUT as itemPUT,
+  DELETE as itemDELETE,
+} from '@/app/api/admin/provinces/[provinceCode]/center-monitors/[monitorId]/route';
 
 const PROV = '30';
 
@@ -153,7 +159,9 @@ describe('center-monitors admin API', () => {
   it('DELETE soft-deletes (is_active=false)', async () => {
     (db.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{ id: 'm1' }]);
     const res = await itemDELETE(
-      req(`http://test/api/admin/provinces/${PROV}/center-monitors/m1`, { method: 'DELETE' }) as never,
+      req(`http://test/api/admin/provinces/${PROV}/center-monitors/m1`, {
+        method: 'DELETE',
+      }) as never,
       itemCtx(PROV, 'm1') as never,
     );
     expect(res.status).toBe(200);

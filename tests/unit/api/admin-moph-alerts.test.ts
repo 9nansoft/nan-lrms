@@ -87,6 +87,22 @@ describe('GET /api/admin/moph-alerts', () => {
     expect(sql).toContain('hospital_id = $1');
     expect(sql).toContain('status = $2');
   });
+
+  it('clamps a bad limit to a safe finite integer (no NaN/negative reaching SQL)', async () => {
+    const spy = db.query as ReturnType<typeof vi.fn>;
+    for (const bad of ['abc', '-5', '0', '', '1e9']) {
+      spy.mockClear();
+      await GET(req(`http://test/api/admin/moph-alerts?limit=${bad}`) as never);
+      expect(spy).toHaveBeenCalled();
+      // LIMIT param is the last bind value; must be a finite integer in 1..500.
+      const params = spy.mock.calls[0][1] as unknown[];
+      const limit = params[params.length - 1];
+      expect(Number.isFinite(limit)).toBe(true);
+      expect(limit).toBeGreaterThanOrEqual(1);
+      expect(limit).toBeLessThanOrEqual(500);
+      expect(Number.isInteger(limit)).toBe(true);
+    }
+  });
 });
 
 describe('POST /api/admin/moph-alerts', () => {

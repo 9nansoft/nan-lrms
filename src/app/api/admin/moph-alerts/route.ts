@@ -38,7 +38,13 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const hospitalId = url.searchParams.get('hospital_id');
     const status = url.searchParams.get('status');
-    const limit = Math.min(Number(url.searchParams.get('limit') ?? '100'), 500);
+    // Finite-integer clamp 1..500 — guards NaN (?limit=abc), negatives, zero,
+    // and huge values so a malformed query can't reach SQL LIMIT and 500.
+    const rawLimit = Number(url.searchParams.get('limit') ?? '100');
+    const limit =
+      Number.isFinite(rawLimit) && rawLimit >= 1
+        ? Math.min(Math.trunc(rawLimit), 500)
+        : 100;
 
     const where: string[] = [];
     const params: unknown[] = [];
@@ -66,8 +72,7 @@ export async function GET(request: NextRequest) {
     // sweep: the 13-digit-only branch exposed malformed CIDs raw).
     const masked = rows.map((r) => ({
       ...r,
-      recipient_cid:
-        r.recipient_cid.length >= 4 ? `********${r.recipient_cid.slice(-4)}` : '****',
+      recipient_cid: r.recipient_cid.length >= 4 ? `********${r.recipient_cid.slice(-4)}` : '****',
     }));
     return NextResponse.json({ alerts: masked, count: masked.length });
   } catch (error) {

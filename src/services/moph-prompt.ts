@@ -148,7 +148,11 @@ export async function sendMophPrompt(input: SendMophPromptInput): Promise<MophPr
       const isLast = remaining <= 0;
       if (isLast) {
         logger.warn('moph_prompt_timeout_exhausted', { attempt });
-        throw new MophPromptError('RETRYABLE_EXHAUSTED', `send timed out after ${attempt} attempts`, 0);
+        throw new MophPromptError(
+          'RETRYABLE_EXHAUSTED',
+          `send timed out after ${attempt} attempts`,
+          0,
+        );
       }
       logger.debug('moph_prompt_timeout_retry', { attempt });
       await sleep(retryBackoffMs * 2 ** (attempt - 1));
@@ -175,7 +179,11 @@ export async function sendMophPrompt(input: SendMophPromptInput): Promise<MophPr
     const isLast = remaining <= 0;
     if (isLast) {
       logger.warn('moph_prompt_502_exhausted', { attempt, status: resp.status });
-      throw new MophPromptError('RETRYABLE_EXHAUSTED', `${resp.status} after ${attempt} attempts`, resp.status);
+      throw new MophPromptError(
+        'RETRYABLE_EXHAUSTED',
+        `${resp.status} after ${attempt} attempts`,
+        resp.status,
+      );
     }
     logger.debug('moph_prompt_502_retry', { attempt, status: resp.status });
     await sleep(retryBackoffMs * 2 ** (attempt - 1));

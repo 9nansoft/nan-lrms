@@ -38,9 +38,11 @@ function maskCid(cid: string): string {
 
 export function MophAlertsTab() {
   // 1. Resolve the deployment's active province (codex: default active-province-only).
-  const { data: configData, isLoading: configLoading, error: configError } = useSWR<ConfigResponse>(
-    '/api/admin/config',
-  );
+  const {
+    data: configData,
+    isLoading: configLoading,
+    error: configError,
+  } = useSWR<ConfigResponse>('/api/admin/config');
   const provinceCode = configData?.config?.active_province_code ?? '';
 
   // 2. List center monitors for that province.
@@ -128,10 +130,9 @@ export function MophAlertsTab() {
     setDeleteBusyId(m.id);
     setMessage(null);
     try {
-      const res = await fetch(
-        `/api/admin/provinces/${provinceCode}/center-monitors/${m.id}`,
-        { method: 'DELETE' },
-      );
+      const res = await fetch(`/api/admin/provinces/${provinceCode}/center-monitors/${m.id}`, {
+        method: 'DELETE',
+      });
       if (!res.ok) {
         const err = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(err?.error ?? 'ลบไม่สำเร็จ');
@@ -188,7 +189,9 @@ export function MophAlertsTab() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <label className="space-y-1">
-            <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">CID (13 หลัก)</span>
+            <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+              CID (13 หลัก)
+            </span>
             <Input
               value={form.cid}
               onChange={(e) => setField('cid', e.target.value.replace(/\D/g, '').slice(0, 13))}
@@ -270,7 +273,9 @@ export function MophAlertsTab() {
               <div className="text-[13px]" style={{ color: 'var(--ink-navy)' }}>
                 {m.name}
               </div>
-              <code className="font-mono text-[12px] text-[var(--ink-navy-dim)]">{maskCid(m.cid)}</code>
+              <code className="font-mono text-[12px] text-[var(--ink-navy-dim)]">
+                {maskCid(m.cid)}
+              </code>
               <div className="text-[12px] text-[var(--ink-navy-muted)]">{m.position ?? '—'}</div>
               <div>
                 {m.isActive ? (

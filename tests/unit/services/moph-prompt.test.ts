@@ -20,10 +20,13 @@ function mockFetchSeq(responses: Response[]): {
 } {
   const calls: { url: string; init: RequestInit }[] = [];
   let i = 0;
-  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
-    calls.push({ url: _url, init: init ?? {} });
-    return responses[Math.min(i++, responses.length - 1)];
-  }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) => {
+      calls.push({ url: _url, init: init ?? {} });
+      return responses[Math.min(i++, responses.length - 1)];
+    }),
+  );
   return { calls };
 }
 
@@ -80,7 +83,9 @@ describe('sendMophPrompt', () => {
   });
 
   it('includes optional confirm_url / service_id / flex when provided', async () => {
-    const { calls } = mockFetchSeq([jsonResponse(200, { message_id: 'm', line: { success: true, status: 'success' } })]);
+    const { calls } = mockFetchSeq([
+      jsonResponse(200, { message_id: 'm', line: { success: true, status: 'success' } }),
+    ]);
     await sendMophPrompt({
       sessionId: 'S',
       cid: CID_13,
@@ -98,22 +103,26 @@ describe('sendMophPrompt', () => {
 
   it('validates cid is exactly 13 digits before calling fetch (400 contract)', async () => {
     mockFetchSeq([jsonResponse(200, { line: { success: true } })]);
-    await expect(sendMophPrompt({ sessionId: 'S', cid: '123', title: 't', text: 'x' }))
-      .rejects.toMatchObject({ code: 'INVALID_CID' });
-    await expect(sendMophPrompt({ sessionId: 'S', cid: '1234567890123', title: 't', text: 'x' }))
-      .resolves.toBeDefined(); // 13 digits ok
+    await expect(
+      sendMophPrompt({ sessionId: 'S', cid: '123', title: 't', text: 'x' }),
+    ).rejects.toMatchObject({ code: 'INVALID_CID' });
+    await expect(
+      sendMophPrompt({ sessionId: 'S', cid: '1234567890123', title: 't', text: 'x' }),
+    ).resolves.toBeDefined(); // 13 digits ok
   });
 
   it('maps 401 → AUTH error (non-retryable)', async () => {
     mockFetchSeq([jsonResponse(401, { error: 'no bearer' })]);
-    await expect(sendMophPrompt({ sessionId: 'S', cid: CID_13, title: 't', text: 'x' }))
-      .rejects.toMatchObject({ code: 'AUTH' });
+    await expect(
+      sendMophPrompt({ sessionId: 'S', cid: CID_13, title: 't', text: 'x' }),
+    ).rejects.toMatchObject({ code: 'AUTH' });
   });
 
   it('maps 422 → VALIDATION error (non-retryable)', async () => {
     mockFetchSeq([jsonResponse(422, { error: 'missing title' })]);
-    await expect(sendMophPrompt({ sessionId: 'S', cid: CID_13, title: '', text: 'x' }))
-      .rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(
+      sendMophPrompt({ sessionId: 'S', cid: CID_13, title: '', text: 'x' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 
   it('retries only on 502 with backoff, then gives up as RETRYABLE_EXHAUSTED', async () => {
@@ -147,8 +156,9 @@ describe('sendMophPrompt', () => {
 
   it('does not retry on 400 (terminal CLIENT_ERROR)', async () => {
     const { calls } = mockFetchSeq([jsonResponse(400, { error: 'bad cid' })]);
-    await expect(sendMophPrompt({ sessionId: 'S', cid: CID_13, title: 't', text: 'x' }))
-      .rejects.toMatchObject({ code: 'CLIENT_ERROR' });
+    await expect(
+      sendMophPrompt({ sessionId: 'S', cid: CID_13, title: 't', text: 'x' }),
+    ).rejects.toMatchObject({ code: 'CLIENT_ERROR' });
     expect(calls).toHaveLength(1);
   });
 

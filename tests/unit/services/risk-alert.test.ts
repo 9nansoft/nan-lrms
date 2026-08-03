@@ -21,7 +21,8 @@ process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
 // Stub the sender so we can assert enqueue NEVER touches LINE I/O. Keep
 // isValidCid real (risk-alert now imports it to filter malformed recipient CIDs).
 vi.mock('@/services/moph-prompt', async () => {
-  const actual = await vi.importActual<typeof import('@/services/moph-prompt')>('@/services/moph-prompt');
+  const actual =
+    await vi.importActual<typeof import('@/services/moph-prompt')>('@/services/moph-prompt');
   return {
     ...actual,
     sendMophPrompt: vi.fn(async () => {
