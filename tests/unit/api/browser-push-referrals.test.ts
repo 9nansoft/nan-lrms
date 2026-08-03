@@ -110,19 +110,23 @@ describe('POST /api/sync/browser-push — referral sections', () => {
     const originHid = await hospitalIdOf(originHcode);
     const journeyId = await seedJourney(originHid);
     const now = new Date().toISOString();
+    // The cached referral must sit inside the referin's [refer_date-30d,
+    // refer_date+1d] match window. Production referout ingestion derives
+    // initiated_at from refer_date (not wall-clock now), so mirror that here
+    // to keep the fixture stable across the calendar (was a date-drift bomb).
+    const referDate = '2026-07-20';
+    const initiatedAt = new Date(`${referDate}T09:00:00+07:00`).toISOString();
     await db.execute(
       `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id, status, reason, urgency_level, initiated_at, created_at, updated_at)
        VALUES ('ref-in-1', ?, 'RF-IN-1', ?, ?, 'INITIATED', 'r', 'ROUTINE', ?, ?, ?)`,
-      [journeyId, originHid, destHid, now, now, now],
+      [journeyId, originHid, destHid, initiatedAt, now, now],
     );
 
     const res = await POST(
       jsonRequest({
         referrals: {
           referouts: [],
-          referins: [
-            { hn: 'DHN-1', cid: CID, refer_hospcode: originHcode, refer_date: '2026-07-20' },
-          ],
+          referins: [{ hn: 'DHN-1', cid: CID, refer_hospcode: originHcode, refer_date: referDate }],
         },
       }) as never,
     );
