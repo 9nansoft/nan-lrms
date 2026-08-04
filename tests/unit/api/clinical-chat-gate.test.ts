@@ -16,6 +16,9 @@ vi.mock('@/lib/auth', () => ({
   auth: async () => (mockSessionUser ? { user: mockSessionUser } : null),
 }));
 vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
+vi.mock('@/db/connection', () => ({
+  getDatabase: async () => ({ query: async () => [] }),
+}));
 
 import { POST } from '@/app/api/chat/route';
 

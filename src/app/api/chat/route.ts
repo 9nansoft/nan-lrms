@@ -6,6 +6,8 @@
 // docs/superpowers/plans/2026-08-03-clinical-chatbot-glm.md.
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
+import { getDatabase } from '@/db/connection';
+import { ensureInit } from '@/lib/ensure-init';
 import { clinicalChatEnabled } from '@/config/clinical-chat-config';
 import { askClinicalQuestion } from '@/services/chat/chat-service';
 import { logger } from '@/lib/logger';
@@ -29,7 +31,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'message required' }, { status: 400 });
   }
   try {
-    const { answer } = await askClinicalQuestion(message);
+    await ensureInit();
+    const db = await getDatabase();
+    const hospitalCode =
+      typeof session.user.hospitalCode === 'string' ? session.user.hospitalCode : undefined;
+    const { answer } = await askClinicalQuestion(message, { db, hospitalCode });
     return NextResponse.json({ answer });
   } catch (error) {
     logger.error('clinical_chat_failed', {
