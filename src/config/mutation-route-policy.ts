@@ -41,6 +41,7 @@ export const MUTATION_ROUTE_POLICIES: Record<string, MutationRoutePolicy> = {
   'src/app/api/onboarding/webhook-key/route.ts': 'session-origin-checked',
   'src/app/api/onboarding/log/route.ts': 'session-origin-checked',
   'src/app/api/hospital/audit-log/route.ts': 'session-origin-checked',
+  'src/app/api/chat/route.ts': 'session-origin-checked',
   'src/app/api/dev/simulate/start/route.ts': 'dev-simulation-guard',
   'src/app/api/dev/simulate/stop/route.ts': 'dev-simulation-guard',
   'src/app/api/dev/simulate/clear/route.ts': 'dev-simulation-guard',
