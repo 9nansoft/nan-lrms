@@ -38,6 +38,13 @@ export interface LlmChatOptions {
   /** Override the internal request-timeout ceiling (ms). Default 30_000. Use
    *  a larger value for heavy prompts like Tier-3 plan generation. */
   timeoutMs?: number;
+  /** Override the API base URL for this call only (chatbot points at the
+   *  GLM-5.2 SGLang endpoint without moving dev-simulation's defaults). */
+  baseUrl?: string;
+  /** Extra JSON fields merged into the OpenAI-compatible request body.
+   *  Example: { chat_template_kwargs: { enable_thinking: false } } to disable
+   *  GLM-5.2 reasoning (cost: thinking tokens are billed). */
+  extraBody?: Record<string, unknown>;
 }
 
 interface ChatCompletionResponse {
@@ -106,6 +113,12 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
       temperature: opts.temperature ?? 0.7,
       max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
     };
+    if (opts.extraBody) {
+      // Caller-supplied extensions (e.g. GLM-5.2 chat_template_kwargs) merged
+      // at top level — OpenAI-compatible servers (vLLM, SGLang) accept unknown
+      // top-level sampling keys. Never overwrites the fields above.
+      Object.assign(body, opts.extraBody);
+    }
     if (opts.jsonMode) {
       body.response_format = { type: 'json_object' };
     }
@@ -113,7 +126,8 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
       // vLLM guided-generation extension — server forces output to conform.
       body.extra_body = { guided_json: opts.jsonSchema };
     }
-    const res = await fetch(`${baseUrl()}/chat/completions`, {
+    const effectiveBaseUrl = (opts.baseUrl || baseUrl()).replace(/\/+$/, '');
+    const res = await fetch(`${effectiveBaseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
