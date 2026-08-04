@@ -35,7 +35,13 @@ export async function POST(request: NextRequest) {
     const db = await getDatabase();
     const hospitalCode =
       typeof session.user.hospitalCode === 'string' ? session.user.hospitalCode : undefined;
-    const { answer } = await askClinicalQuestion(message, { db, hospitalCode });
+    const userId =
+      typeof session.user.id === 'string'
+        ? session.user.id
+        : typeof session.user.userCid === 'string'
+          ? session.user.userCid
+          : undefined;
+    const { answer } = await askClinicalQuestion(message, { db, hospitalCode, userId });
     return NextResponse.json({ answer });
   } catch (error) {
     logger.error('clinical_chat_failed', {

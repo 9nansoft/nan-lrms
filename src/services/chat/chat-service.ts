@@ -2,7 +2,7 @@
 // chat feature (business logic lives in services, never in route handlers:
 // constitution IV). Phase 0 = thin non-streaming chat. Phase 1+ will add
 // context builder + redactor + memory here without changing the route shape.
-import { llmChat } from '@/lib/llm-client';
+import { llmChat, type LlmChatMessage } from '@/lib/llm-client';
 import {
   clinicalChatBaseUrl,
   clinicalChatModel,
@@ -10,6 +10,7 @@ import {
 } from '@/config/clinical-chat-config';
 import { buildChatContext, type ChatContext } from './context-builder';
 import { clinicalSystemPrompt, renderContextBlock } from './prompt-config';
+import { getChatHistory, appendChatTurn } from './memory-store';
 import type { DatabaseAdapter } from '@/db/adapter';
 
 export interface ChatReply {
@@ -20,6 +21,8 @@ export interface ChatServiceDeps {
   db: DatabaseAdapter;
   /** Session hospital code — RAG scope. Null skips patient context (header-only chat). */
   hospitalCode?: string;
+  /** Session user id — enables bounded multi-turn memory (Redis TTL). */
+  userId?: string;
 }
 
 /**
@@ -42,13 +45,18 @@ export async function askClinicalQuestion(
   const contextBlock = renderContextBlock(context);
   const userTurn = contextBlock ? `${contextBlock}\n\nคำถาม: ${question}` : question;
 
+  // Multi-turn: pull bounded masked history (Redis TTL) and append this turn.
+  const history = deps.userId ? await getChatHistory(deps.userId) : [];
+  const messages: LlmChatMessage[] = [
+    { role: 'system', content: clinicalSystemPrompt() },
+    ...history.map((t) => ({ role: t.role, content: t.content }) as LlmChatMessage),
+    { role: 'user', content: userTurn },
+  ];
+
   const answer = await llmChat({
     model: clinicalChatModel(),
     baseUrl: clinicalChatBaseUrl(),
-    messages: [
-      { role: 'system', content: clinicalSystemPrompt() },
-      { role: 'user', content: userTurn },
-    ],
+    messages,
     temperature: 0.3,
     maxTokens: limits.maxTokensPerRequest,
     timeoutMs: limits.timeoutMs,
@@ -56,6 +64,12 @@ export async function askClinicalQuestion(
       chat_template_kwargs: { enable_thinking: false },
     },
   });
+
+  // Persist the turn pair (masked transcript only) so context stays bounded.
+  if (deps.userId) {
+    await appendChatTurn(deps.userId, { role: 'user', content: userTurn });
+    await appendChatTurn(deps.userId, { role: 'assistant', content: answer });
+  }
   return { answer };
 }
 
