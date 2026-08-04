@@ -62,6 +62,16 @@ export interface LlmModelInfo {
   maxContextLen?: number;
 }
 
+/** OpenAI-compatible function-tool declaration (for tool/function calling). */
+export interface ChatCompletionTool {
+  type: 'function';
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
 function baseUrl(): string {
   return (process.env.LLM_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
 }
