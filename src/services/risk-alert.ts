@@ -21,6 +21,7 @@ import { logger } from '@/lib/logger';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
 import { mophAlertsEnabled } from '@/config/moph-alert-config';
 import { isValidCid } from '@/services/moph-prompt';
+import { enabledSubscriberCids } from '@/services/notification-preference';
 import {
   alertTitle,
   type AlertSeverity,
@@ -69,24 +70,37 @@ const HIGH_RULE_ID = 'hr3';
 const HIGH_ALERT_SOURCE = 'anc_hr3';
 const EMERGENCY_ALERT_SOURCE = 'maternal_triage';
 
-/** Resolve active recipients for a hospital + province. Filters out any
- *  recipient whose CID is not exactly 13 digits (the MOPH API would 400 at drain
- *  time, wasting a claim — codex gap-sweep: validate at enqueue instead). */
+/** Resolve active recipients for a hospital + province.
+ *  Default OFF (PDPA): a CID on an admin list (consult_doctors / center
+ *  monitors) delivers ONLY when it has an enabled notification_preferences row
+ *  for this hospital; PLUS authoritative self-subscribers (enabled pref rows
+ *  NOT on any admin list). Filters out any recipient whose CID is not exactly
+ *  13 digits (the MOPH API would 400 at drain time, wasting a claim — codex
+ *  gap-sweep: validate at enqueue instead). */
 async function resolveRecipients(
   db: DatabaseAdapter,
   hospitalId: string,
   province: string,
+  hospitalCodeOverride?: string,
 ): Promise<Recipient[]> {
+  // hospital_code for the preference gate — resolve from hospitalId if not given.
+  let hospitalCode = hospitalCodeOverride ?? '';
+  if (!hospitalCode) {
+    const h = await db.query<{ hcode: string }>(`SELECT hcode FROM hospitals WHERE id = ?`, [
+      hospitalId,
+    ]);
+    hospitalCode = h[0]?.hcode ?? '';
+  }
   const staff = await db.query<{ cid: string; name: string }>(
     `SELECT cid, name FROM hospital_consult_doctors
-     WHERE hospital_id = $1 AND is_active = true`,
+     WHERE hospital_id = ? AND is_active = true`,
     [hospitalId],
   );
   const center =
     province && province.trim()
       ? await db.query<{ cid: string; name: string }>(
           `SELECT cid, name FROM moph_center_monitors
-           WHERE province = $1 AND is_active = true`,
+           WHERE province = ? AND is_active = true`,
           [province],
         )
       : [];
@@ -99,11 +113,22 @@ async function resolveRecipients(
     ...staff.map((r) => ({ cid: r.cid, name: r.name, scope: 'hospital_staff' as const })),
     ...center.map((r) => ({ cid: r.cid, name: r.name, scope: 'province_center' as const })),
   ];
-  const valid = all.filter((r) => isValidCid(r.cid));
-  if (valid.length !== all.length) {
+
+  // Default OFF: admin-listed CIDs ONLY deliver when they have an enabled pref
+  // row; PLUS authoritative self-subscribers (pref rows not on any admin list).
+  const enabled = new Set((await enabledSubscriberCids(db, hospitalCode)).map((r) => r.cid));
+  const allowed: Recipient[] = all.filter((r) => enabled.has(r.cid));
+  for (const cid of enabled) {
+    if (!all.some((r) => r.cid === cid)) {
+      allowed.push({ cid, name: '', scope: 'self_subscribed' as const });
+    }
+  }
+
+  const valid = allowed.filter((r) => isValidCid(r.cid));
+  if (valid.length !== allowed.length) {
     logger.warn('moph_alert_invalid_recipient_cid_skipped', {
       hospitalId,
-      skipped: all.length - valid.length,
+      skipped: allowed.length - valid.length,
     });
   }
   return valid;

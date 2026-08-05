@@ -14,6 +14,7 @@ import {
   type AlertEventContext,
   type EmergencyEventContext,
 } from '@/services/risk-alert';
+import { upsertNotificationPreference } from '@/services/notification-preference';
 
 // The orchestrator now encrypts patient_name at rest (mirrors cached_patients).
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
@@ -34,6 +35,8 @@ vi.mock('@/services/moph-prompt', async () => {
 describe('risk-alert enqueue orchestrator', () => {
   let db: PgliteAdapter;
   let hospitalId: string;
+  // hcode seeded in beforeEach — the hospital_code the opt-in gate matches on.
+  const HOSPITAL_HCODE = '10682';
 
   beforeEach(async () => {
     db = new PgliteAdapter(createPglite());
@@ -59,6 +62,13 @@ describe('risk-alert enqueue orchestrator', () => {
        VALUES ($1,'30','3320500282130','ศูนย์กลาง ขก.',true,NOW(),NOW())`,
       [randomUUID()],
     );
+    // Default OFF gate: a seeded admin-listed CID delivers ONLY when it has an
+    // enabled notification_preferences row. Opt the two valid active CIDs in so
+    // the Default-ON assertions below keep their meaning (delivery now requires
+    // opt-in, never assumed). The opt-in describe resets prefs to prove OFF.
+    for (const cid of ['3320500282121', '3320500282130']) {
+      await upsertNotificationPreference(db, cid, HOSPITAL_HCODE, true);
+    }
   });
   afterEach(async () => {
     await db.close();
@@ -77,6 +87,7 @@ describe('risk-alert enqueue orchestrator', () => {
       localDate: '2026-07-26',
       ...overrides,
     }) as T;
+  const ctxFixture = () => baseCtx<AlertEventContext>({});
 
   it('HIGH producer enqueues one row per active consult doctor + per active center monitor', async () => {
     const n = await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
@@ -196,5 +207,37 @@ describe('risk-alert enqueue orchestrator', () => {
       `SELECT recipient_cid FROM moph_alert_log`,
     );
     expect(rows.find((r) => r.recipient_cid === '123')).toBeUndefined();
+  });
+
+  describe('risk-alert recipient opt-in (notification_preferences gate)', () => {
+    // The outer beforeEach opted the admin-listed CIDs in; these tests must
+    // start from true Default-OFF (no pref rows at all), so clear them.
+    beforeEach(async () => {
+      await db.query(`DELETE FROM notification_preferences`);
+    });
+
+    it('Default OFF: a seeded consult doctor with no pref row is NOT a recipient', async () => {
+      await enqueueHighRiskAlert(db, ctxFixture());
+      const rows = await db.query<{ id: string }>(`SELECT id FROM moph_alert_log`);
+      expect(rows).toHaveLength(0);
+    });
+
+    it('enabled pref row for an admin-listed CID becomes a recipient', async () => {
+      await upsertNotificationPreference(db, '3320500282121', HOSPITAL_HCODE, true);
+      await enqueueHighRiskAlert(db, ctxFixture());
+      const rows = await db.query<{ recipient_cid: string }>(
+        `SELECT recipient_cid FROM moph_alert_log`,
+      );
+      expect(rows.map((r) => r.recipient_cid)).toContain('3320500282121');
+    });
+
+    it('self-subscriber (enabled row, not admin-listed) is a recipient (authoritative)', async () => {
+      await upsertNotificationPreference(db, '5555555555555', HOSPITAL_HCODE, true);
+      await enqueueHighRiskAlert(db, ctxFixture());
+      const rows = await db.query<{ recipient_cid: string }>(
+        `SELECT recipient_cid FROM moph_alert_log`,
+      );
+      expect(rows.map((r) => r.recipient_cid)).toContain('5555555555555');
+    });
   });
 });

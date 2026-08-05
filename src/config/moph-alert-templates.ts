@@ -17,7 +17,13 @@
 // envelope. `alertTitle` produces the Thai alt-text/title string.
 
 export type AlertSeverity = 'high' | 'emergency';
-export type AlertRecipientScope = 'hospital_staff' | 'province_center';
+export type AlertRecipientScope =
+  | 'hospital_staff'
+  | 'province_center'
+  // Self-subscribed users (notification_preferences row NOT on any admin list).
+  // PDPA-safe like province_center: no patient name persisted/rendered —
+  // enqueue's isStaff check is strict `=== 'hospital_staff'`.
+  | 'self_subscribed';
 
 export interface BuildAlertFlexInput {
   severity: AlertSeverity;
@@ -48,6 +54,7 @@ const SEVERITY_LABEL_TH: Record<AlertSeverity, string> = {
 const SCOPE_LABEL_TH: Record<AlertRecipientScope, string> = {
   hospital_staff: 'ผู้รับผิดชอบ รพ.',
   province_center: 'ศูนย์กลางจังหวัด',
+  self_subscribed: 'ผู้ลงทะเบียนด้วยตนเอง',
 };
 
 /** Thai title/alt-text for the alert. */
