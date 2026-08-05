@@ -42,9 +42,7 @@ export async function GET(request: NextRequest) {
     // and huge values so a malformed query can't reach SQL LIMIT and 500.
     const rawLimit = Number(url.searchParams.get('limit') ?? '100');
     const limit =
-      Number.isFinite(rawLimit) && rawLimit >= 1
-        ? Math.min(Math.trunc(rawLimit), 500)
-        : 100;
+      Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(Math.trunc(rawLimit), 500) : 100;
 
     const where: string[] = [];
     const params: unknown[] = [];

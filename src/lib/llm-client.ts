@@ -94,7 +94,9 @@ export async function listLlmModels(signal?: AbortSignal): Promise<LlmModelInfo[
   if (!res.ok) {
     throw new Error(`LLM /models returned ${res.status}`);
   }
-  const body = (await res.json()) as { data?: Array<{ id: string; owned_by?: string; max_model_len?: number }> };
+  const body = (await res.json()) as {
+    data?: Array<{ id: string; owned_by?: string; max_model_len?: number }>;
+  };
   return (body.data ?? []).map((m) => ({
     id: m.id,
     ownedBy: m.owned_by,
@@ -109,9 +111,7 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
   // shared vLLM). Passing 0 disables the internal timer and defers entirely
   // to the caller-provided signal.
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const t = timeoutMs > 0
-    ? setTimeout(() => controller.abort(), timeoutMs)
-    : null;
+  const t = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
   // Merge external signal with internal timeout.
   if (opts.signal) {
     opts.signal.addEventListener('abort', () => controller.abort());

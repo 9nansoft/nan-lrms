@@ -14,10 +14,7 @@ export function clinicalChatEnabled(): boolean {
 
 /** GLM-5.2 inference endpoint (SGLang, OpenAI-compatible). */
 export function clinicalChatBaseUrl(): string {
-  return (
-    process.env.CLINICAL_CHAT_BASE_URL?.trim() ||
-    'https://sglang-glm.bmscloud.in.th/v1'
-  );
+  return process.env.CLINICAL_CHAT_BASE_URL?.trim() || 'https://sglang-glm.bmscloud.in.th/v1';
 }
 
 /** Model served by clinicalChatBaseUrl(). */

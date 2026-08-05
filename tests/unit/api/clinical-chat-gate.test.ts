@@ -78,18 +78,22 @@ describe('POST /api/chat — cost gate + GLM smoke', () => {
     process.env.CLINICAL_CHAT_ENABLED = 'true';
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: { content: 'ความดัน 140/90 ถือเป็นความเสี่ยงสูง', finish_reason: 'stop' },
-              },
-            ],
-            usage: { prompt_tokens: 10, completion_tokens: 8 },
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: 'ความดัน 140/90 ถือเป็นความเสี่ยงสูง',
+                    finish_reason: 'stop',
+                  },
+                },
+              ],
+              usage: { prompt_tokens: 10, completion_tokens: 8 },
+            }),
+            { status: 200 },
+          ),
       ),
     );
     const res = await POST(jsonRequest({ message: 'ความดัน 140/90 อันตรายไหม?' }) as never);

@@ -15,7 +15,11 @@ function rowToPref(r: {
   hospital_code: string;
   moph_line_enabled: boolean;
 }): NotificationPreference {
-  return { userCid: r.user_cid, hospitalCode: r.hospital_code, mophLineEnabled: r.moph_line_enabled };
+  return {
+    userCid: r.user_cid,
+    hospitalCode: r.hospital_code,
+    mophLineEnabled: r.moph_line_enabled,
+  };
 }
 
 export async function getNotificationPreference(

@@ -41,12 +41,7 @@ export async function PUT(request: NextRequest) {
   }
   await ensureInit();
   const db = await getDatabase();
-  const saved = await upsertNotificationPreference(
-    db,
-    userCid,
-    hospitalCode,
-    body.mophLineEnabled,
-  );
+  const saved = await upsertNotificationPreference(db, userCid, hospitalCode, body.mophLineEnabled);
   return NextResponse.json({
     userCid: saved.userCid,
     hospitalCode: saved.hospitalCode,

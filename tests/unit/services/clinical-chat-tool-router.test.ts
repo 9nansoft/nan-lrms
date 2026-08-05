@@ -81,10 +81,7 @@ describe('executeToolCall — hospital-scope enforcement + PHI-free args', () =>
     expect(argsJson).not.toContain('33205');
     expect(argsJson).not.toContain('sha256cidhash');
     // The OpenAI tool schema declares ONLY hn/an as properties.
-    const params = getPatientContextTool.function.parameters.properties as Record<
-      string,
-      unknown
-    >;
+    const params = getPatientContextTool.function.parameters.properties as Record<string, unknown>;
     expect(Object.keys(params).sort()).toEqual(['an', 'hn']);
   });
 
