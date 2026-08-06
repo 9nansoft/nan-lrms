@@ -1,25 +1,28 @@
 // Clinical-chatbot configuration.
 //
-// Single source of truth for the chatbot's tunables and the GLM-5.2 inference
-// endpoint. GLM-5.2 has compute cost, so the whole feature is OPT-IN and
-// default-OFF — the strictly inverted default vs MOPH_ALERTS_ENABLED is
-// intentional: alerts are safety-mandated, a chatbot is a cost-incurring
-// convenience (constitution: no hardcoded conditions/URLs).
+// Single source of truth for the chatbot's tunables and the DeepSeek-V4-Flash
+// inference endpoint (the on-prem SGLang/vLLM server at CLINICAL_CHAT_BASE_URL
+// serves model "deepseek-v4-flash"). The chatbot is ENABLED BY DEFAULT; set
+// CLINICAL_CHAT_ENABLED="false" to disable (explicit opt-out, mirroring the
+// MOPH_ALERTS_ENABLED pattern). Sampling defaults follow the DeepSeek V4 spec
+// (constitution: no hardcoded conditions/URLs).
 
-/** Master switch. When false the chat UI and /api/chat routes short-circuit 503
- *  and NEVER call the LLM (no fetch — a misconfigured deploy cannot burn compute). */
+/** Master switch. When "false" the chat UI and /api/chat routes short-circuit
+ *  503 and NEVER call the LLM (no fetch — a misconfigured deploy cannot burn
+ *  compute). Any other value (or unset) = enabled. */
 export function clinicalChatEnabled(): boolean {
-  return process.env.CLINICAL_CHAT_ENABLED === 'true';
+  return process.env.CLINICAL_CHAT_ENABLED !== 'false';
 }
 
-/** GLM-5.2 inference endpoint (SGLang, OpenAI-compatible). */
+/** DeepSeek-V4-Flash inference endpoint (SGLang/vLLM, OpenAI-compatible). */
 export function clinicalChatBaseUrl(): string {
   return process.env.CLINICAL_CHAT_BASE_URL?.trim() || 'https://sglang-glm.bmscloud.in.th/v1';
 }
 
-/** Model served by clinicalChatBaseUrl(). */
+/** Model served by clinicalChatBaseUrl() — the on-prem server exposes
+ *  "deepseek-v4-flash". */
 export function clinicalChatModel(): string {
-  return process.env.CLINICAL_CHAT_MODEL?.trim() || 'glm-5.2';
+  return process.env.CLINICAL_CHAT_MODEL?.trim() || 'deepseek-v4-flash';
 }
 
 export interface ClinicalChatLimits {
@@ -27,14 +30,23 @@ export interface ClinicalChatLimits {
    *  enable_thinking:false (reasoning tokens are billed and can eat the whole
    *  budget if left unbounded). */
   maxTokensPerRequest: number;
-  /** Per-request HTTP timeout (ms). SGLang can be slow under load. */
+  /** Per-request HTTP timeout (ms). vLLM can be slow under load. */
   timeoutMs: number;
+  /** DeepSeek V4 spec sampling. */
+  temperature: number;
+  topP: number;
+  /** Non-restrictive default (<=0 = disabled); DeepSeek guidance: "you usually
+   *  only need to use temperature". */
+  topK: number;
 }
 
 export function clinicalChatLimits(): ClinicalChatLimits {
   return {
-    maxTokensPerRequest: numEnv('CLINICAL_CHAT_MAX_TOKENS', 400),
-    timeoutMs: numEnv('CLINICAL_CHAT_TIMEOUT_MS', 60_000),
+    maxTokensPerRequest: numEnv('CLINICAL_CHAT_MAX_TOKENS', 8000),
+    timeoutMs: numEnv('CLINICAL_CHAT_TIMEOUT_MS', 120_000),
+    temperature: numEnv('CLINICAL_CHAT_TEMPERATURE', 1.0),
+    topP: numEnv('CLINICAL_CHAT_TOP_P', 1.0),
+    topK: numEnv('CLINICAL_CHAT_TOP_K', -1),
   };
 }
 

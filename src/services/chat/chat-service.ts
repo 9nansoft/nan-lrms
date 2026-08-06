@@ -57,7 +57,9 @@ export async function askClinicalQuestion(
     model: clinicalChatModel(),
     baseUrl: clinicalChatBaseUrl(),
     messages,
-    temperature: 0.3,
+    temperature: limits.temperature,
+    topP: limits.topP,
+    topK: limits.topK,
     maxTokens: limits.maxTokensPerRequest,
     timeoutMs: limits.timeoutMs,
     extraBody: {

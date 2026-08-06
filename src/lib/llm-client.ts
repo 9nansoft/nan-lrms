@@ -28,6 +28,11 @@ export interface LlmChatOptions {
   model?: string;
   messages: LlmChatMessage[];
   temperature?: number;
+  /** Nucleus sampling (DeepSeek V4 spec: 1.0). Only sent when provided. */
+  topP?: number;
+  /** Top-K (DeepSeek guidance: usually not needed; send <=0 to disable). Only
+   *  sent when provided and > 0, to keep strict JSON/dev-simulation unaffected. */
+  topK?: number;
   maxTokens?: number;
   /** When true, asks the server to return a strict JSON object. */
   jsonMode?: boolean;
@@ -123,6 +128,11 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
       temperature: opts.temperature ?? 0.7,
       max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
     };
+    // DeepSeek V4 sampling — top_p is sent only with a meaningful value; top_k
+    // is sent whenever the caller provides it (<=0 = disabled/no-restriction, a
+    // valid vLLM sentinel expressing "usually only need temperature").
+    if (opts.topP != null && opts.topP > 0) body.top_p = opts.topP;
+    if (opts.topK != null) body.top_k = opts.topK;
     if (opts.extraBody) {
       // Caller-supplied extensions (e.g. GLM-5.2 chat_template_kwargs) merged
       // at top level — OpenAI-compatible servers (vLLM, SGLang) accept unknown
