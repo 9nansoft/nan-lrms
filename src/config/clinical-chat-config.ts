@@ -55,6 +55,20 @@ export function clinicalChatLimits(): ClinicalChatLimits {
   };
 }
 
+export interface ClinicalChatStatsLimits {
+  /** Max hospitals listed in the statistics-mode per-hospital breakdown. Caps
+   *  prompt size on a 100-hospital province; the province TOTAL is always
+   *  rendered in full so a truncated list can never be mistaken for the whole
+   *  (see the "no silent caps" note in stats-context-builder). */
+  hospitalBreakdownLimit: number;
+}
+
+export function clinicalChatStatsLimits(): ClinicalChatStatsLimits {
+  return {
+    hospitalBreakdownLimit: numEnv('CLINICAL_CHAT_STATS_HOSPITAL_LIMIT', 25),
+  };
+}
+
 function boolEnv(key: string, fallback: boolean): boolean {
   const raw = process.env[key];
   if (raw === undefined || raw === '') return fallback;

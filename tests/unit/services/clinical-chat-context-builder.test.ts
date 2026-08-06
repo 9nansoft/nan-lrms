@@ -34,10 +34,24 @@ async function seedHospitalAndPatient() {
 }
 
 describe('buildChatContext — PDPA redaction allow-list', () => {
+  // REGRESSION (2026-08-06): callers (/api/chat route → chat-service, and
+  // tool-router) all pass the SESSION's hcode ('10670'), but this builder
+  // filtered cached_patients.hospital_id (a varchar-36 uuid) — so the ward
+  // chatbot silently ran with ZERO patient context. The scope key is the
+  // hcode; the uuid never leaves the DB layer.
+  it('scopes by the session HCODE, not the internal hospitals.id', async () => {
+    db = await createTestDb();
+    await seedHospitalAndPatient();
+    const ctx = await buildChatContext(db, '10670');
+    expect(ctx.patients).toHaveLength(1);
+    expect(ctx.patients[0].hn).toBe('HN-1');
+    await db.close?.();
+  });
+
   it('emits masked name/masked CID and NEVER raw name, raw CID, or cid_hash', async () => {
     db = await createTestDb();
     await seedHospitalAndPatient();
-    const ctx = await buildChatContext(db, 'h1', { hn: 'HN-1' });
+    const ctx = await buildChatContext(db, '10670', { hn: 'HN-1' });
 
     const block = JSON.stringify(ctx);
     // Raw identifiers must NOT leak.
@@ -60,7 +74,7 @@ describe('buildChatContext — PDPA redaction allow-list', () => {
 
   it('returns empty context when no patient matches', async () => {
     db = await createTestDb();
-    const ctx = await buildChatContext(db, 'h1', { hn: 'NOPE' });
+    const ctx = await buildChatContext(db, '10670', { hn: 'NOPE' });
     expect(ctx.patients).toHaveLength(0);
     await db.close?.();
   });

@@ -46,5 +46,5 @@ export function renderContextBlock(ctx: ChatContext | null): string {
       `อายุ ${p.age} ปี · GA ${ga} · G${g}P${pa}`
     );
   });
-  return `ผู้ป่วยในความดูแลของโรงพยาบาลนี้ (${ctx.hospitalId}):\n${lines.join('\n')}`;
+  return `ผู้ป่วยในความดูแลของโรงพยาบาลนี้ (รหัส ${ctx.hospitalCode}):\n${lines.join('\n')}`;
 }

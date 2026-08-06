@@ -8,7 +8,7 @@ import {
   clinicalChatModel,
   clinicalChatLimits,
 } from '@/config/clinical-chat-config';
-import { buildChatContext, type ChatContext } from './context-builder';
+import { buildChatContext } from './context-builder';
 import {
   clinicalSystemPrompt,
   statisticsSystemPrompt,
@@ -54,9 +54,15 @@ export async function askClinicalQuestion(
   const isStats = deps.mode === 'statistics';
   // Statistics mode: deterministic aggregate counts (no PHI lists). Clinical
   // (default): hospital-scoped PDPA-redacted patient RAG.
+  // NOTE: deps.hospitalCode is the session HCODE. Both builders take an hcode —
+  // passing hospitals.id here is the 2026-08-06 regression (empty context →
+  // "ไม่มีข้อมูล"). Statistics mode is province-wide, so it is built even when
+  // the session has no hospital scope; clinical mode needs a hospital.
   const contextBlock = isStats
-    ? ((await buildStatisticsContext(deps.db, deps.hospitalCode ?? ''))?.context ?? '')
-    : renderContextBlock(await buildChatContext(deps.db, deps.hospitalCode ?? ''));
+    ? (await buildStatisticsContext(deps.db, deps.hospitalCode)).context
+    : deps.hospitalCode
+      ? renderContextBlock(await buildChatContext(deps.db, deps.hospitalCode))
+      : '';
   const userTurn = contextBlock ? `${contextBlock}\n\nคำถาม: ${question}` : question;
 
   // Multi-turn: pull bounded masked history (Redis TTL) and append this turn.

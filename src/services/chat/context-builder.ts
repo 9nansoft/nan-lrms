@@ -22,7 +22,8 @@ export interface ChatPatientContext {
 }
 
 export interface ChatContext {
-  hospitalId: string;
+  /** The SESSION hcode this context was scoped to (never the internal uuid). */
+  hospitalCode: string;
   patients: ChatPatientContext[];
 }
 
@@ -31,22 +32,27 @@ export interface ChatContextFilter {
   an?: string;
 }
 
+/**
+ * @param hospitalCode the SESSION's 5-digit hcode (session.user.hospitalCode).
+ *   Every caller has an hcode, never `hospitals.id` — filtering the uuid column
+ *   with an hcode is what silently emptied this context before 2026-08-06.
+ */
 export async function buildChatContext(
   db: DatabaseAdapter,
-  hospitalId: string,
+  hospitalCode: string,
   filter: ChatContextFilter = {},
 ): Promise<ChatContext> {
   // Codebase canonical SQL placeholder is `?` (adapters rewrite ? -> $N; see
   // pglite-adapter/postgres-adapter). Never hand-write $N here.
-  const where = ['hospital_id = ?'];
-  const params: unknown[] = [hospitalId];
+  const where = ['h.hcode = ?'];
+  const params: unknown[] = [hospitalCode];
   if (filter.hn) {
     params.push(filter.hn);
-    where.push('hn = ?');
+    where.push('cp.hn = ?');
   }
   if (filter.an) {
     params.push(filter.an);
-    where.push('an = ?');
+    where.push('cp.an = ?');
   }
   // Newest patients first; cap to keep the prompt bounded (cost: token cap).
   const rows = await db.query<{
@@ -59,10 +65,11 @@ export async function buildChatContext(
     gravida: number | null;
     para: number | null;
   }>(
-    `SELECT hn, an, name, cid, age, ga_weeks, gravida, para
-     FROM cached_patients
+    `SELECT cp.hn, cp.an, cp.name, cp.cid, cp.age, cp.ga_weeks, cp.gravida, cp.para
+     FROM cached_patients cp
+     JOIN hospitals h ON h.id = cp.hospital_id
      WHERE ${where.join(' AND ')}
-     ORDER BY created_at DESC
+     ORDER BY cp.created_at DESC
      LIMIT 10`,
     params,
   );
@@ -78,5 +85,5 @@ export async function buildChatContext(
     para: r.para,
   }));
 
-  return { hospitalId, patients };
+  return { hospitalCode, patients };
 }

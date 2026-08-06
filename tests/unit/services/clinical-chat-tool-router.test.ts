@@ -18,12 +18,16 @@ beforeAll(() => {
   process.env.ENCRYPTION_KEY = KEY;
 });
 
-async function seedHospitalPatient(hospitalId: string, hn: string, an: string) {
+// hospitalId (uuid-ish PK) and hcode are DELIBERATELY different values here.
+// They used to be seeded identically, which let the 2026-08-06 bug — scope key
+// resolved against the wrong column — pass every test while the production
+// chatbot ran with zero patient context.
+async function seedHospitalPatient(hospitalId: string, hcode: string, hn: string, an: string) {
   const now = new Date().toISOString();
   await db.execute(
     `INSERT INTO hospitals (id, hcode, name, level, is_active, connection_status, created_at, updated_at)
      VALUES (?, ?, ?, 'M2', true, 'ONLINE', ?, ?)`,
-    [hospitalId, hospitalId, `รพ.${hospitalId}`, now, now],
+    [hospitalId, hcode, `รพ.${hcode}`, now, now],
   );
   await db.execute(
     `INSERT INTO cached_patients (id, hospital_id, hn, an, name, cid, cid_hash, age, gravida, para, ga_weeks, admit_date, synced_at, created_at, updated_at)
@@ -47,8 +51,9 @@ async function seedHospitalPatient(hospitalId: string, hn: string, an: string) {
 describe('executeToolCall — hospital-scope enforcement + PHI-free args', () => {
   it('resolves a patient in the session hospital by HN', async () => {
     db = await createTestDb();
-    await seedHospitalPatient('h1', 'HN-1', 'AN-1');
-    const res = await executeToolCall(db, 'h1', getPatientContextTool.function.name, {
+    await seedHospitalPatient('h1', '10670', 'HN-1', 'AN-1');
+    // '10670' is the session hcode — the scope key /api/chat actually carries.
+    const res = await executeToolCall(db, '10670', getPatientContextTool.function.name, {
       hn: 'HN-1',
     });
     expect(res.ok).toBe(true);
@@ -61,9 +66,9 @@ describe('executeToolCall — hospital-scope enforcement + PHI-free args', () =>
 
   it('DENIES a patient that only exists in a different hospital', async () => {
     db = await createTestDb();
-    await seedHospitalPatient('h1', 'HN-1', 'AN-1'); // patient lives ONLY at h1
-    // Model asks about HN-1 while the session hospital is h2.
-    const res = await executeToolCall(db, 'h2', getPatientContextTool.function.name, {
+    await seedHospitalPatient('h1', '10670', 'HN-1', 'AN-1'); // patient lives ONLY at 10670
+    // Model asks about HN-1 while the session hospital is another hcode.
+    const res = await executeToolCall(db, '11002', getPatientContextTool.function.name, {
       hn: 'HN-1',
     });
     expect(res.ok).toBe(false);
