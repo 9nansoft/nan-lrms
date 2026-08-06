@@ -16,7 +16,7 @@ import {
   type ClinicalChatMode,
 } from './prompt-config';
 import { buildStatisticsContext } from './stats-context-builder';
-import { getChatHistory, appendChatTurn } from './memory-store';
+import { getChatHistory, appendChatTurn, type ChatMemoryScope } from './memory-store';
 import type { DatabaseAdapter } from '@/db/adapter';
 
 export interface ChatReply {
@@ -66,7 +66,16 @@ export async function askClinicalQuestion(
   const userTurn = contextBlock ? `${contextBlock}\n\nคำถาม: ${question}` : question;
 
   // Multi-turn: pull bounded masked history (Redis TTL) and append this turn.
-  const history = deps.userId ? await getChatHistory(deps.userId) : [];
+  // The bucket is scoped by mode + hospital so a ward conversation and a
+  // dashboard conversation never share a transcript.
+  const scope: ChatMemoryScope | null = deps.userId
+    ? {
+        userId: deps.userId,
+        mode: isStats ? 'statistics' : 'clinical',
+        hospitalCode: deps.hospitalCode,
+      }
+    : null;
+  const history = scope ? await getChatHistory(scope) : [];
   const messages: LlmChatMessage[] = [
     { role: 'system', content: isStats ? statisticsSystemPrompt() : clinicalSystemPrompt() },
     ...history.map((t) => ({ role: t.role, content: t.content }) as LlmChatMessage),
@@ -88,9 +97,13 @@ export async function askClinicalQuestion(
   });
 
   // Persist the turn pair (masked transcript only) so context stays bounded.
-  if (deps.userId) {
-    await appendChatTurn(deps.userId, { role: 'user', content: userTurn });
-    await appendChatTurn(deps.userId, { role: 'assistant', content: answer });
+  // Store the QUESTION, not `userTurn` — userTurn carries the freshly rendered
+  // context block, and replaying up to 10 stale province snapshots per request
+  // both burned the token budget and let the model answer from an old census.
+  // The live block is rebuilt every turn above, so history never needs it.
+  if (scope) {
+    await appendChatTurn(scope, { role: 'user', content: question });
+    await appendChatTurn(scope, { role: 'assistant', content: answer });
   }
   return { answer };
 }

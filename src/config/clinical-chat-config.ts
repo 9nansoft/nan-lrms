@@ -55,6 +55,21 @@ export function clinicalChatLimits(): ClinicalChatLimits {
   };
 }
 
+export interface ClinicalChatRateLimit {
+  /** Turns allowed per user per window. The chat route is the only unmetered
+   *  LLM surface in the app and a tool loop multiplies its cost per turn, so
+   *  one user must not be able to pin the shared GPU. */
+  limit: number;
+  windowSeconds: number;
+}
+
+export function clinicalChatRateLimit(): ClinicalChatRateLimit {
+  return {
+    limit: numEnv('CLINICAL_CHAT_RATE_LIMIT', 20),
+    windowSeconds: numEnv('CLINICAL_CHAT_RATE_WINDOW_SECONDS', 60),
+  };
+}
+
 export interface ClinicalChatStatsLimits {
   /** Max hospitals listed in the statistics-mode per-hospital breakdown. Caps
    *  prompt size on a 100-hospital province; the province TOTAL is always

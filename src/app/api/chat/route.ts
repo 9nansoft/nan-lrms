@@ -4,12 +4,17 @@
 // 503 with a Thai message and NEVER calls the LLM — so a misconfigured deploy
 // cannot silently burn GLM-5.2 compute. See
 // docs/superpowers/plans/2026-08-03-clinical-chatbot-glm.md.
+import { createHash } from 'crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
-import { clinicalChatEnabled } from '@/config/clinical-chat-config';
+import { clinicalChatEnabled, clinicalChatRateLimit } from '@/config/clinical-chat-config';
 import { askClinicalQuestion } from '@/services/chat/chat-service';
+import { checkRateLimit } from '@/lib/rate-limit';
+import { tryLogAccess } from '@/services/audit';
+import { auditActorFromSession } from '@/lib/audit-actor';
+import { maskCidsInText } from '@/lib/pii-mask';
 import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
@@ -35,22 +40,55 @@ export async function POST(request: NextRequest) {
   if (body.mode !== undefined && body.mode !== 'clinical' && body.mode !== 'statistics') {
     return NextResponse.json({ error: 'mode must be "clinical" or "statistics"' }, { status: 400 });
   }
+  const hospitalCode =
+    typeof session.user.hospitalCode === 'string' ? session.user.hospitalCode : undefined;
+  const userId =
+    typeof session.user.id === 'string'
+      ? session.user.id
+      : typeof session.user.userCid === 'string'
+        ? session.user.userCid
+        : undefined;
+  const mode = body.mode === 'statistics' ? 'statistics' : 'clinical';
+
+  // Rate limit BEFORE any LLM work. The bucket key is hashed because userId
+  // falls back to session.user.userCid — a national ID must not reach Redis.
+  const rateKey = createHash('sha256')
+    .update(userId ?? 'anonymous')
+    .digest('hex')
+    .slice(0, 16);
+  const rate = clinicalChatRateLimit();
+  const verdict = await checkRateLimit(`chat:${rateKey}`, rate.limit, rate.windowSeconds);
+  if (!verdict.allowed) {
+    logger.warn('clinical_chat_rate_limited', { hospitalCode, mode });
+    return NextResponse.json(
+      {
+        error: `ถามถี่เกินไป (สูงสุด ${rate.limit} คำถามต่อ ${rate.windowSeconds} วินาที) — รอสักครู่แล้วลองใหม่`,
+      },
+      { status: 429 },
+    );
+  }
+
+  // Scrub embedded national IDs before the text leaves this process — it goes
+  // to the inference server AND into the Redis transcript. maskCid alone is
+  // anchored and would no-op here (see maskCidsInText).
+  const question = maskCidsInText(message);
+
   try {
     await ensureInit();
     const db = await getDatabase();
-    const hospitalCode =
-      typeof session.user.hospitalCode === 'string' ? session.user.hospitalCode : undefined;
-    const userId =
-      typeof session.user.id === 'string'
-        ? session.user.id
-        : typeof session.user.userCid === 'string'
-          ? session.user.userCid
-          : undefined;
-    const { answer } = await askClinicalQuestion(message, {
+    const { answer } = await askClinicalQuestion(question, {
       db,
       hospitalCode,
       userId,
-      mode: body.mode === 'statistics' ? 'statistics' : 'clinical',
+      mode,
+    });
+    // PDPA trail: WHO asked, WHEN, in which scope — never the question text
+    // (clinical detail) and never the answer.
+    await tryLogAccess(db, {
+      ...auditActorFromSession(session),
+      action: 'CHAT_QUERY',
+      resourceType: 'CHAT',
+      resourceId: mode,
     });
     return NextResponse.json({ answer });
   } catch (error) {
