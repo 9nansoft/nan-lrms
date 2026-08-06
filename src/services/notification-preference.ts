@@ -76,3 +76,39 @@ export async function enabledSubscriberCids(
     [hospitalCode],
   );
 }
+
+/**
+ * P1-D one-shot rollout backfill (codex gap-sweep): the Default-OFF flip makes
+ * every currently-configured consult doctor go silent until they self-enable.
+ * Seed an enabled preference row for each ACTIVE consult doctor so no one
+ * silently loses alerts on deploy. Idempotent: ON CONFLICT DO NOTHING never
+ * clobbers a user's later opt-out, and re-runs (startup is retried) don't
+ * duplicate. Center monitors are excluded — they bypass the gate by design
+ * (P1-C: admin list is authoritative).
+ */
+export async function backfillActiveConsultDoctorPrefs(db: DatabaseAdapter): Promise<number> {
+  const now = new Date().toISOString();
+  const rows = await db.query<{ cid: string; hcode: string }>(
+    `SELECT d.cid, h.hcode
+     FROM hospital_consult_doctors d
+     JOIN hospitals h ON h.id = d.hospital_id
+     WHERE d.is_active = true`,
+  );
+  let inserted = 0;
+  for (const r of rows) {
+    const { randomUUID } = await import('crypto');
+    const res = await db.execute(
+      `INSERT INTO notification_preferences
+         (id, user_cid, hospital_code, moph_line_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, true, ?, ?)
+       ON CONFLICT (user_cid, hospital_code) DO NOTHING`,
+      [randomUUID(), r.cid, r.hcode, now, now],
+    );
+    // execute() returns void; the adapter exposes no rowCount here, so count a
+    // conflict-skip as "not inserted" is impossible — this is advisory for a
+    // startup log line only. (unknown-hop satisfies TS strict cast rule.)
+    void res;
+    inserted += 1;
+  }
+  return inserted;
+}

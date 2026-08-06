@@ -216,10 +216,19 @@ describe('risk-alert enqueue orchestrator', () => {
       await db.query(`DELETE FROM notification_preferences`);
     });
 
-    it('Default OFF: a seeded consult doctor with no pref row is NOT a recipient', async () => {
+    it('Default OFF: consult doctor with no pref row is NOT delivered, but center monitor (admin-configured) IS (P1-C)', async () => {
       await enqueueHighRiskAlert(db, ctxFixture());
-      const rows = await db.query<{ id: string }>(`SELECT id FROM moph_alert_log`);
-      expect(rows).toHaveLength(0);
+      const rows = await db.query<{ recipient_cid: string; recipient_scope: string }>(
+        `SELECT recipient_cid, recipient_scope FROM moph_alert_log`,
+      );
+      // P1-C: center monitors are an admin role -> always deliver, no opt-in gate.
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        recipient_cid: '3320500282130',
+        recipient_scope: 'province_center',
+      });
+      // The staff consult doctor (no pref row) is Default-OFF -> NOT delivered.
+      expect(rows.find((r) => r.recipient_cid === '3320500282121')).toBeUndefined();
     });
 
     it('enabled pref row for an admin-listed CID becomes a recipient', async () => {

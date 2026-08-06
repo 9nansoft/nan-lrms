@@ -5,6 +5,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
+import { isValidCid13 } from '@/lib/cid';
 import {
   getNotificationPreference,
   upsertNotificationPreference,
@@ -30,6 +31,12 @@ export async function PUT(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const userCid = String(session.user.userCid ?? '');
   const hospitalCode = String(session.user.hospitalCode ?? '');
+  // P1-B (codex): BMS auth can map a missing user_cid to ''. A preference row
+  // keyed '' is silently dropped by isValidCid at enqueue time, so the user
+  // would falsely believe they opted in. Reject before any write.
+  if (!isValidCid13(userCid)) {
+    return NextResponse.json({ error: 'CID ของผู้ใช้ไม่ครบ 13 หลัก' }, { status: 400 });
+  }
   let body: { mophLineEnabled?: unknown };
   try {
     body = (await request.json()) as { mophLineEnabled?: unknown };

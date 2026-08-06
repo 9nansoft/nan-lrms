@@ -74,4 +74,19 @@ describe('GET/PUT /api/profile/notification-preference', () => {
     const anon = await PUT(req('PUT', { mophLineEnabled: true }) as never);
     expect(anon.status).toBeGreaterThanOrEqual(401);
   });
+
+  it('PUT rejects a session with empty/non-13-digit userCid (no false opt-in)', async () => {
+    // P1-B (codex): BMS can map a missing user_cid to '' — a preference row
+    // keyed '' is silently dropped by isValidCid at enqueue time, so the user
+    // would falsely believe they opted in. The API must reject it.
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '' });
+    const res = await PUT(req('PUT', { mophLineEnabled: true }) as never);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('CID');
+    const rows = await db.query<{ user_cid: string }>(
+      'SELECT user_cid FROM notification_preferences',
+    );
+    expect(rows).toHaveLength(0);
+  });
 });

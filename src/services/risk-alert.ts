@@ -71,12 +71,16 @@ const HIGH_ALERT_SOURCE = 'anc_hr3';
 const EMERGENCY_ALERT_SOURCE = 'maternal_triage';
 
 /** Resolve active recipients for a hospital + province.
- *  Default OFF (PDPA): a CID on an admin list (consult_doctors / center
- *  monitors) delivers ONLY when it has an enabled notification_preferences row
- *  for this hospital; PLUS authoritative self-subscribers (enabled pref rows
- *  NOT on any admin list). Filters out any recipient whose CID is not exactly
- *  13 digits (the MOPH API would 400 at drain time, wasting a claim — codex
- *  gap-sweep: validate at enqueue instead). */
+ *  P1-C contract (codex gap-sweep):
+ *   - CENTER monitors (admin-configured via MophAlertsTab) ALWAYS deliver — no
+ *     self-subscribe gate; the admin list is the authoritative "main setting".
+ *   - Default OFF: hospital staff (consult doctors) deliver ONLY when they have
+ *     an enabled notification_preferences row for this hospital.
+ *   - Authoritative self-subscribers: enabled pref rows NOT on any admin list
+ *     are merged (deduped by CID).
+ *  Filters out any recipient whose CID is not exactly 13 digits (the MOPH API
+ *  would 400 at drain time, wasting a claim — codex gap-sweep: validate at
+ *  enqueue instead). */
 async function resolveRecipients(
   db: DatabaseAdapter,
   hospitalId: string,
@@ -109,17 +113,26 @@ async function resolveRecipients(
     // hospital's province_code gets fixed (codex gap-sweep edge case).
     logger.warn('moph_alert_empty_province', { hospitalId });
   }
-  const all = [
-    ...staff.map((r) => ({ cid: r.cid, name: r.name, scope: 'hospital_staff' as const })),
-    ...center.map((r) => ({ cid: r.cid, name: r.name, scope: 'province_center' as const })),
-  ];
-
-  // Default OFF: admin-listed CIDs ONLY deliver when they have an enabled pref
-  // row; PLUS authoritative self-subscribers (pref rows not on any admin list).
+  // P1-C security/correctness (codex gap-sweep): CENTER monitors are an
+  // admin-configured role (MophAlertsTab is the authoritative "main setting"
+  // for province monitoring) — they ALWAYS deliver, no self-subscribe gate.
   const enabled = new Set((await enabledSubscriberCids(db, hospitalCode)).map((r) => r.cid));
-  const allowed: Recipient[] = all.filter((r) => enabled.has(r.cid));
+  const allowed: Recipient[] = [];
+  for (const c of center) {
+    allowed.push({ cid: c.cid, name: c.name, scope: 'province_center' as const });
+  }
+  // Default OFF: hospital staff (consult doctors) deliver ONLY with an enabled
+  // pref row (self-serve opt-in).
+  for (const s of staff) {
+    if (enabled.has(s.cid)) {
+      allowed.push({ cid: s.cid, name: s.name, scope: 'hospital_staff' as const });
+    }
+  }
+  // Authoritative self-subscribers: enabled pref rows for CIDs not already
+  // delivered above (neither staff nor center) — deduped by CID.
+  const already = new Set(allowed.map((r) => r.cid));
   for (const cid of enabled) {
-    if (!all.some((r) => r.cid === cid)) {
+    if (!already.has(cid)) {
       allowed.push({ cid, name: '', scope: 'self_subscribed' as const });
     }
   }
