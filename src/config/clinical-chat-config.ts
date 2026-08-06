@@ -38,6 +38,10 @@ export interface ClinicalChatLimits {
   /** Non-restrictive default (<=0 = disabled); DeepSeek guidance: "you usually
    *  only need to use temperature". */
   topK: number;
+  /** Reasoning (thinking) for answer quality. DeepSeek sampling params only
+   *  take effect while thinking is ON, and the 8k token cap covers reasoning
+   *  tokens. Default true; set CLINICAL_CHAT_ENABLE_THINKING=false to disable. */
+  enableThinking: boolean;
 }
 
 export function clinicalChatLimits(): ClinicalChatLimits {
@@ -47,7 +51,14 @@ export function clinicalChatLimits(): ClinicalChatLimits {
     temperature: numEnv('CLINICAL_CHAT_TEMPERATURE', 1.0),
     topP: numEnv('CLINICAL_CHAT_TOP_P', 1.0),
     topK: numEnv('CLINICAL_CHAT_TOP_K', -1),
+    enableThinking: boolEnv('CLINICAL_CHAT_ENABLE_THINKING', true),
   };
+}
+
+function boolEnv(key: string, fallback: boolean): boolean {
+  const raw = process.env[key];
+  if (raw === undefined || raw === '') return fallback;
+  return raw !== 'false';
 }
 
 function numEnv(key: string, fallback: number): number {

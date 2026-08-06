@@ -26,11 +26,12 @@ export interface ChatServiceDeps {
 }
 
 /**
- * Sends a single-turn Thai clinical question to GLM-5.2 with thinking DISABLED
- * (extra_body.chat_template_kwargs.enable_thinking=false — SGLang GLM-5.2 is a
- * reasoning model and billed reasoning tokens can eat the entire max_tokens
- * budget before a visible answer appears) and a hard max_tokens cap (cost
- * lever #1). The endpoint/model/limits come from config, never literals.
+ * Sends a single-turn Thai clinical question to the self-hosted
+ * DeepSeek-V4-Flash endpoint with reasoning (thinking) ENABLED by default
+ * (extra_body.chat_template_kwargs.enable_thinking from config — DeepSeek
+ * sampling params only take effect while thinking is on) and a hard max_tokens
+ * cap (cost lever #1; 8k covers reasoning tokens). The endpoint/model/limits
+ * all come from config, never literals.
  *
  * Phase 1: when a hospitalCode is provided, a PDPA-redacted patient context
  * block (masked name/CID, clinical fields only) is built and injected into the
@@ -63,7 +64,7 @@ export async function askClinicalQuestion(
     maxTokens: limits.maxTokensPerRequest,
     timeoutMs: limits.timeoutMs,
     extraBody: {
-      chat_template_kwargs: { enable_thinking: false },
+      chat_template_kwargs: { enable_thinking: limits.enableThinking },
     },
   });
 

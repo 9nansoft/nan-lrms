@@ -5,7 +5,9 @@
 // must short-circuit 503 WITHOUT calling the LLM (proven by asserting
 // global.fetch is never invoked). The inference target is DeepSeek-V4-Flash
 // served at the on-prem SGLang/vLLM endpoint; sampling follows the DeepSeek
-// V4 spec (temperature 1.0, top_p 1.0, thinking off — a reasoning model).
+// V4 spec (temperature 1.0, top_p 1.0), with reasoning (thinking) ENABLED for
+// answer quality — rationale: DeepSeek sampling params only take effect while
+// thinking is on, and the 8k token cap covers reasoning tokens.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { testSessionUser } from '../../helpers/session';
 
@@ -56,13 +58,14 @@ describe('POST /api/chat — cost gate + DeepSeek-V4-Flash smoke', () => {
     delete process.env.CLINICAL_CHAT_ENABLED;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: 'ความดัน 140/90 ถือเป็นความเสี่ยงสูง' } }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: 'ความดัน 140/90 ถือเป็นความเสี่ยงสูง' } }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
     const res = await POST(jsonRequest({ message: 'ความดัน 140/90 อันตรายไหม?' }) as never);
@@ -86,18 +89,22 @@ describe('POST /api/chat — cost gate + DeepSeek-V4-Flash smoke', () => {
     process.env.CLINICAL_CHAT_ENABLED = 'true';
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: { content: 'ความดัน 140/90 ถือเป็นความเสี่ยงสูง', finish_reason: 'stop' },
-              },
-            ],
-            usage: { prompt_tokens: 10, completion_tokens: 8 },
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: 'ความดัน 140/90 ถือเป็นความเสี่ยงสูง',
+                    finish_reason: 'stop',
+                  },
+                },
+              ],
+              usage: { prompt_tokens: 10, completion_tokens: 8 },
+            }),
+            { status: 200 },
+          ),
       ),
     );
     const res = await POST(jsonRequest({ message: 'ความดัน 140/90 อันตรายไหม?' }) as never);
@@ -119,8 +126,9 @@ describe('POST /api/chat — cost gate + DeepSeek-V4-Flash smoke', () => {
     };
     // DeepSeek-V4-Flash is the served model.
     expect(sent.model).toBe('deepseek-v4-flash');
-    // Cost/correctness: reasoning off + hard token cap.
-    expect(sent.chat_template_kwargs?.enable_thinking).toBe(false);
+    // Thinking (reasoning) ENABLED by default for answer quality; hard token
+    // cap 8k gives headroom for reasoning tokens.
+    expect(sent.chat_template_kwargs?.enable_thinking).toBe(true);
     expect(sent.max_tokens).toBe(8000);
     // DeepSeek V4 sampling spec: temperature 1.0, top_p 1.0, top_k non-restrictive.
     expect(sent.temperature).toBe(1.0);
