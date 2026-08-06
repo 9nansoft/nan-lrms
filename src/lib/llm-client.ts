@@ -19,9 +19,22 @@ const DEFAULT_MODEL = 'gemma4';
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_MAX_TOKENS = 8000;
 
+/** A tool call the model asked for (OpenAI-compatible shape). */
+export interface LlmToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
 export interface LlmChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  /** Null on an assistant turn that only carries tool_calls. */
+  content: string | null;
+  /** Present on role:'tool' — echoes the id of the call being answered. */
+  tool_call_id?: string;
+  /** Present on an assistant turn that requested tools; must be replayed
+   *  verbatim or the server rejects the following tool message as orphaned. */
+  tool_calls?: LlmToolCall[];
 }
 
 export interface LlmChatOptions {
@@ -50,15 +63,54 @@ export interface LlmChatOptions {
    *  Example: { chat_template_kwargs: { enable_thinking: false } } to disable
    *  GLM-5.2 reasoning (cost: thinking tokens are billed). */
   extraBody?: Record<string, unknown>;
+  /** Function tools offered to the model this round. Omit to forbid calls. */
+  tools?: ChatCompletionTool[];
+  /** 'none' forces a text answer — used on the loop's final round. */
+  toolChoice?: 'auto' | 'none' | 'required';
 }
 
 interface ChatCompletionResponse {
   choices?: Array<{
-    message?: { content?: string };
+    message?: { content?: string | null; tool_calls?: LlmToolCall[] };
     finish_reason?: string;
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   error?: { message?: string };
+}
+
+/** Raw turn result — unlike llmChat this never throws on empty content, because
+ *  a tool-calling reply legitimately has content:null. */
+export interface LlmChatRawResult {
+  content: string | null;
+  toolCalls: LlmToolCall[];
+  finishReason?: string;
+}
+
+/**
+ * Drops tool calls the model emitted malformed.
+ *
+ * A truncated `arguments` string echoed back into the next request makes the
+ * server 400 the WHOLE conversation, so one bad call would kill the turn. An
+ * empty string is the model's way of saying "no arguments" → '{}'.
+ */
+export function sanitizeToolCalls(raw: LlmToolCall[] | undefined): LlmToolCall[] {
+  if (!raw?.length) return [];
+  const clean: LlmToolCall[] = [];
+  for (const call of raw) {
+    if (!call?.id || !call.function?.name) continue;
+    const args = call.function.arguments?.trim() ?? '';
+    if (args === '') {
+      clean.push({ ...call, function: { ...call.function, arguments: '{}' } });
+      continue;
+    }
+    try {
+      JSON.parse(args);
+      clean.push(call);
+    } catch {
+      logger.warn('llm_tool_call_dropped_malformed_args', { name: call.function.name });
+    }
+  }
+  return clean;
 }
 
 export interface LlmModelInfo {
@@ -109,7 +161,12 @@ export async function listLlmModels(signal?: AbortSignal): Promise<LlmModelInfo[
   }));
 }
 
-export async function llmChat(opts: LlmChatOptions): Promise<string> {
+/**
+ * One completion, returned raw. Tool-calling replies carry content:null and
+ * finish_reason:'tool_calls' — throwing on those (as llmChat does) is exactly
+ * what made every tool-enabled request 502, so the agent loop uses this.
+ */
+export async function llmChatRaw(opts: LlmChatOptions): Promise<LlmChatRawResult> {
   const key = apiKey();
   const controller = new AbortController();
   // Callers can raise the ceiling (planner's 20-event plan needs ~40s on the
@@ -146,6 +203,10 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
       // vLLM guided-generation extension — server forces output to conform.
       body.extra_body = { guided_json: opts.jsonSchema };
     }
+    // Tools are only sent when offered; the loop's final round omits them and
+    // sets tool_choice:'none' so the model must produce prose.
+    if (opts.tools?.length) body.tools = opts.tools;
+    if (opts.toolChoice) body.tool_choice = opts.toolChoice;
     const effectiveBaseUrl = (opts.baseUrl || baseUrl()).replace(/\/+$/, '');
     const res = await fetch(`${effectiveBaseUrl}/chat/completions`, {
       method: 'POST',
@@ -162,9 +223,12 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
     }
     const json = (await res.json()) as ChatCompletionResponse;
     if (json.error) throw new Error(`LLM error: ${json.error.message}`);
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) throw new Error('LLM returned empty content');
-    return content;
+    const choice = json.choices?.[0];
+    return {
+      content: choice?.message?.content ?? null,
+      toolCalls: sanitizeToolCalls(choice?.message?.tool_calls),
+      finishReason: choice?.finish_reason,
+    };
   } catch (err) {
     logger.warn('llm_chat_failed', {
       error: err instanceof Error ? err.message : String(err),
@@ -173,6 +237,17 @@ export async function llmChat(opts: LlmChatOptions): Promise<string> {
   } finally {
     if (t) clearTimeout(t);
   }
+}
+
+/**
+ * Text-only completion. Throws on an empty answer — the long-standing contract
+ * every non-chat caller (dev-simulation planner/generators) relies on to fail
+ * loudly rather than emit an empty plan. Tool-callers must use llmChatRaw.
+ */
+export async function llmChat(opts: LlmChatOptions): Promise<string> {
+  const { content } = await llmChatRaw(opts);
+  if (!content) throw new Error('LLM returned empty content');
+  return content;
 }
 
 /**

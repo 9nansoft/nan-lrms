@@ -42,6 +42,10 @@ export interface ClinicalChatLimits {
    *  take effect while thinking is ON, and the 8k token cap covers reasoning
    *  tokens. Default true; set CLINICAL_CHAT_ENABLE_THINKING=false to disable. */
   enableThinking: boolean;
+  /** Completions allowed per turn, including the forced final answer. 1 = the
+   *  old single-shot behaviour (tools effectively off); 4 leaves room for two
+   *  lookups plus a synthesis round. */
+  maxToolRounds: number;
 }
 
 export function clinicalChatLimits(): ClinicalChatLimits {
@@ -52,6 +56,7 @@ export function clinicalChatLimits(): ClinicalChatLimits {
     topP: numEnv('CLINICAL_CHAT_TOP_P', 1.0),
     topK: numEnv('CLINICAL_CHAT_TOP_K', -1),
     enableThinking: boolEnv('CLINICAL_CHAT_ENABLE_THINKING', true),
+    maxToolRounds: numEnv('CLINICAL_CHAT_MAX_TOOL_ROUNDS', 4),
   };
 }
 

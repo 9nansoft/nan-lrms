@@ -2,7 +2,10 @@
 // chat feature (business logic lives in services, never in route handlers:
 // constitution IV). Phase 0 = thin non-streaming chat. Phase 1+ will add
 // context builder + redactor + memory here without changing the route shape.
-import { llmChat, type LlmChatMessage } from '@/lib/llm-client';
+import { type LlmChatMessage } from '@/lib/llm-client';
+import { logger } from '@/lib/logger';
+import { runChatTurn } from './agent-loop';
+import { chatToolsForMode, runChatTool, type ChatToolContext } from './tool-registry';
 import {
   clinicalChatBaseUrl,
   clinicalChatModel,
@@ -82,10 +85,24 @@ export async function askClinicalQuestion(
     { role: 'user', content: userTurn },
   ];
 
-  const answer = await llmChat({
+  // The turn runs as a bounded tool loop: the injected block answers the common
+  // questions in round 0 with zero extra latency, and anything it doesn't cover
+  // (trends, per-hospital comparisons, "what's overdue", a specific HN) is
+  // FETCHED instead of guessed. Tool surface is per-mode and config-driven.
+  const toolContext: ChatToolContext = {
+    db: deps.db,
+    hospitalCode: deps.hospitalCode,
+    mode: isStats ? 'statistics' : 'clinical',
+    budget: new Map(),
+    ledger: [],
+  };
+  const { answer, toolTrace } = await runChatTurn({
+    messages,
+    tools: chatToolsForMode(toolContext.mode),
+    maxRounds: limits.maxToolRounds,
+    executeTool: (name, args) => runChatTool(toolContext, name, args),
     model: clinicalChatModel(),
     baseUrl: clinicalChatBaseUrl(),
-    messages,
     temperature: limits.temperature,
     topP: limits.topP,
     topK: limits.topK,
@@ -95,6 +112,14 @@ export async function askClinicalQuestion(
       chat_template_kwargs: { enable_thinking: limits.enableThinking },
     },
   });
+  if (toolTrace.length > 0) {
+    // Observability for the "did it look anything up?" question — names and
+    // outcomes only, never the tool payloads (which can carry masked PHI).
+    logger.info('clinical_chat_tools_used', {
+      mode: toolContext.mode,
+      tools: toolTrace.map((t) => `${t.name}:${t.ok ? 'ok' : 'fail'}${t.cached ? ':cached' : ''}`),
+    });
+  }
 
   // Persist the turn pair (masked transcript only) so context stays bounded.
   // Store the QUESTION, not `userTurn` — userTurn carries the freshly rendered
