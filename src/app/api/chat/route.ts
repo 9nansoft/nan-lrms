@@ -20,15 +20,20 @@ export async function POST(request: NextRequest) {
   if (!clinicalChatEnabled()) {
     return NextResponse.json({ error: 'ปิดใช้งานผู้ช่วยแชททางคลินิก' }, { status: 503 });
   }
-  let body: { message?: unknown };
+  let body: { message?: unknown; mode?: unknown };
   try {
-    body = (await request.json()) as { message?: unknown };
+    body = (await request.json()) as { message?: unknown; mode?: unknown };
   } catch {
     return NextResponse.json({ error: 'invalid body' }, { status: 400 });
   }
   const message = typeof body.message === 'string' ? body.message.trim() : '';
   if (!message) {
     return NextResponse.json({ error: 'message required' }, { status: 400 });
+  }
+  // Mode: default 'clinical' (maternity ward). 'statistics' (dashboard) uses
+  // aggregate context. Anything else is rejected — no silent misspelling.
+  if (body.mode !== undefined && body.mode !== 'clinical' && body.mode !== 'statistics') {
+    return NextResponse.json({ error: 'mode must be "clinical" or "statistics"' }, { status: 400 });
   }
   try {
     await ensureInit();
@@ -41,7 +46,12 @@ export async function POST(request: NextRequest) {
         : typeof session.user.userCid === 'string'
           ? session.user.userCid
           : undefined;
-    const { answer } = await askClinicalQuestion(message, { db, hospitalCode, userId });
+    const { answer } = await askClinicalQuestion(message, {
+      db,
+      hospitalCode,
+      userId,
+      mode: body.mode === 'statistics' ? 'statistics' : 'clinical',
+    });
     return NextResponse.json({ answer });
   } catch (error) {
     logger.error('clinical_chat_failed', {

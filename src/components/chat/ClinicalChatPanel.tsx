@@ -8,6 +8,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, Bot, MessageSquareOff } from 'lucide-react';
 import { ClinicalMarkdown } from '@/components/chat/ClinicalMarkdown';
+import type { ClinicalChatMode } from '@/services/chat/prompt-config';
 
 interface ChatMessageUi {
   role: 'user' | 'assistant';
@@ -15,7 +16,7 @@ interface ChatMessageUi {
   error?: boolean;
 }
 
-export function ClinicalChatPanel() {
+export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMode }) {
   const [open, setOpen] = useState(false);
   const [disabled, setDisabled] = useState(false);
   const [input, setInput] = useState('');
@@ -37,7 +38,7 @@ export function ClinicalChatPanel() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, mode }),
       });
       const body = (await res.json().catch(() => ({}))) as { answer?: string; error?: string };
       if (res.status === 503) {

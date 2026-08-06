@@ -25,9 +25,9 @@ export default function ProvincialLayout({ children }: { children: React.ReactNo
               <main className="flex-1">
                 <ContentFrameSlot>{children}</ContentFrameSlot>
               </main>
-              {/* Clinical chatbot — floating bottom-right; self-hides to an
-                  "AI ปิด" pill until CLINICAL_CHAT_ENABLED=true (cost gate). */}
-              <ClinicalChatPanel />
+              {/* Clinical chatbot — statistics mode (provincial dashboard
+                  aggregates). Clinical drilldown pages can override per-page. */}
+              <ClinicalChatPanel mode="statistics" />
             </div>
           </BreadcrumbProvider>
         </CallProvider>

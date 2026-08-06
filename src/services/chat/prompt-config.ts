@@ -6,12 +6,25 @@
 // and already redacted by context-builder; renderContextBlock only formats.
 import type { ChatContext } from './context-builder';
 
+/** Chat mode: maternity-ward = per-patient clinical RAG; statistics = dashboard
+ *  aggregate counts (deterministic injection, no PHI lists). */
+export type ClinicalChatMode = 'clinical' | 'statistics';
+
 const SYSTEM_PROMPT =
   'คุณคือผู้ช่วยทางการแพทย์ด้านสูติกรรมของระบบ KK-LRMS ต่อคำถามของพยาบาล/แพทย์ ' +
   'ตอบเป็นภาษาไทย สั้น ตรงประเด็น ให้คำแนะนำที่ปลอดภัย และบอกเมื่อไม่แน่ใจ';
 
+const STATISTICS_SYSTEM_PROMPT =
+  'คุณคือผู้ช่วยวิเคราะห์สถิติด้านสูติกรรมของระบบ KK-LRMS ประจำหน่วยงาน ' +
+  'ตอบเป็นภาษาไทย ใช้ตัวเลขจากบริบทสถิติที่ให้มาเท่านั้น ถ้าไม่มีตัวเลข ให้ตอบว่าไม่มีข้อมูล ' +
+  'ห้ามเดาตัวเลขเอง และบอกช่วงเวลา/ขอบเขตของตัวเลขอย่างชัดเจน';
+
 export function clinicalSystemPrompt(): string {
   return SYSTEM_PROMPT;
+}
+
+export function statisticsSystemPrompt(): string {
+  return STATISTICS_SYSTEM_PROMPT;
 }
 
 /**

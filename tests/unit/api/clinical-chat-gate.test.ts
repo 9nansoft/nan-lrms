@@ -136,4 +136,42 @@ describe('POST /api/chat — cost gate + DeepSeek-V4-Flash smoke', () => {
     expect(typeof sent.top_k).toBe('number');
     expect(sent.top_k).toBeLessThanOrEqual(0); // -1/0 = disabled "usually only need temperature"
   });
+
+  it('rejects an invalid mode with 400 (no silent misspelling)', async () => {
+    process.env.CLINICAL_CHAT_ENABLED = 'true';
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const res = await POST(
+      jsonRequest({ message: 'กี่คนคะ', mode: 'statstics' }) as never, // typo
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('mode');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('accepts statistics mode (dashboard aggregate answers)', async () => {
+    process.env.CLINICAL_CHAT_ENABLED = 'true';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: 'มีผู้ป่วยทั้งหมด 2 คน' } }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const res = await POST(jsonRequest({ message: 'มีผู้ป่วยกี่คน', mode: 'statistics' }) as never);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.answer).toContain('2');
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    const sent = JSON.parse(init.body) as { messages?: Array<{ role: string; content: string }> };
+    const system = sent.messages?.find((m) => m.role === 'system');
+    expect(system?.content).toContain('สถิติ');
+  });
 });

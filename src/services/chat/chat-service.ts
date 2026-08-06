@@ -9,7 +9,13 @@ import {
   clinicalChatLimits,
 } from '@/config/clinical-chat-config';
 import { buildChatContext, type ChatContext } from './context-builder';
-import { clinicalSystemPrompt, renderContextBlock } from './prompt-config';
+import {
+  clinicalSystemPrompt,
+  statisticsSystemPrompt,
+  renderContextBlock,
+  type ClinicalChatMode,
+} from './prompt-config';
+import { buildStatisticsContext } from './stats-context-builder';
 import { getChatHistory, appendChatTurn } from './memory-store';
 import type { DatabaseAdapter } from '@/db/adapter';
 
@@ -23,6 +29,9 @@ export interface ChatServiceDeps {
   hospitalCode?: string;
   /** Session user id — enables bounded multi-turn memory (Redis TTL). */
   userId?: string;
+  /** Chat mode: 'clinical' (maternity ward, per-patient RAG) is the default;
+   *  'statistics' (dashboard) injects deterministic aggregate counts. */
+  mode?: ClinicalChatMode;
 }
 
 /**
@@ -42,14 +51,18 @@ export async function askClinicalQuestion(
   deps: ChatServiceDeps,
 ): Promise<ChatReply> {
   const limits = clinicalChatLimits();
-  const context = await buildChatContext(deps.db, deps.hospitalCode ?? '');
-  const contextBlock = renderContextBlock(context);
+  const isStats = deps.mode === 'statistics';
+  // Statistics mode: deterministic aggregate counts (no PHI lists). Clinical
+  // (default): hospital-scoped PDPA-redacted patient RAG.
+  const contextBlock = isStats
+    ? ((await buildStatisticsContext(deps.db, deps.hospitalCode ?? ''))?.context ?? '')
+    : renderContextBlock(await buildChatContext(deps.db, deps.hospitalCode ?? ''));
   const userTurn = contextBlock ? `${contextBlock}\n\nคำถาม: ${question}` : question;
 
   // Multi-turn: pull bounded masked history (Redis TTL) and append this turn.
   const history = deps.userId ? await getChatHistory(deps.userId) : [];
   const messages: LlmChatMessage[] = [
-    { role: 'system', content: clinicalSystemPrompt() },
+    { role: 'system', content: isStats ? statisticsSystemPrompt() : clinicalSystemPrompt() },
     ...history.map((t) => ({ role: t.role, content: t.content }) as LlmChatMessage),
     { role: 'user', content: userTurn },
   ];
