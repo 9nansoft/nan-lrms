@@ -7,6 +7,7 @@
 // errors; multi-turn weaves prior turns so the context stays coherent.
 import { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, Bot, MessageSquareOff } from 'lucide-react';
+import { ClinicalMarkdown } from '@/components/chat/ClinicalMarkdown';
 
 interface ChatMessageUi {
   role: 'user' | 'assistant';
@@ -103,7 +104,11 @@ export function ClinicalChatPanel() {
                       : 'bg-slate-100 text-slate-800'
                 }`}
               >
-                {m.content}
+                {m.role === 'user' || m.error ? (
+                  m.content
+                ) : (
+                  <ClinicalMarkdown>{m.content}</ClinicalMarkdown>
+                )}
               </div>
             ))}
             {busy && (
