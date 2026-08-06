@@ -5,6 +5,7 @@ import { TopNavBarSlot } from '@/components/layout/TopNavBarSlot';
 import { ContentFrameSlot } from '@/components/layout/ContentFrameSlot';
 import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
 import { DbHealthBanner } from '@/components/layout/DbHealthBanner';
+import { ClinicalChatPanel } from '@/components/chat/ClinicalChatPanel';
 
 // BmsSessionProvider is mounted here (in addition to the (hospital) layout)
 // so the provincial dashboard can participate in the BMS session flow —
@@ -24,6 +25,9 @@ export default function ProvincialLayout({ children }: { children: React.ReactNo
               <main className="flex-1">
                 <ContentFrameSlot>{children}</ContentFrameSlot>
               </main>
+              {/* Clinical chatbot — floating bottom-right; self-hides to an
+                  "AI ปิด" pill until CLINICAL_CHAT_ENABLED=true (cost gate). */}
+              <ClinicalChatPanel />
             </div>
           </BreadcrumbProvider>
         </CallProvider>

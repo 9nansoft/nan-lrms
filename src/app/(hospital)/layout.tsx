@@ -7,6 +7,7 @@ import { SessionProvider } from 'next-auth/react';
 import { BmsSessionProvider } from '@/contexts/BmsSessionContext';
 import { CallProvider } from '@/components/calls/CallProvider';
 import { TopNavBar } from '@/components/layout/TopNavBar';
+import { ClinicalChatPanel } from '@/components/chat/ClinicalChatPanel';
 
 export default function HospitalLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,6 +17,9 @@ export default function HospitalLayout({ children }: { children: React.ReactNode
           <div className="flex min-h-screen flex-col bg-slate-50/50">
             <TopNavBar variant="hospital" />
             <main className="flex-1">{children}</main>
+            {/* Clinical chatbot — floating bottom-right avatar; self-hides to an
+                "AI ปิด" pill until CLINICAL_CHAT_ENABLED=true (cost gate). */}
+            <ClinicalChatPanel />
           </div>
         </CallProvider>
       </BmsSessionProvider>

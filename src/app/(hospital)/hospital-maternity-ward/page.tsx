@@ -24,7 +24,6 @@ import { useBrowserPoll } from '@/hooks/useBrowserPoll';
 import { useMaternalScreenSummaries } from '@/hooks/useMaternalScreenSummaries';
 import { WardLayoutViewFull, type BedMovePayload } from '@/components/maternity/WardLayoutViewFull';
 import { PatientDrawer } from '@/components/maternity/PatientDrawer';
-import { ClinicalChatPanel } from '@/components/chat/ClinicalChatPanel';
 import { getBedMoveReasons, movePatientBed } from '@/services/maternity-ward';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -590,8 +589,6 @@ export default function HospitalMaternityWardPage() {
         occupant={selectedOccupant}
         onClose={() => setSelectedAn(null)}
       />
-
-      <ClinicalChatPanel />
     </div>
   );
 }
