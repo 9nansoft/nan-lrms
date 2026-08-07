@@ -17,7 +17,7 @@ vi.mock('@/lib/auth', () => ({
 }));
 vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 
-import { GET, PUT } from '@/app/api/profile/notification-preference/route';
+import { GET, PUT, DELETE } from '@/app/api/profile/notification-preference/route';
 
 function req(method: string, body?: unknown): Request {
   return new Request('http://test/api/profile/notification-preference', {
@@ -25,6 +25,11 @@ function req(method: string, body?: unknown): Request {
     headers: { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+/** PUT with a JSON body — the shape every multi-hospital save uses. */
+function jsonRequest(body: unknown): Request {
+  return req('PUT', body);
 }
 
 describe('GET/PUT /api/profile/notification-preference', () => {
@@ -41,19 +46,31 @@ describe('GET/PUT /api/profile/notification-preference', () => {
     expect(res.status).toBeGreaterThanOrEqual(401);
   });
 
-  it('GET 200 with mophLineEnabled=false when no row (Default OFF)', async () => {
+  it('GET 200 with no watched hospital when no row (Default OFF)', async () => {
+    // The single mophLineEnabled scalar became a list of watched hospitals
+    // (spec 2026-08-07). Default OFF now reads as "watching nothing".
     const res = await GET(req('GET') as never);
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toMatchObject({
-      userCid: '1100500090006', // testSessionUser default userCid
-      hospitalCode: '10670',
-      mophLineEnabled: false,
-    });
+    const body = (await res.json()) as {
+      userCid: string;
+      ownHospitalCode: string;
+      preferences: unknown[];
+    };
+    expect(body.userCid).toBe('1100500090006'); // testSessionUser default userCid
+    expect(body.ownHospitalCode).toBe('10670');
+    expect(body.preferences).toEqual([]);
   });
 
   it('PUT upserts from session identity (body cannot set CID)', async () => {
-    const res = await PUT(req('PUT', { mophLineEnabled: true }) as never);
+    const res = await PUT(
+      req('PUT', {
+        hospitalCode: '10670',
+        mophLineEnabled: true,
+        digestHour: 8,
+        events: ['anc_hr3'],
+        userCid: '9999999999999', // hostile: must be ignored in favour of the session
+      }) as never,
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({
@@ -68,10 +85,12 @@ describe('GET/PUT /api/profile/notification-preference', () => {
   });
 
   it('PUT 400 on non-boolean body and 401 when anonymous', async () => {
-    const bad = await PUT(req('PUT', { mophLineEnabled: 'yes' }) as never);
+    // hospitalCode is supplied so this genuinely exercises the boolean guard
+    // rather than passing on the missing-hospital branch.
+    const bad = await PUT(req('PUT', { hospitalCode: '10670', mophLineEnabled: 'yes' }) as never);
     expect(bad.status).toBe(400);
     mockSessionUser = null;
-    const anon = await PUT(req('PUT', { mophLineEnabled: true }) as never);
+    const anon = await PUT(req('PUT', { hospitalCode: '10670', mophLineEnabled: true }) as never);
     expect(anon.status).toBeGreaterThanOrEqual(401);
   });
 
@@ -88,5 +107,115 @@ describe('GET/PUT /api/profile/notification-preference', () => {
       'SELECT user_cid FROM notification_preferences',
     );
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe('multi-hospital preference API', () => {
+  beforeEach(async () => {
+    db = await createTestDb();
+    await new SeedOrchestrator().run(db);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('derives detailLevel=full for the session hospital and aggregate for others', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
+
+    const own = await PUT(
+      jsonRequest({
+        hospitalCode: '10670',
+        mophLineEnabled: true,
+        digestHour: 8,
+        events: ['anc_hr3'],
+      }) as never,
+    );
+    expect(((await own.json()) as { detailLevel: string }).detailLevel).toBe('full');
+
+    const other = await PUT(
+      jsonRequest({
+        hospitalCode: '11002',
+        mophLineEnabled: true,
+        digestHour: 8,
+        events: ['anc_hr3'],
+      }) as never,
+    );
+    expect(((await other.json()) as { detailLevel: string }).detailLevel).toBe('aggregate');
+  });
+
+  it('ignores a detailLevel supplied in the body (no privilege escalation)', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
+    const res = await PUT(
+      jsonRequest({
+        hospitalCode: '11002',
+        mophLineEnabled: true,
+        digestHour: 8,
+        events: ['anc_hr3'],
+        detailLevel: 'full',
+      }) as never,
+    );
+    expect(((await res.json()) as { detailLevel: string }).detailLevel).toBe('aggregate');
+  });
+
+  it('GET returns only implemented events plus every watched hospital', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
+    await PUT(
+      jsonRequest({
+        hospitalCode: '11002',
+        mophLineEnabled: true,
+        digestHour: 8,
+        events: ['anc_hr3'],
+      }) as never,
+    );
+    const body = (await (await GET(new Request('http://t/api') as never)).json()) as {
+      events: { key: string }[];
+      preferences: { hospitalCode: string }[];
+    };
+    expect(body.events.map((e) => e.key).sort()).toEqual(['anc_hr3', 'maternal_triage']);
+    expect(body.preferences.map((p) => p.hospitalCode)).toContain('11002');
+  });
+
+  it('rejects an unknown event key', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
+    const res = await PUT(
+      jsonRequest({
+        hospitalCode: '10670',
+        mophLineEnabled: true,
+        digestHour: 8,
+        events: ['not_an_event'],
+      }) as never,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a digestHour outside 0-23', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
+    const res = await PUT(
+      jsonRequest({
+        hospitalCode: '10670',
+        mophLineEnabled: true,
+        digestHour: 25,
+        events: ['anc_hr3'],
+      }) as never,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('DELETE removes a watched hospital', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
+    await PUT(
+      jsonRequest({
+        hospitalCode: '11002',
+        mophLineEnabled: true,
+        digestHour: 8,
+        events: ['anc_hr3'],
+      }) as never,
+    );
+    const res = await DELETE(
+      new Request('http://t/api?hospitalCode=11002', { method: 'DELETE' }) as never,
+    );
+    expect(res.status).toBe(200);
+    const body = (await (await GET(new Request('http://t/api') as never)).json()) as {
+      preferences: { hospitalCode: string }[];
+    };
+    expect(body.preferences.map((p) => p.hospitalCode)).not.toContain('11002');
   });
 });
