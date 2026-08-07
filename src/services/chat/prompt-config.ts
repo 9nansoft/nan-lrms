@@ -5,6 +5,7 @@
 // override-able from config. Everything rendered into a prompt is allow-listed
 // and already redacted by context-builder; renderContextBlock only formats.
 import type { ChatContext } from './context-builder';
+import { renderPlaybookIndex } from '@/config/chat-playbooks';
 
 /** Chat mode: maternity-ward = per-patient clinical RAG; statistics = dashboard
  *  aggregate counts (deterministic injection, no PHI lists). */
@@ -19,12 +20,17 @@ const STATISTICS_SYSTEM_PROMPT =
   'ตอบเป็นภาษาไทย ใช้ตัวเลขจากบริบทสถิติที่ให้มาเท่านั้น ถ้าไม่มีตัวเลข ให้ตอบว่าไม่มีข้อมูล ' +
   'ห้ามเดาตัวเลขเอง และบอกช่วงเวลา/ขอบเขตของตัวเลขอย่างชัดเจน';
 
+/**
+ * The mode prompt plus the playbook INDEX (one line per playbook). Only the
+ * index rides on every turn; a body is pulled on demand via `load_playbook`, so
+ * adding playbooks costs the per-turn prompt almost nothing.
+ */
 export function clinicalSystemPrompt(): string {
-  return SYSTEM_PROMPT;
+  return `${SYSTEM_PROMPT}\n\n${renderPlaybookIndex()}`;
 }
 
 export function statisticsSystemPrompt(): string {
-  return STATISTICS_SYSTEM_PROMPT;
+  return `${STATISTICS_SYSTEM_PROMPT}\n\n${renderPlaybookIndex()}`;
 }
 
 /**

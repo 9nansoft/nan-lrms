@@ -29,9 +29,8 @@ export async function DELETE(request: NextRequest) {
   if (!session?.user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
-  const mode = new URL(request.url).searchParams.get('mode') === 'statistics'
-    ? 'statistics'
-    : 'clinical';
+  const mode =
+    new URL(request.url).searchParams.get('mode') === 'statistics' ? 'statistics' : 'clinical';
   const userId =
     typeof session.user.id === 'string'
       ? session.user.id

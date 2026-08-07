@@ -28,6 +28,7 @@ import { executeToolCall } from './tool-router';
 import { getPatientContextTool } from './tools';
 import { chatToolSurface, chatToolBudget } from '@/config/clinical-chat-tools';
 import { knowledgeCollections } from '@/config/knowledge-config';
+import { findPlaybook, playbookIds } from '@/config/chat-playbooks';
 import { askKnowledgeLlmAnswer } from './knowledge-client';
 
 export interface ChatToolContext {
@@ -144,6 +145,36 @@ const REGISTRY: Record<string, ChatToolSpec> = {
     execute: async () => {
       const now = new Date();
       return { iso: now.toISOString(), thai: formatBangkokStamp(now), timezone: 'Asia/Bangkok' };
+    },
+  },
+  load_playbook: {
+    // Instructions, not data — no DB, no hospital scope, no PHI.
+    scope: 'province',
+    tool: {
+      type: 'function',
+      function: {
+        name: 'load_playbook',
+        description:
+          'โหลดคู่มือการทำงานเฉพาะของระบบ KK-LRMS (เกณฑ์ CPD, การอ่าน partograph, ระดับ ANC, SLA การส่งต่อ, กฎการรายงานสถิติ) — **ใช้ก่อนตอบ** เมื่อคำถามเกี่ยวกับหัวข้อเหล่านี้ เพราะเป็นกติกาเฉพาะของระบบนี้ที่เดาเองไม่ได้ **อย่าใช้เมื่อ** ถามความรู้ทางการแพทย์ทั่วไป (ใช้ ask_medical_ebook)',
+        parameters: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', enum: playbookIds(), description: 'รหัสคู่มือจากรายการที่ให้ไว้' },
+          },
+          required: ['id'],
+          additionalProperties: false,
+        },
+      },
+    },
+    execute: async (_ctx, args) => {
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      const playbook = findPlaybook(id);
+      if (!playbook) {
+        // Naming the valid ids turns a hallucinated id into a self-correction
+        // on the next round instead of a dead end.
+        throw new ToolRefusal(`ไม่มีคู่มือรหัส "${id}" — ที่มีคือ: ${playbookIds().join(', ')}`);
+      }
+      return { id: playbook.id, instructions: playbook.body };
     },
   },
   ask_medical_ebook: {

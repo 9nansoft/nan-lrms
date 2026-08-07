@@ -163,7 +163,11 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
       // Local view is already cleared; a failed server wipe is not worth an
       // error bubble, but the next turn would still carry old context.
       setMessages([
-        { role: 'assistant', content: 'ล้างประวัติฝั่งเซิร์ฟเวอร์ไม่สำเร็จ ลองใหม่อีกครั้ง', error: true },
+        {
+          role: 'assistant',
+          content: 'ล้างประวัติฝั่งเซิร์ฟเวอร์ไม่สำเร็จ ลองใหม่อีกครั้ง',
+          error: true,
+        },
       ]);
     }
   }

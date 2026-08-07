@@ -18,6 +18,7 @@ const STATISTICS_TOOLS = [
   'get_trends',
   'get_alerts',
   'get_current_datetime',
+  'load_playbook',
   'ask_medical_ebook',
 ] as const;
 
@@ -29,6 +30,7 @@ const CLINICAL_TOOLS = [
   'get_stage_kpis',
   'get_alerts',
   'get_current_datetime',
+  'load_playbook',
 ] as const;
 
 function listEnv(key: string, fallback: readonly string[]): string[] {

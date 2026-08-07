@@ -127,8 +127,7 @@ async function readAnswerStream(
         if (typeof delta === 'string') answer += delta;
       } else if (event.type === 'usage') {
         const u = event.data as
-          | { prompt_tokens?: number; completion_tokens?: number; cached?: boolean }
-          | undefined;
+          { prompt_tokens?: number; completion_tokens?: number; cached?: boolean } | undefined;
         if (u?.prompt_tokens !== undefined) out.promptTokens = u.prompt_tokens;
         if (u?.completion_tokens !== undefined) out.completionTokens = u.completion_tokens;
         if (u?.cached !== undefined) out.cached = u.cached;
