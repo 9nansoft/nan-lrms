@@ -7,7 +7,7 @@
 ## Problem
 
 The profile page offers one switch — `moph_line_enabled` — gating the only two
-alerts that exist (`anc_hr3`, `labor_emergency`). Two consequences:
+alerts that exist (`anc_hr3`, `maternal_triage`). Two consequences:
 
 1. **It is coarse.** A user who wants referral alerts but not ANC alerts has one
    choice: all or nothing.
@@ -47,7 +47,7 @@ event adds rows, not DDL.
 | event_key (`alert_source`) | tier | detail | producer site | dedup |
 |---|---|---|---|---|
 | `anc_hr3` *(exists)* | urgent | patient | `browser-push/route.ts:389` | per case/day |
-| `labor_emergency` *(exists)* | urgent | patient | `webhook.ts:1328` | per case/day |
+| `maternal_triage` *(exists)* | urgent | patient | `webhook.ts:1328` | per case/day |
 | `partograph_critical` | urgent | patient | partograph observation ingest | per case/day/severity |
 | `cpd_high` | urgent | patient | `services/sync/cpd-persist.ts` | per case/day |
 | `referral_incoming` | urgent | patient¹ | referral persist (browser-push / webhook) | per referral/day |
@@ -149,7 +149,7 @@ the events they asked for) and `detailLevel` on the returned recipient.
 
 **Back-compatibility:** a preference row with no `notification_event_subscriptions`
 children means "all events", so every existing subscriber keeps receiving
-`anc_hr3` and `labor_emergency` exactly as today until they touch the new UI.
+`anc_hr3` and `maternal_triage` exactly as today until they touch the new UI.
 Without this rule the migration would silently unsubscribe everyone.
 
 De-duplicated by CID, keeping the **highest** detail level. A recipient present

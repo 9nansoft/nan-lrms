@@ -4,7 +4,7 @@
 
 **Goal:** Replace the profile page's single MOPH LINE switch with per-event, multi-hospital subscriptions, so a user chooses which events they receive and for which hospitals.
 
-**Architecture:** An event catalog in `src/config/` is the single source of truth (key, tier, detail policy, Thai label). `notification_preferences` gains one row per watched hospital plus `detail_level`/`digest_hour`; a new child table `notification_event_subscriptions` holds per-event flags. `resolveRecipients` gains an `eventKey` filter and returns a `detailLevel` per recipient. No new alert events fire in this phase — the two existing ones (`anc_hr3`, `labor_emergency`) simply become selectable.
+**Architecture:** An event catalog in `src/config/` is the single source of truth (key, tier, detail policy, Thai label). `notification_preferences` gains one row per watched hospital plus `detail_level`/`digest_hour`; a new child table `notification_event_subscriptions` holds per-event flags. `resolveRecipients` gains an `eventKey` filter and returns a `detailLevel` per recipient. No new alert events fire in this phase — the two existing ones (`anc_hr3`, `maternal_triage`) simply become selectable.
 
 **Tech Stack:** TypeScript strict, Next.js 15 App Router, PostgreSQL via `DatabaseAdapter` (`?` placeholders — adapters rewrite to `$N`), Vitest + PGlite (`tests/helpers/testDb.ts`), React 19 + Tailwind.
 
@@ -21,7 +21,7 @@
 - Thai user-facing copy; error messages say what went wrong AND what to do.
 - **Back-compatibility rule, load-bearing:** a preference row with zero
   `notification_event_subscriptions` children means *all events enabled*. Every
-  existing subscriber must keep receiving `anc_hr3` and `labor_emergency`
+  existing subscriber must keep receiving `anc_hr3` and `maternal_triage`
   unchanged until they touch the new UI.
 - Run `npx tsc --noEmit && npm run lint` before every commit.
 
@@ -64,7 +64,7 @@
   `findNotificationEvent(key: string): NotificationEvent | null`;
   `implementedNotificationEvents(): NotificationEvent[]`.
 
-`implemented` is the honesty flag: only `anc_hr3` and `labor_emergency` have
+`implemented` is the honesty flag: only `anc_hr3` and `maternal_triage` have
 producers in this phase. The UI must not offer a checkbox that cannot fire.
 
 - [ ] **Step 1: Write the failing test**
@@ -93,7 +93,7 @@ describe('notification event catalog', () => {
   it('marks only the two events that have producers today as implemented', () => {
     expect(implementedNotificationEvents().map((e) => e.key).sort()).toEqual([
       'anc_hr3',
-      'labor_emergency',
+      'maternal_triage',
     ]);
   });
 
@@ -145,7 +145,7 @@ export const NOTIFICATION_EVENTS: readonly NotificationEvent[] = [
     implemented: true,
   },
   {
-    key: 'labor_emergency',
+    key: 'maternal_triage',
     tier: 'urgent',
     detail: 'patient',
     labelTh: 'ภาวะฉุกเฉินในห้องคลอด',
@@ -445,7 +445,7 @@ describe('multi-hospital, per-event preferences', () => {
       mophLineEnabled: true,
       detailLevel: 'aggregate',
       digestHour: 8,
-      events: ['anc_hr3', 'labor_emergency'],
+      events: ['anc_hr3', 'maternal_triage'],
     });
     const prefs = await listNotificationPreferences(db, '3320500282121');
     expect(prefs.map((p) => p.hospitalCode).sort()).toEqual(['10670', '11002']);
@@ -482,7 +482,7 @@ describe('multi-hospital, per-event preferences', () => {
       mophLineEnabled: true,
       detailLevel: 'aggregate',
       digestHour: 8,
-      events: ['labor_emergency'],
+      events: ['maternal_triage'],
     });
     const anc = await subscribersForEvent(db, '10670', 'anc_hr3');
     expect(anc).toEqual([{ cid: '3320500282121', detailLevel: 'full' }]);
@@ -509,10 +509,10 @@ describe('multi-hospital, per-event preferences', () => {
       detailLevel: 'full' as const,
       digestHour: 8,
     };
-    await saveNotificationPreference(db, { ...base, events: ['anc_hr3', 'labor_emergency'] });
-    await saveNotificationPreference(db, { ...base, events: ['labor_emergency'] });
+    await saveNotificationPreference(db, { ...base, events: ['anc_hr3', 'maternal_triage'] });
+    await saveNotificationPreference(db, { ...base, events: ['maternal_triage'] });
     const prefs = await listNotificationPreferences(db, '3320500282124');
-    expect(prefs[0].events).toEqual(['labor_emergency']);
+    expect(prefs[0].events).toEqual(['maternal_triage']);
   });
 
   it('removing a watched hospital deletes its subscriptions too', async () => {
@@ -753,7 +753,7 @@ describe('resolveRecipients — event filter + detail level', () => {
       mophLineEnabled: true,
       detailLevel: 'full',
       digestHour: 8,
-      events: ['labor_emergency'],
+      events: ['maternal_triage'],
     });
     const n = await enqueueHighRiskAlert(db, ctx);
     expect(n).toBe(0);
@@ -948,7 +948,7 @@ describe('multi-hospital preference API', () => {
       events: { key: string }[];
       preferences: { hospitalCode: string }[];
     };
-    expect(body.events.map((e) => e.key).sort()).toEqual(['anc_hr3', 'labor_emergency']);
+    expect(body.events.map((e) => e.key).sort()).toEqual(['anc_hr3', 'maternal_triage']);
     expect(body.preferences.map((p) => p.hospitalCode)).toContain('11002');
   });
 
@@ -1150,7 +1150,7 @@ const GET_BODY = {
       implemented: true,
     },
     {
-      key: 'labor_emergency',
+      key: 'maternal_triage',
       tier: 'urgent',
       detail: 'patient',
       labelTh: 'ภาวะฉุกเฉินในห้องคลอด',
@@ -1193,7 +1193,7 @@ describe('NotificationPreferenceCard', () => {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ ...GET_BODY.preferences[0], events: ['anc_hr3', 'labor_emergency'] }),
+        json: async () => ({ ...GET_BODY.preferences[0], events: ['anc_hr3', 'maternal_triage'] }),
       } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -1208,7 +1208,7 @@ describe('NotificationPreferenceCard', () => {
       expect(put).toBeDefined();
       expect(JSON.parse(String(put?.[1]?.body)).events.sort()).toEqual([
         'anc_hr3',
-        'labor_emergency',
+        'maternal_triage',
       ]);
     });
   });
