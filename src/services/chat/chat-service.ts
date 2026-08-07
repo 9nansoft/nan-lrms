@@ -24,6 +24,10 @@ import type { DatabaseAdapter } from '@/db/adapter';
 
 export interface ChatReply {
   answer: string;
+  /** Tools that returned real data for this answer, in call order. Surfaced in
+   *  the UI as provenance: "did this number come from anywhere?". Empty means
+   *  the model answered from the injected context or its own weights. */
+  sources: string[];
 }
 
 export interface ChatServiceDeps {
@@ -134,5 +138,5 @@ export async function askClinicalQuestion(
     await appendChatTurn(scope, { role: 'user', content: question });
     await appendChatTurn(scope, { role: 'assistant', content: answer });
   }
-  return { answer };
+  return { answer, sources: toolContext.ledger };
 }

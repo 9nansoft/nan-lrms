@@ -46,6 +46,18 @@ export async function getChatHistory(scope: ChatMemoryScope): Promise<ChatMemory
   return envelope?.messages ?? [];
 }
 
+/**
+ * Wipe a bucket's transcript ("เริ่มบทสนทนาใหม่").
+ *
+ * Clearing the panel client-side is NOT enough: the transcript lives in Redis
+ * and would keep being replayed into every later turn, so the bot would still
+ * "remember" a conversation the user believes they ended. Written as an empty
+ * envelope rather than a delete so the cache layer needs no extra verb.
+ */
+export async function clearChatHistory(scope: ChatMemoryScope): Promise<void> {
+  await cacheSetJson(sessionKey(scope), { messages: [] } satisfies MemoryEnvelope, 1);
+}
+
 /** Append a turn and persist the bounded history with a TTL. */
 export async function appendChatTurn(
   scope: ChatMemoryScope,

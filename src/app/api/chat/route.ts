@@ -11,11 +11,39 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { clinicalChatEnabled, clinicalChatRateLimit } from '@/config/clinical-chat-config';
 import { askClinicalQuestion } from '@/services/chat/chat-service';
+import { clearChatHistory } from '@/services/chat/memory-store';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { maskCidsInText } from '@/lib/pii-mask';
 import { logger } from '@/lib/logger';
+
+/**
+ * DELETE /api/chat?mode=… — "เริ่มบทสนทนาใหม่".
+ *
+ * Must exist server-side: the transcript lives in Redis, so clearing the panel
+ * alone would leave the bot remembering a conversation the user ended.
+ */
+export async function DELETE(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+  const mode = new URL(request.url).searchParams.get('mode') === 'statistics'
+    ? 'statistics'
+    : 'clinical';
+  const userId =
+    typeof session.user.id === 'string'
+      ? session.user.id
+      : typeof session.user.userCid === 'string'
+        ? session.user.userCid
+        : undefined;
+  if (!userId) return NextResponse.json({ ok: true });
+  const hospitalCode =
+    typeof session.user.hospitalCode === 'string' ? session.user.hospitalCode : undefined;
+  await clearChatHistory({ userId, mode, hospitalCode });
+  return NextResponse.json({ ok: true });
+}
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -80,7 +108,7 @@ export async function POST(request: NextRequest) {
   try {
     await ensureInit();
     const db = await getDatabase();
-    const { answer } = await askClinicalQuestion(question, {
+    const { answer, sources } = await askClinicalQuestion(question, {
       db,
       hospitalCode,
       userId,
@@ -98,7 +126,9 @@ export async function POST(request: NextRequest) {
       resourceType: 'CHAT',
       resourceId: mode,
     });
-    return NextResponse.json({ answer });
+    // `sources` lets the panel show WHERE the answer came from — a nurse can
+    // see at a glance whether a number was fetched or merely recalled.
+    return NextResponse.json({ answer, sources });
   } catch (error) {
     logger.error('clinical_chat_failed', {
       error: error instanceof Error ? error.message : String(error),
