@@ -14,7 +14,10 @@ import {
   type AlertEventContext,
   type EmergencyEventContext,
 } from '@/services/risk-alert';
-import { upsertNotificationPreference } from '@/services/notification-preference';
+import {
+  upsertNotificationPreference,
+  saveNotificationPreference,
+} from '@/services/notification-preference';
 
 // The orchestrator now encrypts patient_name at rest (mirrors cached_patients).
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
@@ -247,6 +250,118 @@ describe('risk-alert enqueue orchestrator', () => {
         `SELECT recipient_cid FROM moph_alert_log`,
       );
       expect(rows.map((r) => r.recipient_cid)).toContain('5555555555555');
+    });
+  });
+
+  describe('resolveRecipients — event filter + detail level', () => {
+    // Start from true Default-OFF like the opt-in describe: the outer beforeEach
+    // opted two admin-listed CIDs in with legacy (childless) rows, which would
+    // mask whether the event filter is doing anything.
+    beforeEach(async () => {
+      await db.query(`DELETE FROM notification_preferences`);
+    });
+
+    // The center monitor (3320500282130) is admin-configured and delivers
+    // ungated (P1-C), so it is the constant baseline in every count below.
+    const CENTER_CID = '3320500282130';
+    const SELF_CID = '5555555555555';
+
+    it('excludes a self-subscriber who did not subscribe to this event', async () => {
+      await saveNotificationPreference(db, {
+        userCid: SELF_CID,
+        hospitalCode: HOSPITAL_HCODE,
+        mophLineEnabled: true,
+        detailLevel: 'full',
+        digestHour: 8,
+        events: ['maternal_triage'],
+      });
+      const n = await enqueueHighRiskAlert(db, ctxFixture());
+      // Center monitor only — the self-subscriber watches maternal_triage, and
+      // this is an anc_hr3 event.
+      expect(n).toBe(1);
+      const rows = await db.query<{ recipient_cid: string }>(
+        `SELECT recipient_cid FROM moph_alert_log`,
+      );
+      expect(rows.map((r) => r.recipient_cid)).toEqual([CENTER_CID]);
+    });
+
+    it('includes a self-subscriber who did subscribe, at their detail level', async () => {
+      await saveNotificationPreference(db, {
+        userCid: SELF_CID,
+        hospitalCode: HOSPITAL_HCODE,
+        mophLineEnabled: true,
+        detailLevel: 'aggregate',
+        digestHour: 8,
+        events: ['anc_hr3'],
+      });
+      const n = await enqueueHighRiskAlert(db, ctxFixture());
+      // center monitor + the subscribed self-subscriber
+      expect(n).toBe(2);
+      const rows = await db.query<{ recipient_scope: string }>(
+        `SELECT recipient_scope FROM moph_alert_log WHERE recipient_cid = '${SELF_CID}'`,
+      );
+      expect(rows.map((r) => r.recipient_scope)).toEqual(['self_subscribed']);
+    });
+
+    it('subscribing to this event does not resurrect a disabled row', async () => {
+      // moph_line_enabled=false is the master switch; per-event opt-in must not
+      // override it, or "turn notifications off" would stop meaning anything.
+      await saveNotificationPreference(db, {
+        userCid: SELF_CID,
+        hospitalCode: HOSPITAL_HCODE,
+        mophLineEnabled: false,
+        detailLevel: 'full',
+        digestHour: 8,
+        events: ['anc_hr3'],
+      });
+      const n = await enqueueHighRiskAlert(db, ctxFixture());
+      expect(n).toBe(1);
+      const rows = await db.query<{ recipient_cid: string }>(
+        `SELECT recipient_cid FROM moph_alert_log`,
+      );
+      expect(rows.map((r) => r.recipient_cid)).toEqual([CENTER_CID]);
+    });
+
+    it('filters a consult doctor by event too, not just self-subscribers', async () => {
+      // The staff branch reads the same subscriber set, so an admin-listed CID
+      // that opted out of this event must go quiet as well.
+      await saveNotificationPreference(db, {
+        userCid: '3320500282121',
+        hospitalCode: HOSPITAL_HCODE,
+        mophLineEnabled: true,
+        detailLevel: 'full',
+        digestHour: 8,
+        events: ['maternal_triage'],
+      });
+      const n = await enqueueHighRiskAlert(db, ctxFixture());
+      expect(n).toBe(1);
+      const rows = await db.query<{ recipient_cid: string }>(
+        `SELECT recipient_cid FROM moph_alert_log`,
+      );
+      expect(rows.map((r) => r.recipient_cid)).toEqual([CENTER_CID]);
+    });
+
+    it('keeps delivering to a legacy row that has no event children', async () => {
+      // Every pre-migration production row looks like this. If the event filter
+      // drops it, every current recipient goes silent on deploy.
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO notification_preferences
+           (id, user_cid, hospital_code, moph_line_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, true, ?, ?)`,
+        [randomUUID(), '3320500282199', HOSPITAL_HCODE, now, now],
+      );
+      const kids = await db.query<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM notification_event_subscriptions`,
+      );
+      expect(kids[0].c).toBe(0); // the row really is childless
+      const n = await enqueueHighRiskAlert(db, ctxFixture());
+      // center monitor + the legacy self-subscriber
+      expect(n).toBe(2);
+      const rows = await db.query<{ recipient_cid: string }>(
+        `SELECT recipient_cid FROM moph_alert_log`,
+      );
+      expect(rows.map((r) => r.recipient_cid).sort()).toEqual([CENTER_CID, '3320500282199']);
     });
   });
 });

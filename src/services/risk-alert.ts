@@ -21,7 +21,10 @@ import { logger } from '@/lib/logger';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
 import { mophAlertsEnabled } from '@/config/moph-alert-config';
 import { isValidCid } from '@/services/moph-prompt';
-import { enabledSubscriberCids } from '@/services/notification-preference';
+import {
+  subscribersForEvent,
+  type NotificationDetailLevel,
+} from '@/services/notification-preference';
 import {
   alertTitle,
   type AlertSeverity,
@@ -62,6 +65,10 @@ interface Recipient {
   cid: string;
   name: string;
   scope: AlertRecipientScope;
+  /** How much this recipient may see. Admin-configured clinical roles (center
+   *  monitors, consult doctors) are always 'full'; a self-subscriber carries
+   *  whatever their preference row says. */
+  detailLevel: NotificationDetailLevel;
 }
 
 // HR3/item-based HIGH-risk vocabulary (codex review P1/P2: was anc_cpd/cpd_high,
@@ -75,17 +82,23 @@ const EMERGENCY_ALERT_SOURCE = 'maternal_triage';
  *   - CENTER monitors (admin-configured via MophAlertsTab) ALWAYS deliver — no
  *     self-subscribe gate; the admin list is the authoritative "main setting".
  *   - Default OFF: hospital staff (consult doctors) deliver ONLY when they have
- *     an enabled notification_preferences row for this hospital.
- *   - Authoritative self-subscribers: enabled pref rows NOT on any admin list
- *     are merged (deduped by CID).
+ *     an enabled notification_preferences row for this hospital AND that row
+ *     subscribes to `eventKey`.
+ *   - Authoritative self-subscribers: subscribed pref rows NOT on any admin list
+ *     are merged (deduped by CID), each carrying its own detail level.
  *  Filters out any recipient whose CID is not exactly 13 digits (the MOPH API
  *  would 400 at drain time, wasting a claim — codex gap-sweep: validate at
- *  enqueue instead). */
+ *  enqueue instead).
+ *  `eventKey` is the alert_source of the event being enqueued ('anc_hr3',
+ *  'maternal_triage'), matched against the subscriber's event set. It is
+ *  REQUIRED: an optional event filter would silently default to "deliver
+ *  everything" at any call site that forgot it. */
 async function resolveRecipients(
   db: DatabaseAdapter,
   hospitalId: string,
   province: string,
-  hospitalCodeOverride?: string,
+  hospitalCodeOverride: string | undefined,
+  eventKey: string,
 ): Promise<Recipient[]> {
   // hospital_code for the preference gate — resolve from hospitalId if not given.
   let hospitalCode = hospitalCodeOverride ?? '';
@@ -113,27 +126,46 @@ async function resolveRecipients(
     // hospital's province_code gets fixed (codex gap-sweep edge case).
     logger.warn('moph_alert_empty_province', { hospitalId });
   }
+  // Subscribed to THIS event, at this hospital. A pref row with no event
+  // children counts as subscribed to everything — that back-compat rule lives
+  // in subscribersForEvent, and it is what keeps every pre-migration row
+  // delivering instead of going silent on deploy.
+  const subscribers = await subscribersForEvent(db, hospitalCode, eventKey);
+  const byCid = new Map(subscribers.map((s) => [s.cid, s.detailLevel]));
+  const allowed: Recipient[] = [];
   // P1-C security/correctness (codex gap-sweep): CENTER monitors are an
   // admin-configured role (MophAlertsTab is the authoritative "main setting"
-  // for province monitoring) — they ALWAYS deliver, no self-subscribe gate.
-  const enabled = new Set((await enabledSubscriberCids(db, hospitalCode)).map((r) => r.cid));
-  const allowed: Recipient[] = [];
+  // for province monitoring) — they ALWAYS deliver, no self-subscribe gate and
+  // no event filter.
   for (const c of center) {
-    allowed.push({ cid: c.cid, name: c.name, scope: 'province_center' as const });
+    allowed.push({
+      cid: c.cid,
+      name: c.name,
+      scope: 'province_center' as const,
+      // Admin-configured clinical role: always full detail, never downgraded by
+      // a self-serve preference.
+      detailLevel: 'full',
+    });
   }
-  // Default OFF: hospital staff (consult doctors) deliver ONLY with an enabled
-  // pref row (self-serve opt-in).
+  // Default OFF: hospital staff (consult doctors) deliver ONLY with a pref row
+  // subscribed to this event (self-serve opt-in).
   for (const s of staff) {
-    if (enabled.has(s.cid)) {
-      allowed.push({ cid: s.cid, name: s.name, scope: 'hospital_staff' as const });
+    if (byCid.has(s.cid)) {
+      allowed.push({
+        cid: s.cid,
+        name: s.name,
+        scope: 'hospital_staff' as const,
+        detailLevel: 'full',
+      });
     }
   }
-  // Authoritative self-subscribers: enabled pref rows for CIDs not already
-  // delivered above (neither staff nor center) — deduped by CID.
+  // Authoritative self-subscribers: subscribed pref rows for CIDs not already
+  // delivered above (neither staff nor center) — deduped by CID, each at its
+  // own chosen detail level.
   const already = new Set(allowed.map((r) => r.cid));
-  for (const cid of enabled) {
+  for (const [cid, detailLevel] of byCid) {
     if (!already.has(cid)) {
-      allowed.push({ cid, name: '', scope: 'self_subscribed' as const });
+      allowed.push({ cid, name: '', scope: 'self_subscribed' as const, detailLevel });
     }
   }
 
@@ -164,7 +196,19 @@ async function enqueueAlertEvent(
     logger.debug('moph_alert_skipped_disabled', { caseRef: ctx.caseRef });
     return 0;
   }
-  const recipients = await resolveRecipients(db, ctx.hospitalId, ctx.province);
+  // alertSource IS the event key subscriptions are stored under (it is what
+  // lands in moph_alert_log.alert_source), so it doubles as the event filter.
+  // hospitalCodeOverride stays undefined: the preference gate keys on the hcode
+  // of the hospitals row, which is also what the profile UI shows users when
+  // they subscribe. ctx.originHcode is the code the event arrived under and is
+  // not guaranteed to be the same string.
+  const recipients = await resolveRecipients(
+    db,
+    ctx.hospitalId,
+    ctx.province,
+    undefined,
+    alertSource,
+  );
   if (recipients.length === 0) {
     logger.warn('moph_alert_no_recipients', { hospitalId: ctx.hospitalId, caseRef: ctx.caseRef });
     return 0;
