@@ -180,7 +180,11 @@ describe('NotificationPreferenceCard', () => {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ ...optedOut.preferences[0], mophLineEnabled: true, events: ['anc_hr3'] }),
+        json: async () => ({
+          ...optedOut.preferences[0],
+          mophLineEnabled: true,
+          events: ['anc_hr3'],
+        }),
       } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -236,10 +240,7 @@ describe('NotificationPreferenceCard', () => {
     render(<NotificationPreferenceCard />);
     await screen.findByRole('checkbox', { name: /ANC HR3/ });
 
-    await user.type(
-      screen.getByRole('textbox', { name: 'เพิ่มโรงพยาบาลที่ต้องการติดตาม' }),
-      '106',
-    );
+    await user.type(screen.getByRole('textbox', { name: 'เพิ่มโรงพยาบาลที่ต้องการติดตาม' }), '106');
     await user.click(screen.getByRole('button', { name: 'เพิ่ม' }));
 
     expect(await screen.findByText(/5 หลัก/)).toBeInTheDocument();
