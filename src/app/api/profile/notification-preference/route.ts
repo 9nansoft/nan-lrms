@@ -22,6 +22,12 @@ export async function GET(_request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const userCid = String(session.user.userCid ?? '');
   const ownHospitalCode = String(session.user.hospitalCode ?? '');
+  // Same guard as PUT, and for the same reason: BMS auth can map a missing
+  // user_cid to ''. Without it every user whose session lacks a CID queries the
+  // SAME `user_cid = ''` row set — they would read each other's subscriptions.
+  if (!isValidCid13(userCid)) {
+    return NextResponse.json({ error: 'CID ของผู้ใช้ไม่ครบ 13 หลัก' }, { status: 400 });
+  }
   await ensureInit();
   const db = await getDatabase();
   const preferences = await listNotificationPreferences(db, userCid);
@@ -130,6 +136,11 @@ export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const userCid = String(session.user.userCid ?? '');
+  // Without this guard a session with no CID deletes on `user_cid = ''`, which
+  // is every other CID-less user's row set.
+  if (!isValidCid13(userCid)) {
+    return NextResponse.json({ error: 'CID ของผู้ใช้ไม่ครบ 13 หลัก' }, { status: 400 });
+  }
   const hospitalCode = new URL(request.url).searchParams.get('hospitalCode') ?? '';
   if (!hospitalCode) {
     return NextResponse.json(

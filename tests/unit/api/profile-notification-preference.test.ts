@@ -117,6 +117,25 @@ describe('multi-hospital preference API', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
+  // SECURITY: PUT already rejects an empty session CID because BMS auth can map
+  // a missing user_cid to ''. GET and DELETE did not, so every user whose
+  // session lacked a CID shared one `user_cid = ''` row set — they could list
+  // and delete each other's subscriptions.
+  it('GET refuses a session with a non-13-digit userCid', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '' });
+    const res = await GET(new Request('http://t/api') as never);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/[ก-๙]/);
+  });
+
+  it('DELETE refuses a session with a non-13-digit userCid', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '' });
+    const res = await DELETE(
+      new Request('http://t/api?hospitalCode=10670', { method: 'DELETE' }) as never,
+    );
+    expect(res.status).toBe(400);
+  });
+
   it('derives detailLevel=full for the session hospital', async () => {
     mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
 

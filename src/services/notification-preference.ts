@@ -4,7 +4,10 @@
 // authoritative (bypasses admin lists). PDPA-safe: CID only.
 import { randomUUID } from 'crypto';
 import type { DatabaseAdapter } from '@/db/adapter';
-import { notificationEventKeys } from '@/config/notification-events';
+import {
+  notificationEventKeys,
+  implementedNotificationEvents,
+} from '@/config/notification-events';
 
 export interface NotificationPreference {
   userCid: string;
@@ -193,9 +196,15 @@ export async function listNotificationPreferences(
     const children = byPreference.get(r.id) ?? [];
     // Back-compat: no children = subscribed to everything. Without this a
     // pre-migration row would silently stop delivering.
+    // …expanded to IMPLEMENTED events only. Expanding to the whole catalog
+    // round-trips through the UI (which renders only implemented events) and is
+    // saved back as explicit enabled=true rows for events the user was never
+    // shown — so they would silently start receiving each Phase-2 event the day
+    // its producer ships. Delivery today is unaffected: the unimplemented
+    // events have no producer, so there is nothing to miss.
     const events =
       children.length === 0
-        ? notificationEventKeys()
+        ? implementedNotificationEvents().map((e) => e.key)
         : children.filter((s) => s.enabled).map((s) => s.event_key);
     return {
       id: r.id,
@@ -220,35 +229,36 @@ export async function saveNotificationPreference(
   // concurrent read in that window would re-subscribe the user to alerts they
   // just opted out of.
   await db.transaction(async (tx) => {
-    const existing = await tx.query<{ id: string }>(
-      `SELECT id FROM notification_preferences WHERE user_cid = ? AND hospital_code = ?`,
-      [input.userCid, input.hospitalCode],
+    // One upsert, no read-then-write. Under READ COMMITTED a SELECT-then-INSERT
+    // lets two concurrent saves for the same (user_cid, hospital_code) — two
+    // browser tabs, or a retry after a slow request — both see no row and both
+    // insert, so one violates idx_np_unique_user_hospital and 500s with a raw
+    // DB error. RETURNING id is load-bearing: on conflict the row keeps its
+    // ORIGINAL id, and the child rows below must hang off that, not off the
+    // candidate id we generated here — otherwise they orphan and the user's
+    // saved choices silently vanish.
+    const upserted = await tx.query<{ id: string }>(
+      `INSERT INTO notification_preferences
+         (id, user_cid, hospital_code, moph_line_enabled, detail_level, digest_hour, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user_cid, hospital_code) DO UPDATE
+         SET moph_line_enabled = EXCLUDED.moph_line_enabled,
+             detail_level = EXCLUDED.detail_level,
+             digest_hour = EXCLUDED.digest_hour,
+             updated_at = EXCLUDED.updated_at
+       RETURNING id`,
+      [
+        randomUUID(),
+        input.userCid,
+        input.hospitalCode,
+        input.mophLineEnabled,
+        input.detailLevel,
+        input.digestHour,
+        now,
+        now,
+      ],
     );
-    const id = existing[0]?.id ?? randomUUID();
-    if (existing[0]) {
-      await tx.execute(
-        `UPDATE notification_preferences
-         SET moph_line_enabled = ?, detail_level = ?, digest_hour = ?, updated_at = ?
-         WHERE id = ?`,
-        [input.mophLineEnabled, input.detailLevel, input.digestHour, now, id],
-      );
-    } else {
-      await tx.execute(
-        `INSERT INTO notification_preferences
-           (id, user_cid, hospital_code, moph_line_enabled, detail_level, digest_hour, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          input.userCid,
-          input.hospitalCode,
-          input.mophLineEnabled,
-          input.detailLevel,
-          input.digestHour,
-          now,
-          now,
-        ],
-      );
-    }
+    const id = upserted[0].id;
 
     // Replace the event set wholesale — a partial update would leave stale rows
     // that read as "still subscribed".

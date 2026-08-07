@@ -241,6 +241,55 @@ describe('NotificationPreferenceCard', () => {
   // tests/unit/api/profile-notification-preference.test.ts
   // ('REFUSES a subscription to a hospital that is not the session hospital').
 
+  // A row with moph_line_enabled=false delivers nothing, whatever its event
+  // children say. Rendering its boxes ticked asserts a subscription the system
+  // will not honour, and gives the user no way to see why they get no alerts.
+  it('renders a muted row as unsubscribed, not as fully ticked', async () => {
+    const muted = {
+      ...GET_BODY,
+      preferences: [{ ...GET_BODY.preferences[0], mophLineEnabled: false }],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => muted }) as Response),
+    );
+    render(<NotificationPreferenceCard />);
+    expect(await screen.findByRole('checkbox', { name: /ANC HR3/ })).not.toBeChecked();
+  });
+
+  it('re-enables a muted row when a box is ticked', async () => {
+    const muted = {
+      ...GET_BODY,
+      preferences: [{ ...GET_BODY.preferences[0], mophLineEnabled: false }],
+    };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined)
+        return { ok: true, status: 200, json: async () => muted } as Response;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ...muted.preferences[0], mophLineEnabled: true }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<NotificationPreferenceCard />);
+
+    await user.click(await screen.findByRole('checkbox', { name: /ANC HR3/ }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls as unknown as [string, RequestInit | undefined][];
+      const put = calls.find((c) => c[1]?.method === 'PUT');
+      expect(put).toBeDefined();
+      const sent = JSON.parse(String(put?.[1]?.body)) as {
+        mophLineEnabled: boolean;
+        events: string[];
+      };
+      expect(sent.mophLineEnabled).toBe(true);
+      expect(sent.events).toEqual(['anc_hr3']);
+    });
+  });
+
   it('offers a one-click add for the session hospital when nothing is followed yet', async () => {
     const empty = { ...GET_BODY, preferences: [] };
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {

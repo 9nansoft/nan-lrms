@@ -144,10 +144,22 @@ export function NotificationPreferenceCard() {
     }
   }
 
+  /**
+   * A muted row (`mophLineEnabled: false`) delivers nothing regardless of its
+   * event children, so its effective subscription is empty. Deriving it here
+   * keeps the checkboxes honest — they show what the system will actually do —
+   * and makes ticking a box on a muted row re-enable it, which is what the
+   * gesture plainly means.
+   */
+  function effectiveEvents(row: PreferenceDto): string[] {
+    return row.mophLineEnabled ? row.events : [];
+  }
+
   function toggleEvent(row: PreferenceDto, key: string) {
-    const nextEvents = row.events.includes(key)
-      ? row.events.filter((k) => k !== key)
-      : [...row.events, key];
+    const current = effectiveEvents(row);
+    const nextEvents = current.includes(key)
+      ? current.filter((k) => k !== key)
+      : [...current, key];
     void save({ ...row, events: nextEvents });
   }
 
@@ -232,7 +244,7 @@ export function NotificationPreferenceCard() {
                       <input
                         type="checkbox"
                         aria-label={e.labelTh}
-                        checked={row.events.includes(e.key)}
+                        checked={effectiveEvents(row).includes(e.key)}
                         disabled={busy}
                         onChange={() => toggleEvent(row, e.key)}
                         className="mt-1"

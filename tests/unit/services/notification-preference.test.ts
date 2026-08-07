@@ -14,7 +14,7 @@ import {
   removeNotificationPreference,
   subscribersForEvent,
 } from '@/services/notification-preference';
-import { notificationEventKeys } from '@/config/notification-events';
+import { implementedNotificationEvents } from '@/config/notification-events';
 
 let db: DatabaseAdapter;
 process.env.ENCRYPTION_KEY = generateKey();
@@ -177,10 +177,42 @@ describe('notification-preference service', () => {
          VALUES ('legacy', '3320500282199', '10670', true, ?, ?)`,
         [now, now],
       );
+      // …but only to events that can actually FIRE. Expanding to the full
+      // catalog would round-trip through the UI and be saved back as explicit
+      // opt-ins for events the user was never shown a checkbox for, so they
+      // would silently start receiving Phase-2 events on the day those ship.
       const prefs = await listNotificationPreferences(db, '3320500282199');
-      expect(prefs[0].events).toEqual(notificationEventKeys());
+      expect(prefs[0].events).toEqual(implementedNotificationEvents().map((e) => e.key));
+      expect(prefs[0].events).not.toContain('partograph_critical');
+      // Delivery for the events that exist today is unaffected.
       const subs = await subscribersForEvent(db, '10670', 'anc_hr3');
       expect(subs.map((s) => s.cid)).toContain('3320500282199');
+    });
+
+    it('a legacy row round-tripped through the UI does not gain unimplemented events', async () => {
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO notification_preferences
+           (id, user_cid, hospital_code, moph_line_enabled, created_at, updated_at)
+         VALUES ('legacy2', '3320500282198', '10670', true, ?, ?)`,
+        [now, now],
+      );
+      // What the card would send back after the user touches one checkbox.
+      const listed = await listNotificationPreferences(db, '3320500282198');
+      await saveNotificationPreference(db, {
+        userCid: '3320500282198',
+        hospitalCode: '10670',
+        mophLineEnabled: true,
+        detailLevel: 'full',
+        digestHour: 8,
+        events: listed[0].events,
+      });
+      const rows = await db.query<{ event_key: string; enabled: boolean }>(
+        `SELECT s.event_key, s.enabled FROM notification_event_subscriptions s
+         JOIN notification_preferences p ON p.id = s.preference_id
+         WHERE p.user_cid = '3320500282198' AND s.enabled = true`,
+      );
+      expect(rows.map((r) => r.event_key).sort()).toEqual(['anc_hr3', 'maternal_triage']);
     });
 
     it('returns only subscribers of the requested event, with their detail level', async () => {
