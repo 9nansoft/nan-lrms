@@ -25,6 +25,7 @@ import { videoCallParticipantsTable } from './video-call-participants';
 import { mophAlertLogTable } from './moph-alert-log';
 import { mophCenterMonitorsTable } from './moph-center-monitors';
 import { notificationPreferencesTable } from './notification-preferences';
+import { notificationEventSubscriptionsTable } from './notification-event-subscriptions';
 
 export {
   hospitalsTable,
@@ -53,6 +54,7 @@ export {
   mophAlertLogTable,
   mophCenterMonitorsTable,
   notificationPreferencesTable,
+  notificationEventSubscriptionsTable,
 };
 
 // All tables in creation order (respects foreign key dependencies)
@@ -70,6 +72,8 @@ export const ALL_TABLES: TableDefinition[] = [
   mophCenterMonitorsTable,
   // Per-user MOPH LINE notification opt-in — hospital-scoped, no FK to users.
   notificationPreferencesTable,
+  // Per-event opt-in rows hanging off a preference; must follow it.
+  notificationEventSubscriptionsTable,
   mophAlertLogTable,
   usersTable,
   maternalJourneysTable,

@@ -11,6 +11,11 @@ export const notificationPreferencesTable: TableDefinition = {
     { name: 'user_cid', type: 'string', maxLength: 13 },
     { name: 'hospital_code', type: 'string', maxLength: 10 },
     { name: 'moph_line_enabled', type: 'boolean', defaultValue: true },
+    // 'full' = patient-level detail (own hospital only); 'aggregate' = counts
+    // only. The send path may downgrade this, never upgrade it.
+    { name: 'detail_level', type: 'string', maxLength: 10, defaultValue: 'aggregate' },
+    // Hour of day (Asia/Bangkok) the daily digest is sent for this row.
+    { name: 'digest_hour', type: 'integer', defaultValue: 8 },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },
   ],
