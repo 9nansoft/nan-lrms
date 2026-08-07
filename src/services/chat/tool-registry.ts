@@ -159,7 +159,11 @@ const REGISTRY: Record<string, ChatToolSpec> = {
         parameters: {
           type: 'object',
           properties: {
-            id: { type: 'string', enum: playbookIds(), description: 'รหัสคู่มือจากรายการที่ให้ไว้' },
+            id: {
+              type: 'string',
+              enum: playbookIds(),
+              description: 'รหัสคู่มือจากรายการที่ให้ไว้',
+            },
           },
           required: ['id'],
           additionalProperties: false,
