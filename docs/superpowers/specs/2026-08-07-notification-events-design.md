@@ -36,6 +36,22 @@ reaching anyone who is not looking at a screen.
 | Who may subscribe | **Any logged-in staff user** with a valid 13-digit CID, self-service |
 | Cross-hospital | Own hospital → patient-level. Other watched hospitals → **aggregate counts only**. Exception: referrals where the user's own hospital is a party stay patient-level |
 
+> **⚠️ Phase 1 shipped WITHOUT cross-hospital subscription (2026-08-07, `fcb6074`).**
+> The aggregate rule above is a *design decision that is not yet enforceable*.
+> `buildAlertFlex` renders `กรณี: ${caseRef}` to every recipient scope
+> (`moph-alert-templates.ts:107`) and the ANC HR3 caseRef is `ANC-<cid>-G<n>`
+> (`browser-push/route.ts:394`) — the patient's national ID. `detail_level` is
+> derived on the preference row but is **not persisted on `moph_alert_log`**, so
+> the drain cannot honour it. Shipping the recipient-widening half alone leaked
+> patient CIDs across hospitals; `PUT` now refuses any hospital but the
+> session's, and the UI's add-hospital control is withdrawn.
+>
+> **Phase 2 must land these together, in this order:** (1) add `detail_level` to
+> `moph_alert_log` and write it from the resolved recipient; (2) make
+> `buildAlertFlex` suppress `caseRef` — and audit `title` and `confirm_url` for
+> identifiers too — when detail is not `full`; (3) only then re-open the API and
+> restore the UI control.
+
 ## Event catalog
 
 `alert_source` **is** the event key. The existing dedup unique index
