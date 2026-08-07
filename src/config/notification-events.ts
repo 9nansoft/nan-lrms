@@ -30,7 +30,7 @@ export const NOTIFICATION_EVENTS: readonly NotificationEvent[] = [
     implemented: true,
   },
   {
-    key: 'labor_emergency',
+    key: 'maternal_triage',
     tier: 'urgent',
     detail: 'patient',
     labelTh: 'ภาวะฉุกเฉินในห้องคลอด',

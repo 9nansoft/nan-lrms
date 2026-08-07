@@ -22,7 +22,7 @@ describe('notification event catalog', () => {
       implementedNotificationEvents()
         .map((e) => e.key)
         .sort(),
-    ).toEqual(['anc_hr3', 'labor_emergency']);
+    ).toEqual(['anc_hr3', 'maternal_triage']);
   });
 
   it('resolves a known key and returns null for an unknown one', () => {
