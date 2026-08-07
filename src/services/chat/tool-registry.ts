@@ -27,12 +27,18 @@ import { formatBangkokStamp } from '@/lib/bangkok-time';
 import { executeToolCall } from './tool-router';
 import { getPatientContextTool } from './tools';
 import { chatToolSurface, chatToolBudget } from '@/config/clinical-chat-tools';
+import { knowledgeCollections } from '@/config/knowledge-config';
+import { askKnowledgeLlmAnswer } from './knowledge-client';
 
 export interface ChatToolContext {
   db: DatabaseAdapter;
   /** Session hcode. Absent for provincial/central users. */
   hospitalCode?: string;
   mode: ClinicalChatMode;
+  /** BMS session id from the browser — the bearer token for the hosted
+   *  knowledge base. Absent for non-BMS logins, which simply cannot use
+   *  ask_medical_ebook (it refuses in-band rather than failing the turn). */
+  bmsSessionId?: string | null;
   /** Per-turn call budget, mutated in place by runChatTool. */
   budget: Map<string, number>;
   /** Names of tools that returned real data this turn — the grounding ledger
@@ -140,12 +146,77 @@ const REGISTRY: Record<string, ChatToolSpec> = {
       return { iso: now.toISOString(), thai: formatBangkokStamp(now), timezone: 'Asia/Bangkok' };
     },
   },
+  ask_medical_ebook: {
+    // Reference lookup, not patient data — province scope, no hcode needed.
+    scope: 'province',
+    tool: {
+      type: 'function',
+      function: {
+        name: 'ask_medical_ebook',
+        description:
+          'ค้นตำราแพทย์/คู่มือยาจากคลังความรู้จริง (ebook-medical, drug-monograph) แล้วได้คำตอบพร้อมอ้างอิง — **ใช้เสมอ** ก่อนตอบคำถามเชิงวิชาการ/แนวทางรักษา/ขนาดยา/ภาวะแทรกซ้อน เช่น "PPH รักษายังไง" "magnesium sulfate ขนาดเท่าไร" ห้ามตอบจากความจำของโมเดลเอง **อย่าใช้เมื่อ** ถามจำนวน/สถิติผู้ป่วยในระบบ (ใช้เครื่องมือสถิติ) — และห้ามใส่ชื่อหรือเลขบัตรผู้ป่วยลงในคำถาม',
+        parameters: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: 'คำถามเชิงวิชาการ (ไม่มีข้อมูลระบุตัวผู้ป่วย)',
+            },
+            collection: {
+              type: 'string',
+              enum: knowledgeCollections(),
+              description: "'ebook-medical' = ตำราแพทย์ · 'drug-monograph' = ข้อมูลยา",
+            },
+          },
+          required: ['question'],
+          additionalProperties: false,
+        },
+      },
+    },
+    execute: async (ctx, args) => {
+      const question = typeof args.question === 'string' ? args.question.trim() : '';
+      if (!question) throw new ToolRefusal('ต้องระบุคำถามที่จะค้นในตำราแพทย์');
+      const requested = typeof args.collection === 'string' ? args.collection : '';
+      const collection = knowledgeCollections().includes(requested)
+        ? requested
+        : knowledgeCollections()[0];
+      try {
+        const res = await askKnowledgeLlmAnswer(question, {
+          sessionId: ctx.bmsSessionId,
+          collection,
+        });
+        if (!res.answer.trim()) {
+          throw new ToolRefusal('ไม่พบเนื้อหาที่เกี่ยวข้องในคลังความรู้');
+        }
+        return {
+          source: 'medical-knowledge-base',
+          collection: res.answer ? res.collection : collection,
+          question,
+          answer: res.answer,
+          cached: res.cached ?? false,
+          note: 'เนื้อหานี้มาจากตำราแพทย์/คู่มือยา ให้เรียบเรียงเป็นภาษาไทยและอ้างอิงว่ามาจากคลังความรู้ ไม่ใช่ข้อมูลผู้ป่วยรายบุคคล',
+        };
+      } catch (error) {
+        // A knowledge outage must not kill the turn — the model is told the
+        // reference is unavailable so it can answer cautiously and say so.
+        if (error instanceof ToolRefusal) throw error;
+        throw new ToolRefusal(
+          `ค้นคลังความรู้ไม่สำเร็จ: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  },
   [getPatientContextTool.function.name]: {
     scope: 'hospital',
     tool: getPatientContextTool,
     execute: async (ctx, args) => {
       // Already scope-enforced and PDPA-masked (tool-router + context-builder).
-      const res = await executeToolCall(ctx.db, ctx.hospitalCode ?? '', 'get_patient_context', args);
+      const res = await executeToolCall(
+        ctx.db,
+        ctx.hospitalCode ?? '',
+        'get_patient_context',
+        args,
+      );
       if (!res.ok) throw new ToolRefusal(res.message ?? 'ไม่พบข้อมูลผู้ป่วย');
       return res.patient;
     },

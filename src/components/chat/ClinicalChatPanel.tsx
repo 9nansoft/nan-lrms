@@ -8,6 +8,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, Bot, MessageSquareOff } from 'lucide-react';
 import { ClinicalMarkdown } from '@/components/chat/ClinicalMarkdown';
+import { useBmsSession } from '@/contexts/BmsSessionContext';
 import type { ClinicalChatMode } from '@/services/chat/prompt-config';
 
 interface ChatMessageUi {
@@ -23,6 +24,9 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<ChatMessageUi[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
+  // The medical knowledge base authenticates with the user's BMS session id,
+  // which only the browser holds — forward it so ask_medical_ebook can run.
+  const { sessionId } = useBmsSession();
 
   useEffect(() => {
     if (open) listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
@@ -38,7 +42,7 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: text, mode }),
+        body: JSON.stringify({ message: text, mode, bmsSessionId: sessionId }),
       });
       const body = (await res.json().catch(() => ({}))) as { answer?: string; error?: string };
       if (res.status === 503) {

@@ -35,6 +35,9 @@ export interface ChatServiceDeps {
   /** Chat mode: 'clinical' (maternity ward, per-patient RAG) is the default;
    *  'statistics' (dashboard) injects deterministic aggregate counts. */
   mode?: ClinicalChatMode;
+  /** BMS session id forwarded from the browser — bearer for the hosted medical
+   *  knowledge base (ask_medical_ebook). Absent ⇒ that tool refuses in-band. */
+  bmsSessionId?: string | null;
 }
 
 /**
@@ -93,6 +96,7 @@ export async function askClinicalQuestion(
     db: deps.db,
     hospitalCode: deps.hospitalCode,
     mode: isStats ? 'statistics' : 'clinical',
+    bmsSessionId: deps.bmsSessionId,
     budget: new Map(),
     ledger: [],
   };

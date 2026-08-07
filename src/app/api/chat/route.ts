@@ -25,9 +25,13 @@ export async function POST(request: NextRequest) {
   if (!clinicalChatEnabled()) {
     return NextResponse.json({ error: 'ปิดใช้งานผู้ช่วยแชททางคลินิก' }, { status: 503 });
   }
-  let body: { message?: unknown; mode?: unknown };
+  let body: { message?: unknown; mode?: unknown; bmsSessionId?: unknown };
   try {
-    body = (await request.json()) as { message?: unknown; mode?: unknown };
+    body = (await request.json()) as {
+      message?: unknown;
+      mode?: unknown;
+      bmsSessionId?: unknown;
+    };
   } catch {
     return NextResponse.json({ error: 'invalid body' }, { status: 400 });
   }
@@ -81,6 +85,10 @@ export async function POST(request: NextRequest) {
       hospitalCode,
       userId,
       mode,
+      // Browser-held BMS session id — the bearer the hosted medical knowledge
+      // base expects. It is the caller's own session handle, forwarded only to
+      // that service; never logged, never persisted.
+      bmsSessionId: typeof body.bmsSessionId === 'string' ? body.bmsSessionId : null,
     });
     // PDPA trail: WHO asked, WHEN, in which scope — never the question text
     // (clinical detail) and never the answer.
