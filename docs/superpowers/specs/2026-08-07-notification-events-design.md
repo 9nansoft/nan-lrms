@@ -11,11 +11,16 @@ alerts that exist (`anc_hr3`, `labor_emergency`). Two consequences:
 
 1. **It is coarse.** A user who wants referral alerts but not ANC alerts has one
    choice: all or nothing.
-2. **For most users it does nothing at all.** `resolveRecipients`
-   (`src/services/risk-alert.ts:84`) sends only to CIDs in
-   `hospital_consult_doctors` or `moph_center_monitors`; the preference merely
-   *filters* that list. A ward nurse can toggle the switch on and receive
-   nothing, forever, with no indication why.
+2. **It is single-hospital.** The row is created from the session
+   (`hospitalCode` at `route.ts:33`), so a user can only ever subscribe to the
+   hospital they are logged in against — there is no way to watch a second one.
+
+   *(Corrected 2026-08-07: an earlier draft of this spec claimed self-subscribers
+   receive nothing. That is wrong — `resolveRecipients` at
+   `src/services/risk-alert.ts:131-138` already adds any enabled preference CID
+   with scope `self_subscribed`, independent of the consult-doctor list. The
+   recipient model therefore needs no widening; only the event filter and the
+   detail level are new. This shrinks Phase 1.)*
 
 The system already *detects* far more than it notifies about — partograph CDSS
 severity, CPD banding, referral SLA breaches, ANC follow-up gaps, abnormal
@@ -132,10 +137,20 @@ and precisely the "no hardcoded conditions" the constitution forbids.
 recipients(event, hospital) =
     consult_doctors(hospital)          -- existing, detail: full
   ∪ center_monitors(province)          -- existing, bypass opt-in (P1-C)
-  ∪ self_subscribers(hospital, event)  -- NEW: notification_preferences
+  ∪ self_subscribers(hospital, event)  -- EXISTS (risk-alert.ts:131-138);
+                                       --   what is new is the event join:
                                        --   ⋈ notification_event_subscriptions
                                        --   WHERE moph_line_enabled AND enabled
 ```
+
+The self-subscriber union is already implemented. This change adds two things to
+it: the `notification_event_subscriptions` join (so a subscriber receives only
+the events they asked for) and `detailLevel` on the returned recipient.
+
+**Back-compatibility:** a preference row with no `notification_event_subscriptions`
+children means "all events", so every existing subscriber keeps receiving
+`anc_hr3` and `labor_emergency` exactly as today until they touch the new UI.
+Without this rule the migration would silently unsubscribe everyone.
 
 De-duplicated by CID, keeping the **highest** detail level. A recipient present
 in more than one source is sent once.
@@ -212,9 +227,10 @@ the current card's behaviour.
 
 Each phase is independently shippable and independently useful.
 
-1. **Subscription model** — schema, API, UI, recipient resolution, detail
-   levels, deliverability state. No new events fire; the existing two become
-   per-event and multi-hospital. Ships the honesty fix on its own.
+1. **Subscription model** — schema, event catalog, API, UI, the event join and
+   `detailLevel` on recipient resolution. No new events fire; the existing two
+   become per-event and multi-hospital. Ships alone and is what makes every
+   later phase a config entry plus a producer instead of a UI change.
 2. **Urgent producers** — `partograph_critical`, `cpd_high`,
    `referral_incoming`, `referral_overdue`.
 3. **Digest** — the digest builder plus `anc_overdue`, `edc_due_soon`,
