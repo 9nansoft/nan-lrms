@@ -231,42 +231,15 @@ describe('NotificationPreferenceCard', () => {
     });
   });
 
-  it('refuses a hospital code that is not 5 digits instead of saving a dead row', async () => {
-    const fetchMock = vi.fn(
-      async () => ({ ok: true, status: 200, json: async () => GET_BODY }) as Response,
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    const user = userEvent.setup();
-    render(<NotificationPreferenceCard />);
-    await screen.findByRole('checkbox', { name: /ANC HR3/ });
-
-    await user.type(screen.getByRole('textbox', { name: 'เพิ่มโรงพยาบาลที่ต้องการติดตาม' }), '106');
-    await user.click(screen.getByRole('button', { name: 'เพิ่ม' }));
-
-    expect(await screen.findByText(/5 หลัก/)).toBeInTheDocument();
-    const calls = fetchMock.mock.calls as unknown as [string, RequestInit | undefined][];
-    expect(calls.some((c) => c[1]?.method === 'PUT')).toBe(false);
-  });
-
-  it('refuses a hospital already followed instead of wiping its saved events', async () => {
-    const fetchMock = vi.fn(
-      async () => ({ ok: true, status: 200, json: async () => GET_BODY }) as Response,
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    const user = userEvent.setup();
-    render(<NotificationPreferenceCard />);
-    await screen.findByRole('checkbox', { name: /ANC HR3/ });
-
-    await user.type(
-      screen.getByRole('textbox', { name: 'เพิ่มโรงพยาบาลที่ต้องการติดตาม' }),
-      '10670',
-    );
-    await user.click(screen.getByRole('button', { name: 'เพิ่ม' }));
-
-    expect(await screen.findByText(/ติดตาม.*อยู่แล้ว/)).toBeInTheDocument();
-    const calls = fetchMock.mock.calls as unknown as [string, RequestInit | undefined][];
-    expect(calls.some((c) => c[1]?.method === 'PUT')).toBe(false);
-  });
+  // REMOVED 2026-08-07: two tests covered client-side validation of the
+  // free-text "add any hospital" box (non-5-digit code, already-followed code).
+  // That control is withdrawn — the API now refuses any hospital other than the
+  // session's, because alert content still carries the patient's case reference
+  // (an ANC caseRef embeds the national ID) to every recipient scope. The tests
+  // are obsolete rather than inconvenient: the behaviour they guarded no longer
+  // exists. The server-side refusal is pinned in
+  // tests/unit/api/profile-notification-preference.test.ts
+  // ('REFUSES a subscription to a hospital that is not the session hospital').
 
   it('offers a one-click add for the session hospital when nothing is followed yet', async () => {
     const empty = { ...GET_BODY, preferences: [] };

@@ -34,7 +34,6 @@ const TIER_LABEL: Record<NotificationEventDto['tier'], string> = {
 };
 
 const HOSPITAL_NAMES = new Map(KK_HOSPITALS.map((h) => [h.hcode, h.name]));
-const HOSPITAL_CODE = /^\d{5}$/;
 
 /** Nurses recognise หน่วยบริการ by name; the code is the fallback, not the label. */
 function hospitalLabel(code: string): string {
@@ -49,7 +48,6 @@ export function NotificationPreferenceCard() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [addCode, setAddCode] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,23 +162,6 @@ export function NotificationPreferenceCard() {
       digestHour: 8,
       events: [],
     });
-  }
-
-  function addHospital() {
-    const code = addCode.trim();
-    if (!HOSPITAL_CODE.test(code)) {
-      // The API accepts any non-empty string, so a typo would be saved as a
-      // subscription that can never fire. Catch it where the user can fix it.
-      setError('รหัสโรงพยาบาลต้องเป็นตัวเลข 5 หลัก — กรุณาตรวจสอบแล้วกรอกใหม่');
-      return;
-    }
-    if (preferences.some((r) => r.hospitalCode === code)) {
-      // Saving it again would overwrite the row with an empty event set.
-      setError(`ติดตาม ${hospitalLabel(code)} อยู่แล้ว — เลือกเหตุการณ์ในกล่องด้านบนได้เลย`);
-      return;
-    }
-    setAddCode('');
-    followHospital(code);
   }
 
   const tiers: NotificationEventDto['tier'][] = ['urgent', 'digest'];
@@ -300,22 +281,15 @@ export function NotificationPreferenceCard() {
         </button>
       )}
 
-      <div className="flex items-center gap-2">
-        <input
-          value={addCode}
-          onChange={(e) => setAddCode(e.target.value)}
-          placeholder="รหัสโรงพยาบาล 5 หลัก"
-          aria-label="เพิ่มโรงพยาบาลที่ต้องการติดตาม"
-          className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
-        />
-        <button
-          disabled={!addCode.trim() || busy}
-          onClick={addHospital}
-          className="rounded bg-teal-600 px-3 py-1 text-sm text-white disabled:opacity-50"
-        >
-          เพิ่ม
-        </button>
-      </div>
+      {/* The free-text hospital box is withdrawn for now: the API refuses any
+          hospital other than the session's, because alert content still carries
+          the patient's case reference (an ANC caseRef embeds the national ID)
+          for every recipient scope. Offering the box would only produce an
+          error. It returns with the aggregate-rendering work. */}
+      <p className="text-xs text-slate-500">
+        ขณะนี้ติดตามได้เฉพาะโรงพยาบาลของคุณ —
+        การติดตามโรงพยาบาลอื่นจะเปิดใช้เมื่อระบบรองรับการแจ้งเตือนแบบไม่ระบุตัวผู้ป่วย
+      </p>
     </section>
   );
 }

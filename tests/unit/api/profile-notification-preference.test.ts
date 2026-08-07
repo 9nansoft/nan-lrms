@@ -117,7 +117,7 @@ describe('multi-hospital preference API', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('derives detailLevel=full for the session hospital and aggregate for others', async () => {
+  it('derives detailLevel=full for the session hospital', async () => {
     mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
 
     const own = await PUT(
@@ -129,19 +129,14 @@ describe('multi-hospital preference API', () => {
       }) as never,
     );
     expect(((await own.json()) as { detailLevel: string }).detailLevel).toBe('full');
-
-    const other = await PUT(
-      jsonRequest({
-        hospitalCode: '11002',
-        mophLineEnabled: true,
-        digestHour: 8,
-        events: ['anc_hr3'],
-      }) as never,
-    );
-    expect(((await other.json()) as { detailLevel: string }).detailLevel).toBe('aggregate');
   });
 
-  it('ignores a detailLevel supplied in the body (no privilege escalation)', async () => {
+  // SECURITY: watching another hospital is refused outright, not merely
+  // downgraded to 'aggregate'. Nothing downstream reads detailLevel yet —
+  // buildAlertFlex renders `กรณี: ${caseRef}` for every scope, and the ANC HR3
+  // caseRef is `ANC-<cid>-G<n>`, the patient's national ID. Downgrading alone
+  // would still have sent another hospital's patient CIDs to the subscriber.
+  it('REFUSES a subscription to a hospital that is not the session hospital', async () => {
     mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
     const res = await PUT(
       jsonRequest({
@@ -149,17 +144,39 @@ describe('multi-hospital preference API', () => {
         mophLineEnabled: true,
         digestHour: 8,
         events: ['anc_hr3'],
+      }) as never,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/[ก-๙]/);
+
+    // …and nothing was written for that hospital.
+    const body = (await (await GET(new Request('http://t/api') as never)).json()) as {
+      preferences: { hospitalCode: string }[];
+    };
+    expect(body.preferences.map((p) => p.hospitalCode)).not.toContain('11002');
+  });
+
+  it('ignores a detailLevel supplied in the body (no privilege escalation)', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
+    const res = await PUT(
+      jsonRequest({
+        hospitalCode: '10670',
+        mophLineEnabled: true,
+        digestHour: 8,
+        events: ['anc_hr3'],
         detailLevel: 'full',
       }) as never,
     );
-    expect(((await res.json()) as { detailLevel: string }).detailLevel).toBe('aggregate');
+    // 'full' here is correct because it IS the session hospital — the point is
+    // that the value came from the server, not from the body.
+    expect(((await res.json()) as { detailLevel: string }).detailLevel).toBe('full');
   });
 
   it('GET returns only implemented events plus every watched hospital', async () => {
     mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
     await PUT(
       jsonRequest({
-        hospitalCode: '11002',
+        hospitalCode: '10670',
         mophLineEnabled: true,
         digestHour: 8,
         events: ['anc_hr3'],
@@ -169,8 +186,10 @@ describe('multi-hospital preference API', () => {
       events: { key: string }[];
       preferences: { hospitalCode: string }[];
     };
+    // Only the two events with a live producer are offered — an unimplemented
+    // one rendered as a checkbox would promise a notification that cannot fire.
     expect(body.events.map((e) => e.key).sort()).toEqual(['anc_hr3', 'maternal_triage']);
-    expect(body.preferences.map((p) => p.hospitalCode)).toContain('11002');
+    expect(body.preferences.map((p) => p.hospitalCode)).toContain('10670');
   });
 
   it('rejects an unknown event key', async () => {
@@ -201,21 +220,28 @@ describe('multi-hospital preference API', () => {
 
   it('DELETE removes a watched hospital', async () => {
     mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
-    await PUT(
+    const created = await PUT(
       jsonRequest({
-        hospitalCode: '11002',
+        hospitalCode: '10670',
         mophLineEnabled: true,
         digestHour: 8,
         events: ['anc_hr3'],
       }) as never,
     );
+    // Guard against a vacuous pass: prove the row EXISTED before deleting it.
+    expect(created.status).toBe(200);
+    const before = (await (await GET(new Request('http://t/api') as never)).json()) as {
+      preferences: { hospitalCode: string }[];
+    };
+    expect(before.preferences.map((p) => p.hospitalCode)).toContain('10670');
+
     const res = await DELETE(
-      new Request('http://t/api?hospitalCode=11002', { method: 'DELETE' }) as never,
+      new Request('http://t/api?hospitalCode=10670', { method: 'DELETE' }) as never,
     );
     expect(res.status).toBe(200);
     const body = (await (await GET(new Request('http://t/api') as never)).json()) as {
       preferences: { hospitalCode: string }[];
     };
-    expect(body.preferences.map((p) => p.hospitalCode)).not.toContain('11002');
+    expect(body.preferences.map((p) => p.hospitalCode)).not.toContain('10670');
   });
 });
