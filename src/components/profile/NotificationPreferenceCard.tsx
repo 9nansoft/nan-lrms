@@ -1,74 +1,321 @@
-// Single MOPH LINE opt-in toggle (spec 2026-08-05). Optimistic with revert on
-// error; actionable Thai error (constitution §V).
 'use client';
-import { useEffect, useState } from 'react';
+
+// Per-hospital, per-event notification preferences.
+// Plan: docs/superpowers/plans/2026-08-07-notification-events.md
+//
+// Optimistic with revert on error and an actionable Thai message — the same
+// contract the single-switch version had (constitution §V).
+import { useEffect, useState, useCallback } from 'react';
+import { KK_HOSPITALS } from '@/config/hospitals';
+
+interface NotificationEventDto {
+  key: string;
+  tier: 'urgent' | 'digest';
+  detail: 'patient' | 'aggregate';
+  labelTh: string;
+  descriptionTh: string;
+  implemented: boolean;
+}
+
+interface PreferenceDto {
+  id: string;
+  userCid: string;
+  hospitalCode: string;
+  mophLineEnabled: boolean;
+  /** DERIVED server-side from the session hospital — displayed, never sent. */
+  detailLevel: 'full' | 'aggregate';
+  digestHour: number;
+  events: string[];
+}
+
+const TIER_LABEL: Record<NotificationEventDto['tier'], string> = {
+  urgent: 'ทันที',
+  digest: 'สรุปรายวัน',
+};
+
+const HOSPITAL_NAMES = new Map(KK_HOSPITALS.map((h) => [h.hcode, h.name]));
+const HOSPITAL_CODE = /^\d{5}$/;
+
+/** Nurses recognise หน่วยบริการ by name; the code is the fallback, not the label. */
+function hospitalLabel(code: string): string {
+  const name = HOSPITAL_NAMES.get(code);
+  return name ? `${name} (${code})` : `รหัส ${code}`;
+}
 
 export function NotificationPreferenceCard() {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [ownHospitalCode, setOwnHospitalCode] = useState('');
+  const [events, setEvents] = useState<NotificationEventDto[]>([]);
+  const [preferences, setPreferences] = useState<PreferenceDto[]>([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [addCode, setAddCode] = useState('');
 
-  useEffect(() => {
-    fetch('/api/profile/notification-preference')
-      .then((r) => {
-        if (!r.ok) throw new Error('http');
-        return r.json() as Promise<{ mophLineEnabled: boolean }>;
-      })
-      .then((b) => setEnabled(b.mophLineEnabled))
-      .catch(() => setError('โหลดการตั้งค่าไม่สำเร็จ ลองใหม่อีกครั้ง'));
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/profile/notification-preference');
+      if (!res.ok) throw new Error('http');
+      const body = (await res.json()) as {
+        ownHospitalCode?: unknown;
+        events?: unknown;
+        preferences?: unknown;
+      };
+      // Validate at the boundary: a body without these arrays threw inside
+      // render and blanked the whole profile page. Failing to load must also
+      // never read as "you follow nothing", which would invite the user to
+      // re-add hospitals they already follow.
+      if (!Array.isArray(body.events) || !Array.isArray(body.preferences)) {
+        throw new Error('malformed response');
+      }
+      setOwnHospitalCode(typeof body.ownHospitalCode === 'string' ? body.ownHospitalCode : '');
+      setEvents(body.events as NotificationEventDto[]);
+      setPreferences(body.preferences as PreferenceDto[]);
+    } catch {
+      setError('โหลดการตั้งค่าไม่สำเร็จ ลองใหม่อีกครั้ง');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  async function toggle() {
-    if (enabled === null || busy) return;
-    const previous = enabled;
-    const next = !enabled;
-    setEnabled(next);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /** Persist one row. Optimistic: `next` is applied immediately, reverted on failure. */
+  async function save(next: PreferenceDto) {
+    // subscribersForEvent() ANDs moph_line_enabled into its lookup, and this
+    // card has no switch for it. A row left OFF by the old single-switch
+    // version would show every box ticked and still deliver nothing, with no
+    // way to see why — so bind the flag to the selection: at least one chosen
+    // event means "send me LINE for this hospital", none means silence.
+    const row: PreferenceDto = { ...next, mophLineEnabled: next.events.length > 0 };
+    const previous = preferences;
+    setPreferences((rows) =>
+      rows.some((r) => r.hospitalCode === row.hospitalCode)
+        ? rows.map((r) => (r.hospitalCode === row.hospitalCode ? row : r))
+        : [...rows, row],
+    );
     setError('');
     setBusy(true);
     try {
       const res = await fetch('/api/profile/notification-preference', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mophLineEnabled: next }),
+        // detailLevel is deliberately absent: the server derives it, and
+        // sending it would invite a client to ask for patient-level detail at
+        // a hospital that is not its own.
+        body: JSON.stringify({
+          hospitalCode: row.hospitalCode,
+          mophLineEnabled: row.mophLineEnabled,
+          digestHour: row.digestHour,
+          events: row.events,
+        }),
       });
       if (!res.ok) throw new Error('http');
-      const body = (await res.json()) as { mophLineEnabled: boolean };
-      setEnabled(body.mophLineEnabled);
+      const saved = (await res.json()) as PreferenceDto;
+      setPreferences((rows) =>
+        rows.some((r) => r.hospitalCode === saved.hospitalCode)
+          ? rows.map((r) => (r.hospitalCode === saved.hospitalCode ? saved : r))
+          : [...rows, saved],
+      );
     } catch {
-      setEnabled(previous); // optimistic revert
+      setPreferences(previous);
       setError('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง');
     } finally {
       setBusy(false);
     }
   }
 
+  async function removeHospital(hospitalCode: string) {
+    const previous = preferences;
+    setPreferences((rows) => rows.filter((r) => r.hospitalCode !== hospitalCode));
+    setError('');
+    setBusy(true);
+    try {
+      const res = await fetch(
+        `/api/profile/notification-preference?hospitalCode=${encodeURIComponent(hospitalCode)}`,
+        { method: 'DELETE' },
+      );
+      if (!res.ok) throw new Error('http');
+    } catch {
+      setPreferences(previous);
+      setError('ลบไม่สำเร็จ ลองใหม่อีกครั้ง');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleEvent(row: PreferenceDto, key: string) {
+    const nextEvents = row.events.includes(key)
+      ? row.events.filter((k) => k !== key)
+      : [...row.events, key];
+    void save({ ...row, events: nextEvents });
+  }
+
+  /** New rows start silent: nothing is delivered until an event is ticked. */
+  function followHospital(code: string) {
+    void save({
+      id: '',
+      userCid: '',
+      hospitalCode: code,
+      mophLineEnabled: false,
+      detailLevel: code === ownHospitalCode ? 'full' : 'aggregate',
+      digestHour: 8,
+      events: [],
+    });
+  }
+
+  function addHospital() {
+    const code = addCode.trim();
+    if (!HOSPITAL_CODE.test(code)) {
+      // The API accepts any non-empty string, so a typo would be saved as a
+      // subscription that can never fire. Catch it where the user can fix it.
+      setError('รหัสโรงพยาบาลต้องเป็นตัวเลข 5 หลัก — กรุณาตรวจสอบแล้วกรอกใหม่');
+      return;
+    }
+    if (preferences.some((r) => r.hospitalCode === code)) {
+      // Saving it again would overwrite the row with an empty event set.
+      setError(`ติดตาม ${hospitalLabel(code)} อยู่แล้ว — เลือกเหตุการณ์ในกล่องด้านบนได้เลย`);
+      return;
+    }
+    setAddCode('');
+    followHospital(code);
+  }
+
+  const tiers: NotificationEventDto['tier'][] = ['urgent', 'digest'];
+  const ownIsFollowed = preferences.some((r) => r.hospitalCode === ownHospitalCode);
+
   return (
-    <section className="rounded-2xl border border-slate-200 p-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="font-medium">รับการแจ้งเตือน MOPH ทาง LINE</p>
-          <p className="text-xs text-slate-500">ผู้ป่วยเสี่ยงสูง / ฉุกเฉิน</p>
-        </div>
-        <button
-          role="switch"
-          aria-checked={enabled === true}
-          disabled={enabled === null || busy}
-          onClick={() => void toggle()}
-          className={`relative h-7 w-14 rounded-full transition ${enabled ? 'bg-teal-600' : 'bg-slate-300'}`}
-        >
-          <span
-            className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
-              enabled ? 'left-8' : 'left-1'
-            }`}
-          />
-        </button>
+    <section className="space-y-4 rounded-2xl border border-slate-200 p-4">
+      <div>
+        <p className="font-medium">การแจ้งเตือนทาง LINE (MOPH Prompt)</p>
+        <p className="text-xs text-slate-500">
+          เลือกเหตุการณ์ที่ต้องการรับ และโรงพยาบาลที่ต้องการติดตาม
+        </p>
       </div>
-      {busy && <p className="mt-2 text-xs text-slate-500">กำลังบันทึก…</p>}
+
+      {loading && <p className="text-xs text-slate-500">กำลังโหลดการตั้งค่า…</p>}
+      {busy && <p className="text-xs text-slate-500">กำลังบันทึก…</p>}
       {error && (
-        <p className="mt-2 text-xs text-rose-600" role="alert">
+        <p className="text-sm text-rose-700" role="alert">
           {error}
         </p>
       )}
+
+      {/* Suppressed while an error is showing: "you follow nothing" is a claim
+          about saved state we cannot make when the load failed. */}
+      {!loading && !error && preferences.length === 0 && (
+        <p className="text-xs text-slate-500">
+          ยังไม่ได้ติดตามโรงพยาบาลใด — เพิ่มโรงพยาบาลก่อนจึงจะได้รับแจ้งเตือน
+        </p>
+      )}
+
+      {preferences.map((row) => {
+        const isOwn = row.hospitalCode === ownHospitalCode;
+        const hasDigest = events.some((e) => e.tier === 'digest' && row.events.includes(e.key));
+        return (
+          <div key={row.hospitalCode} className="rounded-xl border border-slate-200 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">{hospitalLabel(row.hospitalCode)}</p>
+                <p className="text-xs text-slate-500">
+                  {/* Read from the row, not re-derived here: the server decides
+                      how much detail a hospital's alerts may carry, and this
+                      line is the user's only view of that decision. */}
+                  {row.detailLevel === 'full'
+                    ? 'โรงพยาบาลของคุณ — แจ้งเตือนระดับผู้ป่วยได้'
+                    : 'รับเฉพาะยอดรวม ไม่ระบุตัวผู้ป่วย'}
+                </p>
+              </div>
+              {!isOwn && (
+                <button
+                  onClick={() => void removeHospital(row.hospitalCode)}
+                  disabled={busy}
+                  className="text-xs text-slate-500 hover:text-rose-700 disabled:opacity-50"
+                  aria-label={`เลิกติดตาม ${row.hospitalCode}`}
+                >
+                  เลิกติดตาม
+                </button>
+              )}
+            </div>
+
+            {tiers.map((tier) => {
+              const tierEvents = events.filter((e) => e.tier === tier);
+              if (tierEvents.length === 0) return null;
+              return (
+                <div key={tier} className="mt-2">
+                  <p className="text-[11px] font-semibold text-slate-400">{TIER_LABEL[tier]}</p>
+                  {tierEvents.map((e) => (
+                    <label key={e.key} className="mt-1 flex items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        aria-label={e.labelTh}
+                        checked={row.events.includes(e.key)}
+                        disabled={busy}
+                        onChange={() => toggleEvent(row, e.key)}
+                        className="mt-1"
+                      />
+                      <span>
+                        {e.labelTh}
+                        <span className="block text-xs text-slate-500">{e.descriptionTh}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              );
+            })}
+
+            {hasDigest && (
+              <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                เวลาส่งสรุปรายวัน
+                <select
+                  value={row.digestHour}
+                  aria-label="เวลาส่งสรุปรายวัน"
+                  disabled={busy}
+                  onChange={(ev) => void save({ ...row, digestHour: Number(ev.target.value) })}
+                  className="rounded border border-slate-300 px-2 py-1"
+                >
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>
+                      {String(h).padStart(2, '0')}:00 น.
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Without this a new user, who has no rows at all, would have to know
+          their own 5-digit hospital code to receive anything. */}
+      {!loading && ownHospitalCode !== '' && !ownIsFollowed && (
+        <button
+          onClick={() => followHospital(ownHospitalCode)}
+          disabled={busy}
+          className="rounded bg-teal-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+        >
+          เพิ่มโรงพยาบาลของคุณ ({hospitalLabel(ownHospitalCode)})
+        </button>
+      )}
+
+      <div className="flex items-center gap-2">
+        <input
+          value={addCode}
+          onChange={(e) => setAddCode(e.target.value)}
+          placeholder="รหัสโรงพยาบาล 5 หลัก"
+          aria-label="เพิ่มโรงพยาบาลที่ต้องการติดตาม"
+          className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+        />
+        <button
+          disabled={!addCode.trim() || busy}
+          onClick={addHospital}
+          className="rounded bg-teal-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+        >
+          เพิ่ม
+        </button>
+      </div>
     </section>
   );
 }
