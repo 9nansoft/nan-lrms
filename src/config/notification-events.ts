@@ -59,7 +59,7 @@ export const NOTIFICATION_EVENTS: readonly NotificationEvent[] = [
     detail: 'patient',
     labelTh: 'มีเคสส่งต่อเข้ามา',
     descriptionTh: 'มีการส่งต่อผู้ป่วยมายังโรงพยาบาลนี้',
-    implemented: false,
+    implemented: true,
   },
   {
     key: 'referral_overdue',
@@ -67,7 +67,7 @@ export const NOTIFICATION_EVENTS: readonly NotificationEvent[] = [
     detail: 'patient',
     labelTh: 'ใบส่งต่อค้างเกินเวลา',
     descriptionTh: 'ใบส่งต่อที่ยังไม่ได้รับการตอบรับเกินเกณฑ์เวลา',
-    implemented: false,
+    implemented: true,
   },
   {
     key: 'anc_overdue',

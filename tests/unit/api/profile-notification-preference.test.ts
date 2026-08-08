@@ -212,6 +212,8 @@ describe('multi-hospital preference API', () => {
       'cpd_high',
       'maternal_triage',
       'partograph_critical',
+      'referral_incoming',
+      'referral_overdue',
     ]);
     expect(body.preferences.map((p) => p.hospitalCode)).toContain('10670');
   });

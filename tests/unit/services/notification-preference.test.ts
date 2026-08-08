@@ -14,7 +14,27 @@ import {
   removeNotificationPreference,
   subscribersForEvent,
 } from '@/services/notification-preference';
-import { implementedNotificationEvents } from '@/config/notification-events';
+import { implementedNotificationEvents, notificationEventKeys } from '@/config/notification-events';
+
+/**
+ * A catalog event that genuinely has no producer today.
+ *
+ * DERIVED, never hardcoded: this assertion has already been hollowed out twice
+ * by shipping the very event it named (partograph_critical in Phase 2-A,
+ * referral_incoming in Phase 2-B). Anchoring it to the catalog means the next
+ * producer moves it instead of silently making it vacuous.
+ */
+function anUnimplementedEventKey(): string {
+  const implemented = new Set(implementedNotificationEvents().map((e) => e.key));
+  const key = notificationEventKeys().find((k) => !implemented.has(k));
+  if (!key) {
+    throw new Error(
+      'every catalog event now has a producer — these assertions need a new way to ' +
+        'express "an event with no producer", or they test nothing',
+    );
+  }
+  return key;
+}
 
 let db: DatabaseAdapter;
 process.env.ENCRYPTION_KEY = generateKey();
@@ -183,10 +203,8 @@ describe('notification-preference service', () => {
       // would silently start receiving Phase-2 events on the day those ship.
       const prefs = await listNotificationPreferences(db, '3320500282199');
       expect(prefs[0].events).toEqual(implementedNotificationEvents().map((e) => e.key));
-      // A still-unimplemented event must stay out. (This was 'partograph_critical'
-      // until its Phase-2 producer shipped; the assertion has to track a key that
-      // is genuinely producerless or it stops testing anything.)
-      expect(prefs[0].events).not.toContain('referral_incoming');
+      // A still-unimplemented event must stay out.
+      expect(prefs[0].events).not.toContain(anUnimplementedEventKey());
       // Delivery for the events that exist today is unaffected.
       const subs = await subscribersForEvent(db, '10670', 'anc_hr3');
       expect(subs.map((s) => s.cid)).toContain('3320500282199');
@@ -222,7 +240,7 @@ describe('notification-preference service', () => {
       );
       // Pin the guarantee itself, not just the current catalog: nothing without
       // a producer may be written back as an explicit opt-in.
-      expect(rows.map((r) => r.event_key)).not.toContain('referral_incoming');
+      expect(rows.map((r) => r.event_key)).not.toContain(anUnimplementedEventKey());
     });
 
     it('returns only subscribers of the requested event, with their detail level', async () => {
