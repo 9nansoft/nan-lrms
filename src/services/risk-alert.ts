@@ -76,6 +76,11 @@ interface Recipient {
 const HIGH_RULE_ID = 'hr3';
 const HIGH_ALERT_SOURCE = 'anc_hr3';
 const EMERGENCY_ALERT_SOURCE = 'maternal_triage';
+// Phase 2 producers. The alert_source string IS the subscription key
+// (resolveRecipients matches it against notification_event_subscriptions), so
+// these must stay identical to the catalog keys in config/notification-events.
+const PARTOGRAPH_ALERT_SOURCE = 'partograph_critical';
+const PARTOGRAPH_RULE_ID = 'partograph_critical';
 
 /** Resolve active recipients for a hospital + province.
  *  P1-C contract (codex gap-sweep):
@@ -290,6 +295,22 @@ export async function enqueueEmergencyAlert(
 ): Promise<number> {
   return enqueueAlertEvent(db, ctx, 'emergency', EMERGENCY_ALERT_SOURCE, ctx.ruleId);
 }
+
+/**
+ * Partograph CRITICAL producer. Caller MUST have already gated on a severity
+ * TRANSITION into CRITICAL (`to === 'CRITICAL' && from !== 'CRITICAL'`).
+ *
+ * Severity is 'emergency', not 'high': a labour crossing the CDSS action line
+ * is an act-now event, the same tier as maternal triage — 'high' is the
+ * watch-closely tier used by ANC HR3 and CPD.
+ */
+export async function enqueuePartographCriticalAlert(
+  db: DatabaseAdapter,
+  ctx: AlertEventContext,
+): Promise<number> {
+  return enqueueAlertEvent(db, ctx, 'emergency', PARTOGRAPH_ALERT_SOURCE, PARTOGRAPH_RULE_ID);
+}
+
 
 // crypto.randomUUID is available in Node 20+; isolated here so tests/dev can
 // stub if ever needed. Not using node:crypto import to keep the service

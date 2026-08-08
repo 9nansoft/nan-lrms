@@ -34,8 +34,8 @@ import {
   saveMaternalScreenAssessment,
   MaternalScreenStoreError,
 } from '@/services/maternal-screening-store';
-import { enqueueEmergencyAlert } from '@/services/risk-alert';
-import { resolveAlertOrigin } from '@/services/alert-context';
+import { enqueueEmergencyAlert, enqueuePartographCriticalAlert } from '@/services/risk-alert';
+import { resolveAlertOrigin, decryptPatientName } from '@/services/alert-context';
 import { EMERGENCY_ACUITY_LABEL_TH } from '@/config/maternal-screen-display';
 import {
   shouldEmitMaternalScreenTransition,
@@ -2700,6 +2700,45 @@ export async function processPartographWebhook(
       severity: sc.to,
       alertCount: sc.alertCount,
     });
+
+    // MOPH Prompt partograph_critical producer. This is the single shared
+    // service site: /api/sync/browser-push reaches it through this same
+    // function, so there is no second call site on the route.
+    //
+    // `from !== 'CRITICAL'` is redundant with severityChanges (which only
+    // carries real transitions) and deliberately kept: it is what states that
+    // a CDSS flapping between CRITICAL readings must not re-alert, independent
+    // of the dedup index. Best-effort — a failure never aborts the sync run.
+    if (sc.to === 'CRITICAL' && sc.from !== 'CRITICAL') {
+      try {
+        const origin = await resolveAlertOrigin(db, hospitalId, hcode);
+        // The partograph payload carries no patient name; cached_patients does,
+        // encrypted at rest. Severity transitions are rare (unlike the
+        // per-observation loop above), so a lookup per transition is cheap.
+        const nameRows = await db.query<{ name: string | null }>(
+          'SELECT name FROM cached_patients WHERE id = ?',
+          [sc.patientId],
+        );
+        await enqueuePartographCriticalAlert(db, {
+          hospitalId,
+          originHcode: hcode,
+          hospitalName: origin.hospitalName,
+          province: origin.province,
+          // PDPA: the AN, never the CID — caseRef is rendered into the message.
+          caseRef: `PARTO-AN-${sc.an}`,
+          localDate: origin.localDate,
+          patientName: decryptPatientName(nameRows[0]?.name),
+          confirmUrl: null,
+        });
+      } catch (e) {
+        // Alerting is best-effort — never let it break partograph ingest.
+        logger.warn('moph_alert_partograph_enqueue_failed', {
+          hospitalId,
+          an: sc.an,
+          error: e,
+        });
+      }
+    }
   }
 
   await db.execute(

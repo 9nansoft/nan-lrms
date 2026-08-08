@@ -7,6 +7,8 @@
 // ANC HR3 site and the maternal-triage site; Phase 2 adds two more producers,
 // so it lives here once (Constitution III/IV).
 import type { DatabaseAdapter } from '@/db/adapter';
+import { decrypt, getEncryptionKey } from '@/lib/encryption';
+import { logger } from '@/lib/logger';
 
 export interface AlertOrigin {
   hospitalName: string;
@@ -40,3 +42,25 @@ export async function resolveAlertOrigin(
   };
 }
 
+/**
+ * Decrypt a `cached_patients.name` value for an alert context, or return null.
+ *
+ * The column is encrypted at rest (PDPA), and `enqueueAlertEvent` re-encrypts
+ * the plaintext it is given for staff-scope rows — that single encryption
+ * contract is deliberate, so a producer must hand over plaintext or nothing.
+ *
+ * Deliberately NOT `decryptSafe`: that returns the input unchanged on failure,
+ * which here would store ciphertext as if it were a name and render it to a
+ * doctor's LINE message. A missing key or a bad value means "no name" and the
+ * alert still goes out — losing the name must never cost the alert.
+ */
+export function decryptPatientName(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    return decrypt(value, getEncryptionKey());
+  } catch (e) {
+    // Misconfiguration or a legacy plaintext row — surface it, do not guess.
+    logger.warn('alert_patient_name_decrypt_failed', { error: e });
+    return null;
+  }
+}
