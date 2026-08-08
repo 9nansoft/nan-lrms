@@ -30,6 +30,7 @@ import {
   OVST_FIRST_VISIT_FOR_CIDS,
 } from '@/config/hosxp-queries';
 import { isStaleAdmission } from '@/config/hospital-network';
+import { normalizeHosxpDate } from '@/lib/hosxp-date';
 import type { ConnectionConfig, SqlApiResponse } from '@/types/bms-browser';
 
 // ─── Webhook payload shapes (mirror src/services/webhook.ts) ────────────────
@@ -215,8 +216,14 @@ export interface BrowserPollResult {
 //                                    "ACTIVE LABOR · PROVINCE" with clinically
 //                                    nonsensical GA values. Matches the
 //                                    Pascal client (KKLRMSWebhookUnit.pas L594).
-const SQL_ACTIVE_LABOUR = `
+export const SQL_ACTIVE_LABOUR = `
   SELECT i.an, i.hn, i.regdate, i.regtime, i.dchdate,
+         -- Delivery signal (วันที่เด็กเกิด). A correlated subquery, not a JOIN:
+         -- a join on the labor table would multiply the patient row if an
+         -- ever carries more than one labour record, silently double-counting
+         -- the ward. MAX() also picks the recorded birth over a NULL sibling.
+         (SELECT MAX(lb.labour_finishdate) FROM labor lb WHERE lb.an = i.an)
+           AS labour_finishdate,
          CONCAT(p.pname, p.fname, ' ', p.lname) AS patient_name,
          p.pname, p.fname, p.lname,
          p.cid, p.birthday, p.height,
@@ -375,7 +382,19 @@ function calcAge(birthday: string | null): number {
 
 // ─── Mappers (raw rows → webhook payload shapes) ────────────────────────────
 
-function mapLabor(row: Record<string, unknown>): BrowserLaborPatient | null {
+/** True when a HOSxP DATE column holds a real date.
+ *
+ *  HOSxP represents "unset" three different ways depending on site and column
+ *  — NULL, '', and the MySQL zero date '0000-00-00'. Treating any of those as
+ *  a date would mark a woman as delivered the moment her labour record is
+ *  opened, which would silently empty the labour board. */
+function hasHosxpDate(value: unknown): boolean {
+  const normalized = normalizeHosxpDate(strOrNull(value));
+  if (!normalized) return false;
+  return !/^0{4}-0{2}-0{2}/.test(normalized);
+}
+
+export function mapLabor(row: Record<string, unknown>): BrowserLaborPatient | null {
   const hn = strOrNull(row.hn);
   const an = strOrNull(row.an);
   const name = strOrNull(row.patient_name);
@@ -411,7 +430,16 @@ function mapLabor(row: Record<string, unknown>): BrowserLaborPatient | null {
     cervical_open_cm_admit: numOrNull(row.cervical_open_size),
     effacement_pct_admit: numOrNull(row.eff),
     station_admit: strOrNull(row.station),
-    labor_status: row.dchdate ? 'DELIVERED' : 'ACTIVE',
+    // DELIVERED means "no longer in labour", and there are two ways to learn
+    // that. `dchdate` is discharge; `labor.labour_finishdate` (วันที่เด็กเกิด)
+    // is the birth itself. Discharge alone is not enough: at รพ.น้ำพอง the ward
+    // completes the labour-room screen but not the discharge screen, so
+    // delivered mothers sat on the ACTIVE board until the 7-day stale-admission
+    // timer removed them (STALE_ADMISSION.autoCloseAfterDays). NOTE the birth
+    // date lives in `labor`, NOT in `ipt_labour` — that table is the labour-room
+    // ADMISSION register and has no delivery timestamp at all, so keying off it
+    // would mark every arriving woman as delivered (BMS Mantis #4105).
+    labor_status: row.dchdate || hasHosxpDate(row.labour_finishdate) ? 'DELIVERED' : 'ACTIVE',
   };
 }
 

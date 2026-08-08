@@ -52,6 +52,13 @@ export const ACTIVE_LABOR_PATIENTS: SqlQueryTemplate = {
     WHERE i.confirm_discharge = 'N'
       AND i.ipt_admit_type_id = 3
     ORDER BY i.regdate DESC`,
+  // NOTE (2026-08-08): this server-side variant is reached only from
+  // services/sync/polling.ts, which does not run in production (browser-only
+  // sync). It therefore does NOT carry the delivery signal that the live query
+  // in lib/browser-poll.ts gained — labor.labour_finishdate (วันที่เด็กเกิด).
+  // Anyone reviving this path must add it, or delivered-but-not-discharged
+  // mothers will sit on the ACTIVE board until the 7-day stale-admission timer
+  // fires (the รพ.น้ำพอง case). The birth date is in `labor`, NOT `ipt_labour`.
   mysql: `
     SELECT i.an, i.hn, i.regdate, i.regtime, i.dchdate, i.ward,
            p.pname, p.fname, p.lname,
