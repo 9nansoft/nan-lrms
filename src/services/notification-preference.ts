@@ -4,10 +4,7 @@
 // authoritative (bypasses admin lists). PDPA-safe: CID only.
 import { randomUUID } from 'crypto';
 import type { DatabaseAdapter } from '@/db/adapter';
-import {
-  notificationEventKeys,
-  implementedNotificationEvents,
-} from '@/config/notification-events';
+import { notificationEventKeys, implementedNotificationEvents } from '@/config/notification-events';
 
 export interface NotificationPreference {
   userCid: string;

@@ -157,9 +157,7 @@ export function NotificationPreferenceCard() {
 
   function toggleEvent(row: PreferenceDto, key: string) {
     const current = effectiveEvents(row);
-    const nextEvents = current.includes(key)
-      ? current.filter((k) => k !== key)
-      : [...current, key];
+    const nextEvents = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
     void save({ ...row, events: nextEvents });
   }
 
