@@ -43,7 +43,7 @@ export const NOTIFICATION_EVENTS: readonly NotificationEvent[] = [
     detail: 'patient',
     labelTh: 'Partograph วิกฤต',
     descriptionTh: 'กราฟการคลอดข้าม action line หรือ CDSS แจ้งระดับ CRITICAL',
-    implemented: false,
+    implemented: true,
   },
   {
     key: 'cpd_high',
@@ -51,7 +51,7 @@ export const NOTIFICATION_EVENTS: readonly NotificationEvent[] = [
     detail: 'patient',
     labelTh: 'คะแนน CPD เสี่ยงสูง',
     descriptionTh: 'ผู้คลอดมีคะแนน CPD ถึงเกณฑ์เสี่ยงสูง',
-    implemented: false,
+    implemented: true,
   },
   {
     key: 'referral_incoming',

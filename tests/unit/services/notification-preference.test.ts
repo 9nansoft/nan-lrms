@@ -183,7 +183,10 @@ describe('notification-preference service', () => {
       // would silently start receiving Phase-2 events on the day those ship.
       const prefs = await listNotificationPreferences(db, '3320500282199');
       expect(prefs[0].events).toEqual(implementedNotificationEvents().map((e) => e.key));
-      expect(prefs[0].events).not.toContain('partograph_critical');
+      // A still-unimplemented event must stay out. (This was 'partograph_critical'
+      // until its Phase-2 producer shipped; the assertion has to track a key that
+      // is genuinely producerless or it stops testing anything.)
+      expect(prefs[0].events).not.toContain('referral_incoming');
       // Delivery for the events that exist today is unaffected.
       const subs = await subscribersForEvent(db, '10670', 'anc_hr3');
       expect(subs.map((s) => s.cid)).toContain('3320500282199');
@@ -212,7 +215,14 @@ describe('notification-preference service', () => {
          JOIN notification_preferences p ON p.id = s.preference_id
          WHERE p.user_cid = '3320500282198' AND s.enabled = true`,
       );
-      expect(rows.map((r) => r.event_key).sort()).toEqual(['anc_hr3', 'maternal_triage']);
+      expect(rows.map((r) => r.event_key).sort()).toEqual(
+        implementedNotificationEvents()
+          .map((e) => e.key)
+          .sort(),
+      );
+      // Pin the guarantee itself, not just the current catalog: nothing without
+      // a producer may be written back as an explicit opt-in.
+      expect(rows.map((r) => r.event_key)).not.toContain('referral_incoming');
     });
 
     it('returns only subscribers of the requested event, with their detail level', async () => {

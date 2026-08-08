@@ -205,9 +205,14 @@ describe('multi-hospital preference API', () => {
       events: { key: string }[];
       preferences: { hospitalCode: string }[];
     };
-    // Only the two events with a live producer are offered — an unimplemented
-    // one rendered as a checkbox would promise a notification that cannot fire.
-    expect(body.events.map((e) => e.key).sort()).toEqual(['anc_hr3', 'maternal_triage']);
+    // Only events with a live producer are offered — an unimplemented one
+    // rendered as a checkbox would promise a notification that cannot fire.
+    expect(body.events.map((e) => e.key).sort()).toEqual([
+      'anc_hr3',
+      'cpd_high',
+      'maternal_triage',
+      'partograph_critical',
+    ]);
     expect(body.preferences.map((p) => p.hospitalCode)).toContain('10670');
   });
 

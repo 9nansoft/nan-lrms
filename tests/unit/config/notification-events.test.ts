@@ -17,12 +17,16 @@ describe('notification event catalog', () => {
     }
   });
 
-  it('marks only the two events that have producers today as implemented', () => {
+  it('marks exactly the events that have a producer today as implemented', () => {
+    // Phase 1: anc_hr3, maternal_triage. Phase 2-A adds partograph_critical
+    // (webhook.ts severity-change loop) and cpd_high (sync/cpd-persist.ts).
+    // This list may only grow when a producer actually ships — a checkbox for
+    // an event with no producer promises a notification that cannot arrive.
     expect(
       implementedNotificationEvents()
         .map((e) => e.key)
         .sort(),
-    ).toEqual(['anc_hr3', 'maternal_triage']);
+    ).toEqual(['anc_hr3', 'cpd_high', 'maternal_triage', 'partograph_critical']);
   });
 
   it('resolves a known key and returns null for an unknown one', () => {
