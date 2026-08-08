@@ -20,6 +20,7 @@ import {
   type BrowserNewbornsSection,
 } from '@/services/sync/newborn';
 import { autoArriveReferrals } from '@/services/referral';
+import { enqueueOverdueReferralAlerts } from '@/services/referral-alerts';
 import {
   processBrowserReferouts,
   processBrowserReferins,
@@ -553,17 +554,26 @@ export async function POST(request: NextRequest) {
         const referoutResult = await processBrowserReferouts(db, hospitalId, referouts);
         const referinResult = await processBrowserReferins(db, hospitalId, referins);
         const visitResult = await processBrowserVisitEvidences(db, hospitalId, visitEvidences);
+        // Nothing *happens* when a referral merely gets old, so the overdue
+        // event has to be evaluated on the tick. Runs AFTER the processors so
+        // rows ingested this cycle are already visible to it. Best-effort by
+        // contract — the service swallows its own failures.
+        const overdueAlerts = await enqueueOverdueReferralAlerts(db, hospitalId);
         result.referrals = {
           referouts: referoutResult,
           referins: referinResult,
           visitEvidences: visitResult,
         };
         const arrivedTotal = referinResult.arrived + visitResult.arrived;
-        if (referoutResult.created + referoutResult.upserted > 0 || arrivedTotal > 0) {
+        if (
+          referoutResult.created + referoutResult.upserted > 0 ||
+          arrivedTotal > 0 ||
+          overdueAlerts > 0
+        ) {
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_referrals',
             status: 'success',
-            message: `Referrals: ${referoutResult.created} new, ${referoutResult.upserted} refreshed, ${arrivedTotal} arrived (${visitResult.arrived} via visit evidence).`,
+            message: `Referrals: ${referoutResult.created} new, ${referoutResult.upserted} refreshed, ${arrivedTotal} arrived (${visitResult.arrived} via visit evidence), ${overdueAlerts} overdue alert(s) queued.`,
             counts: {
               referoutsRead: referoutResult.rowsRead,
               created: referoutResult.created,
@@ -572,6 +582,7 @@ export async function POST(request: NextRequest) {
               referinsRead: referinResult.rowsRead,
               visitEvidencesRead: visitResult.rowsRead,
               arrived: arrivedTotal,
+              overdueAlerts,
             },
           });
         }

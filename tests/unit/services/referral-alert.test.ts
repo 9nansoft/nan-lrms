@@ -12,6 +12,8 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey, encrypt, getEncryptionKey, decryptSafe } from '@/lib/encryption';
 import { processBrowserReferouts } from '@/services/sync/referrals';
 import { saveNotificationPreference } from '@/services/notification-preference';
+import { REFERRAL_SLA } from '@/config/referral-sla';
+import { ReferralStatus } from '@/types/domain';
 
 // The producers decrypt the journey name before enqueuing and the orchestrator
 // re-encrypts it for staff-scope rows.
@@ -85,6 +87,36 @@ function referoutRow(overrides: Record<string, unknown> = {}) {
     cid: CID,
     ...overrides,
   };
+}
+
+/** Insert an INITIATED referral aged `hoursAgo`, bypassing the sync path. */
+async function seedReferral(opts: {
+  referNumber?: string | null;
+  hoursAgo: number;
+  status?: ReferralStatus;
+}): Promise<string> {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const initiatedAt = new Date(Date.now() - opts.hoursAgo * 3600_000).toISOString();
+  await db.execute(
+    `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id,
+                                   status, reason, urgency_level, initiated_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'ROUTINE', ?, ?, ?)`,
+    [
+      id,
+      JOURNEY_ID,
+      // `??` would swallow an EXPLICIT null, which is the case one test needs.
+      opts.referNumber === undefined ? 'RF-OVD' : opts.referNumber,
+      ORIGIN_ID,
+      DEST_ID,
+      opts.status ?? ReferralStatus.INITIATED,
+      'ส่งต่อรอตอบรับ',
+      initiatedAt,
+      now,
+      now,
+    ],
+  );
+  return id;
 }
 
 beforeEach(async () => {
@@ -220,6 +252,136 @@ describe('referral_incoming alert producer', () => {
   it('never calls sendMophPrompt during enqueue (no LINE I/O on the sync path)', async () => {
     const { sendMophPrompt } = await import('@/services/moph-prompt');
     await processBrowserReferouts(db, ORIGIN_ID, [referoutRow()]);
+    expect(sendMophPrompt).not.toHaveBeenCalled();
+  });
+});
+
+describe('enqueueOverdueReferralAlerts', () => {
+  // Derived from the SLA config, never a literal: if the threshold moves, these
+  // fixtures follow it instead of silently testing the wrong side of the line.
+  const OVERDUE_HOURS = REFERRAL_SLA.overdueAfterHours + 1;
+  const FRESH_HOURS = REFERRAL_SLA.overdueAfterHours - 1;
+
+  it('alerts BOTH parties, each under their own hospital id', async () => {
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    await seedReferral({ hoursAgo: OVERDUE_HOURS });
+
+    // One call per hospital, exactly as the browser-push route drives it.
+    expect(await enqueueOverdueReferralAlerts(db, ORIGIN_ID)).toBe(1);
+    expect(await enqueueOverdueReferralAlerts(db, DEST_ID)).toBe(1);
+
+    const rows = await alertRows();
+    expect(rows).toHaveLength(2);
+    // Both parties must act: the destination has not accepted, and the origin
+    // has a patient in limbo. Same case, two hospital-scoped alerts.
+    expect(rows.map((r) => r.hospital_id).sort()).toEqual([DEST_ID, ORIGIN_ID].sort());
+    expect(new Set(rows.map((r) => r.case_id))).toEqual(new Set([`REF-${ORIGIN_HCODE}-RF-OVD`]));
+    for (const row of rows) {
+      expect(row.alert_source).toBe('referral_overdue');
+      expect(row.severity).toBe('high');
+      expect(row.rule_id).toBe('referral_overdue');
+      expect(row.case_id).not.toMatch(CID_PATTERN);
+    }
+    // Each hospital's alert renders that hospital's own name/hcode.
+    expect(rows.find((r) => r.hospital_id === ORIGIN_ID)?.origin_hcode).toBe(ORIGIN_HCODE);
+    expect(rows.find((r) => r.hospital_id === DEST_ID)?.origin_hcode).toBe(DEST_HCODE);
+  });
+
+  it('carries the patient name for both parties (both are a party to the referral)', async () => {
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    await seedReferral({ hoursAgo: OVERDUE_HOURS });
+    await enqueueOverdueReferralAlerts(db, ORIGIN_ID);
+    await enqueueOverdueReferralAlerts(db, DEST_ID);
+    const rows = await alertRows();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(decryptSafe(row.patient_name_enc)).toBe(PATIENT_NAME);
+    }
+  });
+
+  it('enqueues nothing for a referral still inside the SLA window', async () => {
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    await seedReferral({ hoursAgo: FRESH_HOURS });
+    expect(await enqueueOverdueReferralAlerts(db, ORIGIN_ID)).toBe(0);
+    expect(await enqueueOverdueReferralAlerts(db, DEST_ID)).toBe(0);
+    expect(await alertRows()).toHaveLength(0);
+  });
+
+  it('enqueues nothing for an ARRIVED referral past the cutoff (only INITIATED ages)', async () => {
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    await seedReferral({ hoursAgo: OVERDUE_HOURS, status: ReferralStatus.ARRIVED });
+    expect(await enqueueOverdueReferralAlerts(db, ORIGIN_ID)).toBe(0);
+    expect(await enqueueOverdueReferralAlerts(db, DEST_ID)).toBe(0);
+    expect(await alertRows()).toHaveLength(0);
+  });
+
+  it('ignores a referral neither party belongs to', async () => {
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    const now = new Date().toISOString();
+    const otherId = 'hosp-other';
+    await db.execute(
+      `INSERT INTO hospitals (id, hcode, name, level, province_code, is_active, created_at, updated_at)
+       VALUES (?, '10003', 'รพ.อื่น', 'M2', '30', true, ?, ?)`,
+      [otherId, now, now],
+    );
+    await db.execute(
+      `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id,
+                                     status, reason, urgency_level, initiated_at, created_at, updated_at)
+       VALUES (?, ?, 'RF-OTHER', ?, ?, 'INITIATED', 'x', 'ROUTINE', ?, ?, ?)`,
+      [
+        randomUUID(),
+        JOURNEY_ID,
+        otherId,
+        otherId,
+        new Date(Date.now() - OVERDUE_HOURS * 3600_000).toISOString(),
+        now,
+        now,
+      ],
+    );
+    expect(await enqueueOverdueReferralAlerts(db, ORIGIN_ID)).toBe(0);
+    expect(await alertRows()).toHaveLength(0);
+  });
+
+  it('adds no rows on a second call the same day (day-granular dedup)', async () => {
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    await seedReferral({ hoursAgo: OVERDUE_HOURS });
+    await enqueueOverdueReferralAlerts(db, ORIGIN_ID);
+    await enqueueOverdueReferralAlerts(db, DEST_ID);
+    // Every push runs this; the dedup index must collapse the repeats.
+    expect(await enqueueOverdueReferralAlerts(db, ORIGIN_ID)).toBe(0);
+    expect(await enqueueOverdueReferralAlerts(db, DEST_ID)).toBe(0);
+    expect(await alertRows()).toHaveLength(2);
+  });
+
+  it('falls back to the referral id when HOSxP never supplied a refer number', async () => {
+    // Webhook-ingested rows may have refer_number NULL; caseRef must stay a
+    // stable, non-PHI identifier rather than rendering "null".
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    const id = await seedReferral({ referNumber: null, hoursAgo: OVERDUE_HOURS });
+    expect(await enqueueOverdueReferralAlerts(db, ORIGIN_ID)).toBe(1);
+    const rows = await alertRows();
+    expect(rows[0].case_id).toBe(`REF-${ORIGIN_HCODE}-${id}`);
+    expect(rows[0].case_id).not.toMatch(CID_PATTERN);
+  });
+
+  it('shares one caseRef scheme with referral_incoming so both name the same case', async () => {
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    await processBrowserReferouts(db, ORIGIN_ID, [referoutRow()]);
+    const incoming = (await alertRows())[0].case_id;
+    // Age the row the sync path just created past the cutoff.
+    await db.execute(`UPDATE cached_referrals SET initiated_at = ? WHERE refer_number = 'RF-001'`, [
+      new Date(Date.now() - OVERDUE_HOURS * 3600_000).toISOString(),
+    ]);
+    await enqueueOverdueReferralAlerts(db, DEST_ID);
+    const overdue = (await alertRows()).find((r) => r.alert_source === 'referral_overdue');
+    expect(overdue?.case_id).toBe(incoming);
+  });
+
+  it('never calls sendMophPrompt (no LINE I/O on the sync path)', async () => {
+    const { enqueueOverdueReferralAlerts } = await import('@/services/referral-alerts');
+    const { sendMophPrompt } = await import('@/services/moph-prompt');
+    await seedReferral({ hoursAgo: OVERDUE_HOURS });
+    await enqueueOverdueReferralAlerts(db, ORIGIN_ID);
     expect(sendMophPrompt).not.toHaveBeenCalled();
   });
 });

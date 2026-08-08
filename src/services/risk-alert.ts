@@ -85,6 +85,8 @@ const CPD_HIGH_ALERT_SOURCE = 'cpd_high';
 const CPD_HIGH_RULE_ID = 'cpd_high';
 const REFERRAL_INCOMING_ALERT_SOURCE = 'referral_incoming';
 const REFERRAL_INCOMING_RULE_ID = 'referral_incoming';
+const REFERRAL_OVERDUE_ALERT_SOURCE = 'referral_overdue';
+const REFERRAL_OVERDUE_RULE_ID = 'referral_overdue';
 
 /** Resolve active recipients for a hospital + province.
  *  P1-C contract (codex gap-sweep):
@@ -349,6 +351,28 @@ export async function enqueueReferralIncomingAlert(
     'high',
     REFERRAL_INCOMING_ALERT_SOURCE,
     REFERRAL_INCOMING_RULE_ID,
+  );
+}
+
+/**
+ * Overdue-referral producer: an INITIATED referral that has aged past the
+ * SLA cutoff without the destination responding.
+ *
+ * Caller MUST have already applied the threshold from config/referral-sla.ts —
+ * this producer restates no policy. It is enqueued once per hospital per push
+ * for BOTH parties (see enqueueOverdueReferralAlerts), so `ctx.hospitalId` is
+ * whichever party this alert is for, not a fixed side of the referral.
+ */
+export async function enqueueReferralOverdueAlert(
+  db: DatabaseAdapter,
+  ctx: AlertEventContext,
+): Promise<number> {
+  return enqueueAlertEvent(
+    db,
+    ctx,
+    'high',
+    REFERRAL_OVERDUE_ALERT_SOURCE,
+    REFERRAL_OVERDUE_RULE_ID,
   );
 }
 
