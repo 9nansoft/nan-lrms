@@ -30,8 +30,13 @@ export interface BuildAlertFlexInput {
   recipientScope: AlertRecipientScope;
   /** Origin hospital name (resolved by the API from the session). */
   hospitalName: string;
-  /** Case/journey reference shown to all scopes. */
+  /** Case/journey reference. PATIENT-IDENTIFYING: ANC builds it as
+   *  `ANC-<13-digit CID>-G<n>`, so it is rendered only at 'full' detail. */
   caseRef: string;
+  /** How much this recipient may see. 'aggregate' strips every patient
+   *  identifier — the case reference and the patient name — leaving severity and
+   *  origin hospital. Defaults to 'full' so existing callers are unchanged. */
+  detailLevel?: 'full' | 'aggregate';
   /** Patient name — ONLY rendered for hospital_staff scope. Ignored for center. */
   patientName?: string | null;
   /** Optional maternal-triage acuity Thai label (e.g. 'ฉุกเฉิน'); falls back to severity label. */
@@ -101,21 +106,37 @@ export function buildAlertFlex(input: BuildAlertFlexInput): Record<string, unkno
   const scopeLabel = SCOPE_LABEL_TH[input.recipientScope];
   const headerTitle = `แจ้งเตือน${sevLabel}`;
 
+  // Default 'full' keeps every existing caller rendering exactly as before.
+  const isAggregate = input.detailLevel === 'aggregate';
+
   const bodyContents: Record<string, unknown>[] = [
     textBlock(headerTitle, { weight: 'bold', size: 'xl', color: SEVERITY_COLOR[input.severity] }),
     textBlock(`โรงพยาบาลต้นทาง: ${input.hospitalName}`, { weight: 'bold' }),
-    textBlock(`กรณี: ${input.caseRef}`),
-    textBlock(`แจ้งถึง: ${scopeLabel}`),
   ];
 
-  // PDPA: patient name only for hospital-staff scope.
-  if (input.recipientScope === 'hospital_staff' && input.patientName) {
+  // PDPA: the case reference is patient-identifying (ANC builds it as
+  // `ANC-<cid>-G<n>`), so an aggregate recipient — someone watching a hospital
+  // that is not their own — gets the alert without it. Suppressing it here, in
+  // the template layer, is what lets the subscription surface widen safely.
+  if (!isAggregate) {
+    bodyContents.push(textBlock(`กรณี: ${input.caseRef}`));
+  }
+  bodyContents.push(textBlock(`แจ้งถึง: ${scopeLabel}`));
+  if (isAggregate) {
+    bodyContents.push(textBlock('ดูรายละเอียดผู้ป่วยได้ที่โรงพยาบาลต้นทาง', { size: 'sm' }));
+  }
+
+  // PDPA: patient name only for hospital-staff scope, and never at aggregate
+  // detail even if a caller passes one.
+  if (!isAggregate && input.recipientScope === 'hospital_staff' && input.patientName) {
     bodyContents.push(textBlock(`ผู้ป่วย: ${input.patientName}`));
   }
 
-  const footer: Record<string, unknown> | undefined = input.confirmUrl
-    ? footerButton(input.confirmUrl)
-    : undefined;
+  // The action button deep-links to the case, so it is withheld at aggregate
+  // detail too — today confirmUrl is null at both producers, but that is a
+  // caller's choice, not a guarantee this builder should rely on.
+  const footer: Record<string, unknown> | undefined =
+    input.confirmUrl && !isAggregate ? footerButton(input.confirmUrl) : undefined;
 
   const bubble: Record<string, unknown> = {
     type: 'bubble',

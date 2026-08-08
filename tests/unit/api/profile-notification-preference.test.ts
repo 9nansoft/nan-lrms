@@ -150,12 +150,12 @@ describe('multi-hospital preference API', () => {
     expect(((await own.json()) as { detailLevel: string }).detailLevel).toBe('full');
   });
 
-  // SECURITY: watching another hospital is refused outright, not merely
-  // downgraded to 'aggregate'. Nothing downstream reads detailLevel yet —
-  // buildAlertFlex renders `กรณี: ${caseRef}` for every scope, and the ANC HR3
-  // caseRef is `ANC-<cid>-G<n>`, the patient's national ID. Downgrading alone
-  // would still have sent another hospital's patient CIDs to the subscriber.
-  it('REFUSES a subscription to a hospital that is not the session hospital', async () => {
+  // SECURITY: watching another hospital is allowed, but only at 'aggregate'
+  // detail. That is what keeps the patient's case reference — `ANC-<cid>-G<n>`,
+  // their national ID — out of an alert sent to someone at another hospital.
+  // The template layer enforces it (moph-alert-templates.test.ts) and the
+  // detail level is persisted per recipient (risk-alert.test.ts).
+  it('allows watching another hospital, but only at aggregate detail', async () => {
     mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '3320500282121' });
     const res = await PUT(
       jsonRequest({
@@ -165,14 +165,14 @@ describe('multi-hospital preference API', () => {
         events: ['anc_hr3'],
       }) as never,
     );
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toMatch(/[ก-๙]/);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { detailLevel: string }).detailLevel).toBe('aggregate');
 
-    // …and nothing was written for that hospital.
     const body = (await (await GET(new Request('http://t/api') as never)).json()) as {
-      preferences: { hospitalCode: string }[];
+      preferences: { hospitalCode: string; detailLevel: string }[];
     };
-    expect(body.preferences.map((p) => p.hospitalCode)).not.toContain('11002');
+    const watched = body.preferences.find((p) => p.hospitalCode === '11002');
+    expect(watched?.detailLevel).toBe('aggregate');
   });
 
   it('ignores a detailLevel supplied in the body (no privilege escalation)', async () => {

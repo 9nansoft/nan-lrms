@@ -48,6 +48,7 @@ export function NotificationPreferenceCard() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [addCode, setAddCode] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -291,15 +292,44 @@ export function NotificationPreferenceCard() {
         </button>
       )}
 
-      {/* The free-text hospital box is withdrawn for now: the API refuses any
-          hospital other than the session's, because alert content still carries
-          the patient's case reference (an ANC caseRef embeds the national ID)
-          for every recipient scope. Offering the box would only produce an
-          error. It returns with the aggregate-rendering work. */}
-      <p className="text-xs text-slate-500">
-        ขณะนี้ติดตามได้เฉพาะโรงพยาบาลของคุณ —
-        การติดตามโรงพยาบาลอื่นจะเปิดใช้เมื่อระบบรองรับการแจ้งเตือนแบบไม่ระบุตัวผู้ป่วย
-      </p>
+      {/* Restored now that aggregate rendering is enforced end to end: a
+          hospital that is not yours is stored as 'aggregate' and its alerts
+          arrive without the case reference, the patient name or the deep-link.
+          A picker rather than free text — it cannot produce an invalid code. */}
+      <div className="space-y-1">
+        <label htmlFor="watch-hospital" className="text-xs text-slate-500">
+          ติดตามโรงพยาบาลอื่น (จะได้รับเฉพาะยอดรวม ไม่ระบุตัวผู้ป่วย)
+        </label>
+        <div className="flex items-center gap-2">
+          <select
+            id="watch-hospital"
+            value={addCode}
+            onChange={(e) => setAddCode(e.target.value)}
+            aria-label="เพิ่มโรงพยาบาลที่ต้องการติดตาม"
+            className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+          >
+            <option value="">เลือกโรงพยาบาล…</option>
+            {KK_HOSPITALS.filter((h) => !preferences.some((r) => r.hospitalCode === h.hcode)).map(
+              (h) => (
+                <option key={h.hcode} value={h.hcode}>
+                  {h.name} ({h.hcode})
+                </option>
+              ),
+            )}
+          </select>
+          <button
+            disabled={!addCode || busy}
+            onClick={() => {
+              const code = addCode;
+              setAddCode('');
+              followHospital(code);
+            }}
+            className="rounded bg-teal-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+          >
+            เพิ่ม
+          </button>
+        </div>
+      </div>
     </section>
   );
 }

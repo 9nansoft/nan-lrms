@@ -27,6 +27,53 @@ describe('buildAlertFlex', () => {
     expect(json).toContain('น.ส. A');
   });
 
+  // The caseRef is patient-identifying: ANC alerts build it as
+  // `ANC-<13-digit CID>-G<n>` (browser-push/route.ts). It was rendered to every
+  // scope, so a recipient watching another hospital would receive that
+  // hospital's patients' national IDs. detailLevel:'aggregate' is what makes
+  // cross-hospital subscription safe to re-open.
+  const CID_CASE = 'ANC-3320500282121-G2';
+
+  it('aggregate detail carries NO case reference, and so no patient CID', () => {
+    const flex = buildAlertFlex({
+      severity: 'high',
+      recipientScope: 'self_subscribed',
+      detailLevel: 'aggregate',
+      hospitalName: HOSP,
+      caseRef: CID_CASE,
+      patientName: 'น.ส. A',
+      confirmUrl: 'https://app/case/x',
+    });
+    const json = JSON.stringify(flex);
+    expect(json).not.toContain(CID_CASE);
+    expect(json).not.toContain('3320500282121');
+    expect(json).not.toContain('น.ส. A');
+    // …but it is still a usable alert: severity and origin hospital remain.
+    expect(json).toContain('เสี่ยงสูง');
+    expect(json).toContain(HOSP);
+  });
+
+  it('full detail still carries the case reference (unchanged behaviour)', () => {
+    const flex = buildAlertFlex({
+      severity: 'high',
+      recipientScope: 'hospital_staff',
+      detailLevel: 'full',
+      hospitalName: HOSP,
+      caseRef: CID_CASE,
+    });
+    expect(JSON.stringify(flex)).toContain(CID_CASE);
+  });
+
+  it('defaults to full when detailLevel is omitted, so existing callers are unaffected', () => {
+    const flex = buildAlertFlex({
+      severity: 'high',
+      recipientScope: 'hospital_staff',
+      hospitalName: HOSP,
+      caseRef: CASE,
+    });
+    expect(JSON.stringify(flex)).toContain(CASE);
+  });
+
   it('EMERGENCY hospital-scope bubble carries ฉุกเฉิน styling', () => {
     const flex = buildAlertFlex({
       severity: 'emergency',

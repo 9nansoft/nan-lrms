@@ -96,24 +96,12 @@ export async function PUT(request: NextRequest) {
       { status: 400 },
     );
   }
-  // SECURITY (2026-08-07): cross-hospital subscription is REFUSED until the
-  // template layer honours detail level. `detailLevel: 'aggregate'` is computed
-  // below but nothing downstream reads it: buildAlertFlex renders
-  // `กรณี: ${caseRef}` for every scope (moph-alert-templates.ts:107), and for
-  // ANC HR3 the caseRef is `ANC-<cid>-G<n>` (browser-push/route.ts:394) — the
-  // patient's 13-digit national ID. Allowing a user to watch another hospital
-  // would therefore send them that hospital's patients' CIDs over LINE.
-  // Re-enable together with: detail_level persisted on moph_alert_log + the
-  // Flex builder suppressing caseRef for aggregate recipients.
-  if (hospitalCode !== ownHospitalCode) {
-    return NextResponse.json(
-      {
-        error:
-          'ขณะนี้ติดตามได้เฉพาะโรงพยาบาลของคุณเท่านั้น — การติดตามโรงพยาบาลอื่นจะเปิดใช้เมื่อระบบรองรับการแจ้งเตือนแบบไม่ระบุตัวผู้ป่วย',
-      },
-      { status: 400 },
-    );
-  }
+  // Cross-hospital subscription was refused between fcb6074 and this commit,
+  // because alert content carried the case reference to every recipient and the
+  // ANC caseRef embeds the patient's CID. It is re-opened now that the
+  // guarantee is enforced end to end: detail_level is persisted per recipient
+  // on moph_alert_log and buildAlertFlex omits the case reference, the patient
+  // name and the deep-link for anything other than 'full'.
   // detailLevel is DERIVED, never taken from the body: 'full' means the alert
   // carries patient-level content, so it is only ever granted for the hospital
   // on the caller's own session. Reading it from the body would let anyone

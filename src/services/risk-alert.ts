@@ -233,10 +233,10 @@ async function enqueueAlertEvent(
     const result = await db.query<{ c: number }>(
       `INSERT INTO moph_alert_log
          (id, case_id, hospital_id, origin_hcode, hospital_name, recipient_cid,
-          recipient_scope, alert_source, severity, rule_id, title,
+          recipient_scope, detail_level, alert_source, severity, rule_id, title,
           patient_name_enc, status, attempts, local_date, confirm_url,
           created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',0,$13,$14,NOW(),NOW())
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending',0,$14,$15,NOW(),NOW())
        ON CONFLICT (case_id, hospital_id, recipient_cid, alert_source, severity, rule_id, local_date)
        DO NOTHING
        RETURNING 1::int as c`,
@@ -248,6 +248,9 @@ async function enqueueAlertEvent(
         ctx.hospitalName,
         r.cid,
         r.scope,
+        // Persisted so the drain can render to the right depth — the recipient
+        // list is gone by the time the message is built.
+        r.detailLevel,
         alertSource,
         severity,
         ruleId,

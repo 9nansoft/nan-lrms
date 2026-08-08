@@ -341,6 +341,39 @@ describe('risk-alert enqueue orchestrator', () => {
       expect(rows.map((r) => r.recipient_cid)).toEqual([CENTER_CID]);
     });
 
+    // The end-to-end guarantee that lets cross-hospital subscription re-open:
+    // a subscriber watching a hospital that is not their own is stored as
+    // 'aggregate', and the drain renders that without the case reference —
+    // which for ANC is `ANC-<cid>-G<n>`, the patient's national ID.
+    it('stores detail_level=aggregate for a cross-hospital subscriber', async () => {
+      await saveNotificationPreference(db, {
+        // SELF_CID is deliberately not in the consult-doctor or center list —
+        // an admin-listed CID resolves as hospital_staff and carries 'full',
+        // which would make this test pass for the wrong reason.
+        userCid: SELF_CID,
+        hospitalCode: HOSPITAL_HCODE,
+        mophLineEnabled: true,
+        detailLevel: 'aggregate', // as the API derives it for a foreign hospital
+        digestHour: 8,
+        events: ['anc_hr3'],
+      });
+      await enqueueHighRiskAlert(db, ctxFixture());
+      const rows = await db.query<{ detail_level: string; recipient_scope: string }>(
+        `SELECT detail_level, recipient_scope FROM moph_alert_log
+          WHERE recipient_cid = '${SELF_CID}'`,
+      );
+      expect(rows[0].recipient_scope).toBe('self_subscribed');
+      expect(rows[0].detail_level).toBe('aggregate');
+    });
+
+    it('stores detail_level=full for admin-configured clinical roles', async () => {
+      await enqueueHighRiskAlert(db, ctxFixture());
+      const rows = await db.query<{ detail_level: string }>(
+        `SELECT DISTINCT detail_level FROM moph_alert_log WHERE recipient_scope = 'province_center'`,
+      );
+      expect(rows[0].detail_level).toBe('full');
+    });
+
     it('keeps delivering to a legacy row that has no event children', async () => {
       // Every pre-migration production row looks like this. If the event filter
       // drops it, every current recipient goes silent on deploy.

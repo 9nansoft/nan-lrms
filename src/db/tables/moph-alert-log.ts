@@ -42,6 +42,12 @@ export const mophAlertLogTable: TableDefinition = {
     { name: 'hospital_name', type: 'string', maxLength: 255, nullable: true },
     { name: 'recipient_cid', type: 'string', maxLength: 13 },
     { name: 'recipient_scope', type: 'string', maxLength: 20 },
+    // How much this recipient may see when the drain renders the message.
+    // 'full' by default so rows written before this column existed — and every
+    // consult-doctor / center-monitor row, which are admin-configured clinical
+    // roles — keep rendering exactly as they did. Only self-subscribers
+    // watching a hospital that is not their own are written as 'aggregate'.
+    { name: 'detail_level', type: 'string', maxLength: 10, defaultValue: 'full' },
     { name: 'alert_source', type: 'string', maxLength: 30 },
     { name: 'severity', type: 'string', maxLength: 20 },
     { name: 'rule_id', type: 'string', maxLength: 60, defaultValue: 'none' },

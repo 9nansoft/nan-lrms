@@ -120,7 +120,10 @@ describe('NotificationPreferenceCard', () => {
     );
     render(<NotificationPreferenceCard />);
     expect(await screen.findByText(/โรงพยาบาลของคุณ/)).toBeInTheDocument();
-    expect(screen.getByText(/เฉพาะยอดรวม/)).toBeInTheDocument();
+    // Stated twice on purpose: once on the watched row, once on the picker that
+    // adds another hospital — the user should meet the limit before choosing,
+    // not only after.
+    expect(screen.getAllByText(/เฉพาะยอดรวม/).length).toBeGreaterThanOrEqual(2);
     // A nurse recognises the hospital by name, not by its 5-digit code.
     expect(screen.getByText(/รพ\.บ้านไผ่/)).toBeInTheDocument();
   });

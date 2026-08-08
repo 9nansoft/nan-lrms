@@ -54,6 +54,8 @@ interface ClaimedRow {
   hospital_name: string | null;
   recipient_cid: string;
   recipient_scope: string;
+  /** 'full' | 'aggregate'; nullable only defensively — the column has a default. */
+  detail_level: string | null;
   alert_source: string;
   severity: string;
   rule_id: string;
@@ -108,7 +110,7 @@ export async function drainMophAlerts(
        FOR UPDATE SKIP LOCKED
      )
      RETURNING id, case_id, hospital_id, origin_hcode, hospital_name, recipient_cid,
-              recipient_scope, alert_source, severity, rule_id, title,
+              recipient_scope, detail_level, alert_source, severity, rule_id, title,
               patient_name_enc, confirm_url, attempts`,
     [hospitalId, maxAlerts],
   );
@@ -206,9 +208,15 @@ async function sendOne(
     // is decrypted ONLY for hospital_staff scope (PDPA); center stays null.
     const hospitalName = row.hospital_name ?? row.origin_hcode;
     const patientName = scope === 'hospital_staff' ? decryptSafe(row.patient_name_enc) : null;
+    // Anything that is not exactly 'full' renders as aggregate. Rows predating
+    // the column are backfilled to 'full' by the ADD COLUMN default, so this is
+    // belt-and-braces for an unexpected or NULL value — and it fails to the
+    // LESS revealing side, because the case reference embeds the patient's CID.
+    const detailLevel = row.detail_level === 'full' ? 'full' : 'aggregate';
     const flex = buildAlertFlex({
       severity,
       recipientScope: scope,
+      detailLevel,
       hospitalName,
       caseRef: row.case_id,
       patientName,
