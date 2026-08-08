@@ -32,6 +32,7 @@ import {
   type BrowserReferinsResult,
 } from '@/services/sync/referrals';
 import { enqueueHighRiskAlert } from '@/services/risk-alert';
+import { resolveAlertOrigin } from '@/services/alert-context';
 import { drainMophAlerts } from '@/services/moph-alert-drain';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
 import { AncRiskLevel } from '@/types/domain';
@@ -371,15 +372,11 @@ export async function POST(request: NextRequest) {
         // pending moph_alert_log row — no LINE I/O here; the drain step below
         // sends. Best-effort: a failure never aborts the sync run.
         try {
-          const hosp = await db.query<{ name: string; province_code: string | null }>(
-            'SELECT name, province_code FROM hospitals WHERE id = ?',
-            [hospitalId],
+          const { hospitalName, province, localDate } = await resolveAlertOrigin(
+            db,
+            hospitalId,
+            hcode,
           );
-          const hospitalName = hosp[0]?.name ?? hcode;
-          const province = hosp[0]?.province_code ?? '';
-          const localDate = new Date().toLocaleDateString('en-CA', {
-            timeZone: 'Asia/Bangkok',
-          });
           let enqueued = 0;
           for (const p of patients) {
             // Trust the server-side canon classifier, not the client-declared

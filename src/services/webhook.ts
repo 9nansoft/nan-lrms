@@ -35,6 +35,7 @@ import {
   MaternalScreenStoreError,
 } from '@/services/maternal-screening-store';
 import { enqueueEmergencyAlert } from '@/services/risk-alert';
+import { resolveAlertOrigin } from '@/services/alert-context';
 import { EMERGENCY_ACUITY_LABEL_TH } from '@/config/maternal-screen-display';
 import {
   shouldEmitMaternalScreenTransition,
@@ -1321,21 +1322,16 @@ export async function processWebhookPayload(
           const acuity = projected.emergencyAcuity;
           if (acuity === 'EMERGENCY' || acuity === 'URGENT') {
             try {
-              const hosp = await db.query<{ name: string; province_code: string | null }>(
-                'SELECT name, province_code FROM hospitals WHERE id = ?',
-                [hospitalId],
-              );
+              const origin = await resolveAlertOrigin(db, hospitalId, hcode);
               await enqueueEmergencyAlert(db, {
                 hospitalId,
                 originHcode: hcode,
-                hospitalName: hosp[0]?.name ?? hcode,
-                province: hosp[0]?.province_code ?? '',
+                hospitalName: origin.hospitalName,
+                province: origin.province,
                 caseRef: admission.journey_id
                   ? `LABOR-${admission.journey_id}`
                   : `LABOR-AN-${p.an}`,
-                localDate: new Date().toLocaleDateString('en-CA', {
-                  timeZone: 'Asia/Bangkok',
-                }),
+                localDate: origin.localDate,
                 patientName: typeof p.name === 'string' ? p.name : null,
                 confirmUrl: null,
                 acuityLabel: EMERGENCY_ACUITY_LABEL_TH[acuity],
