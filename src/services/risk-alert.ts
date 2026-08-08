@@ -81,6 +81,8 @@ const EMERGENCY_ALERT_SOURCE = 'maternal_triage';
 // these must stay identical to the catalog keys in config/notification-events.
 const PARTOGRAPH_ALERT_SOURCE = 'partograph_critical';
 const PARTOGRAPH_RULE_ID = 'partograph_critical';
+const CPD_HIGH_ALERT_SOURCE = 'cpd_high';
+const CPD_HIGH_RULE_ID = 'cpd_high';
 
 /** Resolve active recipients for a hospital + province.
  *  P1-C contract (codex gap-sweep):
@@ -311,6 +313,17 @@ export async function enqueuePartographCriticalAlert(
   return enqueueAlertEvent(db, ctx, 'emergency', PARTOGRAPH_ALERT_SOURCE, PARTOGRAPH_RULE_ID);
 }
 
+/**
+ * CPD HIGH-risk producer. Caller MUST have already gated on the CPD score
+ * classifying as RiskLevel.HIGH (config-derived via classifyRiskLevel — never
+ * a restated numeric threshold).
+ */
+export async function enqueueCpdHighAlert(
+  db: DatabaseAdapter,
+  ctx: AlertEventContext,
+): Promise<number> {
+  return enqueueAlertEvent(db, ctx, 'high', CPD_HIGH_ALERT_SOURCE, CPD_HIGH_RULE_ID);
+}
 
 // crypto.randomUUID is available in Node 20+; isolated here so tests/dev can
 // stub if ever needed. Not using node:crypto import to keep the service

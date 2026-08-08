@@ -6,6 +6,13 @@ import type { SseManager } from '@/lib/sse';
 import { calculateCpdScore } from '@/services/cpd-score';
 import { RiskLevel } from '@/types/domain';
 import { CooperativeYielder } from '@/lib/event-loop';
+import { logger } from '@/lib/logger';
+import { enqueueCpdHighAlert } from '@/services/risk-alert';
+import {
+  resolveAlertOrigin,
+  decryptPatientName,
+  type AlertOrigin,
+} from '@/services/alert-context';
 
 export async function calculateAndStoreCpdScores(
   db: DatabaseAdapter,
@@ -15,6 +22,11 @@ export async function calculateAndStoreCpdScores(
   const patients = await db.query<{
     id: string;
     an: string;
+    // Encrypted at rest (PDPA). Widening this existing SELECT rather than
+    // adding a per-patient lookup: this loop runs for every ACTIVE patient on
+    // every sync tick and is on the page-latency critical path (hence the
+    // CooperativeYielder below).
+    name: string | null;
     gravida: number | null;
     anc_count: number | null;
     ga_weeks: number | null;
@@ -24,7 +36,7 @@ export async function calculateAndStoreCpdScores(
     us_weight_g: number | null;
     hematocrit_pct: number | null;
   }>(
-    "SELECT id, an, gravida, anc_count, ga_weeks, height_cm, weight_diff_kg, fundal_height_cm, us_weight_g, hematocrit_pct FROM cached_patients WHERE hospital_id = ? AND labor_status = 'ACTIVE'",
+    "SELECT id, an, name, gravida, anc_count, ga_weeks, height_cm, weight_diff_kg, fundal_height_cm, us_weight_g, hematocrit_pct FROM cached_patients WHERE hospital_id = ? AND labor_status = 'ACTIVE'",
     [hospitalId],
   );
 
@@ -33,6 +45,11 @@ export async function calculateAndStoreCpdScores(
     [hospitalId],
   );
   const hcode = hospitalRows[0]?.hcode ?? '';
+
+  // Resolved lazily on the first HIGH transition and memoized for the run: most
+  // ticks produce none, and this loop must not pay an extra query per tick for
+  // an alert that will not fire.
+  let alertOrigin: AlertOrigin | null = null;
 
   // Bounded cooperative yielding (page-stall fix part 2): this recomputes CPD
   // for EVERY ACTIVE patient of the hospital on each webhook/browser-push
@@ -93,6 +110,12 @@ export async function calculateAndStoreCpdScores(
       });
     }
 
+    // NOTE: prevRiskLevel is null on a patient's FIRST score, so this gate also
+    // fires for someone who arrives already HIGH. That is intentional, not a
+    // bug to "fix" — a newly admitted high-risk patient is precisely the case
+    // the ward needs told about. The threshold itself is never restated here:
+    // result.riskLevel comes from classifyRiskLevel, which reads
+    // RISK_LEVELS[HIGH].minScore.
     if (result.riskLevel === RiskLevel.HIGH && prevRiskLevel !== RiskLevel.HIGH) {
       sseManager.broadcast('patient-update', {
         type: 'high_risk_alert',
@@ -101,6 +124,27 @@ export async function calculateAndStoreCpdScores(
         score: result.score,
         recommendation: result.recommendation,
       });
+
+      // MOPH Prompt cpd_high producer. Shared service site: the webhook
+      // pipeline and /api/sync/browser-push both reach it here, so there is no
+      // second call site on either route. Best-effort — a failure must never
+      // abort the sync run or lose the score that was just written.
+      try {
+        alertOrigin ??= await resolveAlertOrigin(db, hospitalId, hcode);
+        await enqueueCpdHighAlert(db, {
+          hospitalId,
+          originHcode: hcode,
+          hospitalName: alertOrigin.hospitalName,
+          province: alertOrigin.province,
+          // PDPA: the AN, never the CID — caseRef is rendered into the message.
+          caseRef: `CPD-AN-${p.an}`,
+          localDate: alertOrigin.localDate,
+          patientName: decryptPatientName(p.name),
+          confirmUrl: null,
+        });
+      } catch (e) {
+        logger.warn('moph_alert_cpd_high_enqueue_failed', { hospitalId, an: p.an, error: e });
+      }
     }
   }
 }
