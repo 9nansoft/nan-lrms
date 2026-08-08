@@ -148,6 +148,37 @@ function admitTime(iso: string | null): string {
   });
 }
 
+/** How long she has been admitted, as a duration.
+ *
+ *  Deliberately NOT formatRelativeTime: that collapses to a calendar date past
+ *  24h, which hides the number that matters most. A woman on the labour board
+ *  for three days is the single loudest signal on it — prolonged labour
+ *  clinically, and a data-entry or discharge problem operationally (the
+ *  รพ.น้ำพอง admissions sat for days behind an unchanged "08:28"). */
+function admitElapsed(iso: string | null): string | null {
+  if (!iso) return null;
+  // Clock read lives here, not in the component body: reading it during render
+  // trips react-hooks/purity. This mirrors formatRelativeTime, which the LAST
+  // VITAL column beside this one already uses. The value refreshes on the
+  // dashboard's normal SWR re-render rather than ticking on its own.
+  const now = Date.now();
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return null;
+  const mins = Math.floor((now - ms) / 60000);
+  // Clock skew between the hospital's HOSxP and this server can put an
+  // admission a few minutes in the future; show it as brand new, not negative.
+  if (mins < 1) return 'เพิ่งรับ';
+  if (mins < 60) return `${mins}น`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) {
+    const rem = mins % 60;
+    return rem === 0 ? `${hours}ชม` : `${hours}ชม ${rem}น`;
+  }
+  const days = Math.floor(hours / 24);
+  const remH = hours % 24;
+  return remH === 0 ? `${days}ว` : `${days}ว ${remH}ชม`;
+}
+
 function vitalFreshness(iso: string | null): { text: string; stale: boolean } {
   if (!iso) return { text: 'no data', stale: true };
   return { text: formatRelativeTime(iso) ?? '—', stale: false };
@@ -159,11 +190,14 @@ function SkeletonRow({ variant }: { variant: 'light' | 'kiosk' }) {
     <div
       className="grid items-center gap-2 border-b px-2 py-2"
       style={{
-        gridTemplateColumns: '62px 130px 1fr 44px 44px 150px 58px 80px 110px 140px 220px',
+        // Must stay in lockstep with the non-kiosk `columns` list above — this
+        // is a second, hand-maintained copy of the same layout, so a column
+        // added there and not here misaligns the whole loading state.
+        gridTemplateColumns: '62px 130px 1fr 44px 44px 150px 78px 88px 80px 110px 140px 220px',
         borderColor: variant === 'kiosk' ? 'var(--kiosk-rule)' : 'var(--rule-hair)',
       }}
     >
-      {Array.from({ length: 11 }).map((_, i) => (
+      {Array.from({ length: 12 }).map((_, i) => (
         <div key={i} className={cn('h-3 animate-pulse rounded', barBg)} />
       ))}
     </div>
@@ -215,7 +249,7 @@ export function HighRiskPatientList({
         { key: 'ga', label: 'GA', w: 50 },
         { key: 'cpd', label: 'CPD', w: 50 },
         { key: 'hospital', label: 'HOSPITAL', w: 0 }, // flex 1
-        { key: 'admit', label: 'ADMIT', w: 70 },
+        { key: 'admit', label: 'ADMIT / นาน', w: 86 },
         { key: 'labor', label: 'สถานะ', w: 92 },
         { key: 'partograph', label: 'PARTOGRAPH', w: 120 },
         { key: 'screen', label: 'คัดกรอง (เงา)', w: 130 },
@@ -227,7 +261,7 @@ export function HighRiskPatientList({
         { key: 'ga', label: 'GA', w: 44 },
         { key: 'cpd', label: 'CPD', w: 44 },
         { key: 'hospital', label: 'HOSPITAL', w: 150 },
-        { key: 'admit', label: 'ADMIT', w: 58 },
+        { key: 'admit', label: 'ADMIT / นาน', w: 78 },
         { key: 'labor', label: 'สถานะ', w: 88 },
         { key: 'vital', label: 'LAST VITAL', w: 80 },
         { key: 'partograph', label: 'PARTOGRAPH', w: 110 },
@@ -422,6 +456,20 @@ export function HighRiskPatientList({
                 </div>
                 <div className="font-mono" style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}>
                   {admitTime(p.admitDate)}
+                  {(() => {
+                    const elapsed = admitElapsed(p.admitDate);
+                    return elapsed ? (
+                      <div
+                        style={{
+                          color: inkMuted,
+                          fontSize: isKiosk ? 11 : 10,
+                          fontWeight: 400,
+                        }}
+                      >
+                        {elapsed}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 <LaborStageCell deliveredAt={p.deliveredAt ?? null} isKiosk={isKiosk} />
                 {!isKiosk && (
