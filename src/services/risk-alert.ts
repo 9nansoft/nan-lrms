@@ -83,6 +83,8 @@ const PARTOGRAPH_ALERT_SOURCE = 'partograph_critical';
 const PARTOGRAPH_RULE_ID = 'partograph_critical';
 const CPD_HIGH_ALERT_SOURCE = 'cpd_high';
 const CPD_HIGH_RULE_ID = 'cpd_high';
+const REFERRAL_INCOMING_ALERT_SOURCE = 'referral_incoming';
+const REFERRAL_INCOMING_RULE_ID = 'referral_incoming';
 
 /** Resolve active recipients for a hospital + province.
  *  P1-C contract (codex gap-sweep):
@@ -323,6 +325,31 @@ export async function enqueueCpdHighAlert(
   ctx: AlertEventContext,
 ): Promise<number> {
   return enqueueAlertEvent(db, ctx, 'high', CPD_HIGH_ALERT_SOURCE, CPD_HIGH_RULE_ID);
+}
+
+/**
+ * Incoming-referral producer, fired when a referral is first CREATED.
+ *
+ * `ctx.hospitalId` MUST be the DESTINATION hospital — the party that has to
+ * accept the patient. The ingest site is driven by the ORIGIN hospital's
+ * gateway, so passing the pushing hospital here would alert the sender about
+ * its own outgoing referral and leave the receiver with nothing.
+ *
+ * Severity is 'high' (watch-closely), not 'emergency': a referral arriving is
+ * a workload/acceptance event, not an act-this-minute clinical crisis. The
+ * referral's own urgency_level is carried in the case, not in this tier.
+ */
+export async function enqueueReferralIncomingAlert(
+  db: DatabaseAdapter,
+  ctx: AlertEventContext,
+): Promise<number> {
+  return enqueueAlertEvent(
+    db,
+    ctx,
+    'high',
+    REFERRAL_INCOMING_ALERT_SOURCE,
+    REFERRAL_INCOMING_RULE_ID,
+  );
 }
 
 // crypto.randomUUID is available in Node 20+; isolated here so tests/dev can

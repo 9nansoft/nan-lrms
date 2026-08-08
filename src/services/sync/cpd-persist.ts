@@ -8,11 +8,7 @@ import { RiskLevel } from '@/types/domain';
 import { CooperativeYielder } from '@/lib/event-loop';
 import { logger } from '@/lib/logger';
 import { enqueueCpdHighAlert } from '@/services/risk-alert';
-import {
-  resolveAlertOrigin,
-  decryptPatientName,
-  type AlertOrigin,
-} from '@/services/alert-context';
+import { resolveAlertOrigin, decryptPatientName, type AlertOrigin } from '@/services/alert-context';
 
 export async function calculateAndStoreCpdScores(
   db: DatabaseAdapter,
@@ -85,7 +81,11 @@ export async function calculateAndStoreCpdScores(
         missing_factors, calculated_at, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        uuidv4(), p.id, result.score, result.riskLevel, result.recommendation,
+        uuidv4(),
+        p.id,
+        result.score,
+        result.riskLevel,
+        result.recommendation,
         result.factorScores.gravida ?? null,
         result.factorScores.ancCount ?? null,
         result.factorScores.gaWeeks ?? null,
@@ -95,7 +95,8 @@ export async function calculateAndStoreCpdScores(
         result.factorScores.usWeightG ?? null,
         result.factorScores.hematocritPct ?? null,
         JSON.stringify(result.missingFactors),
-        now, now,
+        now,
+        now,
       ],
     );
 

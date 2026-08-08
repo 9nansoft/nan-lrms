@@ -30,6 +30,9 @@ import { getActiveJourneyByCid } from '@/services/journey';
 import { normalizeHosxpDate } from '@/lib/hosxp-date';
 import { decryptSafe } from '@/lib/encryption';
 import { logger } from '@/lib/logger';
+import { enqueueReferralIncomingAlert } from '@/services/risk-alert';
+import { resolveAlertOrigin, decryptPatientName, type AlertOrigin } from '@/services/alert-context';
+import { referralCaseRef } from '@/services/referral-alerts';
 
 export interface BrowserReferoutRow {
   refer_number?: string | null;
@@ -116,6 +119,13 @@ async function hospitalIdByHcode(db: DatabaseAdapter, hcode: string): Promise<st
   return rows.length > 0 ? rows[0].id : null;
 }
 
+async function hcodeByHospitalId(db: DatabaseAdapter, hospitalId: string): Promise<string> {
+  const rows = await db.query<{ hcode: string }>('SELECT hcode FROM hospitals WHERE id = ?', [
+    hospitalId,
+  ]);
+  return rows[0]?.hcode ?? '';
+}
+
 /** Coerce a pg/browser-serialized date value to Gregorian `YYYY-MM-DD`, or
  *  null. Buddhist-Era years (พ.ศ. > 2400) are normalized first — some HOSxP
  *  sites store BE in DATE columns (see hosxp-date.ts). */
@@ -157,6 +167,13 @@ export async function processBrowserReferouts(
     failed: 0,
   };
 
+  // caseRef is keyed on the ORIGIN hcode (refer numbers reset yearly and are
+  // unique only per origin hospital — see KEY_REUSE_GUARD below), so resolve it
+  // once for the batch rather than per row.
+  const originHcode = rows.length > 0 ? await hcodeByHospitalId(db, hospitalId) : '';
+  // One AlertOrigin per destination hospital seen in this batch.
+  const alertOrigins = new Map<string, AlertOrigin>();
+
   for (const row of rows) {
     try {
       const referNumber = row.refer_number?.trim();
@@ -168,7 +185,11 @@ export async function processBrowserReferouts(
       }
 
       const toHcode = row.refer_hospcode?.trim();
-      const toHospitalId = toHcode ? await hospitalIdByHcode(db, toHcode) : null;
+      if (!toHcode) {
+        result.skippedUnknownHospital++;
+        continue;
+      }
+      const toHospitalId = await hospitalIdByHcode(db, toHcode);
       if (!toHospitalId) {
         result.skippedUnknownHospital++;
         continue;
@@ -230,6 +251,53 @@ export async function processBrowserReferouts(
           ],
         );
         result.created++;
+
+        // Only a NEWLY created referral is news; the UPDATE branch above is a
+        // descriptive refresh of one the destination has already been told
+        // about.
+        //
+        // The alert belongs to the DESTINATION hospital. This function is
+        // called with the ORIGIN hospital's id (its browser gateway pushed the
+        // rows), but the people who must act are at `toHospitalId` — enqueuing
+        // under `hospitalId` would alert the sender about its own outgoing
+        // referral and tell the receiving hospital nothing.
+        //
+        // It is also what makes the PDPA rule hold with no extra code:
+        // subscribers OF the destination are a party to the referral and may
+        // legitimately see patient detail, while anyone watching that hospital
+        // from elsewhere is already downgraded to 'aggregate' by the Phase 1
+        // machinery.
+        try {
+          let alertOrigin = alertOrigins.get(toHospitalId);
+          if (!alertOrigin) {
+            alertOrigin = await resolveAlertOrigin(db, toHospitalId, toHcode);
+            alertOrigins.set(toHospitalId, alertOrigin);
+          }
+          await enqueueReferralIncomingAlert(db, {
+            hospitalId: toHospitalId,
+            originHcode: toHcode,
+            hospitalName: alertOrigin.hospitalName,
+            province: alertOrigin.province,
+            // PDPA: hcode + refer number, never row.cid — caseRef is rendered
+            // into the LINE message.
+            caseRef: referralCaseRef(originHcode, referNumber),
+            localDate: alertOrigin.localDate,
+            // The journey we just matched on cidHash is the same person; its
+            // name is encrypted at rest and is present for every row that gets
+            // this far (rows without a journey are skipped above).
+            patientName: decryptPatientName(journey.name),
+            confirmUrl: null,
+          });
+        } catch (e) {
+          // Best-effort: alerting must never fail the sync, and must never
+          // count a successfully created referral as a failed row.
+          logger.warn('moph_alert_referral_incoming_enqueue_failed', {
+            hospitalId,
+            toHospitalId,
+            referNumber,
+            error: e,
+          });
+        }
       }
     } catch {
       // Per-row isolation: one poison row never blocks the rest of the batch.
