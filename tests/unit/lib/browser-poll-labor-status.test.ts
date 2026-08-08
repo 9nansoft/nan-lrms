@@ -16,7 +16,7 @@
 // delivered and empty the labour board — hence the explicit test below that
 // an ipt_labour-only row stays ACTIVE.
 import { describe, it, expect } from 'vitest';
-import { mapLabor, SQL_ACTIVE_LABOUR } from '@/lib/browser-poll';
+import { countLaborWithBirthDate, mapLabor, SQL_ACTIVE_LABOUR } from '@/lib/browser-poll';
 
 /** A row shaped like the gateway's active-labour SELECT. */
 function laborRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -58,6 +58,32 @@ describe('mapLabor — ACTIVE vs DELIVERED', () => {
     // ward would be marked delivered the moment her labour record is opened.
     expect(mapLabor(laborRow({ labour_finishdate: '' }))?.labor_status).toBe('ACTIVE');
     expect(mapLabor(laborRow({ labour_finishdate: '0000-00-00' }))?.labor_status).toBe('ACTIVE');
+  });
+});
+
+describe('countLaborWithBirthDate — the diagnostic that makes a reload conclusive', () => {
+  // Whether the fix worked at a given hospital is otherwise a coin flip: the
+  // rows either clear or they don't, and if they don't we cannot tell "no birth
+  // recorded in HOSxP" from "recorded somewhere we still don't read". Counting
+  // how many active-labour rows came back carrying a birth date turns the next
+  // push into evidence. Counted off the RAW rows, before mapping, because
+  // mapLabor keeps only the derived status.
+  it('counts only rows with a real birth date', () => {
+    expect(
+      countLaborWithBirthDate([
+        { labour_finishdate: '2026-08-05' },
+        { labour_finishdate: null },
+        { labour_finishdate: '' },
+        { labour_finishdate: '0000-00-00' },
+        { labour_finishdate: '2026-08-06' },
+      ]),
+    ).toBe(2);
+  });
+
+  it('is 0 for an empty ward and never throws on a row missing the column', () => {
+    // An older gateway bundle has no labour_finishdate in its SELECT at all.
+    expect(countLaborWithBirthDate([])).toBe(0);
+    expect(countLaborWithBirthDate([{ an: '1' }, { an: '2' }])).toBe(0);
   });
 });
 

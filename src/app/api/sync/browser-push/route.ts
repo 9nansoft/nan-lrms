@@ -58,7 +58,10 @@ import {
 interface BrowserPushBody {
   /** BMS PasteJSON session id the client pulled under — see readBmsSessionId. */
   bms_session_id?: unknown;
-  labor?: Omit<WebhookPayload, 'hospitalCode'>;
+  /** `withBirthDate` is a client-supplied diagnostic count, typed `unknown`
+   *  because it crosses the trust boundary — narrowed with a typeof check at
+   *  the one place it is read, never fed into persistence or control flow. */
+  labor?: Omit<WebhookPayload, 'hospitalCode'> & { withBirthDate?: unknown };
   anc?: Omit<WebhookAncPayload, 'hospitalCode' | 'type'>;
   partograph?: Omit<WebhookPartographPayload, 'hospitalCode' | 'type'>;
   /** Raw HOSxP delivery rows (labour infants + ipt_pregnancy summaries)
@@ -227,6 +230,18 @@ export async function POST(request: NextRequest) {
           // result.labor keeps the full PHI-free error strings; the Sync Log
           // `counts` map is numeric-only, so it carries an error COUNT.
           const hasScreening = r.maternalScreenAssessments !== undefined;
+          // Diagnostic (2026-08-08): how many active-labour rows HOSxP returned
+          // carrying a birth date. `undefined` means this gateway is still
+          // running a pre-fix bundle whose query never selected the column —
+          // reported as such, because printing 0 would misread a stale browser
+          // tab as a ward that records no births. That distinction is the whole
+          // point of the counter (the รพ.น้ำพอง investigation).
+          const withBirthDate =
+            typeof body.labor?.withBirthDate === 'number' ? body.labor.withBirthDate : null;
+          const birthDateNote =
+            withBirthDate == null
+              ? '; birth-date signal unavailable (gateway on an old bundle — reload the page)'
+              : `; ${withBirthDate} of ${r.patientsProcessed} carried a birth date`;
           const screenErrorCount = r.maternalScreenIngestErrors?.length ?? 0;
           result.labor = {
             processed: r.patientsProcessed,
@@ -248,12 +263,13 @@ export async function POST(request: NextRequest) {
               hasScreening
                 ? `; maternal screening: ${r.maternalScreenAssessments} saved, ${r.maternalScreenDuplicates ?? 0} duplicate, ${screenErrorCount} error(s)`
                 : ''
-            }.`,
+            }${birthDateNote}.`,
             counts: {
               processed: r.patientsProcessed,
               newAdmissions: r.newAdmissions,
               discharges: r.discharges,
               transfers: r.transfers,
+              ...(withBirthDate == null ? {} : { withBirthDate }),
               ...(hasScreening
                 ? {
                     maternalScreenAssessments: r.maternalScreenAssessments ?? 0,

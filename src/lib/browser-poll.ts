@@ -148,6 +148,12 @@ export interface BrowserPushBody {
     // present with an empty `patients` list (ward emptied / all rows dropped by
     // the name probe) — the server closes out cached ACTIVE rows absent from it.
     activeAns?: string[];
+    /** Diagnostic: how many of this hospital's active-labour rows carried a
+     *  birth date (labor.labour_finishdate). Optional — a gateway still running
+     *  a pre-2026-08-08 bundle omits it, and `undefined` must be reported as
+     *  "old bundle", never as 0, or a stale tab looks like a hospital that
+     *  records no births. */
+    withBirthDate?: number;
   };
   anc?: { patients: BrowserAncPatient[] };
   partograph?: { observations: BrowserPartographObservation[] };
@@ -392,6 +398,17 @@ function hasHosxpDate(value: unknown): boolean {
   const normalized = normalizeHosxpDate(strOrNull(value));
   if (!normalized) return false;
   return !/^0{4}-0{2}-0{2}/.test(normalized);
+}
+
+/** How many active-labour rows came back carrying a birth date.
+ *
+ *  Diagnostic, not control flow. Without it, "did the fix work at this
+ *  hospital?" is only answerable as yes/no: if the rows do not clear we cannot
+ *  distinguish "HOSxP has no birth recorded" from "recorded in a field we still
+ *  do not read". Counted off the RAW rows because mapLabor keeps only the
+ *  derived status. Reported in the persist_labor sync step. */
+export function countLaborWithBirthDate(rows: Record<string, unknown>[]): number {
+  return rows.reduce((n, r) => (hasHosxpDate(r.labour_finishdate) ? n + 1 : n), 0);
 }
 
 export function mapLabor(row: Record<string, unknown>): BrowserLaborPatient | null {
@@ -878,6 +895,9 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       (r) => !isStaleAdmission(strOrNull(r.regdate), r.dchdate),
     );
     result.labor.droppedStaleAdmission = rawLaborRows.length - laborRows.length;
+    // Diagnostic, computed before mapping/probing so it describes what HOSxP
+    // returned rather than what survived our filters.
+    const laborWithBirthDate = countLaborWithBirthDate(laborRows);
 
     result.labor.read = laborRows.length;
     result.partograph.read = partRows.length;
@@ -1181,7 +1201,10 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
 
     const body: BrowserPushBody = {};
     if (opts.bmsSessionId) body.bms_session_id = opts.bmsSessionId;
-    if (decision.labor) body.labor = decision.labor;
+    // Counted from the raw rows, not `laborPatients`: the name-authenticity
+    // probe may have dropped some, and the diagnostic should describe what
+    // HOSxP actually returned for this ward.
+    if (decision.labor) body.labor = { ...decision.labor, withBirthDate: laborWithBirthDate };
     if (partographs.length > 0) body.partograph = { observations: partographs };
     if (ancPatients.length > 0) body.anc = { patients: ancPatients };
     if (newbornsSection) body.newborns = newbornsSection;
