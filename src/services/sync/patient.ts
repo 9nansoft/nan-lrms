@@ -39,6 +39,9 @@ export interface SyncPatientData {
   effacementPctAdmit?: number | null;
   stationAdmit?: string | null;
   laborStatus: string;
+  /** When the baby was born. Independent of `laborStatus`: a delivered mother
+   *  is normally still ACTIVE (admitted postpartum) until she is discharged. */
+  deliveredAt?: string | null;
   syncedAt: string;
 }
 
@@ -115,7 +118,13 @@ export async function upsertCachedPatients(
           bp_systolic_admit = ?, bp_diastolic_admit = ?, pulse_admit = ?,
           rr_admit = ?, temperature_admit = ?,
           cervical_open_cm_admit = ?, effacement_pct_admit = ?, station_admit = ?,
-          labor_status = ?, synced_at = ?, updated_at = ?
+          labor_status = ?,
+          -- COALESCE, not a plain assignment: a birth does not un-happen. Once
+          -- HOSxP has reported labour_finishdate, a later push that omits it
+          -- (different query window, a gateway on an older bundle) must not
+          -- erase it and put the mother back on the board as still labouring.
+          delivered_at = COALESCE(?, delivered_at),
+          synced_at = ?, updated_at = ?
         WHERE id = ?`,
         [
           p.hn, p.name, p.cid, p.cidHash ?? null, p.age,
@@ -127,7 +136,7 @@ export async function upsertCachedPatients(
           p.bpSystolicAdmit ?? null, p.bpDiastolicAdmit ?? null, p.pulseAdmit ?? null,
           p.rrAdmit ?? null, p.temperatureAdmit ?? null,
           p.cervicalOpenCmAdmit ?? null, p.effacementPctAdmit ?? null, p.stationAdmit ?? null,
-          p.laborStatus, p.syncedAt, now,
+          p.laborStatus, p.deliveredAt ?? null, p.syncedAt, now,
           existing[0].id,
         ],
       );
@@ -143,8 +152,8 @@ export async function upsertCachedPatients(
           bp_systolic_admit, bp_diastolic_admit, pulse_admit,
           rr_admit, temperature_admit,
           cervical_open_cm_admit, effacement_pct_admit, station_admit,
-          labor_status, synced_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          labor_status, delivered_at, synced_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuidv4(), hospitalId, p.hn, p.an, p.name, p.cid, p.cidHash ?? null, p.age,
           p.gravida, p.para ?? null, p.abortion ?? null, p.livingChildren ?? null, p.pregNo ?? null,
@@ -156,7 +165,7 @@ export async function upsertCachedPatients(
           p.bpSystolicAdmit ?? null, p.bpDiastolicAdmit ?? null, p.pulseAdmit ?? null,
           p.rrAdmit ?? null, p.temperatureAdmit ?? null,
           p.cervicalOpenCmAdmit ?? null, p.effacementPctAdmit ?? null, p.stationAdmit ?? null,
-          p.laborStatus, p.syncedAt, now, now,
+          p.laborStatus, p.deliveredAt ?? null, p.syncedAt, now, now,
         ],
       );
     }

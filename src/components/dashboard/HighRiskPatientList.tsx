@@ -24,6 +24,10 @@ export interface HighRiskPatient {
   hospital: string;
   hcode: string;
   admitDate: string | null;
+  /** Birth time, or null if she has not delivered. This list is "admitted and
+   *  not discharged", so a delivered mother stays on it — she is postpartum on
+   *  the ward, not gone — and this is what distinguishes her. */
+  deliveredAt?: string | null;
   lastVitalAt: string | null;
   partographSeverity?: CdssSeverity | null;
   partographAlertCount?: number | null;
@@ -84,6 +88,52 @@ function RiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' 
     >
       {riskLevel}
     </span>
+  );
+}
+
+/** Where this woman is in her labour, for a board that lists everyone admitted
+ *  and not yet discharged.
+ *
+ *  Both states are meaningful and neither is an error: รอคลอด is still in
+ *  labour, คลอดแล้ว has given birth and is on the ward postpartum — still
+ *  needing watching (PPH), which is exactly why she is not removed from the
+ *  list. Deliberately NOT colour-coded on the risk palette: clinical risk is
+ *  the RISK / CPD / PARTOGRAPH columns' job, and reusing those colours here
+ *  would read as "delivered = safe". */
+function LaborStageCell({
+  deliveredAt,
+  isKiosk,
+}: {
+  deliveredAt: string | null;
+  isKiosk: boolean;
+}) {
+  const delivered = Boolean(deliveredAt);
+  // Same kiosk-aware tokens the parent derives — the kiosk theme is a different
+  // palette entirely, so hardcoding the light-mode vars would render this cell
+  // near-invisible on the ward monitor.
+  const ink = isKiosk ? 'var(--kiosk-ink)' : 'var(--ink-navy)';
+  const inkDim = isKiosk ? 'var(--kiosk-dim)' : 'var(--ink-navy-dim)';
+  const inkMuted = isKiosk ? 'var(--kiosk-dim)' : 'var(--ink-navy-muted)';
+  const ruleStrong = isKiosk ? 'var(--kiosk-rule)' : 'var(--rule-strong)';
+  const ruleHair = isKiosk ? 'var(--kiosk-rule)' : 'var(--rule-hair)';
+  return (
+    <div style={{ fontSize: isKiosk ? 13 : 11, lineHeight: 1.25 }}>
+      <span
+        className="inline-block border px-1.5 py-0.5 font-mono tracking-[0.04em] whitespace-nowrap"
+        style={{
+          color: delivered ? inkDim : ink,
+          borderColor: delivered ? ruleHair : ruleStrong,
+          background: 'transparent',
+        }}
+      >
+        {delivered ? 'คลอดแล้ว' : 'รอคลอด'}
+      </span>
+      {delivered && (
+        <div className="font-mono" style={{ color: inkMuted, fontSize: 10 }}>
+          {admitTime(deliveredAt)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -166,6 +216,7 @@ export function HighRiskPatientList({
         { key: 'cpd', label: 'CPD', w: 50 },
         { key: 'hospital', label: 'HOSPITAL', w: 0 }, // flex 1
         { key: 'admit', label: 'ADMIT', w: 70 },
+        { key: 'labor', label: 'สถานะ', w: 92 },
         { key: 'partograph', label: 'PARTOGRAPH', w: 120 },
         { key: 'screen', label: 'คัดกรอง (เงา)', w: 130 },
       ]
@@ -177,6 +228,7 @@ export function HighRiskPatientList({
         { key: 'cpd', label: 'CPD', w: 44 },
         { key: 'hospital', label: 'HOSPITAL', w: 150 },
         { key: 'admit', label: 'ADMIT', w: 58 },
+        { key: 'labor', label: 'สถานะ', w: 88 },
         { key: 'vital', label: 'LAST VITAL', w: 80 },
         { key: 'partograph', label: 'PARTOGRAPH', w: 110 },
         { key: 'screen', label: 'คัดกรอง (เงา)', w: 140 },
@@ -371,6 +423,7 @@ export function HighRiskPatientList({
                 <div className="font-mono" style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}>
                   {admitTime(p.admitDate)}
                 </div>
+                <LaborStageCell deliveredAt={p.deliveredAt ?? null} isKiosk={isKiosk} />
                 {!isKiosk && (
                   <div
                     className="font-mono"

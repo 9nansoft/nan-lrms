@@ -34,30 +34,58 @@ function laborRow(overrides: Record<string, unknown> = {}): Record<string, unkno
   };
 }
 
-describe('mapLabor — ACTIVE vs DELIVERED', () => {
+// `labor_status` answers "is she still on the ward?", NOT "has she given
+// birth?". Those are different questions and DELIVERED already owns the first
+// one: markPatientsDelivered (sync/patient.ts) sets it for admissions HOSxP has
+// stopped returning. Overloading it with "gave birth, still admitted" would
+// collapse two states AND drop postpartum women off the ALL ACTIVE board, which
+// is the board of women who are not discharged. The birth goes in its own
+// field, `delivered_at`, and the UI renders รอคลอด vs คลอดแล้ว from it.
+describe('mapLabor — labor_status tracks the admission, not the birth', () => {
   it('is ACTIVE while she is still in labour (no birth, no discharge)', () => {
     expect(mapLabor(laborRow())?.labor_status).toBe('ACTIVE');
   });
 
-  it('is DELIVERED once labor.labour_finishdate is recorded, even without discharge', () => {
-    // The น้ำพอง case: baby born, mother still admitted postpartum.
+  it('stays ACTIVE after the birth while she is still admitted', () => {
+    // The น้ำพอง case: baby born, mother still on the ward postpartum. She
+    // belongs on the board — with a status column, not removed from it.
     const mapped = mapLabor(laborRow({ labour_finishdate: '2026-08-05', dchdate: null }));
-    expect(mapped?.labor_status).toBe('DELIVERED');
+    expect(mapped?.labor_status).toBe('ACTIVE');
   });
 
-  it('stays DELIVERED on discharge, with no birth date recorded', () => {
+  it('is DELIVERED on discharge', () => {
     // Pre-existing behaviour must not regress: hospitals that DO complete the
     // discharge screen keep working exactly as before.
     const mapped = mapLabor(laborRow({ dchdate: '2026-08-07', labour_finishdate: null }));
     expect(mapped?.labor_status).toBe('DELIVERED');
   });
+});
 
-  it('treats an empty-string labour_finishdate as "not delivered"', () => {
+describe('mapLabor — delivered_at carries the birth', () => {
+  it('is null while she is still in labour', () => {
+    expect(mapLabor(laborRow())?.delivered_at).toBeNull();
+  });
+
+  it('is the recorded birth date once labour has finished', () => {
+    expect(mapLabor(laborRow({ labour_finishdate: '2026-08-05' }))?.delivered_at).toBe(
+      '2026-08-05',
+    );
+  });
+
+  it('treats HOSxP unset dates as "not delivered"', () => {
     // HOSxP/MySQL hands back '' and '0000-00-00' for unset dates far more often
-    // than NULL. Either one must NOT be read as a birth, or every woman on the
-    // ward would be marked delivered the moment her labour record is opened.
-    expect(mapLabor(laborRow({ labour_finishdate: '' }))?.labor_status).toBe('ACTIVE');
-    expect(mapLabor(laborRow({ labour_finishdate: '0000-00-00' }))?.labor_status).toBe('ACTIVE');
+    // than NULL. Either one read as a birth would show every woman on the ward
+    // as delivered the moment her labour record is opened.
+    expect(mapLabor(laborRow({ labour_finishdate: '' }))?.delivered_at).toBeNull();
+    expect(mapLabor(laborRow({ labour_finishdate: '0000-00-00' }))?.delivered_at).toBeNull();
+  });
+
+  it('normalises a Buddhist-era year, as every other HOSxP event date is', () => {
+    // Some sites store พ.ศ. in DATE columns (see lib/hosxp-date.ts). An
+    // un-normalised 2569 would render as a birth 543 years in the future.
+    expect(mapLabor(laborRow({ labour_finishdate: '2569-08-05' }))?.delivered_at).toBe(
+      '2026-08-05',
+    );
   });
 });
 

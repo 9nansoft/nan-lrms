@@ -95,6 +95,11 @@ export interface WebhookPatientPayload {
   effacement_pct_admit?: number | null;
   station_admit?: string | null; // free-form (-3 / -2 / -1 / 0 / +1 / etc)
   labor_status?: string; // ACTIVE (default), DELIVERED
+  /** Birth date/time (HOSxP `labor.labour_finishdate`). Independent of
+   *  labor_status — a delivered mother stays ACTIVE until she is discharged.
+   *  Optional: senders that do not record it simply omit it, and the upsert
+   *  COALESCEs so a missing value never erases a previously reported birth. */
+  delivered_at?: string | null;
   action?: 'upsert' | 'delete'; // default: 'upsert'
   // OPTIONAL maternal labor-triage screening observations (Task 7, spec §9.1).
   // Legacy senders that omit it are 100% unaffected (GC7); it is only ever
@@ -1163,6 +1168,7 @@ export async function processWebhookPayload(
       effacementPctAdmit: p.effacement_pct_admit ?? null,
       stationAdmit: p.station_admit ?? null,
       laborStatus: p.labor_status ?? 'ACTIVE',
+      deliveredAt: p.delivered_at ?? null,
       syncedAt: new Date().toISOString(),
     });
   }

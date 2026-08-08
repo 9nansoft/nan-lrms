@@ -65,7 +65,12 @@ interface BrowserLaborPatient {
   cervical_open_cm_admit?: number | null;
   effacement_pct_admit?: number | null;
   station_admit?: string | null;
+  /** Admission state: ACTIVE = still on the ward, DELIVERED = discharged. */
   labor_status?: string;
+  /** When the baby was born (labor.labour_finishdate), or null if she has not
+   *  delivered yet. Independent of `labor_status`: a woman can be delivered AND
+   *  still admitted, which is the normal postpartum case. */
+  delivered_at?: string | null;
 }
 
 interface BrowserPartographObservation {
@@ -447,16 +452,21 @@ export function mapLabor(row: Record<string, unknown>): BrowserLaborPatient | nu
     cervical_open_cm_admit: numOrNull(row.cervical_open_size),
     effacement_pct_admit: numOrNull(row.eff),
     station_admit: strOrNull(row.station),
-    // DELIVERED means "no longer in labour", and there are two ways to learn
-    // that. `dchdate` is discharge; `labor.labour_finishdate` (วันที่เด็กเกิด)
-    // is the birth itself. Discharge alone is not enough: at รพ.น้ำพอง the ward
-    // completes the labour-room screen but not the discharge screen, so
-    // delivered mothers sat on the ACTIVE board until the 7-day stale-admission
-    // timer removed them (STALE_ADMISSION.autoCloseAfterDays). NOTE the birth
-    // date lives in `labor`, NOT in `ipt_labour` — that table is the labour-room
-    // ADMISSION register and has no delivery timestamp at all, so keying off it
-    // would mark every arriving woman as delivered (BMS Mantis #4105).
-    labor_status: row.dchdate || hasHosxpDate(row.labour_finishdate) ? 'DELIVERED' : 'ACTIVE',
+    // `labor_status` tracks the ADMISSION, not the birth: DELIVERED already
+    // means "no longer on the ward" (markPatientsDelivered closes out ANs HOSxP
+    // stops returning), so a mother who has given birth but is still admitted
+    // stays ACTIVE and remains on the not-discharged board. Which of the two she
+    // is, is `delivered_at` below — surfaced as a status column, not by removing
+    // her from the list.
+    labor_status: row.dchdate ? 'DELIVERED' : 'ACTIVE',
+    // The birth itself: `labor.labour_finishdate` (วันที่เด็กเกิด). NOT in
+    // `ipt_labour` — that is the labour-room ADMISSION register and carries no
+    // delivery timestamp at all, so keying off it would show every arriving
+    // woman as delivered (BMS Mantis #4105). Normalised for Buddhist-era years
+    // like every other HOSxP event date.
+    delivered_at: hasHosxpDate(row.labour_finishdate)
+      ? normalizeHosxpDate(strOrNull(row.labour_finishdate))
+      : null,
   };
 }
 
