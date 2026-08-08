@@ -554,26 +554,17 @@ export async function POST(request: NextRequest) {
         const referoutResult = await processBrowserReferouts(db, hospitalId, referouts);
         const referinResult = await processBrowserReferins(db, hospitalId, referins);
         const visitResult = await processBrowserVisitEvidences(db, hospitalId, visitEvidences);
-        // Nothing *happens* when a referral merely gets old, so the overdue
-        // event has to be evaluated on the tick. Runs AFTER the processors so
-        // rows ingested this cycle are already visible to it. Best-effort by
-        // contract — the service swallows its own failures.
-        const overdueAlerts = await enqueueOverdueReferralAlerts(db, hospitalId);
         result.referrals = {
           referouts: referoutResult,
           referins: referinResult,
           visitEvidences: visitResult,
         };
         const arrivedTotal = referinResult.arrived + visitResult.arrived;
-        if (
-          referoutResult.created + referoutResult.upserted > 0 ||
-          arrivedTotal > 0 ||
-          overdueAlerts > 0
-        ) {
+        if (referoutResult.created + referoutResult.upserted > 0 || arrivedTotal > 0) {
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_referrals',
             status: 'success',
-            message: `Referrals: ${referoutResult.created} new, ${referoutResult.upserted} refreshed, ${arrivedTotal} arrived (${visitResult.arrived} via visit evidence), ${overdueAlerts} overdue alert(s) queued.`,
+            message: `Referrals: ${referoutResult.created} new, ${referoutResult.upserted} refreshed, ${arrivedTotal} arrived (${visitResult.arrived} via visit evidence).`,
             counts: {
               referoutsRead: referoutResult.rowsRead,
               created: referoutResult.created,
@@ -582,7 +573,6 @@ export async function POST(request: NextRequest) {
               referinsRead: referinResult.rowsRead,
               visitEvidencesRead: visitResult.rowsRead,
               arrived: arrivedTotal,
-              overdueAlerts,
             },
           });
         }
@@ -601,6 +591,29 @@ export async function POST(request: NextRequest) {
           detail: msg,
         });
       }
+    }
+
+    // Overdue-referral alerts. Nothing *happens* when a referral merely gets
+    // old, so the event has to be evaluated on the tick.
+    //
+    // Deliberately OUTSIDE the `body.referrals` block: browser-poll only
+    // attaches a referrals section when this hospital's own HOSxP pull returned
+    // referral rows (lib/browser-poll.ts), so a hospital that is purely the
+    // DESTINATION of an overdue referral would never run the scan — and the
+    // destination is exactly the party that has not acted on it. Runs after the
+    // processors above so rows ingested this cycle are already visible.
+    try {
+      const overdueAlerts = await enqueueOverdueReferralAlerts(db, hospitalId);
+      if (overdueAlerts > 0) {
+        await appendSyncStep(hospitalId, runId, {
+          name: 'referral_overdue_alerts',
+          status: 'success',
+          message: `Queued ${overdueAlerts} overdue-referral alert(s).`,
+          counts: { queued: overdueAlerts },
+        });
+      }
+    } catch (e) {
+      logger.warn('referral_overdue_alerts_failed', { hospitalId, error: e });
     }
 
     // Referral auto-arrive reconciliation — previously lived only in the
