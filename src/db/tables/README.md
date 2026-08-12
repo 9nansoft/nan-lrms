@@ -1,6 +1,6 @@
 # Database Schema — Two-Table Patient Model
 
-KK-LRMS stores patient data across two complementary tables. **They are not duplicates** — each represents a distinct lifecycle stage and answers different operational questions.
+NN-LRMS stores patient data across two complementary tables. **They are not duplicates** — each represents a distinct lifecycle stage and answers different operational questions.
 
 ## Why Two Tables?
 

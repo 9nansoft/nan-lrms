@@ -40,9 +40,9 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER:-kklrms}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-kklrms}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-kk-lrms}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-nn-lrms}
       AUTH_TRUST_HOST: "true"
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-https://kk-lrms.bmscloud.in.th}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?Set NEXTAUTH_URL in .env — the public origin this deploy is served from, e.g. https://nn-lrms.example.go.th}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}
       BMS_VALIDATE_URL: ${BMS_VALIDATE_URL:-https://hosxp.net/phapi/PasteJSON}

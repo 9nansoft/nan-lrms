@@ -12,7 +12,7 @@
 // hospital, so the standard onboarding endpoint would 400. This flag-
 // only clear lets the admin unblock from anywhere; the real sync
 // happens server-side on the next cycle once a user from the affected
-// hospital opens KK-LRMS.
+// hospital opens NN-LRMS.
 //
 // Admin-gated by both the Edge middleware AND the handler-level requireAdmin()
 // guard below (/api/admin/* requires role=ADMIN + ADMIN_ALLOWED_CIDS).

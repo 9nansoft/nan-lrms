@@ -23,7 +23,7 @@ import { PERMISSIONS_POLICY } from '../../src/lib/security-headers';
 
 const HARNESS_HTML = `<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>kk-lrms media smoke</title></head>
+<head><meta charset="utf-8"><title>nn-lrms media smoke</title></head>
 <body style="margin:0">
 <div id="room" style="width:100vw;height:100vh"></div>
 <script src="https://${JITSI_DOMAIN}/external_api.js"></script>

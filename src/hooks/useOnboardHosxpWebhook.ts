@@ -35,12 +35,12 @@ const PENDING_STORAGE_KEY = 'nn-lrms:hosxp-webhook-pending-key';
 const WEBHOOK_MODULE_ID = 3;
 const WEBHOOK_SETTING_CODE = 'NN-LRMS';
 
-function resolveKkLrmsWebhookUrl(): string {
+function resolveNnLrmsWebhookUrl(): string {
   if (typeof window === 'undefined') return '';
   // Reuse the deployed origin — HOSxP will POST back here with the auth key.
-  // Override via NEXT_PUBLIC_KK_LRMS_PUBLIC_URL when the public origin
+  // Override via NEXT_PUBLIC_NN_LRMS_PUBLIC_URL when the public origin
   // differs from window.location (e.g. behind a reverse proxy).
-  const override = process.env.NEXT_PUBLIC_KK_LRMS_PUBLIC_URL;
+  const override = process.env.NEXT_PUBLIC_NN_LRMS_PUBLIC_URL;
   const origin = override && override.length > 0 ? override : window.location.origin;
   return `${origin.replace(/\/$/, '')}/api/webhooks/patient-data`;
 }
@@ -232,7 +232,7 @@ export function useOnboardHosxpWebhook(): {
           hasExistingRow: existingId !== null,
         });
 
-        const webhookUrl = resolveKkLrmsWebhookUrl();
+        const webhookUrl = resolveNnLrmsWebhookUrl();
 
         // PUT for update, POST for insert. BMS's /api/rest accepts writes on
         // webhook_setting now, but POST is a strict INSERT — posting an

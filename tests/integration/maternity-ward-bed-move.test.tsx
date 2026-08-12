@@ -116,7 +116,7 @@ describe('Maternity ward bed-move full flow (against mock BMS)', () => {
     const cfg: ConnectionConfig = {
       apiUrl: server.url,
       bearerToken: 'JWT',
-      appIdentifier: 'KK-LRMS.Web',
+      appIdentifier: 'NN-LRMS.Web',
     };
     const reasons = await getBedMoveReasons(cfg);
     expect(reasons).toEqual(['ตามคำขอผู้ป่วย', 'ฉุกเฉิน']);
@@ -132,7 +132,7 @@ describe('Maternity ward bed-move full flow (against mock BMS)', () => {
     const cfg: ConnectionConfig = {
       apiUrl: server.url,
       bearerToken: 'JWT',
-      appIdentifier: 'KK-LRMS.Web',
+      appIdentifier: 'NN-LRMS.Web',
     };
 
     // Capture the production page-level handler so we can fire it manually
@@ -242,7 +242,7 @@ describe('Maternity ward bed-move full flow (against mock BMS)', () => {
     const cfg: ConnectionConfig = {
       apiUrl: server.url,
       bearerToken: 'JWT',
-      appIdentifier: 'KK-LRMS.Web',
+      appIdentifier: 'NN-LRMS.Web',
     };
 
     render(

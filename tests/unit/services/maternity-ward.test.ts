@@ -31,7 +31,7 @@ global.fetch = mockFetch;
 const cfg: ConnectionConfig = {
   apiUrl: 'https://t.example/api',
   bearerToken: 'BEARER',
-  appIdentifier: 'KK-LRMS.Web',
+  appIdentifier: 'NN-LRMS.Web',
 };
 
 describe('listMaternityWards', () => {

@@ -12,7 +12,7 @@ pgTypes.setTypeParser(20, (val: string) => parseInt(val, 10));
 
 // Same treatment for numeric/decimal (OID 1700). `pg` returns these as
 // strings to preserve arbitrary precision, but every decimal column in
-// kk-lrms is a clinical measurement with ≤2 decimal places (temperature,
+// nn-lrms is a clinical measurement with ≤2 decimal places (temperature,
 // hematocrit, cervical dilation, weight, partograph BP/temp, etc.) — all
 // safely within Number precision. The string default broke patient detail
 // views with "ex.toFixed is not a function" the moment any of those fields

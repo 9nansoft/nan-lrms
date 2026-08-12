@@ -2,7 +2,7 @@
 // handler for the inbound patient-data webhook (auth, validator, processor).
 //
 // Why this exists: the previous version of this test required a live HOSxP
-// PostgreSQL on 127.0.0.1:5432 PLUS a running kk-lrms dev server on
+// PostgreSQL on 127.0.0.1:5432 PLUS a running nn-lrms dev server on
 // localhost:3003 PLUS a manually-provisioned API key. In CI all three are
 // absent, so the suite errored out in beforeAll with ECONNREFUSED before
 // any case ran.

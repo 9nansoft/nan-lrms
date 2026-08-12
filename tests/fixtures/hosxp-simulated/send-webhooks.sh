@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# HOSxP Simulator — Send webhook test payloads to KK-LRMS
+# HOSxP Simulator — Send webhook test payloads to NN-LRMS
 # Usage: ./send-webhooks.sh [base_url] [api_key_hospital_10679] [api_key_hospital_10737]
 #
-# Real API keys must be issued by the KK-LRMS admin (สสจ.ขอนแก่น).
+# Real API keys must be issued by the NN-LRMS admin (สสจ.น่าน).
 # Replace the placeholders below or pass them as arguments.
 
-BASE_URL="${1:-https://kk-lrms.bmscloud.in.th}"
+BASE_URL="${1:?Pass the target base URL as arg 1, e.g. https://nn-lrms.example.go.th}"
 API_KEY_10679="${2:-kklrms_TEST_API_KEY_PLACEHOLDER}"
 API_KEY_11304="${3:-kklrms_TEST_API_KEY_PLACEHOLDER_11304}"
 

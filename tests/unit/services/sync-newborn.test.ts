@@ -315,7 +315,7 @@ describe('newborn polling sync', () => {
   });
 
   // ── Retrospective journeys ─────────────────────────────────────────────
-  // Historical births whose mothers were never registered (pre-kk-lrms
+  // Historical births whose mothers were never registered (pre-nn-lrms
   // deliveries found during backfill) get a minimal DELIVERED journey built
   // from the mother identity the delivery queries now carry — instead of
   // being skipped and lost to the outcomes board.

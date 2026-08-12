@@ -5,7 +5,7 @@ import {
   isJsonContentType,
 } from '@/lib/request-origin';
 
-const APP = 'https://kk-lrms.bmscloud.in.th';
+const APP = 'https://nn-lrms.example.test';
 
 describe('parseTrustedOrigins', () => {
   it('derives the app origin from NEXTAUTH_URL and appends extras', () => {

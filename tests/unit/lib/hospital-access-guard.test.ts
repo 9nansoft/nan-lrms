@@ -1,4 +1,4 @@
-// Policy gate: which BMS-session identities may hold a KK-LRMS session.
+// Policy gate: which BMS-session identities may hold a NN-LRMS session.
 // Runs against a fresh PGlite DB so the `hospitals` lookup is real and not
 // mocked — the policy must stay aligned with the live schema.
 import { describe, it, expect, beforeAll } from 'vitest';

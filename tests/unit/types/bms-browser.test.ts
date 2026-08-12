@@ -14,7 +14,7 @@ describe('bms-browser types', () => {
     const c: ConnectionConfig = {
       apiUrl: 'https://x',
       bearerToken: 't',
-      appIdentifier: 'KK-LRMS.Web',
+      appIdentifier: 'NN-LRMS.Web',
     };
     expectTypeOf(c.apiUrl).toBeString();
   });

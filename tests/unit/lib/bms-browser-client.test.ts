@@ -138,7 +138,7 @@ describe('extractUserInfo', () => {
 const cfg: ConnectionConfig = {
   apiUrl: 'https://t.example/api',
   bearerToken: 'BEARER',
-  appIdentifier: 'KK-LRMS.Web',
+  appIdentifier: 'NN-LRMS.Web',
 };
 
 describe('executeSql', () => {
@@ -166,7 +166,7 @@ describe('executeSql', () => {
       }),
     );
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body).toEqual({ sql: 'SELECT 1', app: 'KK-LRMS.Web' });
+    expect(body).toEqual({ sql: 'SELECT 1', app: 'NN-LRMS.Web' });
   });
 
   it('passes params when provided', async () => {

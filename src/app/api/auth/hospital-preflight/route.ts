@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
   // Gate onboarding on the per-hospital HOSxP API version. The user's tunnel
   // must expose `get_server_api_version` and report >= MIN_BMS_API_VERSION;
   // otherwise downstream features (partograph schema, /api/function calls
-  // like `get_serialnumber`) won't behave as the rest of kk-lrms expects.
+  // like `get_serialnumber`) won't behave as the rest of nn-lrms expects.
   //
   // Bearer for /api/function is the session code (UUID), NOT identity.jwt
   // (which holds `auth_key` and is used elsewhere as the marketplace-token).

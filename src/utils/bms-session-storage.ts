@@ -1,4 +1,4 @@
-// kk-lrms BMS session/cookie/URL utilities (port from hosxp-telemed)
+// nn-lrms BMS session/cookie/URL utilities (port from hosxp-telemed)
 
 /** Cookie name used to persist the BMS session identifier */
 export const BMS_SESSION_COOKIE_NAME = 'bms-session-id';

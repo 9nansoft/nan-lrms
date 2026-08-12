@@ -16,9 +16,9 @@ interface RedisRetryState {
 }
 
 declare global {
-  var __kkLrmsRedisClient: RedisClient | undefined;
-  var __kkLrmsRedisRetry: RedisRetryState | undefined;
-  var __kkLrmsMemoryCache: Map<string, MemoryEntry> | undefined;
+  var __nnLrmsRedisClient: RedisClient | undefined;
+  var __nnLrmsRedisRetry: RedisRetryState | undefined;
+  var __nnLrmsMemoryCache: Map<string, MemoryEntry> | undefined;
 }
 
 const DEFAULT_PREFIX = 'nn-lrms';
@@ -26,8 +26,8 @@ const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 300_000;
 
 function memoryStore(): Map<string, MemoryEntry> {
-  globalThis.__kkLrmsMemoryCache ??= new Map<string, MemoryEntry>();
-  return globalThis.__kkLrmsMemoryCache;
+  globalThis.__nnLrmsMemoryCache ??= new Map<string, MemoryEntry>();
+  return globalThis.__nnLrmsMemoryCache;
 }
 
 function cleanupExpiredMemory(now = Date.now()): void {
@@ -49,15 +49,15 @@ function namespaced(key: string): string {
 }
 
 function retryState(): RedisRetryState {
-  if (!globalThis.__kkLrmsRedisRetry) {
-    globalThis.__kkLrmsRedisRetry = {
+  if (!globalThis.__nnLrmsRedisRetry) {
+    globalThis.__nnLrmsRedisRetry = {
       attempt: 0,
       disabledUntil: 0,
       degradedSince: null,
       connecting: null,
     };
   }
-  return globalThis.__kkLrmsRedisRetry;
+  return globalThis.__nnLrmsRedisRetry;
 }
 
 function newRedisClient(url: string): RedisClient {
@@ -66,7 +66,7 @@ function newRedisClient(url: string): RedisClient {
   client.on('error', (error) => {
     logger.warn('redis_client_error', { error });
   });
-  globalThis.__kkLrmsRedisClient = client;
+  globalThis.__nnLrmsRedisClient = client;
   return client;
 }
 
@@ -74,7 +74,7 @@ async function getRedisClient(): Promise<RedisClient | null> {
   const redisUrl = process.env.REDIS_URL?.trim();
   if (!redisUrl || redisUrl === 'memory') return null;
 
-  const existing = globalThis.__kkLrmsRedisClient;
+  const existing = globalThis.__nnLrmsRedisClient;
   if (existing?.isOpen) return existing;
 
   const state = retryState();
@@ -82,7 +82,7 @@ async function getRedisClient(): Promise<RedisClient | null> {
   if (state.connecting) return state.connecting; // single-flight
 
   state.connecting = (async () => {
-    const client = globalThis.__kkLrmsRedisClient ?? newRedisClient(redisUrl);
+    const client = globalThis.__nnLrmsRedisClient ?? newRedisClient(redisUrl);
     try {
       if (!client.isOpen) await client.connect();
       if (state.attempt > 0) {
@@ -260,7 +260,7 @@ export async function cacheStatus(): Promise<{
 
 /** Tear down client + retry state + memory store so tests start clean. */
 export function resetCacheForTests(): void {
-  globalThis.__kkLrmsRedisClient = undefined;
-  globalThis.__kkLrmsRedisRetry = undefined;
-  globalThis.__kkLrmsMemoryCache = undefined;
+  globalThis.__nnLrmsRedisClient = undefined;
+  globalThis.__nnLrmsRedisRetry = undefined;
+  globalThis.__nnLrmsMemoryCache = undefined;
 }

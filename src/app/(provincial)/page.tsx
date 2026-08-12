@@ -146,7 +146,7 @@ function buildHosxpSyncReport(
 export default function DashboardPage() {
   useSetBreadcrumbs([{ label: 'แดชบอร์ด' }]);
   // Auto-provisions the HOSxP `webhook_setting` row for module_id=3 /
-  // setting_code='KK-LRMS' on first onboarding. No-op when the row already
+  // setting_code='NN-LRMS' on first onboarding. No-op when the row already
   // exists or when the BMS session / marketplace_token isn't present.
   const { state: onboardingState } = useOnboardHosxpWebhook();
   const { state: hosxpSyncState } = useOnboardHosxpSync();

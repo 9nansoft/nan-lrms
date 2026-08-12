@@ -947,7 +947,7 @@ export default function AboutPage() {
                 ตัวอย่างการเรียกใช้งาน (cURL)
               </h3>
               <CodeBlock title="terminal">
-                {`curl -X POST https://kk-lrms.example.com/api/webhooks/patient-data \\
+                {`curl -X POST https://nn-lrms.example.com/api/webhooks/patient-data \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer kklrms_a1b2c3d4e5f6..." \\
   -d '{

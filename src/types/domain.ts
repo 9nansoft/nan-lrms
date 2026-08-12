@@ -1,4 +1,4 @@
-// T012: KK-LRMS domain types and enums
+// T012: NN-LRMS domain types and enums
 
 // MoPH service-plan levels.
 //
@@ -35,7 +35,7 @@ export enum HospitalLevel {
   F = 'F',
 }
 
-// Service-role classification for the kk-lrms maternity network.
+// Service-role classification for the nn-lrms maternity network.
 // Orthogonal to MOPH `HospitalLevel`: a single F2 district hospital may or
 // may not run a maternity ward; the service_type column captures that.
 // Drives:

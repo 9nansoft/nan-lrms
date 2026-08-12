@@ -285,11 +285,11 @@ export interface ImmediateSyncJobSnapshot {
 }
 
 const syncJobGlobal = globalThis as unknown as {
-  __kkLrmsImmediateSyncJobs?: Map<string, ImmediateSyncJobState>;
+  __nnLrmsImmediateSyncJobs?: Map<string, ImmediateSyncJobState>;
 };
 const immediateSyncJobs =
-  syncJobGlobal.__kkLrmsImmediateSyncJobs ?? new Map<string, ImmediateSyncJobState>();
-syncJobGlobal.__kkLrmsImmediateSyncJobs = immediateSyncJobs;
+  syncJobGlobal.__nnLrmsImmediateSyncJobs ?? new Map<string, ImmediateSyncJobState>();
+syncJobGlobal.__nnLrmsImmediateSyncJobs = immediateSyncJobs;
 
 function snapshotImmediateSyncJob(
   state: ImmediateSyncJobState | undefined,
