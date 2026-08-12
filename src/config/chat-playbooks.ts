@@ -1,4 +1,4 @@
-// Chat playbooks — kk-lrms's own clinical and operational conventions, written
+// Chat playbooks — nn-lrms's own clinical and operational conventions, written
 // as instructions the model loads ON DEMAND via the `load_playbook` tool.
 //
 // Division of labour, deliberately:
@@ -43,9 +43,9 @@ export const CHAT_PLAYBOOKS: readonly ChatPlaybook[] = [
   {
     id: 'cpd-interpretation',
     summary:
-      'แปลผลคะแนน CPD และระดับความเสี่ยงของ KK-LRMS (ใช้เมื่อถามว่าคะแนนนี้แปลว่าอะไร/ต้องทำอะไรต่อ)',
+      'แปลผลคะแนน CPD และระดับความเสี่ยงของ NN-LRMS (ใช้เมื่อถามว่าคะแนนนี้แปลว่าอะไร/ต้องทำอะไรต่อ)',
     body: [
-      '# การแปลผลคะแนน CPD ในระบบ KK-LRMS',
+      '# การแปลผลคะแนน CPD ในระบบ NN-LRMS',
       '',
       'คะแนน CPD (Cephalopelvic Disproportion) คำนวณจากปัจจัยเสี่ยงของผู้คลอด',
       'แล้วจัดระดับตามเกณฑ์ของระบบนี้ (ไม่ใช่เกณฑ์สากล) ดังนี้:',
@@ -70,7 +70,7 @@ export const CHAT_PLAYBOOKS: readonly ChatPlaybook[] = [
     summary:
       'อ่านกราฟ partograph: alert line / action line และระดับการแจ้งเตือน (ใช้เมื่อถามถึงการตีความ partogram)',
     body: [
-      '# การอ่าน Partograph ใน KK-LRMS',
+      '# การอ่าน Partograph ใน NN-LRMS',
       '',
       '## เส้นอ้างอิง',
       `- **Alert line** เริ่มคำนวณเมื่อปากมดลูกเปิด ${ALERT_LINE_START_CM} ซม. (อัตราอ้างอิง 1 ซม./ชม.)`,
@@ -95,7 +95,7 @@ export const CHAT_PLAYBOOKS: readonly ChatPlaybook[] = [
     id: 'anc-followup',
     summary: 'ระดับความเสี่ยง ANC (LOW/HR1/HR2/HR3) และเกณฑ์ความสดของข้อมูลที่ระบบใช้',
     body: [
-      '# การติดตาม ANC ใน KK-LRMS',
+      '# การติดตาม ANC ใน NN-LRMS',
       '',
       '## ระดับความเสี่ยง (ตามการจำแนกที่ระบบใช้)',
       '- `LOW` = ครรภ์ความเสี่ยงต่ำ ติดตามตามนัดปกติ',
@@ -120,7 +120,7 @@ export const CHAT_PLAYBOOKS: readonly ChatPlaybook[] = [
     id: 'referral-triage',
     summary: `เกณฑ์เวลาการส่งต่อ (ค้างเกิน ${REFERRAL_SLA.overdueAfterHours} ชม. / วิกฤตเกิน ${REFERRAL_SLA.criticalAfterHours} ชม.)`,
     body: [
-      '# เกณฑ์การส่งต่อ (Referral SLA) ใน KK-LRMS',
+      '# เกณฑ์การส่งต่อ (Referral SLA) ใน NN-LRMS',
       '',
       '## การนับอายุใบส่งต่อ',
       `- ค้างเกิน **${REFERRAL_SLA.overdueAfterHours} ชั่วโมง** = overdue (แสดงสีเหลืองและนับใน KPI งานค้าง)`,
@@ -141,7 +141,7 @@ export const CHAT_PLAYBOOKS: readonly ChatPlaybook[] = [
     summary:
       'ตัวเลขไหนตอบคำถามแบบไหน และกฎการรายงานสถิติของแดชบอร์ด (ใช้เมื่อถามยอดรวม/เปรียบเทียบ รพ.)',
     body: [
-      '# กฎการรายงานสถิติของแดชบอร์ด KK-LRMS',
+      '# กฎการรายงานสถิติของแดชบอร์ด NN-LRMS',
       '',
       '## นิยามที่ต้องใช้ให้ตรง',
       '- **"รอคลอด" / "กำลังคลอด" / "อยู่ในห้องคลอด"** = ผู้ป่วยที่ `labor_status = ACTIVE`',

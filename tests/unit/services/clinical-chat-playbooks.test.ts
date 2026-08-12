@@ -1,6 +1,6 @@
 // TDD — chat playbooks (2026-08-07).
 //
-// Playbooks carry kk-lrms's LOCAL conventions (CPD bands, partograph lines, ANC
+// Playbooks carry nn-lrms's LOCAL conventions (CPD bands, partograph lines, ANC
 // tiers, referral SLA, statistics reporting rules). The model cannot know these
 // from its weights, and the medical ebook cannot tell it either.
 //

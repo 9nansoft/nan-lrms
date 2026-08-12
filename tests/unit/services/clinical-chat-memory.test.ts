@@ -14,7 +14,7 @@ import {
   type ChatMemoryScope,
 } from '@/services/chat/memory-store';
 
-const KEY_PREFIX = 'kk-lrms:chat';
+const KEY_PREFIX = 'nn-lrms:chat';
 
 // vi.hoisted: the mock factory is hoisted above all top-level bindings, so the
 // fake store must be created here and referenced from both the factory and the

@@ -196,7 +196,7 @@ function renderStatisticsBlock(input: {
   const shown = s.hospitals.slice(0, hospitalLimit);
   const lines: string[] = [];
 
-  lines.push(`## ข้อมูลสถิติจริงจากแดชบอร์ด KK-LRMS (ข้อมูล ณ ${stamp})`);
+  lines.push(`## ข้อมูลสถิติจริงจากแดชบอร์ด NN-LRMS (ข้อมูล ณ ${stamp})`);
   lines.push('');
   lines.push('### ภาพรวมทั้งจังหวัด');
   lines.push(

@@ -9,7 +9,7 @@ import { cacheGetJson, cacheSetJson } from '@/lib/cache';
 import type { LlmChatMessage } from '@/lib/llm-client';
 import type { ClinicalChatMode } from './prompt-config';
 
-const KEY_PREFIX = 'kk-lrms:chat';
+const KEY_PREFIX = 'nn-lrms:chat';
 const MAX_HISTORY_TURNS = 20;
 const SESSION_TTL_SECONDS = 60 * 60; // 1h idle expiry
 
