@@ -103,4 +103,16 @@ describe('TopNavBar — hospital variant', () => {
     expect(screen.getByText('นางทดสอบ')).toBeInTheDocument();
     expect(screen.getByLabelText(/ออกจากระบบ/)).toBeInTheDocument();
   });
+
+  it('renders the notification-settings link un-hidden and linked to /profile', async () => {
+    mockUseSession.mockReturnValue(baseSession);
+    render(<TopNavBar variant="hospital" />);
+    const link = await screen.findByRole('link', { name: 'การตั้งค่าการแจ้งเตือน' });
+    expect(link).toBeInTheDocument();
+    // Regression: the link must NOT be visibility-hidden at any breakpoint
+    // (was `hidden ... md:inline-flex` — invisible on mobile). toBeVisible
+    // fails if Tailwind `hidden` is present.
+    expect(link).toBeVisible();
+    expect(link).toHaveAttribute('href', '/profile');
+  });
 });

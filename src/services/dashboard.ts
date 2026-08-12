@@ -260,6 +260,7 @@ interface HighRiskRow {
   hospital_name: string;
   hcode: string;
   admit_date: string | null;
+  delivered_at: string | Date | null;
   last_vital_at: string | null;
   partograph_severity: string | null;
   partograph_alert_count: number | null;
@@ -354,6 +355,7 @@ export async function getHighRiskPatients(
       h.name AS hospital_name,
       h.hcode,
       cp.admit_date,
+      cp.delivered_at,
       cp.partograph_severity,
       cp.partograph_alert_count,
       cp.maternal_screen_local_tier,
@@ -389,6 +391,9 @@ export async function getHighRiskPatients(
     // pg returns timestamptz columns as Date objects, SQLite as strings —
     // normalize to ISO so the API shape stays a string as declared.
     admitDate: row.admit_date == null ? null : new Date(row.admit_date).toISOString(),
+    // Null = still labouring; set = delivered but not yet discharged, so she
+    // stays on this board. The UI renders รอคลอด vs คลอดแล้ว from this.
+    deliveredAt: toIsoString(row.delivered_at),
     lastVitalAt: row.last_vital_at == null ? null : new Date(row.last_vital_at).toISOString(),
     partographSeverity: (row.partograph_severity as CdssSeverity | null) ?? null,
     partographAlertCount: row.partograph_alert_count ?? null,
@@ -724,7 +729,15 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
      GROUP BY cs.risk_level`,
   );
 
-  const labor = { total: 0, low: 0, medium: 0, high: 0 };
+  const labor = {
+    total: 0,
+    low: 0,
+    medium: 0,
+    high: 0,
+    admitted: 0,
+    awaitingDelivery: 0,
+    deliveredAdmitted: 0,
+  };
   for (const row of laborCounts) {
     const c = Number(row.count);
     labor.total += c;
@@ -732,6 +745,23 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
     else if (row.risk_level === 'MEDIUM') labor.medium = c;
     else if (row.risk_level === 'HIGH') labor.high = c;
   }
+
+  // The ward as it actually stands. Deliberately NOT derived from laborCounts
+  // above: that query INNER JOINs cpd_scores, so a woman admitted minutes ago
+  // and not yet scored is missing from it — the board would report fewer women
+  // than are physically on it. Counted straight off cached_patients instead,
+  // and split by whether she has given birth, because "admitted" and "still in
+  // labour" stopped being the same question once delivered_at existed.
+  const admittedRows = await db.query<{ awaiting: number; delivered: number }>(
+    `SELECT COUNT(*) FILTER (WHERE cp.delivered_at IS NULL) AS awaiting,
+            COUNT(*) FILTER (WHERE cp.delivered_at IS NOT NULL) AS delivered
+       FROM cached_patients cp
+      WHERE cp.labor_status = 'ACTIVE'
+        AND cp.hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}`,
+  );
+  labor.awaitingDelivery = Number(admittedRows[0]?.awaiting ?? 0);
+  labor.deliveredAdmitted = Number(admittedRows[0]?.delivered ?? 0);
+  labor.admitted = labor.awaitingDelivery + labor.deliveredAdmitted;
 
   // Delivered counts (this month) with outcome flags
   // Bangkok month boundary — consistent with the outcomes board (the old

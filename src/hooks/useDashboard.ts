@@ -19,7 +19,15 @@ interface DashboardWithExtras extends DashboardResponse {
 
 const DEFAULT_STAGE_KPIS: DashboardStageKPIs = {
   pregnancy: { total: 0, low: 0, hr1: 0, hr2: 0, hr3: 0 },
-  labor: { total: 0, low: 0, medium: 0, high: 0 },
+  labor: {
+    total: 0,
+    low: 0,
+    medium: 0,
+    high: 0,
+    admitted: 0,
+    awaitingDelivery: 0,
+    deliveredAdmitted: 0,
+  },
   delivered: { total: 0, normal: 0, lowApgar: 0, lbw: 0 },
 };
 

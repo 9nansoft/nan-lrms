@@ -41,6 +41,8 @@ export const MUTATION_ROUTE_POLICIES: Record<string, MutationRoutePolicy> = {
   'src/app/api/onboarding/webhook-key/route.ts': 'session-origin-checked',
   'src/app/api/onboarding/log/route.ts': 'session-origin-checked',
   'src/app/api/hospital/audit-log/route.ts': 'session-origin-checked',
+  'src/app/api/chat/route.ts': 'session-origin-checked',
+  'src/app/api/profile/notification-preference/route.ts': 'session-origin-checked',
   'src/app/api/dev/simulate/start/route.ts': 'dev-simulation-guard',
   'src/app/api/dev/simulate/stop/route.ts': 'dev-simulation-guard',
   'src/app/api/dev/simulate/clear/route.ts': 'dev-simulation-guard',
@@ -51,6 +53,10 @@ export const MUTATION_ROUTE_POLICIES: Record<string, MutationRoutePolicy> = {
   // requireAdmin() in every exported handler).
   'src/app/api/admin/clear-cache/route.ts': 'session-origin-checked',
   'src/app/api/admin/config/route.ts': 'session-origin-checked',
+  'src/app/api/admin/moph-alerts/route.ts': 'session-origin-checked',
+  'src/app/api/admin/provinces/[provinceCode]/center-monitors/[monitorId]/route.ts':
+    'session-origin-checked',
+  'src/app/api/admin/provinces/[provinceCode]/center-monitors/route.ts': 'session-origin-checked',
   'src/app/api/admin/hospitals/[hcode]/bms-config/route.ts': 'session-origin-checked',
   'src/app/api/admin/hospitals/[hcode]/clear-purge/route.ts': 'session-origin-checked',
   'src/app/api/admin/hospitals/[hcode]/consult-doctors/[doctorId]/route.ts':

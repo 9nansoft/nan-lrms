@@ -231,9 +231,7 @@ describe('processBrowserReferins (Phase 2 — destination gateway push)', () => 
   });
 
   it('carries the real refer_time into arrived_at (not a midnight stamp)', async () => {
-    await processBrowserReferins(db, DEST_ID, [
-      referinRow({ refer_time: '14:45:00' }),
-    ]);
+    await processBrowserReferins(db, DEST_ID, [referinRow({ refer_time: '14:45:00' })]);
     const rows = await db.query<{ arrived_at: string | Date }>(
       `SELECT arrived_at FROM cached_referrals`,
     );

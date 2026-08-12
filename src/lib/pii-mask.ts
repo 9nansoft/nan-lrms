@@ -91,6 +91,21 @@ export function maskName(value: string | null | undefined): string {
 }
 
 /**
+ * Mask every 13-digit national ID EMBEDDED in free text.
+ *
+ *   "ผู้ป่วย 3320500282121 คลอดหรือยัง" → "ผู้ป่วย 3XXXXXXXX2121 คลอดหรือยัง"
+ *
+ * maskCid() is anchored (^\d{13}$) and therefore a no-op on free text, so any
+ * caller handling user-typed input needs this variant instead. The boundary
+ * guards keep 12- and 14-digit runs (HN/AN/phone/reference numbers) untouched.
+ * Use on anything that leaves the process — LLM prompts, logs, webhooks.
+ */
+export function maskCidsInText(value: string | null | undefined): string {
+  if (!value) return '';
+  return value.replace(/(?<!\d)\d{13}(?!\d)/g, (match) => maskCid(match));
+}
+
+/**
  * More aggressive variant for low-trust contexts (kiosk, public displays).
  * Both first and last names are abbreviated to their first character.
  *

@@ -34,6 +34,9 @@ import {
   saveMaternalScreenAssessment,
   MaternalScreenStoreError,
 } from '@/services/maternal-screening-store';
+import { enqueueEmergencyAlert, enqueuePartographCriticalAlert } from '@/services/risk-alert';
+import { resolveAlertOrigin, decryptPatientName } from '@/services/alert-context';
+import { EMERGENCY_ACUITY_LABEL_TH } from '@/config/maternal-screen-display';
 import {
   shouldEmitMaternalScreenTransition,
   buildMaternalScreenStateChangedEvent,
@@ -92,6 +95,11 @@ export interface WebhookPatientPayload {
   effacement_pct_admit?: number | null;
   station_admit?: string | null; // free-form (-3 / -2 / -1 / 0 / +1 / etc)
   labor_status?: string; // ACTIVE (default), DELIVERED
+  /** Birth date/time (HOSxP `labor.labour_finishdate`). Independent of
+   *  labor_status — a delivered mother stays ACTIVE until she is discharged.
+   *  Optional: senders that do not record it simply omit it, and the upsert
+   *  COALESCEs so a missing value never erases a previously reported birth. */
+  delivered_at?: string | null;
   action?: 'upsert' | 'delete'; // default: 'upsert'
   // OPTIONAL maternal labor-triage screening observations (Task 7, spec §9.1).
   // Legacy senders that omit it are 100% unaffected (GC7); it is only ever
@@ -1160,6 +1168,7 @@ export async function processWebhookPayload(
       effacementPctAdmit: p.effacement_pct_admit ?? null,
       stationAdmit: p.station_admit ?? null,
       laborStatus: p.labor_status ?? 'ACTIVE',
+      deliveredAt: p.delivered_at ?? null,
       syncedAt: new Date().toISOString(),
     });
   }
@@ -1310,6 +1319,40 @@ export async function processWebhookPayload(
               assessedAt: projected.assessedAt ?? validated.candidate.assessedAt,
             }),
           );
+
+          // MOPH Prompt EMERGENCY alert enqueue (codex #2 EMERGENCY producer).
+          // Fires only on a real transition into EMERGENCY/URGENT acuity (not
+          // STABLE/UNKNOWN). Best-effort: a failure never breaks screening.
+          // ruleId = emerg_<acuity> so distinct levels co-fire (codex #5); the
+          // drain (browser-push path) is the only LINE I/O site.
+          const acuity = projected.emergencyAcuity;
+          if (acuity === 'EMERGENCY' || acuity === 'URGENT') {
+            try {
+              const origin = await resolveAlertOrigin(db, hospitalId, hcode);
+              await enqueueEmergencyAlert(db, {
+                hospitalId,
+                originHcode: hcode,
+                hospitalName: origin.hospitalName,
+                province: origin.province,
+                caseRef: admission.journey_id
+                  ? `LABOR-${admission.journey_id}`
+                  : `LABOR-AN-${p.an}`,
+                localDate: origin.localDate,
+                patientName: typeof p.name === 'string' ? p.name : null,
+                confirmUrl: null,
+                acuityLabel: EMERGENCY_ACUITY_LABEL_TH[acuity],
+                ruleId: `emerg_${acuity.toLowerCase()}`,
+              });
+            } catch (e) {
+              // Alerting is best-effort — never let it break maternal screening.
+              logger.warn('moph_alert_emergency_enqueue_failed', {
+                hospitalId,
+                an: p.an,
+                acuity,
+                error: e,
+              });
+            }
+          }
         }
       } catch (err) {
         // Store errors are PHI-free by contract (ids/codes only — never
@@ -2663,6 +2706,45 @@ export async function processPartographWebhook(
       severity: sc.to,
       alertCount: sc.alertCount,
     });
+
+    // MOPH Prompt partograph_critical producer. This is the single shared
+    // service site: /api/sync/browser-push reaches it through this same
+    // function, so there is no second call site on the route.
+    //
+    // `from !== 'CRITICAL'` is redundant with severityChanges (which only
+    // carries real transitions) and deliberately kept: it is what states that
+    // a CDSS flapping between CRITICAL readings must not re-alert, independent
+    // of the dedup index. Best-effort — a failure never aborts the sync run.
+    if (sc.to === 'CRITICAL' && sc.from !== 'CRITICAL') {
+      try {
+        const origin = await resolveAlertOrigin(db, hospitalId, hcode);
+        // The partograph payload carries no patient name; cached_patients does,
+        // encrypted at rest. Severity transitions are rare (unlike the
+        // per-observation loop above), so a lookup per transition is cheap.
+        const nameRows = await db.query<{ name: string | null }>(
+          'SELECT name FROM cached_patients WHERE id = ?',
+          [sc.patientId],
+        );
+        await enqueuePartographCriticalAlert(db, {
+          hospitalId,
+          originHcode: hcode,
+          hospitalName: origin.hospitalName,
+          province: origin.province,
+          // PDPA: the AN, never the CID — caseRef is rendered into the message.
+          caseRef: `PARTO-AN-${sc.an}`,
+          localDate: origin.localDate,
+          patientName: decryptPatientName(nameRows[0]?.name),
+          confirmUrl: null,
+        });
+      } catch (e) {
+        // Alerting is best-effort — never let it break partograph ingest.
+        logger.warn('moph_alert_partograph_enqueue_failed', {
+          hospitalId,
+          an: sc.an,
+          error: e,
+        });
+      }
+    }
   }
 
   await db.execute(

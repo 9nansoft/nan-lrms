@@ -194,6 +194,12 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
               {roleLabel && <span className="text-[10px] text-white/60">{roleLabel}</span>}
             </div>
           )}
+          <Link
+            href="/profile"
+            className="inline-flex items-center rounded-sm border border-white/25 bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white transition-colors hover:bg-white/20"
+          >
+            การตั้งค่าการแจ้งเตือน
+          </Link>
           <CallDirectoryButton />
           <button
             onClick={handleLogout}
@@ -239,6 +245,14 @@ export function TopNavBar({ variant = 'provincial' }: TopNavBarProps = {}) {
               </Link>
             );
           })}
+          <Link
+            href="/profile"
+            onClick={() => setMobileOpen(false)}
+            className="mt-2 flex w-full items-center gap-2 rounded-sm px-3 py-2 text-[14px]"
+            style={{ color: 'var(--ink-navy-dim)' }}
+          >
+            การตั้งค่าการแจ้งเตือน
+          </Link>
           <button
             onClick={handleLogout}
             className="mt-2 flex w-full items-center gap-2 rounded-sm px-3 py-2 text-[14px] text-red-600 hover:bg-red-50"

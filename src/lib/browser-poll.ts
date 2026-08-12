@@ -30,6 +30,7 @@ import {
   OVST_FIRST_VISIT_FOR_CIDS,
 } from '@/config/hosxp-queries';
 import { isStaleAdmission } from '@/config/hospital-network';
+import { normalizeHosxpDate } from '@/lib/hosxp-date';
 import type { ConnectionConfig, SqlApiResponse } from '@/types/bms-browser';
 
 // ─── Webhook payload shapes (mirror src/services/webhook.ts) ────────────────
@@ -64,7 +65,12 @@ interface BrowserLaborPatient {
   cervical_open_cm_admit?: number | null;
   effacement_pct_admit?: number | null;
   station_admit?: string | null;
+  /** Admission state: ACTIVE = still on the ward, DELIVERED = discharged. */
   labor_status?: string;
+  /** When the baby was born (labor.labour_finishdate), or null if she has not
+   *  delivered yet. Independent of `labor_status`: a woman can be delivered AND
+   *  still admitted, which is the normal postpartum case. */
+  delivered_at?: string | null;
 }
 
 interface BrowserPartographObservation {
@@ -147,6 +153,12 @@ export interface BrowserPushBody {
     // present with an empty `patients` list (ward emptied / all rows dropped by
     // the name probe) — the server closes out cached ACTIVE rows absent from it.
     activeAns?: string[];
+    /** Diagnostic: how many of this hospital's active-labour rows carried a
+     *  birth date (labor.labour_finishdate). Optional — a gateway still running
+     *  a pre-2026-08-08 bundle omits it, and `undefined` must be reported as
+     *  "old bundle", never as 0, or a stale tab looks like a hospital that
+     *  records no births. */
+    withBirthDate?: number;
   };
   anc?: { patients: BrowserAncPatient[] };
   partograph?: { observations: BrowserPartographObservation[] };
@@ -215,8 +227,14 @@ export interface BrowserPollResult {
 //                                    "ACTIVE LABOR · PROVINCE" with clinically
 //                                    nonsensical GA values. Matches the
 //                                    Pascal client (KKLRMSWebhookUnit.pas L594).
-const SQL_ACTIVE_LABOUR = `
+export const SQL_ACTIVE_LABOUR = `
   SELECT i.an, i.hn, i.regdate, i.regtime, i.dchdate,
+         -- Delivery signal (วันที่เด็กเกิด). A correlated subquery, not a JOIN:
+         -- a join on the labor table would multiply the patient row if an
+         -- ever carries more than one labour record, silently double-counting
+         -- the ward. MAX() also picks the recorded birth over a NULL sibling.
+         (SELECT MAX(lb.labour_finishdate) FROM labor lb WHERE lb.an = i.an)
+           AS labour_finishdate,
          CONCAT(p.pname, p.fname, ' ', p.lname) AS patient_name,
          p.pname, p.fname, p.lname,
          p.cid, p.birthday, p.height,
@@ -375,7 +393,30 @@ function calcAge(birthday: string | null): number {
 
 // ─── Mappers (raw rows → webhook payload shapes) ────────────────────────────
 
-function mapLabor(row: Record<string, unknown>): BrowserLaborPatient | null {
+/** True when a HOSxP DATE column holds a real date.
+ *
+ *  HOSxP represents "unset" three different ways depending on site and column
+ *  — NULL, '', and the MySQL zero date '0000-00-00'. Treating any of those as
+ *  a date would mark a woman as delivered the moment her labour record is
+ *  opened, which would silently empty the labour board. */
+function hasHosxpDate(value: unknown): boolean {
+  const normalized = normalizeHosxpDate(strOrNull(value));
+  if (!normalized) return false;
+  return !/^0{4}-0{2}-0{2}/.test(normalized);
+}
+
+/** How many active-labour rows came back carrying a birth date.
+ *
+ *  Diagnostic, not control flow. Without it, "did the fix work at this
+ *  hospital?" is only answerable as yes/no: if the rows do not clear we cannot
+ *  distinguish "HOSxP has no birth recorded" from "recorded in a field we still
+ *  do not read". Counted off the RAW rows because mapLabor keeps only the
+ *  derived status. Reported in the persist_labor sync step. */
+export function countLaborWithBirthDate(rows: Record<string, unknown>[]): number {
+  return rows.reduce((n, r) => (hasHosxpDate(r.labour_finishdate) ? n + 1 : n), 0);
+}
+
+export function mapLabor(row: Record<string, unknown>): BrowserLaborPatient | null {
   const hn = strOrNull(row.hn);
   const an = strOrNull(row.an);
   const name = strOrNull(row.patient_name);
@@ -411,7 +452,21 @@ function mapLabor(row: Record<string, unknown>): BrowserLaborPatient | null {
     cervical_open_cm_admit: numOrNull(row.cervical_open_size),
     effacement_pct_admit: numOrNull(row.eff),
     station_admit: strOrNull(row.station),
+    // `labor_status` tracks the ADMISSION, not the birth: DELIVERED already
+    // means "no longer on the ward" (markPatientsDelivered closes out ANs HOSxP
+    // stops returning), so a mother who has given birth but is still admitted
+    // stays ACTIVE and remains on the not-discharged board. Which of the two she
+    // is, is `delivered_at` below — surfaced as a status column, not by removing
+    // her from the list.
     labor_status: row.dchdate ? 'DELIVERED' : 'ACTIVE',
+    // The birth itself: `labor.labour_finishdate` (วันที่เด็กเกิด). NOT in
+    // `ipt_labour` — that is the labour-room ADMISSION register and carries no
+    // delivery timestamp at all, so keying off it would show every arriving
+    // woman as delivered (BMS Mantis #4105). Normalised for Buddhist-era years
+    // like every other HOSxP event date.
+    delivered_at: hasHosxpDate(row.labour_finishdate)
+      ? normalizeHosxpDate(strOrNull(row.labour_finishdate))
+      : null,
   };
 }
 
@@ -850,6 +905,9 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       (r) => !isStaleAdmission(strOrNull(r.regdate), r.dchdate),
     );
     result.labor.droppedStaleAdmission = rawLaborRows.length - laborRows.length;
+    // Diagnostic, computed before mapping/probing so it describes what HOSxP
+    // returned rather than what survived our filters.
+    const laborWithBirthDate = countLaborWithBirthDate(laborRows);
 
     result.labor.read = laborRows.length;
     result.partograph.read = partRows.length;
@@ -1153,7 +1211,10 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
 
     const body: BrowserPushBody = {};
     if (opts.bmsSessionId) body.bms_session_id = opts.bmsSessionId;
-    if (decision.labor) body.labor = decision.labor;
+    // Counted from the raw rows, not `laborPatients`: the name-authenticity
+    // probe may have dropped some, and the diagnostic should describe what
+    // HOSxP actually returned for this ward.
+    if (decision.labor) body.labor = { ...decision.labor, withBirthDate: laborWithBirthDate };
     if (partographs.length > 0) body.partograph = { observations: partographs };
     if (ancPatients.length > 0) body.anc = { patients: ancPatients };
     if (newbornsSection) body.newborns = newbornsSection;

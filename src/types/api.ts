@@ -312,6 +312,11 @@ export interface HighRiskPatient {
   hospital: string;
   hcode: string;
   admitDate: string | null;
+  /** When she gave birth (HOSxP `labor.labour_finishdate`), or null if she has
+   *  not delivered yet. Distinct from being on this list at all: the list is
+   *  "admitted, not discharged", so a delivered mother stays on it and shows as
+   *  คลอดแล้ว rather than disappearing. */
+  deliveredAt: string | null;
   lastVitalAt: string | null;
   partographSeverity: CdssSeverity | null;
   partographAlertCount: number | null;
@@ -781,7 +786,19 @@ export interface OutcomesResponse extends NewbornKPIsResponse {
 
 export interface DashboardStageKPIs {
   pregnancy: { total: number; low: number; hr1: number; hr2: number; hr3: number };
-  labor: { total: number; low: number; medium: number; high: number };
+  /** `total`/`low`/`medium`/`high` are the CPD-risk breakdown and count only
+   *  women who have a CPD score, so they under-report the ward.
+   *  `admitted` is every not-discharged woman, split by whether she has given
+   *  birth yet — the figure the ward actually reads off the board. */
+  labor: {
+    total: number;
+    low: number;
+    medium: number;
+    high: number;
+    admitted: number;
+    awaitingDelivery: number;
+    deliveredAdmitted: number;
+  };
   delivered: { total: number; normal: number; lowApgar: number; lbw: number };
 }
 

@@ -16,6 +16,7 @@ import {
   scheduleAuditLogRetention,
   stopAuditLogRetentionSchedule,
 } from '@/services/audit-retention';
+import { backfillActiveConsultDoctorPrefs } from '@/services/notification-preference';
 import { logger } from '@/lib/logger';
 
 // HMR- and bundle-safe init flag (pair with ensure-init.ts singleton).
@@ -100,6 +101,25 @@ export async function initializeApp(): Promise<void> {
     logger.info('cached_anc_visits_hospital_backfilled', {
       pendingBefore: Number(beforeBackfill[0]?.count ?? 0),
     });
+
+    // 2c. P1-D rollout backfill (notification opt-in): Default-OFF would make
+    // every currently-configured consult doctor go silent on deploy. Seed an
+    // enabled preference row for each ACTIVE consult doctor now (idempotent —
+    // ON CONFLICT DO NOTHING never clobbers a user's later opt-out; re-runs
+    // don't duplicate). Center monitors excluded (admin list is authoritative).
+    try {
+      const optInBackfilled = await backfillActiveConsultDoctorPrefs(db);
+      if (optInBackfilled > 0) {
+        logger.info('notification_prefs_consult_doctor_backfilled', {
+          inserted: optInBackfilled,
+        });
+      }
+    } catch (error) {
+      // Fail-safe: a backfill failure must not block app startup.
+      logger.warn('notification_prefs_backfill_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     // 3. Run seeders
     const seedOrchestrator = new SeedOrchestrator();

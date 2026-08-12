@@ -10,6 +10,8 @@ import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey } from '@/lib/encryption';
 import { testSessionUser } from '../../helpers/session';
+import { saveNotificationPreference } from '@/services/notification-preference';
+import { REFERRAL_SLA } from '@/config/referral-sla';
 
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
 
@@ -27,10 +29,6 @@ import { POST } from '@/app/api/sync/browser-push/route';
 const HCODE = '10670';
 const CID = '1111111111113';
 const CID_HASH = createHash('sha256').update(CID).digest('hex');
-
-function todayInBangkok(): string {
-  return new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 function jsonRequest(body: unknown): Request {
   return new Request('http://test/api/sync/browser-push', {
@@ -114,22 +112,23 @@ describe('POST /api/sync/browser-push — referral sections', () => {
     const originHid = await hospitalIdOf(originHcode);
     const journeyId = await seedJourney(originHid);
     const now = new Date().toISOString();
-    // Referin evidence is matched within one day after its HOSxP local date.
-    // A fixed historical date eventually falls outside that safety window.
-    const referDate = todayInBangkok();
+    // The cached referral must sit inside the referin's [refer_date-30d,
+    // refer_date+1d] match window. Production referout ingestion derives
+    // initiated_at from refer_date (not wall-clock now), so mirror that here
+    // to keep the fixture stable across the calendar (was a date-drift bomb).
+    const referDate = '2026-07-20';
+    const initiatedAt = new Date(`${referDate}T09:00:00+07:00`).toISOString();
     await db.execute(
       `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id, status, reason, urgency_level, initiated_at, created_at, updated_at)
        VALUES ('ref-in-1', ?, 'RF-IN-1', ?, ?, 'INITIATED', 'r', 'ROUTINE', ?, ?, ?)`,
-      [journeyId, originHid, destHid, now, now, now],
+      [journeyId, originHid, destHid, initiatedAt, now, now],
     );
 
     const res = await POST(
       jsonRequest({
         referrals: {
           referouts: [],
-          referins: [
-            { hn: 'DHN-1', cid: CID, refer_hospcode: originHcode, refer_date: referDate },
-          ],
+          referins: [{ hn: 'DHN-1', cid: CID, refer_hospcode: originHcode, refer_date: referDate }],
         },
       }) as never,
     );
@@ -144,5 +143,56 @@ describe('POST /api/sync/browser-push — referral sections', () => {
       [journeyId],
     );
     expect(journey[0].current_hospital_id).toBe(destHid);
+  });
+
+  // The overdue scan has no event to hang on — nothing happens when a referral
+  // merely gets old — so it is evaluated on the tick. It must not be gated on
+  // the pushing hospital having sent a `referrals` section: browser-poll only
+  // attaches one when that hospital's own HOSxP pull returned referral rows, so
+  // a hospital that is purely the DESTINATION of an overdue referral would
+  // never run the scan. The destination is exactly the party that has not acted.
+  it('queues overdue alerts even when the push carries no referrals section', async () => {
+    const destHid = await hospitalIdOf(HCODE); // the pushing hospital = destination
+    const originHcode = await otherHcode();
+    const originHid = await hospitalIdOf(originHcode);
+    const journeyId = await seedJourney(originHid);
+
+    // A doctor at the destination, subscribed to referral_overdue.
+    const doctorCid = '1409901234567';
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO hospital_consult_doctors (id, hospital_id, cid, name, position, is_active, created_at, updated_at)
+       VALUES ('cd-overdue-1', ?, ?, 'นพ.ปลายทาง', 'สูตินรี', true, ?, ?)`,
+      [destHid, doctorCid, now, now],
+    );
+    await saveNotificationPreference(db, {
+      userCid: doctorCid,
+      hospitalCode: HCODE,
+      mophLineEnabled: true,
+      detailLevel: 'full',
+      digestHour: 8,
+      events: ['referral_overdue'],
+    });
+
+    // Initiated past the SLA — derived from config, never a literal, so the
+    // fixture follows REFERRAL_SLA if the threshold is ever retuned.
+    const overdueAt = new Date(
+      Date.now() - (REFERRAL_SLA.overdueAfterHours + 1) * 3600_000,
+    ).toISOString();
+    await db.execute(
+      `INSERT INTO cached_referrals (id, journey_id, refer_number, from_hospital_id, to_hospital_id, status, reason, urgency_level, initiated_at, created_at, updated_at)
+       VALUES ('ref-overdue-1', ?, 'RF-OVERDUE-1', ?, ?, 'INITIATED', 'PIH', 'ROUTINE', ?, ?, ?)`,
+      [journeyId, originHid, destHid, overdueAt, now, now],
+    );
+
+    // No `referrals` key at all — the shape a destination-only gateway pushes.
+    const res = await POST(jsonRequest({}) as never);
+    expect(res.status).toBe(200);
+
+    const alerts = await db.query<{ alert_source: string; hospital_id: string }>(
+      `SELECT alert_source, hospital_id FROM moph_alert_log WHERE alert_source = 'referral_overdue'`,
+    );
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].hospital_id).toBe(destHid);
   });
 });

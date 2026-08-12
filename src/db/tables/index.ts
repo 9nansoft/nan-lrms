@@ -22,6 +22,10 @@ import { mophHospitalsTable } from './moph-hospitals';
 import { systemConfigTable } from './system-config';
 import { videoCallsTable } from './video-calls';
 import { videoCallParticipantsTable } from './video-call-participants';
+import { mophAlertLogTable } from './moph-alert-log';
+import { mophCenterMonitorsTable } from './moph-center-monitors';
+import { notificationPreferencesTable } from './notification-preferences';
+import { notificationEventSubscriptionsTable } from './notification-event-subscriptions';
 
 export {
   hospitalsTable,
@@ -47,6 +51,10 @@ export {
   systemConfigTable,
   videoCallsTable,
   videoCallParticipantsTable,
+  mophAlertLogTable,
+  mophCenterMonitorsTable,
+  notificationPreferencesTable,
+  notificationEventSubscriptionsTable,
 };
 
 // All tables in creation order (respects foreign key dependencies)
@@ -59,6 +67,14 @@ export const ALL_TABLES: TableDefinition[] = [
   hospitalsTable,
   hospitalBmsConfigTable,
   hospitalConsultDoctorsTable,
+  // MOPH Prompt alerts — both reference hospitals, so after hospitalsTable.
+  // moph_center_monitors is province-scoped (no FK); moph_alert_log FKs hospitals.
+  mophCenterMonitorsTable,
+  // Per-user MOPH LINE notification opt-in — hospital-scoped, no FK to users.
+  notificationPreferencesTable,
+  // Per-event opt-in rows hanging off a preference; must follow it.
+  notificationEventSubscriptionsTable,
+  mophAlertLogTable,
   usersTable,
   maternalJourneysTable,
   cachedPatientsTable,

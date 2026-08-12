@@ -62,11 +62,17 @@ export function StageKPICards({ stageKPIs }: StageKPICardsProps) {
       />
       <StageCard
         title="ในห้องคลอด"
-        total={stageKPIs.labor.total}
+        total={stageKPIs.labor.admitted}
         href="/hospitals"
         rows={[
-          ['LOW', stageKPIs.labor.low, 'var(--risk-low)'],
-          ['MED', stageKPIs.labor.medium, 'var(--risk-medium)'],
+          // The ward's real question is who is still labouring vs who has
+          // delivered and is postpartum — both are admitted, so both belong on
+          // this card. Neutral colours: these are stages, not risk levels, and
+          // putting them on the risk palette would read as "delivered = safe"
+          // (postpartum haemorrhage is exactly when it is not). HIGH stays
+          // alongside as the clinical signal.
+          ['รอคลอด', stageKPIs.labor.awaitingDelivery, 'var(--ink-navy)'],
+          ['คลอดแล้ว', stageKPIs.labor.deliveredAdmitted, 'var(--ink-navy-dim)'],
           ['HIGH', stageKPIs.labor.high, 'var(--risk-high)'],
         ]}
       />

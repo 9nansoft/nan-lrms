@@ -20,6 +20,7 @@ import {
   type BrowserNewbornsSection,
 } from '@/services/sync/newborn';
 import { autoArriveReferrals } from '@/services/referral';
+import { enqueueOverdueReferralAlerts } from '@/services/referral-alerts';
 import {
   processBrowserReferouts,
   processBrowserReferins,
@@ -31,6 +32,11 @@ import {
   type BrowserReferoutsResult,
   type BrowserReferinsResult,
 } from '@/services/sync/referrals';
+import { enqueueHighRiskAlert } from '@/services/risk-alert';
+import { resolveAlertOrigin } from '@/services/alert-context';
+import { drainMophAlerts } from '@/services/moph-alert-drain';
+import { classifyAncItems } from '@/config/anc-classifying-canon';
+import { AncRiskLevel } from '@/types/domain';
 import {
   processWebhookPayload,
   processAncWebhook,
@@ -52,7 +58,10 @@ import {
 interface BrowserPushBody {
   /** BMS PasteJSON session id the client pulled under — see readBmsSessionId. */
   bms_session_id?: unknown;
-  labor?: Omit<WebhookPayload, 'hospitalCode'>;
+  /** `withBirthDate` is a client-supplied diagnostic count, typed `unknown`
+   *  because it crosses the trust boundary — narrowed with a typeof check at
+   *  the one place it is read, never fed into persistence or control flow. */
+  labor?: Omit<WebhookPayload, 'hospitalCode'> & { withBirthDate?: unknown };
   anc?: Omit<WebhookAncPayload, 'hospitalCode' | 'type'>;
   partograph?: Omit<WebhookPartographPayload, 'hospitalCode' | 'type'>;
   /** Raw HOSxP delivery rows (labour infants + ipt_pregnancy summaries)
@@ -221,6 +230,18 @@ export async function POST(request: NextRequest) {
           // result.labor keeps the full PHI-free error strings; the Sync Log
           // `counts` map is numeric-only, so it carries an error COUNT.
           const hasScreening = r.maternalScreenAssessments !== undefined;
+          // Diagnostic (2026-08-08): how many active-labour rows HOSxP returned
+          // carrying a birth date. `undefined` means this gateway is still
+          // running a pre-fix bundle whose query never selected the column —
+          // reported as such, because printing 0 would misread a stale browser
+          // tab as a ward that records no births. That distinction is the whole
+          // point of the counter (the รพ.น้ำพอง investigation).
+          const withBirthDate =
+            typeof body.labor?.withBirthDate === 'number' ? body.labor.withBirthDate : null;
+          const birthDateNote =
+            withBirthDate == null
+              ? '; birth-date signal unavailable (gateway on an old bundle — reload the page)'
+              : `; ${withBirthDate} of ${r.patientsProcessed} carried a birth date`;
           const screenErrorCount = r.maternalScreenIngestErrors?.length ?? 0;
           result.labor = {
             processed: r.patientsProcessed,
@@ -242,12 +263,13 @@ export async function POST(request: NextRequest) {
               hasScreening
                 ? `; maternal screening: ${r.maternalScreenAssessments} saved, ${r.maternalScreenDuplicates ?? 0} duplicate, ${screenErrorCount} error(s)`
                 : ''
-            }.`,
+            }${birthDateNote}.`,
             counts: {
               processed: r.patientsProcessed,
               newAdmissions: r.newAdmissions,
               discharges: r.discharges,
               transfers: r.transfers,
+              ...(withBirthDate == null ? {} : { withBirthDate }),
               ...(hasScreening
                 ? {
                     maternalScreenAssessments: r.maternalScreenAssessments ?? 0,
@@ -360,6 +382,47 @@ export async function POST(request: NextRequest) {
             visitConflicts: r.visitConflicts,
             fieldOverflows: r.fieldOverflows,
           });
+        }
+
+        // MOPH Prompt HIGH-risk alert enqueue (codex #2 HIGH producer). For
+        // each ANC patient the server classifies as HR3 (top tier), enqueue a
+        // pending moph_alert_log row — no LINE I/O here; the drain step below
+        // sends. Best-effort: a failure never aborts the sync run.
+        try {
+          const { hospitalName, province, localDate } = await resolveAlertOrigin(
+            db,
+            hospitalId,
+            hcode,
+          );
+          let enqueued = 0;
+          for (const p of patients) {
+            // Trust the server-side canon classifier, not the client-declared
+            // riskLevel — a client can claim HR3 without the item evidence.
+            const classified = classifyAncItems(p.riskItemIds ?? []);
+            if (classified.level !== AncRiskLevel.HR3) continue;
+            const n = await enqueueHighRiskAlert(db, {
+              hospitalId,
+              originHcode: hcode,
+              hospitalName,
+              province,
+              caseRef: `ANC-${p.cid}-G${p.pregNo}`,
+              localDate,
+              patientName: p.name,
+              confirmUrl: null,
+            });
+            enqueued += n;
+          }
+          if (enqueued > 0) {
+            await appendSyncStep(hospitalId, runId, {
+              name: 'moph_alerts_enqueue',
+              status: 'success',
+              message: `Enqueued ${enqueued} HIGH-risk (HR3) MOPH alert(s) for drain.`,
+              counts: { enqueued },
+            });
+          }
+        } catch (e) {
+          // Alerting is best-effort — never let it break the sync run.
+          logger.warn('moph_alert_enqueue_failed', { hospitalId, error: e });
         }
       } catch (e) {
         hadWarning = true;
@@ -546,6 +609,29 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Overdue-referral alerts. Nothing *happens* when a referral merely gets
+    // old, so the event has to be evaluated on the tick.
+    //
+    // Deliberately OUTSIDE the `body.referrals` block: browser-poll only
+    // attaches a referrals section when this hospital's own HOSxP pull returned
+    // referral rows (lib/browser-poll.ts), so a hospital that is purely the
+    // DESTINATION of an overdue referral would never run the scan — and the
+    // destination is exactly the party that has not acted on it. Runs after the
+    // processors above so rows ingested this cycle are already visible.
+    try {
+      const overdueAlerts = await enqueueOverdueReferralAlerts(db, hospitalId);
+      if (overdueAlerts > 0) {
+        await appendSyncStep(hospitalId, runId, {
+          name: 'referral_overdue_alerts',
+          status: 'success',
+          message: `Queued ${overdueAlerts} overdue-referral alert(s).`,
+          counts: { queued: overdueAlerts },
+        });
+      }
+    } catch (e) {
+      logger.warn('referral_overdue_alerts_failed', { hospitalId, error: e });
+    }
+
     // Referral auto-arrive reconciliation — previously lived only in the
     // disabled polling cycle, so it never ran in production. Cheap query;
     // never blocks the push.
@@ -570,6 +656,39 @@ export async function POST(request: NextRequest) {
       "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE id = ?",
       [new Date().toISOString(), hospitalId],
     );
+
+    // MOPH Prompt alert drain (codex #1 hybrid) — the ONLY LINE I/O site, run
+    // as a bounded final step on this live browser-push path. Sends pending
+    // alert rows for this hospital within a hard budget. Best-effort: failures
+    // are logged and the sync run still succeeds (pending rows retry next push).
+    try {
+      await appendSyncStep(hospitalId, runId, {
+        name: 'moph_alerts_drain',
+        status: 'running',
+        message: 'Draining pending MOPH alerts (bounded).',
+      });
+      const summary = await drainMophAlerts(db, hospitalId);
+      await appendSyncStep(hospitalId, runId, {
+        name: 'moph_alerts_drain',
+        status: 'success',
+        message: `Drained MOPH alerts: ${summary.sent} sent, ${summary.retryable} deferred, ${summary.failed} failed, ${summary.skipped} skipped.`,
+        counts: {
+          sent: summary.sent,
+          retryable: summary.retryable,
+          failed: summary.failed,
+          skipped: summary.skipped,
+        },
+      });
+    } catch (e) {
+      // Drain failure must never abort the sync run — pending rows retry next push.
+      logger.warn('moph_alert_drain_step_failed', { hospitalId, error: e });
+      await appendSyncStep(hospitalId, runId, {
+        name: 'moph_alerts_drain',
+        status: 'warning',
+        message: 'MOPH alert drain step errored (pending alerts will retry next sync).',
+        detail: e instanceof Error ? e.message : String(e),
+      });
+    }
 
     const outcome: SyncRunOutcome = hadWarning ? 'partial' : 'success';
     void finalizeSyncRun(
