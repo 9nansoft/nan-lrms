@@ -693,7 +693,9 @@ export default function DashboardPage() {
             <div className="flex min-h-0 flex-1 flex-col">
               {overviewMode === 'map' ? (
                 <>
-                  <div className="min-h-0 flex-1">
+                  {/* Map pinned to a fixed ~half of the column so the
+                    hospital list below gets more room and starts higher. */}
+                  <div className="min-h-0" style={{ flex: '0 0 52%' }}>
                     <ProvinceMap
                       hospitals={hospitals}
                       selected={selectedHospital}
@@ -708,8 +710,8 @@ export default function DashboardPage() {
                     mobile-fallback HospitalTable below — sidebar lists are
                     primary navigation, the overview-dialog list stays modal. */}
                   <div
-                    className="max-h-[36%] min-h-0 overflow-auto border-t border-[var(--rule-strong)]"
-                    style={{ flexShrink: 0 }}
+                    className="min-h-0 overflow-auto border-t border-[var(--rule-strong)]"
+                    style={{ flex: '1 1 auto' }}
                   >
                     <div className="sticky top-0 z-10 flex justify-between border-b border-[var(--rule-hair)] bg-white px-3 py-1 font-mono text-[12px] tracking-[0.12em] text-[var(--ink-navy-muted)]">
                       <span>HOSPITAL · SORTED BY SEVERITY</span>
