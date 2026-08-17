@@ -26,12 +26,12 @@ function iso(msAgo: number): string {
   return new Date(Date.now() - msAgo).toISOString();
 }
 
-// Real KK hcodes so the จ.ขอนแก่น tab filter keeps them visible.
+// Real NAN hcodes so the จ.น่าน tab filter keeps them visible.
 function makeHospitals(): DashboardHospital[] {
   return [
     {
-      hcode: '10670',
-      name: 'รพ.ขอนแก่น',
+      hcode: '10716',
+      name: 'โรงพยาบาลน่าน',
       level: 'A_S' as DashboardHospital['level'],
       connectionStatus: 'ONLINE' as DashboardHospital['connectionStatus'],
       lastSyncAt: iso(13 * 24 * 60 * MIN), // 13 days stale → critical
@@ -42,8 +42,8 @@ function makeHospitals(): DashboardHospital[] {
       syncBlockedReason: null,
     },
     {
-      hcode: '10995',
-      name: 'รพ.บ้านฝาง',
+      hcode: '11173',
+      name: 'โรงพยาบาลแม่จริม',
       level: 'M2' as DashboardHospital['level'],
       connectionStatus: 'ONLINE' as DashboardHospital['connectionStatus'],
       lastSyncAt: iso(2 * MIN), // fresh
@@ -54,8 +54,8 @@ function makeHospitals(): DashboardHospital[] {
       syncBlockedReason: null,
     },
     {
-      hcode: '10996',
-      name: 'รพ.พระยืน',
+      hcode: '11174',
+      name: 'โรงพยาบาลบ้านหลวง',
       level: 'M2' as DashboardHospital['level'],
       connectionStatus: 'OFFLINE' as DashboardHospital['connectionStatus'],
       lastSyncAt: null,
@@ -108,13 +108,13 @@ describe('HospitalsPage — roster rows', () => {
   it('classifies each row by sync freshness and shows relative sync age', async () => {
     renderPage();
 
-    const hub = await screen.findByTestId('hospital-row-10670');
+    const hub = await screen.findByTestId('hospital-row-10716');
     expect(hub.getAttribute('data-sync')).toBe('critical');
     expect(within(hub).getByText(/13 วัน/)).toBeInTheDocument();
 
-    expect(screen.getByTestId('hospital-row-10995').getAttribute('data-sync')).toBe('ok');
+    expect(screen.getByTestId('hospital-row-11173').getAttribute('data-sync')).toBe('ok');
 
-    const blocked = screen.getByTestId('hospital-row-10996');
+    const blocked = screen.getByTestId('hospital-row-11174');
     expect(blocked.getAttribute('data-sync')).toBe('blocked');
     expect(within(blocked).getByText(/ถูกบล็อก/)).toBeInTheDocument();
   });
@@ -122,7 +122,7 @@ describe('HospitalsPage — roster rows', () => {
   it('shows ANC and labor counts per row', async () => {
     renderPage();
 
-    const row = await screen.findByTestId('hospital-row-10995');
+    const row = await screen.findByTestId('hospital-row-11173');
     expect(within(row).getByText('215')).toBeInTheDocument(); // ANC
     expect(within(row).getByText('1')).toBeInTheDocument(); // labor
   });
@@ -130,11 +130,11 @@ describe('HospitalsPage — roster rows', () => {
   it('orders rows within a level group by combined workload, busiest first', async () => {
     renderPage();
 
-    await screen.findByTestId('hospital-row-10995');
+    await screen.findByTestId('hospital-row-11173');
     const rows = screen.getAllByTestId(/hospital-row-/);
     const codes = rows.map((r) => r.getAttribute('data-testid'));
-    // Both M2 hospitals: บ้านฝาง (workload ~22.5) before พระยืน (~1).
-    expect(codes.indexOf('hospital-row-10995')).toBeLessThan(codes.indexOf('hospital-row-10996'));
+    // Both M2 hospitals: แม่จริม (workload ~22.5) before บ้านหลวง (~1).
+    expect(codes.indexOf('hospital-row-11173')).toBeLessThan(codes.indexOf('hospital-row-11174'));
   });
 
   it('shows the partograph data-quality KPI and per-row coverage', async () => {
@@ -147,11 +147,11 @@ describe('HospitalsPage — roster rows', () => {
     expect(kpi.textContent).toMatch(/ต่ำกว่าเกณฑ์\s*1/);
 
     // Per-row coverage cell, colored by the config thresholds.
-    const critical = within(screen.getByTestId('hospital-row-10670')).getByTestId('parto-cell');
+    const critical = within(screen.getByTestId('hospital-row-10716')).getByTestId('parto-cell');
     expect(critical.getAttribute('data-parto')).toBe('critical');
     expect(critical.textContent).toContain('2/10');
 
-    const none = within(screen.getByTestId('hospital-row-10996')).getByTestId('parto-cell');
+    const none = within(screen.getByTestId('hospital-row-11174')).getByTestId('parto-cell');
     expect(none.getAttribute('data-parto')).toBe('none');
   });
 });

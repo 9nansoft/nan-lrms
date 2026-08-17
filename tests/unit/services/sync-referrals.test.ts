@@ -405,12 +405,23 @@ describe('processBrowserReferins (Phase 2 — destination gateway push)', () => 
 
 describe('getReferralArrivalProbe (server-issued CID list for the ovst fallback)', () => {
   beforeEach(async () => {
+    // Pin the clock: the probe drops referrals initiated more than 30 days
+    // before "now", and the fixtures use fixed July dates — unpinned, this
+    // suite goes red the day the fixtures age out of the window. Only Date
+    // is faked so PGlite async ops keep real timers (same pattern as
+    // tests/unit/api/referral-check-auth.test.ts).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-01T12:00:00+07:00'));
     // The probe decrypts journey.cid — reseed the journey with a real ciphertext.
     await db.execute(`UPDATE maternal_journeys SET cid = ? WHERE id = ?`, [
       encrypt(CID, getEncryptionKey()),
       JOURNEY_ID,
     ]);
     await processBrowserReferouts(db, ORIGIN_ID, [referoutRow()]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('lists CIDs of open referrals headed to this hospital with a since date', async () => {

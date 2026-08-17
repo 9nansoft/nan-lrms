@@ -27,13 +27,21 @@ vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 // route's import-time module resolution (codex flaky-test fix: the inline
 // factory + post-import cast can race under memory pressure).
 const { mockDrain } = vi.hoisted(() => ({
-  mockDrain: vi.fn(async () => ({ sent: 0, retryable: 0, failed: 0, skipped: 0 })),
+  // Typed with the real drainMophAlerts signature so assertions can read
+  // individual call args (mock.calls[0][1] = hospitalId).
+  mockDrain: vi.fn(async (_db: unknown, _hospitalId: string) => ({
+    sent: 0,
+    retryable: 0,
+    failed: 0,
+    skipped: 0,
+  })),
 }));
 vi.mock('@/services/moph-alert-drain', () => ({
   drainMophAlerts: mockDrain,
 }));
 
 import { POST } from '@/app/api/sync/browser-push/route';
+import { SseManager } from '@/lib/sse';
 
 const HCODE = '10670';
 
@@ -82,6 +90,11 @@ describe('POST /api/sync/browser-push — MOPH alert wiring (HIGH/HR3)', () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    // The route grabs the SSE singleton, whose 30s heartbeat interval keeps
+    // the worker's event loop alive after the file finishes — vitest then
+    // times out killing the worker and reports an unhandled error (exit 1
+    // even with every test green). Tear it down like the other route tests.
+    SseManager.resetForTests();
   });
 
   it('HR3 ANC patient enqueues a pending moph_alert_log row + appends a moph_alerts_drain step', async () => {
@@ -100,14 +113,19 @@ describe('POST /api/sync/browser-push — MOPH alert wiring (HIGH/HR3)', () => {
     // HR3 patient. We assert the drain step ran regardless (drain is always
     // appended as a final step).
     const run = await getLatestSyncRun(hid);
-    const drainStep = run!.steps.find((s) => s.name === 'moph_alerts_drain');
-    expect(drainStep).toBeDefined();
-    expect(mockDrain).toHaveBeenCalledWith(expect.anything(), hid, expect.anything());
-
-    // If recipients existed, a pending row would be present. With the seed
-    // (no consult doctors seeded for 10670), expect 0 rows but no error.
-    // The key contract: the route did not throw and the drain step is 'success'.
-    expect(drainStep!.status).toBe('success');
+    // The route appends a 'running' step, then a terminal 'success'/'warning'
+    // step — appendSyncStep pushes a NEW entry per call, so look at the LAST
+    // moph_alerts_drain step, not the first (find() would always see 'running').
+    const drainSteps = run!.steps.filter((s) => s.name === 'moph_alerts_drain');
+    expect(drainSteps.length).toBeGreaterThan(0);
+    expect(drainSteps.at(-1)!.status).toBe('success');
+    // Assert on the scalar arg instead of toHaveBeenCalledWith: its first
+    // argument is the db adapter, which holds the PGlite WASM instance —
+    // vitest's deep-equality traversal of it allocates until the worker OOMs
+    // (observed 2026-08-18; this line was unreachable before the KK test
+    // fixtures were re-seeded, so the bomb stayed hidden).
+    expect(mockDrain).toHaveBeenCalledTimes(1);
+    expect(mockDrain.mock.calls[0]?.[1]).toBe(hid);
     void rows; // presence depends on seeded recipients; not asserted here
   });
 

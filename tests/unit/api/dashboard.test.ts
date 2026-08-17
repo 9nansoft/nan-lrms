@@ -18,9 +18,9 @@ describe('Dashboard API Logic', () => {
     await db.close();
   });
 
-  it('returns dashboard with all 26 KK hospitals', async () => {
+  it('returns dashboard with all seeded hospitals (NAN 14 + KK fixtures 26)', async () => {
     const result = await getProvinceDashboard(db);
-    expect(result.hospitals).toHaveLength(26);
+    expect(result.hospitals).toHaveLength(40);
     // Verify each hospital has required fields
     for (const h of result.hospitals) {
       expect(h.hcode).toBeTruthy();

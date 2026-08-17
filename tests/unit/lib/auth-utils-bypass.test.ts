@@ -21,7 +21,7 @@ describe('validateBmsSession dev bypass gating', () => {
     const identity = await validateBmsSession('any-session', '');
     expect(identity).not.toBeNull();
     expect(identity?.role).toBe('ADMIN');
-    expect(identity?.hospitalCode).toBe('10670');
+    expect(identity?.hospitalCode).toBe('10716'); // NN-LRMS dev-bypass hub (โรงพยาบาลน่าน)
   });
 
   it('fails closed in production even when the flag is on', async () => {

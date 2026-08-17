@@ -25,7 +25,7 @@ describe('Health Check', () => {
     expect(status.database).toBe('connected');
     expect(status.uptime).toBeGreaterThanOrEqual(0);
     expect(status.hospitalConnections).toBeDefined();
-    expect(status.hospitalConnections.total).toBe(26); // seeded KK hospitals
+    expect(status.hospitalConnections.total).toBe(40); // seeded NAN (14) + KK fixtures (26)
     expect(status.degradedReasons).toContain('no_hospitals_online');
   });
 
@@ -34,7 +34,7 @@ describe('Health Check', () => {
     const status = await getHealthStatus(db);
     expect(status.hospitalConnections.online).toBe(0);
     expect(status.hospitalConnections.offline).toBe(0);
-    expect(status.hospitalConnections.unknown).toBe(26);
+    expect(status.hospitalConnections.unknown).toBe(40);
   });
 
   it('should return healthy status once at least one hospital is online', async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
@@ -19,11 +19,18 @@ import { GET } from '@/app/api/admin/reconciliation-report/route';
 
 describe('GET /api/admin/reconciliation-report', () => {
   beforeEach(async () => {
+    // Seed BEFORE stubbing the env: HospitalSeeder keys its fixture set off
+    // NODE_ENV, and a stub left over from the previous test would seed only
+    // the NAN hospitals (no 10670) and break the KK-fixture tests below.
     db = await createTestDb();
     await new SeedOrchestrator().run(db);
     mockSessionUser = null;
     vi.stubEnv('ADMIN_ALLOWED_CIDS', '');
     vi.stubEnv('NODE_ENV', 'development');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('requires admin', async () => {

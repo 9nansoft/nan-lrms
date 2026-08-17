@@ -18,7 +18,7 @@ import { NotificationPreferenceCard } from '@/components/profile/NotificationPre
 
 const GET_BODY = {
   userCid: '3320500282121',
-  ownHospitalCode: '10670',
+  ownHospitalCode: '10716',
   events: [
     {
       key: 'anc_hr3',
@@ -41,7 +41,7 @@ const GET_BODY = {
     {
       id: 'p1',
       userCid: '3320500282121',
-      hospitalCode: '10670',
+      hospitalCode: '10716',
       mophLineEnabled: true,
       detailLevel: 'full',
       digestHour: 8,
@@ -107,7 +107,7 @@ describe('NotificationPreferenceCard', () => {
                 {
                   id: 'p2',
                   userCid: '3320500282121',
-                  hospitalCode: '11002',
+                  hospitalCode: '11177',
                   mophLineEnabled: true,
                   detailLevel: 'aggregate',
                   digestHour: 8,
@@ -125,7 +125,7 @@ describe('NotificationPreferenceCard', () => {
     // not only after.
     expect(screen.getAllByText(/เฉพาะยอดรวม/).length).toBeGreaterThanOrEqual(2);
     // A nurse recognises the hospital by name, not by its 5-digit code.
-    expect(screen.getByText(/รพ\.บ้านไผ่/)).toBeInTheDocument();
+    expect(screen.getByText(/โรงพยาบาลเวียงสา/)).toBeInTheDocument();
   });
 
   it('shows an actionable Thai error and reverts when saving fails', async () => {
@@ -304,7 +304,7 @@ describe('NotificationPreferenceCard', () => {
         json: async () => ({
           id: 'p9',
           userCid: '3320500282121',
-          hospitalCode: '10670',
+          hospitalCode: '10716',
           mophLineEnabled: false,
           detailLevel: 'full',
           digestHour: 8,
@@ -322,7 +322,7 @@ describe('NotificationPreferenceCard', () => {
       const calls = fetchMock.mock.calls as unknown as [string, RequestInit | undefined][];
       const put = calls.find((c) => c[1]?.method === 'PUT');
       expect(put).toBeDefined();
-      expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({ hospitalCode: '10670' });
+      expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({ hospitalCode: '10716' });
     });
     expect(await screen.findByRole('checkbox', { name: /ANC HR3/ })).not.toBeChecked();
   });
@@ -335,7 +335,7 @@ describe('NotificationPreferenceCard', () => {
         {
           id: 'p2',
           userCid: '3320500282121',
-          hospitalCode: '11002',
+          hospitalCode: '11177',
           mophLineEnabled: true,
           detailLevel: 'aggregate',
           digestHour: 8,
@@ -352,9 +352,9 @@ describe('NotificationPreferenceCard', () => {
     const user = userEvent.setup();
     render(<NotificationPreferenceCard />);
 
-    await user.click(await screen.findByRole('button', { name: /เลิกติดตาม 11002/ }));
+    await user.click(await screen.findByRole('button', { name: /เลิกติดตาม 11177/ }));
 
     expect(await screen.findByText(/ลบไม่สำเร็จ/)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText(/รพ\.บ้านไผ่/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/โรงพยาบาลเวียงสา/)).toBeInTheDocument());
   });
 });
