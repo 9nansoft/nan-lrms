@@ -5,7 +5,7 @@
 export type SimEventType = 'labor' | 'anc' | 'referral' | 'referral_update' | 'partograph';
 
 export interface SimulationConfig {
-  /** hcodes to simulate (e.g. ['10670','10998']). Empty = all 26. */
+  /** hcodes to simulate (e.g. ['10716','11173']). Empty = all seeded Nan hospitals. */
   hospitals: string[];
   /** Event types to generate. Must include at least one. */
   eventTypes: SimEventType[];

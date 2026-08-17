@@ -117,8 +117,8 @@ export async function validateBmsSession(
       // because we shouldn't auto-grant admin to a no-CID identity.
       userCid: process.env.DEV_USER_CID ?? '',
       role: UserRole.ADMIN,
-      hospitalCode: '10670',
-      hospitalName: 'รพ.ขอนแก่น',
+      hospitalCode: '10716',
+      hospitalName: 'รพ.น่าน',
       tunnelUrl: process.env.DEV_HOSPITAL_TUNNEL_URL ?? '',
       databaseType: 'postgresql',
       jwt: 'dev-jwt-token',

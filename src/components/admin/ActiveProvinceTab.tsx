@@ -10,6 +10,10 @@ import { Globe, Save, CheckCircle2, ListPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
+import {
+  CONFIG_BROADCAST_CHANNEL,
+  type ConfigBroadcastMessage,
+} from '@/lib/config-broadcast';
 import { BulkAddHospitalsDialog } from './BulkAddHospitalsDialog';
 
 interface ProvinceRow {
@@ -74,6 +78,16 @@ export function ActiveProvinceTab() {
       }
       setSaveMessage('บันทึกสำเร็จ');
       await mutate();
+      // Tell any already-mounted maps (dashboard / kiosk in another tab of
+      // the same browser) to switch to the new province right away.
+      if (typeof BroadcastChannel !== 'undefined') {
+        const channel = new BroadcastChannel(CONFIG_BROADCAST_CHANNEL);
+        channel.postMessage({
+          type: 'active-province-changed',
+          code: selectedCode,
+        } satisfies ConfigBroadcastMessage);
+        channel.close();
+      }
     } catch (e) {
       setSaveMessage((e as Error).message ?? 'บันทึกไม่สำเร็จ');
     } finally {

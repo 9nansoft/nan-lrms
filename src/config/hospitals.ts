@@ -1,9 +1,12 @@
-// T015: Hospital level definitions and KK province hospital data
+// T015: Hospital level definitions + province hospital data.
 //
-// SAP framework reclassification (อ.ก.พ. มติ 3/2568, 20 พ.ค. 2568) is
-// applied here for the 26 Khon Kaen province hospitals + 2 system codes.
-// Source: MoPH สธ ๐๒๐๗.๑๑/ว ๒๐๖๘๙ forwarded by PHO Khon Kaen as
-// ขก ๐๐๓๓.๐๐๒/ว.๖๕๐๐ on 13 ส.ค. 2568.
+// KK_HOSPITALS below is the legacy Khon Kaen reference set (SAP
+// reclassification อ.ก.พ. มติ 3/2568, 20 พ.ค. 2568 — source MoPH
+// สธ ๐๒๐๗.๑๑/ว ๒๐๖๘๙ forwarded by PHO Khon Kaen as ขก ๐๐๓๓.๐๐๒/ว.๖๕๐๐
+// on 13 ส.ค. 2568), retained for the referral-capability table and as
+// historical reference.
+//
+// NAN_HOSPITALS is what a fresh NN-LRMS (Nan) deployment seeds instead.
 
 import { HospitalLevel } from '@/types/domain';
 
@@ -183,6 +186,30 @@ export const KK_HOSPITALS: KkHospitalSeed[] = [
     developmentCondition: 'ประสิทธิภาพบริการ',
   },
   { hcode: '77652', name: 'รพ.โนนศิลา', level: HospitalLevel.S },
+];
+
+// NN-LRMS (Nan) operational seed — the MOPH registry's general + community
+// hospitals for chwpart '55' (hospital_type_id 5/6/7; the army hospital,
+// dental centre and prison clinic are excluded — no maternity role).
+// Levels are guessed from hospital_type_id because Nan's SAP classification
+// isn't published yet; โรงพยาบาลน่าน (10716) is promoted to the provincial
+// P tier as the terminal referral hub (see hospital-capabilities.ts).
+// Admins can reclassify from /admin afterwards.
+export const NAN_HOSPITALS: KkHospitalSeed[] = [
+  { hcode: '10716', name: 'โรงพยาบาลน่าน', level: HospitalLevel.P },
+  { hcode: '11173', name: 'โรงพยาบาลแม่จริม', level: HospitalLevel.F2 },
+  { hcode: '11174', name: 'โรงพยาบาลบ้านหลวง', level: HospitalLevel.F2 },
+  { hcode: '11175', name: 'โรงพยาบาลนาน้อย', level: HospitalLevel.F2 },
+  { hcode: '11176', name: 'โรงพยาบาลท่าวังผา', level: HospitalLevel.F2 },
+  { hcode: '11177', name: 'โรงพยาบาลเวียงสา', level: HospitalLevel.F2 },
+  { hcode: '11178', name: 'โรงพยาบาลทุ่งช้าง', level: HospitalLevel.F2 },
+  { hcode: '11179', name: 'โรงพยาบาลเชียงกลาง', level: HospitalLevel.F2 },
+  { hcode: '11180', name: 'โรงพยาบาลนาหมื่น', level: HospitalLevel.F2 },
+  { hcode: '11181', name: 'โรงพยาบาลสันติสุข', level: HospitalLevel.F2 },
+  { hcode: '11182', name: 'โรงพยาบาลบ่อเกลือ', level: HospitalLevel.F2 },
+  { hcode: '11183', name: 'โรงพยาบาลสองแคว', level: HospitalLevel.F2 },
+  { hcode: '11453', name: 'โรงพยาบาลสมเด็จพระยุพราชปัว', level: HospitalLevel.F2 },
+  { hcode: '25017', name: 'โรงพยาบาลภูเพียง', level: HospitalLevel.F2 },
 ];
 
 export function getHospitalLevelConfig(level: HospitalLevel): HospitalLevelConfig {

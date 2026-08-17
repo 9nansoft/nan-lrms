@@ -2,7 +2,7 @@
 // labor data so the next simulation run starts from a clean slate.
 //
 // PRESERVED — explicitly excluded from the wipe (do NOT add to `tables`):
-//   - hospitals             — admin-managed registry (KK_HOSPITALS seed +
+//   - hospitals             — admin-managed registry (NAN_HOSPITALS seed +
 //                             multi-province admin additions). Wiping this
 //                             would force re-registration of every external
 //                             hospital and break their webhook keys.

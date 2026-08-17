@@ -207,7 +207,7 @@ function resolveProfile(hcode: string, desiredType: SimEventType): ResolvedPlan 
 
 const SYSTEM_PROMPT = [
   'You are generating realistic DEV-ONLY synthetic obstetric data for a Thai',
-  'maternal-care dashboard covering Khon Kaen Province (OneLR / ห้องคลอดหนึ่งเดียว).',
+  'maternal-care dashboard covering Nan Province (OneLR / ห้องคลอดหนึ่งเดียว).',
   'All data is fabricated — no real patient is represented. Output must be',
   'valid JSON only, no markdown, no commentary. Names must be plausible Thai',
   'names (ชื่อ-นามสกุล). Clinical details must match the profile provided and',

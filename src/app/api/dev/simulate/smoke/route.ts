@@ -37,7 +37,7 @@ interface SmokeCase {
 
 const SYSTEM_PROMPT = [
   'You are generating realistic DEV-ONLY synthetic obstetric data for a Thai',
-  'maternal-care dashboard covering Khon Kaen Province. Output a FLAT JSON',
+  'maternal-care dashboard covering Nan Province. Output a FLAT JSON',
   'object matching the schema — no wrapper keys, all required fields at the',
   'top level. JSON only, no markdown.',
 ].join(' ');
@@ -77,7 +77,7 @@ export async function GET() {
   // work to do. preeclampsia_severe requires BP ≥160/100 + heavy proteinuria —
   // a schema or profile miss will show up.
   const profile = getProfileById('preeclampsia_severe')!;
-  const hcode = '10670';
+  const hcode = '10716';
   const hospitalName = 'รพ.น่าน';
   const cases: SmokeCase[] = [];
 

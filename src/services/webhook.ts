@@ -262,7 +262,7 @@ export interface WebhookAncPatient {
    *  at every hospital) — lets the server persist WHICH criteria fired,
    *  not just the level. Optional for legacy clients. */
   riskItemIds?: number[] | null;
-  changwatCode?: string; // จังหวัด 2-digit (e.g. "40" = ขอนแก่น)
+  changwatCode?: string; // จังหวัด 2-digit (e.g. "55" = น่าน)
   amphurCode?: string; // อำเภอ 2-digit
   tambonCode?: string; // ตำบล 2-digit
   visits?: WebhookAncVisit[];

@@ -339,7 +339,7 @@ export function CpdFactorBreakdown({
         style={{ borderColor: 'var(--rule-hair)' }}
       >
         <span>คำนวณเมื่อ {formatRelativeTime(calculatedAt)}</span>
-        <span>CPD score · Khon Kaen province</span>
+        <span>CPD score · Nan province</span>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 // Hospitals — provincial directory. Redesigned 2026-04-30 to a Mission-Control
-// "Map + Roster" split: a Leaflet map of Khon Kaen on the left (pins sized by
+// "Map + Roster" split: a Leaflet map of Nan on the left (pins sized by
 // activity, colored by max-risk severity), a level-grouped roster on the right
 // that selects in sync with the map. Top KPI strip surfaces network-level ops
 // signals (online ratio, active total, high-risk total, sync health).
@@ -13,7 +13,7 @@ import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { SectionLabel } from '@/components/dashboard/shared';
 import { ProvinceMap } from '@/components/dashboard/ProvinceMap';
-import { HOSPITAL_LEVELS, KK_HOSPITALS } from '@/config/hospitals';
+import { HOSPITAL_LEVELS, NAN_HOSPITALS } from '@/config/hospitals';
 import {
   classifySyncHealth,
   combinedWorkload,
@@ -30,9 +30,9 @@ import { Search, Building2, Globe, ChevronRight } from 'lucide-react';
 import type { DashboardHospital } from '@/types/api';
 import type { HospitalLevel } from '@/types/domain';
 
-const KK_HCODES = new Set(KK_HOSPITALS.map((h) => h.hcode));
+const NAN_HCODES = new Set(NAN_HOSPITALS.map((h) => h.hcode));
 
-type TabKey = 'khonkaen' | 'other';
+type TabKey = 'nan' | 'other';
 
 function groupByLevel(hospitals: DashboardHospital[]) {
   const groups = new Map<HospitalLevel, DashboardHospital[]>();
@@ -341,16 +341,18 @@ export default function HospitalsPage() {
 
   const { hospitals, isLoading, error, updatedAt, mutate } = useDashboard();
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<TabKey>('khonkaen');
+  const [activeTab, setActiveTab] = useState<TabKey>('nan');
   const [selected, setSelected] = useState<string | null>(null);
 
-  const kkHospitals = useMemo(() => hospitals.filter((h) => KK_HCODES.has(h.hcode)), [hospitals]);
+  // "จ.น่าน" tab = the Nan registry hospitals; everything else (guests,
+  // manually added outside-province facilities) lands in "other".
+  const nanHospitals = useMemo(() => hospitals.filter((h) => NAN_HCODES.has(h.hcode)), [hospitals]);
   const otherHospitals = useMemo(
-    () => hospitals.filter((h) => !KK_HCODES.has(h.hcode)),
+    () => hospitals.filter((h) => !NAN_HCODES.has(h.hcode)),
     [hospitals],
   );
 
-  const tabHospitals = activeTab === 'khonkaen' ? kkHospitals : otherHospitals;
+  const tabHospitals = activeTab === 'nan' ? nanHospitals : otherHospitals;
 
   // Search applies to the roster only — the map keeps showing the full set
   // for spatial context, since hiding pins on a typed search would erase the
@@ -363,8 +365,8 @@ export default function HospitalsPage() {
     );
   }, [tabHospitals, search]);
 
-  // KPI roll-ups — bound to the active tab so switching from KK to "other"
-  // re-summarises (28 hospitals total = 26 KK + a couple of webhook guests).
+  // KPI roll-ups — bound to the active tab so switching from "จ.น่าน" to
+  // "อื่น" re-summarises (the Nan registry seed + any manually added guests).
   const totalActive = tabHospitals.reduce((sum, h) => sum + h.counts.total, 0);
   const totalLow = tabHospitals.reduce((sum, h) => sum + h.counts.low, 0);
   const totalMedium = tabHospitals.reduce((sum, h) => sum + h.counts.medium, 0);
@@ -631,9 +633,9 @@ export default function HospitalsPage() {
         >
           {[
             {
-              k: 'khonkaen' as const,
+              k: 'nan' as const,
               label: 'จ.น่าน',
-              count: kkHospitals.length,
+              count: nanHospitals.length,
               icon: Building2,
             },
             {

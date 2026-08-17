@@ -8,7 +8,7 @@
 // imports this with `ssr: false` to satisfy Next.js SSR boundaries.
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import {
@@ -34,6 +34,10 @@ import {
   districtCentroids,
   type ProvinceShapes,
 } from '@/lib/thai-geo-shapes';
+import {
+  CONFIG_BROADCAST_CHANNEL,
+  type ConfigBroadcastMessage,
+} from '@/lib/config-broadcast';
 
 interface ProvinceMapLeafletProps {
   hospitals: DashboardHospital[];
@@ -272,10 +276,29 @@ export default function ProvinceMapLeaflet({
 
   // Active province drives which shapes + pin list are rendered. A missing
   // config means default to Nan so first-run deployments don't blank.
-  const { data: configData } = useSWR<{ config: { active_province_code?: string } }>(
-    '/api/admin/config',
-  );
-  const activeProvince = configData?.config?.active_province_code ?? FALLBACK_PROVINCE_CODE;
+  const { data: configData, mutate: mutateConfig } = useSWR<{
+    config: { active_province_code?: string };
+  }>('/api/admin/config');
+  // Cross-tab updates: when an admin saves a new active province, that tab
+  // broadcasts it here so an already-mounted map flips immediately. The
+  // broadcast value is only an interim — once the config refetch lands it
+  // becomes the source of truth again (and it also covers the case where
+  // this viewer can't read the admin-gated config endpoint).
+  const [broadcastProvince, setBroadcastProvince] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel(CONFIG_BROADCAST_CHANNEL);
+    channel.onmessage = (event: MessageEvent<ConfigBroadcastMessage>) => {
+      const msg = event.data;
+      if (msg?.type === 'active-province-changed' && msg.code) {
+        setBroadcastProvince(msg.code);
+        void mutateConfig();
+      }
+    };
+    return () => channel.close();
+  }, [mutateConfig]);
+  const activeProvince =
+    configData?.config?.active_province_code ?? broadcastProvince ?? FALLBACK_PROVINCE_CODE;
 
   // For non-KK provinces we fetch the full Thailand GeoJSON + filter to the
   // active province at runtime. KK keeps using the pre-simplified inline

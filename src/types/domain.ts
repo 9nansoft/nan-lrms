@@ -3,7 +3,7 @@
 // MoPH service-plan levels.
 //
 // The first block (A_S..F3) is the LEGACY classification still applied to
-// hospitals outside Khon Kaen that haven't been reclassified under SAP.
+// hospitals outside Nan that haven't been reclassified under SAP.
 //
 // The second block is the SAP framework ratified by อ.ก.พ. มติ 3/2568
 // (20 พ.ค. 2568) — see the August 2025 PHO Khon Kaen circular forwarded

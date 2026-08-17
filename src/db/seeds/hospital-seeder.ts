@@ -1,8 +1,10 @@
-// T032: HospitalSeeder — seeds 26 Khon Kaen province hospitals (per MOPH)
+// T032: HospitalSeeder — seeds the Nan province hospital set for NN-LRMS
+// (see NAN_HOSPITALS in src/config/hospitals.ts — derived from the MOPH
+// registry, chwpart '55').
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '../adapter';
 import { DataSeeder } from './seeder';
-import { KK_HOSPITALS } from '@/config/hospitals';
+import { NAN_HOSPITALS } from '@/config/hospitals';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
 
 // Default service-type by level. Updated for SAP framework:
@@ -37,7 +39,7 @@ export class HospitalSeeder extends DataSeeder {
     const now = new Date().toISOString();
     let count = 0;
 
-    for (const hospital of KK_HOSPITALS) {
+    for (const hospital of NAN_HOSPITALS) {
       await db.execute(
         `INSERT INTO hospitals (id, hcode, name, level, service_type,
           is_active, connection_status, development_condition,

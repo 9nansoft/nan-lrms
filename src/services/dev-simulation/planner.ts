@@ -106,7 +106,7 @@ function buildPlanPrompt(
 ): string {
   return [
     `Plan a realistic ${PLAN_SIZE}-event shift at ${hospitalName} (hcode ${hcode}),`,
-    'a community hospital in Khon Kaen Province, Thailand.',
+    'a community hospital in Nan Province, Thailand.',
     '',
     `Allowed event types: ${eventTypes.join(', ')}.`,
     'Target rough proportions (when allowed):',

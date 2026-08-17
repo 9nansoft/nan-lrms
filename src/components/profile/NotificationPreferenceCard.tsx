@@ -6,7 +6,7 @@
 // Optimistic with revert on error and an actionable Thai message — the same
 // contract the single-switch version had (constitution §V).
 import { useEffect, useState, useCallback } from 'react';
-import { KK_HOSPITALS } from '@/config/hospitals';
+import { NAN_HOSPITALS } from '@/config/hospitals';
 
 interface NotificationEventDto {
   key: string;
@@ -33,7 +33,7 @@ const TIER_LABEL: Record<NotificationEventDto['tier'], string> = {
   digest: 'สรุปรายวัน',
 };
 
-const HOSPITAL_NAMES = new Map(KK_HOSPITALS.map((h) => [h.hcode, h.name]));
+const HOSPITAL_NAMES = new Map(NAN_HOSPITALS.map((h) => [h.hcode, h.name]));
 
 /** Nurses recognise หน่วยบริการ by name; the code is the fallback, not the label. */
 function hospitalLabel(code: string): string {
@@ -309,7 +309,7 @@ export function NotificationPreferenceCard() {
             className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
           >
             <option value="">เลือกโรงพยาบาล…</option>
-            {KK_HOSPITALS.filter((h) => !preferences.some((r) => r.hospitalCode === h.hcode)).map(
+            {NAN_HOSPITALS.filter((h) => !preferences.some((r) => r.hospitalCode === h.hcode)).map(
               (h) => (
                 <option key={h.hcode} value={h.hcode}>
                   {h.name} ({h.hcode})

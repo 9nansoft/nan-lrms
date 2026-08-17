@@ -35,7 +35,7 @@ export interface AlertEventContext {
   hospitalId: string;
   originHcode: string;
   hospitalName: string;
-  /** Province code (e.g. '30' Khon Kaen) — for center-monitor resolution. */
+  /** Province code (e.g. '55' Nan) — for center-monitor resolution. */
   province: string;
   /** Case/journey reference shown in the message. */
   caseRef: string;

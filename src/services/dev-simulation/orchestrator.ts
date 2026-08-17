@@ -7,7 +7,7 @@
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
-import { KK_HOSPITALS } from '@/config/hospitals';
+import { NAN_HOSPITALS } from '@/config/hospitals';
 import {
   generateLaborEvent,
   generateAncEvent,
@@ -83,8 +83,8 @@ class SimulationOrchestrator {
 
     const roster: HospitalContext[] = (
       config.hospitals.length > 0
-        ? KK_HOSPITALS.filter((h) => config.hospitals.includes(h.hcode))
-        : KK_HOSPITALS
+        ? NAN_HOSPITALS.filter((h) => config.hospitals.includes(h.hcode))
+        : NAN_HOSPITALS
     ).map((h) => ({ hcode: h.hcode, name: h.name }));
 
     // Pre-flight: issue + verify an API key for every hospital by POSTing an

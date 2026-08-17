@@ -14,7 +14,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { useSimulation } from '@/hooks/useSimulation';
-import { KK_HOSPITALS } from '@/config/hospitals';
+import { NAN_HOSPITALS } from '@/config/hospitals';
 import type { SimEventType, SimulationConfig } from '@/services/dev-simulation/types';
 
 interface ScenarioPreset {
@@ -111,7 +111,7 @@ export function SimulationControl() {
   const [presetId, setPresetId] = useState<string>('normal');
   const preset = PRESETS.find((p) => p.id === presetId) ?? PRESETS[0];
   const [selectedHospitals, setSelectedHospitals] = useState<Set<string>>(
-    new Set(KK_HOSPITALS.map((h) => h.hcode)),
+    new Set(NAN_HOSPITALS.map((h) => h.hcode)),
   );
   const [eventTypes, setEventTypes] = useState<Set<SimEventType>>(new Set(preset.eventTypes));
   const [rate, setRate] = useState<number>(preset.ratePerHospitalPerMin);
@@ -177,7 +177,7 @@ export function SimulationControl() {
         setClearResult(res.cleared);
       }
       const config: SimulationConfig = {
-        hospitals: selectedHospitals.size === KK_HOSPITALS.length ? [] : Array.from(selectedHospitals),
+        hospitals: selectedHospitals.size === NAN_HOSPITALS.length ? [] : Array.from(selectedHospitals),
         eventTypes: Array.from(eventTypes),
         ratePerHospitalPerMin: rate,
         durationMin,
@@ -418,11 +418,11 @@ export function SimulationControl() {
               <section className="mt-5">
                 <div className="flex items-center justify-between">
                   <h3 className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
-                    07 · Hospitals ({selectedHospitals.size}/{KK_HOSPITALS.length})
+                    07 · Hospitals ({selectedHospitals.size}/{NAN_HOSPITALS.length})
                   </h3>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setSelectedHospitals(new Set(KK_HOSPITALS.map((h) => h.hcode)))}
+                      onClick={() => setSelectedHospitals(new Set(NAN_HOSPITALS.map((h) => h.hcode)))}
                       className="font-mono text-[12px] tracking-[0.1em] text-[var(--accent-navy)] hover:underline"
                     >
                       ALL
@@ -436,7 +436,7 @@ export function SimulationControl() {
                   </div>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-1.5">
-                  {KK_HOSPITALS.map((h) => (
+                  {NAN_HOSPITALS.map((h) => (
                     <label
                       key={h.hcode}
                       className={cn(
