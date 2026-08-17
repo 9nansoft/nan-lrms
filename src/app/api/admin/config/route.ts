@@ -1,13 +1,14 @@
 // GET/PUT /api/admin/config — singleton key/value configuration.
 // Known key: `active_province_code` (MOPH 2-digit province code scoping
-// dashboard/map/sync). Empty DB returns the Khon Kaen default (40).
+// dashboard/map/sync). Empty DB returns the Nan default (55) — this
+// deployment is NN-LRMS (Nan), not the former Khon Kaen system.
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { requireAdmin } from '@/lib/admin-guard';
 import { logger } from '@/lib/logger';
 
-const DEFAULT_ACTIVE_PROVINCE_CODE = '40';
+const DEFAULT_ACTIVE_PROVINCE_CODE = '55';
 
 async function readConfig(): Promise<Record<string, string | null>> {
   const db = await getDatabase();

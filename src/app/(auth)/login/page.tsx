@@ -102,11 +102,11 @@ function LoginForm() {
       const preflight = (await preflightRes.json().catch(() => null)) as {
         ok: boolean;
         reason?:
-          | 'invalid_session'
-          | 'not_registered'
-          | 'deactivated'
-          | 'invalid_request'
-          | 'hosxp_too_old';
+        | 'invalid_session'
+        | 'not_registered'
+        | 'deactivated'
+        | 'invalid_request'
+        | 'hosxp_too_old';
         hospitalCode?: string;
         hospitalName?: string;
         currentVersion?: string;
@@ -231,7 +231,7 @@ function LoginForm() {
           <div className="space-y-3">
             <div className="flex items-center gap-4 bg-white/5 rounded-xl p-4">
               <Building2 className="h-5 w-5 shrink-0 text-emerald-400" />
-              <span className="text-sm text-slate-300">26 โรงพยาบาลในเครือข่าย</span>
+              <span className="text-sm text-slate-300">15 โรงพยาบาลในเครือข่าย</span>
             </div>
             <div className="flex items-center gap-4 bg-white/5 rounded-xl p-4">
               <Activity className="h-5 w-5 shrink-0 text-emerald-400" />
@@ -249,7 +249,7 @@ function LoginForm() {
         </div>
 
         <p className="relative z-10 text-xs text-slate-500">
-          v1.0.0 — สำนักงานสาธารณสุขจังหวัดน่าน
+          v1.0.2 — โรงพยาบาลน่าน จ.น่าน
         </p>
       </div>
 

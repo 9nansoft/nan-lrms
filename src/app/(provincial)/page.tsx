@@ -4,7 +4,14 @@
 // institutional-navy accent, shared IA across normal + kiosk modes.
 'use client';
 
-import { useMemo, useState } from 'react';
+import {
+  useMemo,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { debounceLeadingTrailing, SSE_REFRESH_DEBOUNCE_MS } from '@/lib/debounce';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useHighRiskPatients } from '@/hooks/useHighRiskPatients';
@@ -59,6 +66,21 @@ const SSE_STATUS_META: Record<SseConnectionState, { chip: string; stream: string
       color: 'var(--risk-medium)',
     },
   };
+
+// Draggable map / hospital-list split in the Province overview column
+// (normal mode). The split is clamped and persisted per user so a reload
+// keeps their preferred balance between map and list.
+const MAP_SHARE_STORAGE_KEY = 'dashboard.overview-map-share-pct';
+const MAP_SHARE_MIN = 15;
+const MAP_SHARE_MAX = 85;
+const MAP_SHARE_DEFAULT = 40;
+function readInitialMapShare(): number {
+  if (typeof window === 'undefined') return MAP_SHARE_DEFAULT;
+  const raw = window.localStorage.getItem(MAP_SHARE_STORAGE_KEY);
+  const n = raw === null ? Number.NaN : Number(raw);
+  if (!Number.isFinite(n)) return MAP_SHARE_DEFAULT;
+  return Math.min(MAP_SHARE_MAX, Math.max(MAP_SHARE_MIN, n));
+}
 
 function formatSyncTime(value?: string | null): string {
   if (!value) return 'none yet';
@@ -185,6 +207,66 @@ export default function DashboardPage() {
   const openHospitalDetail = (hcode: string | null) => {
     setSelectedHospital(hcode);
     if (hcode) setDetailHcode(hcode);
+  };
+
+  // Draggable map / hospital-list split in the Province overview column.
+  // Starts at the persisted value (or 40%) and clamps to [15%, 85%]. The
+  // value only loads after mount so SSR hydration never sees localStorage.
+  const [mapShare, setMapShare] = useState<number>(MAP_SHARE_DEFAULT);
+  const mapShareRef = useRef(MAP_SHARE_DEFAULT);
+  const overviewColRef = useRef<HTMLDivElement | null>(null);
+  const mapDragStart = useRef<{ y: number; share: number } | null>(null);
+  useEffect(() => {
+    const initial = readInitialMapShare();
+    mapShareRef.current = initial;
+    setMapShare(initial);
+  }, []);
+  const persistMapShare = (share: number) => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(MAP_SHARE_STORAGE_KEY, String(Math.round(share)));
+    }
+  };
+  const startMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    mapDragStart.current = { y: e.clientY, share: mapShareRef.current };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const moveMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = mapDragStart.current;
+    const col = overviewColRef.current;
+    if (!drag || !col) return;
+    const height = col.getBoundingClientRect().height;
+    if (height <= 0) return;
+    const next = drag.share + ((drag.y - e.clientY) / height) * 100;
+    const clamped = Math.min(MAP_SHARE_MAX, Math.max(MAP_SHARE_MIN, next));
+    mapShareRef.current = clamped;
+    setMapShare(clamped);
+  };
+  const endMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    mapDragStart.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // capture already released (e.g. on pointercancel)
+    }
+    persistMapShare(mapShareRef.current);
+  };
+  const onDividerKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const delta =
+      e.key === 'ArrowUp' || e.key === 'PageUp'
+        ? 1
+        : e.key === 'ArrowDown' || e.key === 'PageDown'
+          ? -1
+          : 0;
+    if (delta === 0) return;
+    e.preventDefault();
+    const step = e.key.startsWith('Page') ? 10 : 1;
+    const next = Math.min(
+      MAP_SHARE_MAX,
+      Math.max(MAP_SHARE_MIN, mapShareRef.current + delta * step),
+    );
+    mapShareRef.current = next;
+    setMapShare(next);
+    persistMapShare(next);
   };
 
   const refreshAll = () => {
@@ -690,17 +772,40 @@ export default function DashboardPage() {
             </div>
 
             {/* Content: map OR list fills the rest of the height */}
-            <div className="flex min-h-0 flex-1 flex-col">
+            <div ref={overviewColRef} className="flex min-h-0 flex-1 flex-col">
               {overviewMode === 'map' ? (
                 <>
-                  {/* Map pinned to a fixed ~half of the column so the
-                    hospital list below gets more room and starts higher. */}
-                  <div className="min-h-0" style={{ flex: '0 0 52%' }}>
+                  {/* Map sized by the user's draggable split (default 40%);
+                    the hospital list below takes the remaining space. */}
+                  <div className="min-h-0" style={{ flex: `0 0 ${mapShare}%` }}>
                     <ProvinceMap
                       hospitals={hospitals}
                       selected={selectedHospital}
                       onSelect={openHospitalDetail}
                       size="full"
+                    />
+                  </div>
+                  {/* Draggable divider — pointer-drag (or ArrowUp/ArrowDown)
+                    resizes the map / list split; persisted to localStorage. */}
+                  <div
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-valuemin={MAP_SHARE_MIN}
+                    aria-valuemax={MAP_SHARE_MAX}
+                    aria-valuenow={Math.round(mapShare)}
+                    aria-label="ปรับสัดส่วนแผนที่ / รายชื่อโรงพยาบาล"
+                    tabIndex={0}
+                    title="ลากเพื่อปรับสัดส่วนแผนที่ / รายชื่อ"
+                    className="group flex h-2 shrink-0 cursor-row-resize touch-none select-none items-center justify-center border-t border-[var(--rule-strong)] bg-[var(--surface-cool)] outline-none transition-colors hover:bg-[var(--accent-navy-soft)] focus-visible:bg-[var(--accent-navy-soft)]"
+                    onPointerDown={startMapDrag}
+                    onPointerMove={moveMapDrag}
+                    onPointerUp={endMapDrag}
+                    onPointerCancel={endMapDrag}
+                    onKeyDown={onDividerKeyDown}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="h-1 w-10 rounded-full border border-[var(--rule-strong)] bg-white transition-colors group-hover:border-[var(--accent-navy)] group-hover:bg-[var(--accent-navy-soft)]"
                     />
                   </div>
                   {/* Compact hospital list under the map for at-a-glance.

@@ -1,6 +1,6 @@
 // Real-map implementation of the Province overview — uses Leaflet + OSM tiles
-// so surrounding provinces are visible while Khon Kaen is highlighted in the
-// middle. Hospital pins are placed at real OSM-verified coordinates where
+// so surrounding provinces are visible while the active province is highlighted
+// in the middle. Hospital pins are placed at real OSM-verified coordinates where
 // available, with district-centroid fallback for hospitals OSM didn't have.
 //
 // This file MUST NOT be imported at the module level from a server component
@@ -254,6 +254,10 @@ interface ActiveMap {
 }
 
 const KK_PROVINCE_CODE = '40';
+// This deployment is NN-LRMS (Nan, MOPH code 55). The fallback only applies
+// when /api/admin/config has no row yet; it must NOT route Nan into the
+// inline Khon Kaen fast path below, so it stays a separate constant.
+const FALLBACK_PROVINCE_CODE = '55';
 
 export default function ProvinceMapLeaflet({
   hospitals,
@@ -267,11 +271,11 @@ export default function ProvinceMapLeaflet({
   const w = WEIGHTS[size];
 
   // Active province drives which shapes + pin list are rendered. A missing
-  // config means default to Khon Kaen so first-run deployments don't blank.
+  // config means default to Nan so first-run deployments don't blank.
   const { data: configData } = useSWR<{ config: { active_province_code?: string } }>(
     '/api/admin/config',
   );
-  const activeProvince = configData?.config?.active_province_code ?? KK_PROVINCE_CODE;
+  const activeProvince = configData?.config?.active_province_code ?? FALLBACK_PROVINCE_CODE;
 
   // For non-KK provinces we fetch the full Thailand GeoJSON + filter to the
   // active province at runtime. KK keeps using the pre-simplified inline
