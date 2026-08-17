@@ -6,7 +6,6 @@
 
 import {
   useMemo,
-  useEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -17,6 +16,7 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { useHighRiskPatients } from '@/hooks/useHighRiskPatients';
 import { useSSE, type SseConnectionState } from '@/hooks/useSSE';
 import { useKioskMode } from '@/hooks/useKioskMode';
+import { useMapShare, MAP_SHARE_MIN, MAP_SHARE_MAX } from '@/hooks/useMapShare';
 import { useOnboardHosxpWebhook } from '@/hooks/useOnboardHosxpWebhook';
 import { useOnboardHosxpSync, type OnboardHosxpSyncState } from '@/hooks/useOnboardHosxpSync';
 import { useBrowserPoll } from '@/hooks/useBrowserPoll';
@@ -68,19 +68,9 @@ const SSE_STATUS_META: Record<SseConnectionState, { chip: string; stream: string
   };
 
 // Draggable map / hospital-list split in the Province overview column
-// (normal mode). The split is clamped and persisted per user so a reload
-// keeps their preferred balance between map and list.
-const MAP_SHARE_STORAGE_KEY = 'dashboard.overview-map-share-pct';
-const MAP_SHARE_MIN = 15;
-const MAP_SHARE_MAX = 85;
-const MAP_SHARE_DEFAULT = 40;
-function readInitialMapShare(): number {
-  if (typeof window === 'undefined') return MAP_SHARE_DEFAULT;
-  const raw = window.localStorage.getItem(MAP_SHARE_STORAGE_KEY);
-  const n = raw === null ? Number.NaN : Number(raw);
-  if (!Number.isFinite(n)) return MAP_SHARE_DEFAULT;
-  return Math.min(MAP_SHARE_MAX, Math.max(MAP_SHARE_MIN, n));
-}
+// (normal mode): the constants here style the divider; the persisted value
+// itself lives in useMapShare (localStorage-backed, effect-free).
+
 
 function formatSyncTime(value?: string | null): string {
   if (!value) return 'none yet';
@@ -211,23 +201,13 @@ export default function DashboardPage() {
 
   // Draggable map / hospital-list split in the Province overview column.
   // Starts at the persisted value (or 40%) and clamps to [15%, 85%]. The
-  // value only loads after mount so SSR hydration never sees localStorage.
-  const [mapShare, setMapShare] = useState<number>(MAP_SHARE_DEFAULT);
-  const mapShareRef = useRef(MAP_SHARE_DEFAULT);
+  // persisted value arrives via useSyncExternalStore right after hydration
+  // so SSR never sees localStorage and no mount effect is needed.
+  const { mapShare, previewMapShare, saveMapShare, commitMapShare } = useMapShare();
   const overviewColRef = useRef<HTMLDivElement | null>(null);
   const mapDragStart = useRef<{ y: number; share: number } | null>(null);
-  useEffect(() => {
-    const initial = readInitialMapShare();
-    mapShareRef.current = initial;
-    setMapShare(initial);
-  }, []);
-  const persistMapShare = (share: number) => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(MAP_SHARE_STORAGE_KEY, String(Math.round(share)));
-    }
-  };
   const startMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    mapDragStart.current = { y: e.clientY, share: mapShareRef.current };
+    mapDragStart.current = { y: e.clientY, share: mapShare };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const moveMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -238,8 +218,7 @@ export default function DashboardPage() {
     if (height <= 0) return;
     const next = drag.share + ((drag.y - e.clientY) / height) * 100;
     const clamped = Math.min(MAP_SHARE_MAX, Math.max(MAP_SHARE_MIN, next));
-    mapShareRef.current = clamped;
-    setMapShare(clamped);
+    previewMapShare(clamped);
   };
   const endMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
     mapDragStart.current = null;
@@ -248,7 +227,7 @@ export default function DashboardPage() {
     } catch {
       // capture already released (e.g. on pointercancel)
     }
-    persistMapShare(mapShareRef.current);
+    saveMapShare();
   };
   const onDividerKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     const delta =
@@ -260,13 +239,8 @@ export default function DashboardPage() {
     if (delta === 0) return;
     e.preventDefault();
     const step = e.key.startsWith('Page') ? 10 : 1;
-    const next = Math.min(
-      MAP_SHARE_MAX,
-      Math.max(MAP_SHARE_MIN, mapShareRef.current + delta * step),
-    );
-    mapShareRef.current = next;
-    setMapShare(next);
-    persistMapShare(next);
+    const next = Math.min(MAP_SHARE_MAX, Math.max(MAP_SHARE_MIN, mapShare + delta * step));
+    commitMapShare(next);
   };
 
   const refreshAll = () => {
