@@ -13,6 +13,7 @@ import {
 } from '@/services/sync/onboarding-session';
 import { logger } from '@/lib/logger';
 import { EXEMPT_HCODES } from '@/lib/hospital-access-guard';
+import { exemptHospitalName } from '@/config/hospital-network';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
 
@@ -27,10 +28,6 @@ interface Body {
   confirmReonboard?: unknown;
 }
 
-const EXEMPT_HOSPITAL_DEFAULTS: Record<string, { name: string }> = {
-  '00000': { name: 'System (00000)' },
-  '99999': { name: 'Provincial Admin (99999)' },
-};
 
 type HospitalRow = { id: string; is_active: boolean | number };
 
@@ -62,7 +59,7 @@ async function resolveOrCreateExemptHospital(
       );
     }
 
-    const defaults = EXEMPT_HOSPITAL_DEFAULTS[hcode] ?? { name: `Exempt (${hcode})` };
+    const defaults = { name: exemptHospitalName(hcode) };
     const hospitalId = uuidv4();
     await db.execute(
       `INSERT INTO hospitals (id, hcode, name, level, service_type, is_active,

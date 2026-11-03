@@ -54,7 +54,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         // Reject the login when the BMS identity belongs to a hospital that
         // isn't registered (or is deactivated). Exempt only: hcode 00000 /
-        // 99999 (system + provincial admin). Role does NOT bypass — even
+        // 00042 (system + สสจ.น่าน). Role does NOT bypass — even
         // ADMIN role from an unregistered hospital is denied; cross-province
         // admins must use one of the exempt hcodes. Failure closed so an
         // operator removing a hospital from the admin list immediately

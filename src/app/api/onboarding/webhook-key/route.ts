@@ -17,6 +17,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { createApiKey } from '@/services/webhook';
 import { EXEMPT_HCODES } from '@/lib/hospital-access-guard';
+import { exemptHospitalName } from '@/config/hospital-network';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
 import { logger } from '@/lib/logger';
 
@@ -25,13 +26,9 @@ interface Body {
   label?: string;
 }
 
-// Display names for the system-reserved hcodes that bypass the registry
-// gate (see hospital-access-guard.EXEMPT_HCODES). Auto-registered on first
-// onboarding so the webhook-key flow doesn't 404 on these well-known codes.
-const EXEMPT_HOSPITAL_DEFAULTS: Record<string, { name: string }> = {
-  '00000': { name: 'System (00000)' },
-  '99999': { name: 'Provincial Admin (99999)' },
-};
+// Exempt hcodes (hospital-access-guard.EXEMPT_HCODES) are auto-registered on
+// first onboarding, named from NON_REPORTING_HCODE_NAMES, so the webhook-key
+// flow doesn't 404 on these well-known codes.
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -51,7 +48,7 @@ export async function POST(request: NextRequest) {
     );
     let hospital: { id: string; name: string };
     if (rows.length === 0) {
-      // EXEMPT hcodes (00000 / 99999) are system/admin sandboxes that bypass
+      // EXEMPT hcodes (00000 system / 00042 สสจ.น่าน) are non-hospital accounts that bypass
       // the login registry gate. They aren't seeded by HospitalSeeder and
       // wouldn't appear in the MoPH master picker in /admin, so without
       // auto-registration here the webhook-key flow 404s and the HOSxP
@@ -63,7 +60,7 @@ export async function POST(request: NextRequest) {
           { status: 404 },
         );
       }
-      const defaults = EXEMPT_HOSPITAL_DEFAULTS[hcode] ?? { name: `Exempt (${hcode})` };
+      const defaults = { name: exemptHospitalName(hcode) };
       const newId = uuidv4();
       const now = new Date().toISOString();
       await db.execute(

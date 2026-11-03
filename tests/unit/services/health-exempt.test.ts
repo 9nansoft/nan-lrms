@@ -11,7 +11,7 @@ describe('health excludes pseudo-hospitals (EXEMPT_HCODES)', () => {
     const old = new Date(Date.now() - 10 * 86_400_000).toISOString();
     for (const [id, hcode, last] of [
       ['h1', '11000', fresh],
-      ['h99', '99999', old], // Provincial Admin — never a real feed
+      ['h99', '00042', old], // สสจ.น่าน — never a real feed
       ['h0', '00000', null],
     ] as const) {
       await db.query(
@@ -22,7 +22,7 @@ describe('health excludes pseudo-hospitals (EXEMPT_HCODES)', () => {
     }
   });
 
-  it('counts only reporting hospitals and is not degraded by 99999/00000', async () => {
+  it('counts only reporting hospitals and is not degraded by 00042/00000', async () => {
     const h = await getHealthStatus(db);
     expect(h.hospitalConnections.total).toBe(1);
     expect(h.hospitalConnections.stale).toBe(0);

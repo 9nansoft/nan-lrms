@@ -6,9 +6,13 @@
 // Policy (in order):
 //   1. EXEMPT_HCODES → always allowed regardless of auth method or role.
 //        '00000' reserved system-level account
-//        '99999' reserved provincial/admin testing account
+//        '00042' สำนักงานสาธารณสุขจังหวัดน่าน — the provincial admins' home
+//                hcode (replaced the '99999' test account). A deliberate
+//                exception to the rule below: every สสจ.น่าน BMS user gets a
+//                read/write session, while /admin stays gated by
+//                ADMIN_ALLOWED_CIDS.
 //      These are also honored by /api/onboarding/* to auto-register webhook
-//      keys + HOSxP sync. Do NOT add real organization codes here — use
+//      keys + HOSxP sync. Do NOT add other real organization codes here — use
 //      READONLY_LOGIN_HCODES instead. Cross-province administrators MUST
 //      use one of these hcodes; the role-based ADMIN bypass that previously
 //      sat above this rule was removed because mapPositionToRole() promotes

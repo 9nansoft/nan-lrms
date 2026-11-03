@@ -53,7 +53,7 @@ export function useProvinceDashboard() {
   });
 
   const { hospitals, continuum } = dash;
-  // Pseudo-hospitals (00000/99999) never sync: excluded from the freshness
+  // Pseudo-hospitals (00000/00042) never sync: excluded from the freshness
   // numerator and denominator so this agrees with the status strip.
   const reporting = hospitals.filter((h) => !isNonReportingHcode(h.hcode));
 

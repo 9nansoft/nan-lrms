@@ -32,7 +32,7 @@ describe('isHospitalAccessAllowed', { timeout: 30000 }, () => {
 
   it('allows an ADMIN on a reserved exempt hcode (the sanctioned cross-province path)', async () => {
     const allowed = await isHospitalAccessAllowed(
-      { hospitalCode: '99999', role: UserRole.ADMIN },
+      { hospitalCode: '00042', role: UserRole.ADMIN },
       ctx.db,
     );
     expect(allowed).toBe(true);
@@ -46,12 +46,20 @@ describe('isHospitalAccessAllowed', { timeout: 30000 }, () => {
     expect(allowed).toBe(true);
   });
 
-  it('allows the reserved 99999 hcode even with non-admin role', async () => {
+  it('allows สสจ.น่าน (00042) even with non-admin role', async () => {
     const allowed = await isHospitalAccessAllowed(
-      { hospitalCode: '99999', role: UserRole.OBSTETRICIAN },
+      { hospitalCode: '00042', role: UserRole.OBSTETRICIAN },
       ctx.db,
     );
     expect(allowed).toBe(true);
+  });
+
+  it('no longer exempts the retired 99999 test account when it is not registered', async () => {
+    const allowed = await isHospitalAccessAllowed(
+      { hospitalCode: '99999', role: UserRole.ADMIN },
+      ctx.db,
+    );
+    expect(allowed).toBe(false);
   });
 
   it('allows a non-admin whose hcode is in the registered hospitals table', async () => {
