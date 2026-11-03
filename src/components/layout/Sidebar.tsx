@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { ChevronsLeft, ChevronsRight } from 'lucide-react';
-import type { NavItem } from '@/config/nav';
+import { MANUAL_LINK, type NavItem } from '@/config/nav';
 import { BrandMark } from '@/components/shared/BrandMark';
 import { cn } from '@/lib/utils';
 
@@ -38,6 +38,7 @@ export function Sidebar({ items, isActive, collapsed, onToggle, homeHref, onNavi
       </Link>
     );
   };
+  const ManualIcon = MANUAL_LINK.icon;
   return (
     <aside
       className={cn(
@@ -53,6 +54,18 @@ export function Sidebar({ items, isActive, collapsed, onToggle, homeHref, onNavi
       <nav aria-label="เมนูหลัก" className="flex flex-1 flex-col gap-1">
         {main.map(renderItem)}
         <div className="flex-1" />
+        {/* Static page, not an app route: plain <a> in a new tab. */}
+        <a
+          href={MANUAL_LINK.href}
+          target="_blank"
+          rel="noopener"
+          onClick={onNavigate}
+          title={collapsed ? MANUAL_LINK.label : undefined}
+          className="flex items-center gap-3 rounded-xl px-3 py-2 text-body font-medium text-brand-soft transition-colors hover:bg-white/10 hover:text-white"
+        >
+          <ManualIcon className="h-5 w-5 shrink-0" />
+          <span className={cn(collapsed && 'sr-only')}>{MANUAL_LINK.label}</span>
+        </a>
         {pinned.map(renderItem)}
       </nav>
       <button

@@ -271,6 +271,15 @@ function LoginForm() {
             <Link href="/about" className="font-medium text-brand underline-offset-4 hover:underline">
               เกี่ยวกับระบบ NN-LRMS
             </Link>{' '}
+            ·{' '}
+            <a
+              href="/manual.html"
+              target="_blank"
+              rel="noopener"
+              className="font-medium text-brand underline-offset-4 hover:underline"
+            >
+              คู่มือการใช้งาน
+            </a>{' '}
             · สำนักงานสาธารณสุขจังหวัดน่าน
           </p>
         </div>

@@ -11,6 +11,7 @@ import {
   Stethoscope,
   Settings,
   UserRound,
+  BookOpen,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -29,6 +30,11 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/hospital-maternity-ward', label: 'ห้องคลอด', icon: Stethoscope },
   { href: '/admin', label: 'ตั้งค่า', icon: Settings, adminOnly: true },
 ];
+
+/** User manual — a static page (public/manual.html), auth-exempt so staff
+ *  can read it before signing in. Rendered by Sidebar for every variant and
+ *  opened in a new tab so the working page stays put. */
+export const MANUAL_LINK: NavItem = { href: '/manual.html', label: 'คู่มือการใช้งาน', icon: BookOpen };
 
 export const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'ผู้ดูแลระบบ',

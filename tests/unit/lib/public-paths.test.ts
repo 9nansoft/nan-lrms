@@ -14,6 +14,9 @@ describe('middleware path exemptions', () => {
   it('does not exempt look-alike prefixes', () => {
     expect(isStaticPath('/illustrations-private/x')).toBe(false);
   });
+  it('serves the user manual without auth so staff can read it before signing in', () => {
+    expect(isAuthExempt('/manual.html')).toBe(true);
+  });
   it('keeps existing public and static paths', () => {
     expect(isPublicPath('/login')).toBe(true);
     expect(isStaticPath('/_next/x.js')).toBe(true);

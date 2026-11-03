@@ -154,6 +154,10 @@ describe('Login — direction-C layout', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'เกี่ยวกับระบบ NN-LRMS' })).toHaveAttribute('href', '/about');
   });
+  it('links the user manual before sign-in', () => {
+    render(<LoginPage />);
+    expect(screen.getByRole('link', { name: 'คู่มือการใช้งาน' })).toHaveAttribute('href', '/manual.html');
+  });
   it('the hero illustration is decorative', () => {
     const { container } = render(<LoginPage />);
     const img = container.querySelector('img[src*="login-hero"]');

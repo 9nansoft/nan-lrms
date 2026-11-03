@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คู่มือการใช้งาน NN-LRMS</title>
+<meta name="description" content="คู่มือการใช้งานระบบติดตามการคลอดแบบรวมศูนย์ จังหวัดน่าน (NN-LRMS) สำหรับเจ้าหน้าที่ห้องคลอด สูติแพทย์ และฝ่าย IT">
+<style>
+  :root {
+    --page: #FBF8F3; --card: #FFFFFF; --muted: #F3EFE6;
+    --ink: #22223B; --ink-muted: #5C5C7A; --border: #E4DED2;
+    --brand: #2E3A87; --brand-soft: #E4E6F4;
+    --ok: #3F8F4F; --ok-tint: #EEF7EE;
+    --warn: #8A5A00; --warn-tint: #FFF6E0;
+    --danger: #A1271B; --danger-tint: #FDECEA;
+    --hosxp: #6B4E16; --hosxp-tint: #F7EEDC;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #15151F; --card: #1E1E2B; --muted: #262636;
+      --ink: #ECECF4; --ink-muted: #A8A8C0; --border: #34344A;
+      --brand: #AEB8F5; --brand-soft: #2A3060;
+      --ok: #7CC98A; --ok-tint: #1D3323;
+      --warn: #F0C060; --warn-tint: #3A2E12;
+      --danger: #F28B7E; --danger-tint: #3D1E1A;
+      --hosxp: #E8C886; --hosxp-tint: #3A3020;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font-family: "Sarabun", "Noto Sans Thai", "Leelawadee UI", "Tahoma", system-ui, sans-serif;
+    font-size: 17px; line-height: 1.7;
+  }
+  a { color: var(--brand); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px 64px; }
+  header.top {
+    background: var(--brand); color: #fff; padding: 28px 0 32px; margin-bottom: 28px;
+  }
+  @media (prefers-color-scheme: dark) { header.top { background: #232A5C; } }
+  header.top .wrap { padding-bottom: 0; }
+  header.top a { color: #fff; }
+  .back { display: inline-block; font-size: 15px; opacity: .85; margin-bottom: 14px; text-decoration: none; }
+  .back:hover { opacity: 1; text-decoration: underline; }
+  h1 { font-size: 34px; line-height: 1.25; margin: 0 0 8px; }
+  .sub { margin: 0; opacity: .9; max-width: 760px; }
+  h2 {
+    font-size: 26px; line-height: 1.3; margin: 0 0 6px; color: var(--brand);
+    scroll-margin-top: 16px;
+  }
+  h3 { font-size: 20px; margin: 26px 0 8px; }
+  h4 { font-size: 17px; margin: 18px 0 6px; }
+  section.card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 18px;
+    padding: 26px 28px; margin: 0 0 22px;
+  }
+  .lead { color: var(--ink-muted); margin-top: 0; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
+  nav.toc a {
+    border: 1px solid var(--border); background: var(--card); border-radius: 999px;
+    padding: 6px 14px; text-decoration: none; font-size: 15px; font-weight: 600;
+  }
+  nav.toc a:hover { background: var(--brand-soft); }
+  .note {
+    border-radius: 12px; padding: 12px 16px; margin: 14px 0; border: 1px solid;
+  }
+  .note.info { background: var(--brand-soft); border-color: transparent; }
+  .note.warn { background: var(--warn-tint); border-color: transparent; color: var(--ink); }
+  .note.danger { background: var(--danger-tint); border-color: transparent; color: var(--ink); }
+  .note strong:first-child { display: block; margin-bottom: 2px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 4px; font-size: 16px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  th { background: var(--muted); font-weight: 700; }
+  .table-scroll { overflow-x: auto; }
+  code {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: .88em;
+    background: var(--muted); padding: 1px 6px; border-radius: 6px; word-break: break-word;
+  }
+  ul, ol { padding-left: 1.4em; }
+  li { margin: 3px 0; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .panel { background: var(--muted); border-radius: 14px; padding: 14px 18px; }
+  .panel h4 { margin-top: 0; }
+  .tag {
+    display: inline-block; font-size: 13px; font-weight: 700; border-radius: 999px;
+    padding: 1px 10px; margin-right: 6px; white-space: nowrap; vertical-align: 2px;
+  }
+  .tag.hosxp { background: var(--hosxp-tint); color: var(--hosxp); }
+  .tag.sys { background: var(--brand-soft); color: var(--brand); }
+  .tag.ward { background: var(--ok-tint); color: var(--ok); }
+  .tag.prov { background: var(--warn-tint); color: var(--warn); }
+  .tag.it { background: var(--danger-tint); color: var(--danger); }
+  .risk { font-weight: 700; padding: 0 8px; border-radius: 6px; }
+  .risk.low { background: var(--ok-tint); color: var(--ok); }
+  .risk.med { background: var(--warn-tint); color: var(--warn); }
+  .risk.high { background: var(--danger-tint); color: var(--danger); }
+
+  /* ── End-to-end flow ── */
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0 18px; font-size: 15px; }
+  ol.flow { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+  ol.flow > li {
+    counter-increment: step; position: relative; padding: 0 0 18px 58px; margin: 0;
+  }
+  ol.flow > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0;
+    width: 40px; height: 40px; border-radius: 50%; background: var(--brand); color: #fff;
+    display: grid; place-items: center; font-weight: 800; font-size: 17px;
+  }
+  @media (prefers-color-scheme: dark) { ol.flow > li::before { color: #15151F; } }
+  ol.flow > li::after {
+    content: ""; position: absolute; left: 19px; top: 44px; bottom: 4px; width: 2px; background: var(--border);
+  }
+  ol.flow > li:last-child::after { display: none; }
+  .step { background: var(--muted); border-radius: 14px; padding: 12px 16px; }
+  .step-title { font-weight: 700; font-size: 18px; margin: 0 0 4px; }
+  .step p { margin: 4px 0; }
+  .step ul { margin: 4px 0; }
+  .phase {
+    margin: 4px 0 14px 58px; font-size: 14px; font-weight: 800; letter-spacing: .04em;
+    color: var(--ink-muted); text-transform: uppercase;
+  }
+  .branch { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 12px; margin-top: 8px; }
+  .branch > div { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+  .branch b { display: block; margin-bottom: 2px; }
+  .states { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; font-size: 15px; }
+  .states span.s { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1px 8px; font-weight: 700; }
+  .states span.arrow { color: var(--ink-muted); }
+
+  /* ── Data-flow diagram ── */
+  .diagram { margin: 14px 0 6px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; min-width: 680px; height: auto; }
+  .diagram .box { fill: var(--card); stroke: var(--border); stroke-width: 1.5; }
+  .diagram .box.hosxp { fill: var(--hosxp-tint); stroke: none; }
+  .diagram .box.sys { fill: var(--brand-soft); stroke: none; }
+  .diagram .box.user { fill: var(--ok-tint); stroke: none; }
+  .diagram text { fill: var(--ink); font-family: inherit; font-size: 15px; }
+  .diagram text.t { font-weight: 700; font-size: 16px; }
+  .diagram text.s { fill: var(--ink-muted); font-size: 13px; }
+  .diagram .line { stroke: var(--ink-muted); stroke-width: 1.6; fill: none; }
+  .diagram .arrowhead { fill: var(--ink-muted); }
+
+  .check li { list-style: none; position: relative; padding-left: 4px; }
+  .check { padding-left: 1.6em; }
+  .check li::before { content: "☐"; position: absolute; left: -1.4em; color: var(--brand); font-weight: 700; }
+
+  footer.end { color: var(--ink-muted); font-size: 15px; text-align: center; margin-top: 30px; }
+
+  @media (max-width: 600px) {
+    body { font-size: 16px; }
+    h1 { font-size: 27px; }
+    h2 { font-size: 22px; }
+    section.card { padding: 20px 16px; }
+    ol.flow > li { padding-left: 50px; }
+    .phase { margin-left: 50px; }
+  }
+  @media print {
+    :root { --page: #fff; --card: #fff; }
+    header.top { background: none; color: var(--ink); padding: 0; }
+    header.top a, .back, nav.toc { display: none; }
+    section.card { border: none; padding: 0; break-inside: auto; }
+    h2 { break-after: avoid; }
+    ol.flow > li, .panel, tr { break-inside: avoid; }
+    body { font-size: 13pt; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="back" href="/">← กลับเข้าสู่ระบบ NN-LRMS</a>
+    <h1>คู่มือการใช้งาน NN-LRMS</h1>
+    <p class="sub">ระบบติดตามการคลอดแบบรวมศูนย์ จังหวัดน่าน (Nan Labor Room Monitoring System) — สำหรับเจ้าหน้าที่ห้องคลอด/หอผู้ป่วย สูติแพทย์และพยาบาลระดับจังหวัด และฝ่าย IT</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<nav class="toc" aria-label="สารบัญ">
+  <a href="#overview">ภาพรวม</a>
+  <a href="#flow">Flow การทำงาน</a>
+  <a href="#start">เริ่มต้นใช้งาน</a>
+  <a href="#ward">เจ้าหน้าที่ห้องคลอด</a>
+  <a href="#provincial">สูติแพทย์ / ระดับจังหวัด</a>
+  <a href="#it">สิ่งที่ IT ต้องดูแล</a>
+  <a href="#troubleshoot">ปัญหาที่พบบ่อย</a>
+</nav>
+
+<!-- ───────────────────────── ภาพรวม ───────────────────────── -->
+<section class="card" id="overview">
+  <h2>1. ภาพรวมระบบ</h2>
+  <p class="lead">NN-LRMS รวบรวมข้อมูลหญิงตั้งครรภ์และผู้คลอดจาก HOSxP ของทุกโรงพยาบาลในจังหวัดน่านมาแสดงที่เดียว เพื่อให้ห้องคลอดของแต่ละโรงพยาบาลและโรงพยาบาลแม่ข่าย (รพ.น่าน) เห็นความเสี่ยงและตัดสินใจส่งต่อได้ทันเวลา</p>
+
+  <div class="note danger">
+    <strong>ข้อควรจำ</strong>
+    ระบบเป็นเครื่องมือ<b>ช่วยติดตามและสนับสนุนการตัดสินใจ</b> ไม่ใช่เครื่องมือวินิจฉัย ไม่สั่งการรักษาหรือส่งต่อเอง และไม่แทนแนวทางเวชปฏิบัติหรือดุลยพินิจของแพทย์/พยาบาล
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h4>ข้อมูลมาจากไหน</h4>
+      <p>ข้อมูลทั้งหมด<b>บันทึกใน HOSxP เหมือนเดิม</b> NN-LRMS ดึงไปแสดงเอง ไม่ต้องพิมพ์ซ้ำ ช่องทางหลักคือเปิด NN-LRMS จากเมนูใน HOSxP แล้วหน้าจอจะซิงค์ข้อมูลของโรงพยาบาลให้ทุก 60 วินาที โรงพยาบาลที่ไม่ใช้ HOSxP ส่งข้อมูลผ่าน Webhook API</p>
+    </div>
+    <div class="panel">
+      <h4>ใครใช้ทำอะไร</h4>
+      <ul>
+        <li><span class="tag ward">ห้องคลอด</span>ดูบอร์ดเตียง บันทึก partograph/สัญญาณชีพ ย้ายเตียง ส่งต่อ จำหน่าย</li>
+        <li><span class="tag prov">จังหวัด</span>สูติแพทย์/พยาบาลแม่ข่ายเฝ้าดูผู้คลอดทั้งจังหวัด ติดตามการส่งต่อ</li>
+        <li><span class="tag it">IT</span>ดูแลการเชื่อมต่อ HOSxP เซิร์ฟเวอร์ สิทธิ์ และการซิงค์</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>ระดับความเสี่ยงที่เห็นในระบบ</h3>
+  <div class="table-scroll">
+  <table>
+    <tr><th>ตัวชี้วัด</th><th>ระดับ</th><th>ความหมาย</th></tr>
+    <tr><td>คะแนน CPD (ผู้คลอด)</td><td><span class="risk low">LOW</span> <span class="risk med">MEDIUM</span> <span class="risk high">HIGH</span></td><td>คำนวณจาก 8 ปัจจัย: ครรภ์แรก, ANC น้อยกว่า 4 ครั้ง, อายุครรภ์ ≥ 40 สัปดาห์, ส่วนสูง, น้ำหนักที่เพิ่ม, ยอดมดลูก, น้ำหนักทารกจาก U/S, Hematocrit — LOW 0–4.99 · MEDIUM 5–9.99 · HIGH ตั้งแต่ 10</td></tr>
+    <tr><td>ความเสี่ยงฝากครรภ์ (ANC)</td><td><span class="risk low">LOW</span> HR1 HR2 <span class="risk high">HR3</span></td><td>จัดตามเกณฑ์คัดกรองหญิงตั้งครรภ์ HR3 คือกลุ่มเสี่ยงสูงสุดที่ต้องติดตามใกล้ชิด</td></tr>
+    <tr><td>สี</td><td>เขียว · เหลือง/ส้ม · แดง</td><td>ใช้ความหมายเดียวกันทุกหน้าจอ: ปกติ · เฝ้าระวัง · อันตราย</td></tr>
+  </table>
+  </div>
+  <div class="note warn">
+    <strong>ข้อมูลไม่ครบ ≠ ปกติ</strong>
+    ปัจจัยที่ไม่มีข้อมูลจะได้ 0 คะแนนและระบบจะแสดงว่า "ไม่มีข้อมูล" คะแนนจึงอาจต่ำกว่าความเสี่ยงจริง ต้องอ่านคะแนนร่วมกับข้อมูลทางคลินิกเสมอ
+  </div>
+</section>
+
+<!-- ───────────────────────── FLOW ───────────────────────── -->
+<section class="card" id="flow">
+  <h2>2. Flow การทำงาน ตั้งแต่เริ่มจนสิ้นสุด</h2>
+  <p class="lead">เส้นทางของหญิงตั้งครรภ์หนึ่งรายในระบบ ตั้งแต่ฝากครรภ์จนจำหน่ายและสรุปผลลัพธ์ทารก แต่ละขั้นระบุว่าใครทำและทำที่ไหน</p>
+
+  <div class="legend" aria-label="คำอธิบายป้าย">
+    <span><span class="tag hosxp">HOSxP</span>บันทึกในโปรแกรม HOSxP</span>
+    <span><span class="tag sys">NN-LRMS</span>ระบบทำให้อัตโนมัติ</span>
+    <span><span class="tag ward">ห้องคลอด</span>เจ้าหน้าที่ รพ.ชุมชน</span>
+    <span><span class="tag prov">จังหวัด</span>สูติแพทย์/พยาบาลแม่ข่าย</span>
+  </div>
+
+  <div class="phase">ระยะที่ 1 · ฝากครรภ์</div>
+  <ol class="flow">
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag hosxp">HOSxP</span>ลงทะเบียนฝากครรภ์และบันทึกการตรวจ ANC</p>
+        <p>เจ้าหน้าที่ ANC บันทึกใน HOSxP ตามปกติ (ประวัติครรภ์ ผลตรวจ การคัดกรองความเสี่ยง นัดครั้งถัดไป)</p>
+      </div>
+    </li>
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag sys">NN-LRMS</span>ซิงค์ข้อมูลและสร้าง "เส้นทางการตั้งครรภ์"</p>
+        <p>เมื่อมีหน้าจอ NN-LRMS ของโรงพยาบาลเปิดอยู่ ระบบดึงข้อมูลจาก HOSxP ทุก 60 วินาที จับคู่การตั้งครรภ์ข้ามโรงพยาบาลด้วยเลขบัตรประชาชนที่เข้ารหัสแล้ว และจัดระดับความเสี่ยง LOW / HR1 / HR2 / HR3</p>
+      </div>
+    </li>
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag prov">จังหวัด</span><span class="tag ward">ห้องคลอด</span>ติดตามในเมนู "ฝากครรภ์"</p>
+        <ul>
+          <li>กรองหา HR3, ใกล้ครบกำหนด, เลยกำหนด, ขาดนัด, ANC น้อยกว่าเกณฑ์</li>
+          <li>ระบบแจ้งเตือนตามที่ตั้งไว้ในโปรไฟล์ เช่น "ครรภ์เสี่ยงสูง (ANC HR3)", "ANC ขาดนัด", "ใกล้ครบกำหนดคลอด"</li>
+          <li>ติดตามผู้ที่ขาดนัดผ่านช่องทางปกติของโรงพยาบาล (โทรศัพท์ อสม. ฯลฯ)</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+
+  <div class="phase">ระยะที่ 2 · เข้าห้องคลอด</div>
+  <ol class="flow" start="4" style="counter-reset: step 3">
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag hosxp">HOSxP</span>รับเข้าห้องคลอด (Admit) และจัดเตียง</p>
+        <p>รับผู้คลอดเป็นผู้ป่วยในของวอร์ดห้องคลอดใน HOSxP พร้อมระบุห้อง/เตียง (roomno / bedno)</p>
+      </div>
+    </li>
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag sys">NN-LRMS</span>ผู้คลอดขึ้นบนบอร์ดเตียงและแดชบอร์ดจังหวัด</p>
+        <p>บอร์ด "ห้องคลอด" อ่านเตียงจาก HOSxP โดยตรงและรีเฟรชทุก 20 วินาที ระบบคำนวณคะแนน CPD และแสดงผู้คลอดบนแดชบอร์ดจังหวัดตามระดับความเสี่ยง</p>
+      </div>
+    </li>
+  </ol>
+
+  <div class="phase">ระยะที่ 3 · เฝ้าระวังระหว่างรอคลอด</div>
+  <ol class="flow" style="counter-reset: step 5">
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag ward">ห้องคลอด</span>บันทึก partograph และสัญญาณชีพตามรอบ</p>
+        <p>บันทึกการเปิดของปากมดลูก การหดรัดตัว เสียงหัวใจทารก ความดัน ชีพจร อุณหภูมิ ฯลฯ ผ่านแท็บ "พาร์โทกราฟ" / "สัญญาณชีพ" ในหน้าผู้ป่วย หรือใน HOSxP ก็ได้ ข้อมูลเข้าที่เดียวกัน</p>
+      </div>
+    </li>
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag sys">NN-LRMS</span>ประเมินและแจ้งเตือนอัตโนมัติ</p>
+        <ul>
+          <li>กราฟ partograph พร้อมเส้น alert / action และกฎเตือน (CDSS) ด้านมารดา ทารก การหดรัดตัว และความก้าวหน้าการคลอด</li>
+          <li>เกิดการแจ้งเตือน เช่น "คะแนน CPD เสี่ยงสูง", "Partograph วิกฤต", "ภาวะฉุกเฉินในห้องคลอด" ไปยังผู้ที่ติดตามโรงพยาบาลนั้น และกลุ่ม LINE (MOPH) ของศูนย์กลางจังหวัดตามที่ผู้ดูแลตั้งไว้</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag prov">จังหวัด</span>สูติแพทย์แม่ข่ายเฝ้าดูและให้คำปรึกษา</p>
+        <p>ดูผู้คลอดเสี่ยงสูงทั้งจังหวัดบนแดชบอร์ด เปิดดูรายละเอียดผู้คลอด/partograph และใช้วิดีโอคอลปรึกษากับห้องคลอดต้นทางได้ทันที</p>
+      </div>
+    </li>
+  </ol>
+
+  <div class="phase">ระยะที่ 4 · ตัดสินใจ</div>
+  <ol class="flow" style="counter-reset: step 8">
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag ward">ห้องคลอด</span><span class="tag prov">จังหวัด</span>คลอดที่โรงพยาบาลเดิม หรือส่งต่อ</p>
+        <div class="branch">
+          <div><b>ก. คลอดที่โรงพยาบาลเดิม</b>เฝ้าระวังต่อจนคลอด แล้วไปขั้นที่ 10</div>
+          <div><b>ข. ส่งต่อ</b>ในแท็บ "จำหน่าย" ของหน้าผู้ป่วย เลือกประเภท "ส่งต่อโรงพยาบาล" แล้วกรอกข้อมูลส่งต่อ (Refer Out) หรือออกใบส่งตัวใน HOSxP จากนั้นติดตามสถานะในเมนู "ส่งต่อ":
+            <div class="states">
+              <span class="s">INITIATED</span><span class="arrow">→</span><span class="s">ACCEPTED</span><span class="arrow">→</span><span class="s">IN_TRANSIT</span><span class="arrow">→</span><span class="s">ARRIVED</span>
+            </div>
+            หรือ <span class="s" style="border:1px solid var(--border);border-radius:8px;padding:1px 8px;font-weight:700">REJECTED</span> — ใบที่ค้างเกินเวลาจะขึ้นเตือน "ใบส่งต่อค้างเกินเวลา" เมื่อผู้ป่วยมาถึงปลายทาง ระบบยืนยันจากการรับตัวใน HOSxP ของโรงพยาบาลปลายทาง
+          </div>
+        </div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="phase">ระยะที่ 5 · คลอดและสิ้นสุด</div>
+  <ol class="flow" style="counter-reset: step 9">
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag ward">ห้องคลอด</span><span class="tag hosxp">HOSxP</span>บันทึกการคลอดและข้อมูลทารก</p>
+        <p>บันทึกระยะคลอด ยา ภาวะแทรกซ้อน และข้อมูลทารก (น้ำหนัก Apgar การกู้ชีพ) ในแท็บ "ระยะคลอด" / "ภาวะแทรกซ้อน" / "ทารก" หรือใน HOSxP</p>
+      </div>
+    </li>
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag ward">ห้องคลอด</span>จำหน่ายผู้ป่วย</p>
+        <p>จำหน่ายในแท็บ "จำหน่าย" หรือใน HOSxP เตียงจะว่างบนบอร์ด และผู้คลอดออกจากรายการที่กำลังรอคลอด</p>
+      </div>
+    </li>
+    <li>
+      <div class="step">
+        <p class="step-title"><span class="tag sys">NN-LRMS</span><span class="tag prov">จังหวัด</span>สรุปผลลัพธ์</p>
+        <p>ข้อมูลไปรวมในเมนู "ผลลัพธ์ทารก" (จำนวนคลอด น้ำหนักแรกเกิดต่ำ Apgar 5 นาที การกู้ชีพ ครรภ์แฝด) ใช้ทบทวนคุณภาพระดับจังหวัด เส้นทางการตั้งครรภ์ของรายนี้ถือว่าสิ้นสุด</p>
+      </div>
+    </li>
+  </ol>
+
+  <h3>เส้นทางของข้อมูล (ฝั่งเทคนิค)</h3>
+  <div class="diagram" role="img" aria-label="แผนภาพ: HOSxP ส่งข้อมูลผ่านเบราว์เซอร์ที่เปิด NN-LRMS หรือผ่าน Webhook ไปยังเซิร์ฟเวอร์ NN-LRMS แล้วกระจายไปยังหน้าจอทุกจุด">
+    <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" class="arrowhead"/>
+        </marker>
+      </defs>
+      <rect class="box hosxp" x="10" y="30" width="170" height="80" rx="14"/>
+      <text class="t" x="95" y="64" text-anchor="middle">HOSxP</text>
+      <text class="s" x="95" y="88" text-anchor="middle">ของแต่ละโรงพยาบาล</text>
+
+      <rect class="box" x="250" y="30" width="200" height="80" rx="14"/>
+      <text class="t" x="350" y="60" text-anchor="middle">เบราว์เซอร์ห้องคลอด</text>
+      <text class="s" x="350" y="82" text-anchor="middle">เปิด NN-LRMS จาก HOSxP</text>
+      <text class="s" x="350" y="100" text-anchor="middle">ซิงค์ทุก 60 วินาที</text>
+
+      <rect class="box" x="250" y="150" width="200" height="70" rx="14"/>
+      <text class="t" x="350" y="180" text-anchor="middle">ระบบอื่น (ไม่ใช่ HOSxP)</text>
+      <text class="s" x="350" y="202" text-anchor="middle">Webhook API + API key</text>
+
+      <rect class="box sys" x="520" y="70" width="170" height="110" rx="14"/>
+      <text class="t" x="605" y="112" text-anchor="middle">เซิร์ฟเวอร์</text>
+      <text class="t" x="605" y="134" text-anchor="middle">NN-LRMS</text>
+      <text class="s" x="605" y="158" text-anchor="middle">ฐานข้อมูลเข้ารหัส</text>
+
+      <rect class="box user" x="740" y="40" width="150" height="70" rx="14"/>
+      <text class="t" x="815" y="70" text-anchor="middle">หน้าจอทุกจุด</text>
+      <text class="s" x="815" y="92" text-anchor="middle">แดชบอร์ด · บอร์ดเตียง</text>
+
+      <rect class="box user" x="740" y="140" width="150" height="70" rx="14"/>
+      <text class="t" x="815" y="170" text-anchor="middle">แจ้งเตือน</text>
+      <text class="s" x="815" y="192" text-anchor="middle">ในระบบ · LINE (MOPH)</text>
+
+      <path class="line" d="M180,62 L248,62" marker-end="url(#ah)"/>
+      <path class="line" d="M248,80 L182,80" marker-end="url(#ah)"/>
+      <path class="line" d="M450,70 C490,70 490,105 518,105" marker-end="url(#ah)"/>
+      <path class="line" d="M450,185 C490,185 490,150 518,150" marker-end="url(#ah)"/>
+      <path class="line" d="M690,105 C715,105 715,75 738,75" marker-end="url(#ah)"/>
+      <path class="line" d="M690,145 C715,145 715,175 738,175" marker-end="url(#ah)"/>
+    </svg>
+  </div>
+  <div class="note warn">
+    <strong>สำคัญมาก: ระบบไม่ดึง HOSxP เองจากฝั่งเซิร์ฟเวอร์</strong>
+    ถ้าไม่มีหน้าจอ NN-LRMS ของโรงพยาบาลนั้นเปิดอยู่ (และไม่มี Webhook) ข้อมูลของโรงพยาบาลจะหยุดอัปเดต แดชบอร์ดจังหวัดจะขึ้นสถานะ "ล่าช้า" หลัง 60 นาที และ "วิกฤต" หลัง 24 ชั่วโมง
+  </div>
+</section>
+
+<!-- ───────────────────────── START ───────────────────────── -->
+<section class="card" id="start">
+  <h2>3. เริ่มต้นใช้งาน และการเข้าสู่ระบบ</h2>
+  <h3>ช่องทางเข้าสู่ระบบ</h3>
+  <div class="table-scroll">
+  <table>
+    <tr><th>ช่องทาง</th><th>วิธีเข้า</th><th>สิทธิ์</th></tr>
+    <tr><td><b>เปิดจากเมนูใน HOSxP</b> (แนะนำ)</td><td>เลือกเมนู NN-LRMS ใน HOSxP ระบบกรอก BMS Session ID และเข้าสู่ระบบให้อัตโนมัติ</td><td>อ่านและแก้ไขได้ ซิงค์ข้อมูลโรงพยาบาลได้</td></tr>
+    <tr><td>BMS Session ID</td><td>หน้าเข้าสู่ระบบ → วาง BMS Session ID → "เข้าสู่ระบบด้วย BMS (HOSxP)"</td><td>เหมือนข้างบน</td></tr>
+    <tr><td>ProviderID</td><td>หน้าเข้าสู่ระบบ → "เข้าสู่ระบบด้วย ProviderID"</td><td><b>อ่านอย่างเดียว</b> ดูข้อมูลได้ แก้ไขไม่ได้ และไม่ซิงค์ข้อมูล</td></tr>
+  </table>
+  </div>
+
+  <h3>บทบาทผู้ใช้</h3>
+  <ul>
+    <li><b>พยาบาล</b> และ <b>สูติแพทย์</b> — ใช้งานทั่วไปตามโรงพยาบาลที่สังกัด</li>
+    <li><b>ผู้ดูแลระบบ</b> — เห็นเมนู "ตั้งค่า" เพิ่มเติม (ต้องเข้าด้วย BMS และเลขบัตรอยู่ในรายชื่อผู้ดูแลที่ IT ตั้งไว้)</li>
+  </ul>
+
+  <h3>เมนูหลัก</h3>
+  <div class="table-scroll">
+  <table>
+    <tr><th>เมนู</th><th>ใช้ทำอะไร</th></tr>
+    <tr><td>แดชบอร์ด</td><td>ภาพรวมจังหวัด: ผู้คลอดที่กำลังรอคลอด ความเสี่ยง การแจ้งเตือน แผนที่และสถานะโรงพยาบาล โหมดจอภาพ (Kiosk)</td></tr>
+    <tr><td>ฝากครรภ์</td><td>ทะเบียนการตั้งครรภ์ข้ามโรงพยาบาล กรองตามระดับความเสี่ยง ใกล้/เลยกำหนด ขาดนัด</td></tr>
+    <tr><td>โรงพยาบาล</td><td>รายชื่อโรงพยาบาลบนแผนที่ ภาระงาน ความสดของข้อมูล คุณภาพการบันทึก partograph</td></tr>
+    <tr><td>ส่งต่อ</td><td>ติดตามใบส่งต่อทุกสถานะ ระยะเวลาค้าง เส้นทางการส่งต่อ</td></tr>
+    <tr><td>ผลลัพธ์ทารก</td><td>สถิติการคลอดและทารกแรกเกิด แยกรายโรงพยาบาล</td></tr>
+    <tr><td>ห้องคลอด</td><td>บอร์ดเตียงของโรงพยาบาลตัวเอง (อ่านจาก HOSxP โดยตรง)</td></tr>
+    <tr><td>โปรไฟล์</td><td>ตั้งค่าการแจ้งเตือนที่ต้องการรับ (เข้าได้จากเมนู "การตั้งค่าการแจ้งเตือน" ที่มุมบนด้วย)</td></tr>
+    <tr><td>ตั้งค่า</td><td>เฉพาะผู้ดูแลระบบ (ดูหัวข้อ <a href="#it">สิ่งที่ IT ต้องดูแล</a>)</td></tr>
+    <tr><td>คู่มือการใช้งาน</td><td>หน้านี้ — เปิดได้แม้ยังไม่เข้าสู่ระบบ</td></tr>
+  </table>
+  </div>
+</section>
+
+<!-- ───────────────────────── WARD ───────────────────────── -->
+<section class="card" id="ward">
+  <h2>4. เจ้าหน้าที่ห้องคลอด / หอผู้ป่วย ต้องทำอะไรบ้าง</h2>
+  <p class="lead">หลักการ: <b>บันทึกงานใน HOSxP หรือในหน้าผู้ป่วยของ NN-LRMS ตามปกติ</b> และ <b>เปิด NN-LRMS ทิ้งไว้</b> บนเครื่องห้องคลอดตลอดเวร เพื่อให้ข้อมูลโรงพยาบาลส่งเข้าจังหวัดต่อเนื่อง</p>
+
+  <div class="grid2">
+    <div class="panel">
+      <h4>เริ่มเวร</h4>
+      <ul class="check">
+        <li>เปิด HOSxP แล้วเข้า NN-LRMS จากเมนูใน HOSxP บนเครื่องห้องคลอด</li>
+        <li>เปิดเมนู "ห้องคลอด" ตรวจว่าผู้คลอดและเตียงตรงกับความจริง</li>
+        <li>ดูเวลาอัปเดตที่ป้ายสถานะ HOSxP มุมบน ต้องเป็นเวลาล่าสุด</li>
+        <li>ไล่ดูผู้คลอดที่มีคะแนน CPD สูง หรือมีป้ายเตือน</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>ระหว่างเวร</h4>
+      <ul class="check">
+        <li>บันทึก partograph และสัญญาณชีพตามรอบเวลาที่กำหนด</li>
+        <li>ตอบสนองการแจ้งเตือน/คำปรึกษาจากแม่ข่าย</li>
+        <li>ย้ายเตียงในระบบเมื่อย้ายผู้ป่วยจริง (ต้องระบุเหตุผล)</li>
+        <li>บันทึกการคลอด ทารก และจำหน่ายให้ครบเมื่อจบเคส</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>ส่งเวร</h4>
+      <ul class="check">
+        <li>ตรวจว่าไม่มีผู้ที่คลอด/จำหน่ายแล้วแต่ยังค้างบนบอร์ด</li>
+        <li>ตรวจใบส่งต่อที่ค้างสถานะ</li>
+        <li><b>อย่าปิดหน้าจอ NN-LRMS</b> ให้เวรถัดไปใช้ต่อ</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>บอร์ดเตียง (เมนู "ห้องคลอด")</h3>
+  <ul>
+    <li>แต่ละช่องคือหนึ่งเตียง แสดงผู้คลอด ข้อมูลสำคัญ และสถานะ เตียงว่าง/ปิดใช้แสดงแบบย่อ</li>
+    <li>ด้านบนมีแผง "ความจุเตียง" และแผง "ต้องประเมินด่วน" ช่วยจัดลำดับว่าควรดูใครก่อน</li>
+    <li>ข้อมูลรีเฟรชเองทุก 20 วินาที กดปุ่มรีเฟรชเพื่ออัปเดตทันทีได้</li>
+    <li>ถ้ามีหลายวอร์ด เลือกวอร์ดได้ที่ส่วนหัว</li>
+    <li>ผู้ป่วยที่ยังไม่ได้จัดเตียง หรืออยู่เตียงเดียวกันหลายคน ยังแสดงให้เห็นทุกคน ควรแก้เตียงใน HOSxP ให้ถูกต้อง</li>
+  </ul>
+
+  <h3>หน้าข้อมูลผู้ป่วย (คลิกที่เตียง)</h3>
+  <div class="table-scroll">
+  <table>
+    <tr><th>แท็บ</th><th>ใช้ทำอะไร</th></tr>
+    <tr><td>พาร์โทกราฟ</td><td>ดูกราฟและบันทึกความก้าวหน้าการคลอด ระบบแสดงเส้น alert/action และคำเตือน</td></tr>
+    <tr><td>สัญญาณชีพ</td><td>บันทึก/ดู BP, T, P, R, SpO₂, ระดับความปวด ฯลฯ</td></tr>
+    <tr><td>ก่อนคลอด</td><td>ข้อมูลก่อนเข้าระยะคลอด</td></tr>
+    <tr><td>ระยะคลอด</td><td>บันทึกเวลาและรายละเอียดแต่ละระยะของการคลอด</td></tr>
+    <tr><td>ยา · ยาห้องคลอด</td><td>รายการยาที่ได้รับ</td></tr>
+    <tr><td>ภาวะแทรกซ้อน</td><td>บันทึกภาวะแทรกซ้อนของมารดา</td></tr>
+    <tr><td>ทารก</td><td>ข้อมูลทารกแรกเกิด</td></tr>
+    <tr><td>เตียง</td><td>ย้ายเตียง (หรือลากผู้ป่วยไปเตียงใหม่บนบอร์ด) ต้องระบุเหตุผล</td></tr>
+    <tr><td>จำหน่าย</td><td>จำหน่ายผู้ป่วยออกจากห้องคลอด รวมถึงการส่งต่อ (เลือกประเภท "ส่งต่อโรงพยาบาล" แล้วกรอกข้อมูล Refer Out)</td></tr>
+  </table>
+  </div>
+  <p>การส่งต่อทำในแท็บ <b>จำหน่าย</b> — ถ้าเลือกประเภทส่งต่อแต่ยังไม่กรอกข้อมูล Refer Out ระบบจะเตือน "ยังไม่มีข้อมูลส่งต่อ" หลังส่งแล้วติดตามได้ในเมนู "ส่งต่อ"</p>
+
+  <div class="note warn">
+    <strong>หลังย้ายเตียงหรือจำหน่าย ให้ตรวจผลทุกครั้ง</strong>
+    การย้ายเตียงและจำหน่ายเขียนลง HOSxP หลายขั้นตอน ถ้าเครือข่ายสะดุดกลางทาง อาจสำเร็จเพียงบางส่วน ให้ตรวจบนบอร์ดและใน HOSxP ว่าตรงกัน หากไม่ตรงให้แก้ใน HOSxP แล้วกดรีเฟรช
+  </div>
+
+  <h3>ข้อควรปฏิบัติ</h3>
+  <div class="grid2">
+    <div class="panel">
+      <h4>ควรทำ</h4>
+      <ul>
+        <li>บันทึกส่วนสูง น้ำหนัก ยอดมดลูก Hct ให้ครบ คะแนน CPD จะได้ไม่ต่ำกว่าความจริง</li>
+        <li>ระบุห้อง/เตียงใน HOSxP ให้ถูกต้องทุกครั้งที่รับเข้า</li>
+        <li>ออกจากระบบเมื่อใช้เครื่องร่วมกับผู้อื่นนอกห้องคลอด</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>ไม่ควรทำ</h4>
+      <ul>
+        <li>ถ่ายภาพหน้าจอข้อมูลผู้ป่วยส่งต่อในช่องทางที่ไม่ได้รับอนุญาต (PDPA)</li>
+        <li>ปิดหน้าจอ NN-LRMS บนเครื่องห้องคลอดระหว่างเวร</li>
+        <li>ใช้คะแนน CPD แทนการประเมินทางคลินิก</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── PROVINCIAL ───────────────────────── -->
+<section class="card" id="provincial">
+  <h2>5. สูติแพทย์ / พยาบาลระดับจังหวัด (แม่ข่าย)</h2>
+
+  <h3>งานประจำวัน</h3>
+  <ul class="check">
+    <li>เปิด "แดชบอร์ด" ดูผู้คลอดเสี่ยงสูงและการแจ้งเตือนล่าสุด</li>
+    <li>ตรวจแผงสถานะโรงพยาบาลว่าโรงพยาบาลใดข้อมูล "ล่าช้า" หรือ "ยังไม่ซิงค์" แจ้งโรงพยาบาลนั้นให้เปิด NN-LRMS จาก HOSxP</li>
+    <li>เปิดเมนู "ส่งต่อ" ดูใบส่งต่อที่รอตอบรับหรือค้างนาน</li>
+    <li>เปิดเมนู "ฝากครรภ์" ติดตามกลุ่ม HR3 ที่ใกล้ครบกำหนดหรือขาดนัด</li>
+  </ul>
+
+  <h3>เครื่องมือที่ใช้บ่อย</h3>
+  <div class="table-scroll">
+  <table>
+    <tr><th>เครื่องมือ</th><th>วิธีใช้</th></tr>
+    <tr><td>ดึงข้อมูลทันที</td><td>ปุ่มบนแดชบอร์ด ส่งข้อมูลของโรงพยาบาลตัวเองเข้าระบบทันที ไม่ต้องรอรอบ 60 วินาที</td></tr>
+    <tr><td>โหมดจอภาพ (Kiosk)</td><td>ปุ่มบนแดชบอร์ด แสดงเต็มจอ ตัวอักษรใหญ่ สำหรับจอติดผนังในห้องคลอด/ห้องบัญชาการ กด Esc เพื่อออก</td></tr>
+    <tr><td>รายละเอียดโรงพยาบาล</td><td>คลิกโรงพยาบาลบนแผนที่หรือรายชื่อ ดูผู้คลอด หญิงตั้งครรภ์ใกล้คลอด และสถานะการเชื่อมต่อ</td></tr>
+    <tr><td>รายละเอียดผู้คลอด</td><td>คลิกชื่อผู้คลอด ดูสัญญาณชีพ การหดรัดตัว CPD partograph และประวัติการส่งต่อ</td></tr>
+    <tr><td>วิดีโอคอล</td><td>เรียกผู้ใช้ที่ออนไลน์หรือทั้งโรงพยาบาลเข้าห้องปรึกษา (สูงสุด 8 คน) จากปุ่มที่ส่วนหัว</td></tr>
+  </table>
+  </div>
+
+  <h3>ตั้งค่าการแจ้งเตือน (เมนู "โปรไฟล์")</h3>
+  <p>เลือกได้ทีละโรงพยาบาล ทีละเหตุการณ์ โรงพยาบาลของตัวเองได้รับรายละเอียดผู้ป่วย โรงพยาบาลอื่นที่เพิ่มเข้ามาติดตามจะได้รับเฉพาะยอดรวม ไม่ระบุตัวผู้ป่วย</p>
+  <p>เหตุการณ์ที่เลือกได้: ครรภ์เสี่ยงสูง (ANC HR3) · ภาวะฉุกเฉินในห้องคลอด · Partograph วิกฤต · คะแนน CPD เสี่ยงสูง · มีเคสส่งต่อเข้ามา · ใบส่งต่อค้างเกินเวลา · ANC ขาดนัด · ใกล้ครบกำหนดคลอด · ผลลัพธ์การคลอดผิดปกติ · การเชื่อมต่อข้อมูลขัดข้อง (บางรายการอาจยังไม่เปิดใช้ ระบบจะระบุไว้)</p>
+
+  <div class="note info">
+    <strong>การอ่านตัวเลขบนแดชบอร์ด</strong>
+    ตัวเลข ANC และผลลัพธ์นับจากข้อมูลที่ซิงค์เข้าระบบแล้วเท่านั้น ไม่ใช่จำนวนประชากรหญิงตั้งครรภ์ทั้งจังหวัด ถ้าโรงพยาบาลใดไม่ได้ซิงค์ ตัวเลขของโรงพยาบาลนั้นจะต่ำกว่าความจริง
+  </div>
+</section>
+
+<!-- ───────────────────────── IT ───────────────────────── -->
+<section class="card" id="it">
+  <h2>6. สิ่งที่ IT ต้องดูแล</h2>
+  <p class="lead">แบ่งเป็น 2 ระดับ: IT ของโรงพยาบาลชุมชน (ฝั่ง HOSxP และเครื่องห้องคลอด) และ IT / ผู้ดูแลระบบส่วนกลางที่ สสจ.น่าน (เซิร์ฟเวอร์และการตั้งค่าระบบ)</p>
+
+  <h3><span class="tag it">IT รพ.ชุมชน</span>ฝั่ง HOSxP และเครื่องห้องคลอด</h3>
+  <div class="table-scroll">
+  <table>
+    <tr><th>งาน</th><th>รายละเอียด</th></tr>
+    <tr><td>เมนู NN-LRMS ใน HOSxP</td><td>ให้ผู้ใช้เปิด NN-LRMS จาก HOSxP ได้ (ส่ง BMS Session และ marketplace token มาให้) — ถ้าเปิดโดยไม่มี marketplace token ระบบจะดูได้แต่<b>ไม่ส่งข้อมูลเข้าจังหวัด</b></td></tr>
+    <tr><td>เวอร์ชัน HOSxP</td><td>ต้องไม่ต่ำกว่าที่ระบบรองรับ ถ้าเก่าเกินจะขึ้นหน้าต่าง "ต้องอัปเดต HOSxP ก่อนใช้งาน" พร้อมเวอร์ชันขั้นต่ำ</td></tr>
+    <tr><td>BMS Session / local gateway</td><td>เครื่องห้องคลอดต้องเข้าถึง BMS gateway (เครื่องเดียวกัน <code>127.0.0.1:45011</code> หรือผ่าน BMS tunnel) และออกอินเทอร์เน็ตไปยังเซิร์ฟเวอร์ NN-LRMS ได้</td></tr>
+    <tr><td>webhook_setting ใน HOSxP</td><td>ครั้งแรกที่เปิดแดชบอร์ดด้วย session ที่ถูกต้อง ระบบสร้างแถว <code>webhook_setting</code> (module 3, code <code>NN-LRMS</code>) ให้อัตโนมัติ อย่าลบหรือแก้แถวนี้</td></tr>
+    <tr><td>ห้องและเตียง</td><td>ตั้งค่าห้อง/เตียง (roomno / bedno) ของวอร์ดห้องคลอดใน HOSxP ให้ครบ ถ้าไม่มี บอร์ดจะขึ้น "วอร์ดนี้ยังไม่มีเตียงใน HOSxP"</td></tr>
+    <tr><td>เครื่องห้องคลอด</td><td>ตั้งไม่ให้เครื่องเข้าโหมดพัก/ปิดเบราว์เซอร์เองระหว่างเวร เพราะการซิงค์ทำงานเฉพาะตอนหน้าจอเปิดอยู่ แนะนำ Chrome หรือ Edge รุ่นปัจจุบัน</td></tr>
+    <tr><td>โรงพยาบาลที่ไม่ใช้ HOSxP</td><td>ขอ Webhook API key จากผู้ดูแลส่วนกลาง แล้วให้ระบบของโรงพยาบาลส่งข้อมูลไปที่ <code>POST /api/webhooks/patient-data</code> (ดูรายละเอียดในหน้า <a href="/about">เกี่ยวกับระบบ</a>)</td></tr>
+  </table>
+  </div>
+
+  <h3><span class="tag it">IT ส่วนกลาง</span>เซิร์ฟเวอร์และการตั้งค่าระบบ</h3>
+  <h4>การติดตั้งและค่าที่ต้องตั้ง</h4>
+  <ul>
+    <li>ติดตั้งด้วย Docker Compose (service <code>app</code>, <code>postgres</code>, <code>redis</code>) แล้ว deploy ด้วย <code>npm run deploy</code> ระบบสร้างตารางและข้อมูลโรงพยาบาลเริ่มต้นให้เองเมื่อเริ่มครั้งแรก</li>
+    <li>ค่าใน <code>.env</code> ที่ต้องตั้ง: <code>POSTGRES_PASSWORD</code>, <code>NEXTAUTH_SECRET</code>, <code>ENCRYPTION_KEY</code> (hex 64 ตัว), <code>NEXTAUTH_URL</code> (URL จริงของระบบ), <code>ADMIN_ALLOWED_CIDS</code> (เลขบัตรผู้ดูแล คั่นด้วยจุลภาค), ค่า BMS/ProviderID</li>
+    <li><b>ห้ามทำ <code>ENCRYPTION_KEY</code> หาย</b> — ข้อมูลชื่อ/เลขบัตรที่เข้ารหัสไว้จะถอดไม่ได้อีก ต้องเก็บสำรองไว้ในที่ปลอดภัยแยกจากเซิร์ฟเวอร์</li>
+    <li><code>ADMIN_ALLOWED_CIDS</code> ว่าง = ไม่มีใครเข้าเมนู "ตั้งค่า" ได้ ผู้ที่อยู่ในรายชื่อและเข้าด้วย BMS จะได้สิทธิ์ผู้ดูแลอัตโนมัติ</li>
+    <li>ใน production ต้องปิด <code>DEV_AUTH_BYPASS</code> และ <code>DEV_SIMULATION_ENABLED</code> (ระบบบล็อกให้เองอยู่แล้ว แต่ไม่ควรตั้งค่าไว้)</li>
+    <li>วาง reverse proxy / TLS (HTTPS) หน้าระบบ และให้ <code>NEXTAUTH_URL</code> ตรงกับ URL สาธารณะ</li>
+  </ul>
+
+  <h4>เมนู "ตั้งค่า" (เฉพาะผู้ดูแลระบบ)</h4>
+  <div class="table-scroll">
+  <table>
+    <tr><th>แท็บ</th><th>ใช้ทำอะไร</th></tr>
+    <tr><td>จังหวัดหลัก</td><td>กำหนดจังหวัดของระบบ (น่าน) — มีผลกับแผนที่และรายชื่อโรงพยาบาล</td></tr>
+    <tr><td>โรงพยาบาล</td><td>เพิ่มจากทะเบียนสถานพยาบาล แก้ไข เปิด/ปิดใช้งาน กำหนดประเภทบริการ ล้างสถานะ "ระงับการซิงค์" เมื่อแก้ปัญหาแล้ว ดูจำนวนข้อมูลของแต่ละโรงพยาบาล</td></tr>
+    <tr><td>การเชื่อมต่อ BMS</td><td>ตั้งค่าการเชื่อมต่อ BMS ของแต่ละโรงพยาบาล</td></tr>
+    <tr><td>คีย์ Webhook</td><td>ออก/ยกเลิก API key สำหรับโรงพยาบาลที่ส่งผ่าน Webhook (คีย์แสดงครั้งเดียวตอนสร้าง)</td></tr>
+    <tr><td>สถานะการซิงค์</td><td>ดูรอบการซิงค์ของทุกโรงพยาบาลย้อนหลัง 24 ชั่วโมง และเจาะดูรายละเอียดเมื่อมีปัญหา</td></tr>
+    <tr><td>ผู้ใช้ออนไลน์</td><td>ดูว่าใครกำลังใช้งานอยู่ จากโรงพยาบาลใด</td></tr>
+    <tr><td>แจ้งเตือน MOPH (LINE)</td><td>จัดการผู้รับการแจ้งเตือนผ่าน LINE ของศูนย์กลางจังหวัด</td></tr>
+    <tr><td>จำลองข้อมูล</td><td>สำหรับเครื่องทดสอบเท่านั้น ห้ามใช้กับเซิร์ฟเวอร์จริง</td></tr>
+  </table>
+  </div>
+
+  <h4>ตารางงานดูแลระบบ</h4>
+  <div class="grid2">
+    <div class="panel">
+      <h4>ทุกวัน</h4>
+      <ul class="check">
+        <li>ตรวจ <code>/api/health/ready</code> ตอบ 200 และ <code>/api/health</code> ไม่อยู่ในสถานะ degraded</li>
+        <li>เปิด "ตั้งค่า → สถานะการซิงค์" หาโรงพยาบาลที่ล่าช้าเกิน 60 นาที ถูกระงับ หรือไม่เคยซิงค์ แล้วประสาน IT โรงพยาบาลนั้น</li>
+        <li>ตรวจว่าการสำรองฐานข้อมูลเมื่อคืนสำเร็จ</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>ทุกสัปดาห์</h4>
+      <ul class="check">
+        <li>สคริปต์ล้างใบส่งต่อค้าง <code>scripts/referral-cleanup-cron.sh</code> รันตาม cron (แนะนำวันอาทิตย์ 03:30) ตรวจ log ว่าสำเร็จ</li>
+        <li>ตรวจพื้นที่ดิสก์ของ <code>postgres-data/</code> และ <code>redis-data/</code></li>
+        <li>ทบทวน log ของ app: <code>docker compose logs app --since 24h</code></li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>ทุกเดือน / เมื่อมีการเปลี่ยนแปลง</h4>
+      <ul class="check">
+        <li>ทดสอบกู้คืนข้อมูลจาก backup (restore drill)</li>
+        <li>ทบทวนรายชื่อ <code>ADMIN_ALLOWED_CIDS</code> และคีย์ Webhook ที่ไม่ใช้แล้ว</li>
+        <li>อัปเดตระบบตามเวอร์ชันใหม่ ทดสอบก่อนขึ้นเครื่องจริง</li>
+        <li>บันทึกการเข้าถึง (audit log) เก็บ 30 วันแล้วลบเองอัตโนมัติ — หากนโยบายต้องเก็บนานกว่านี้ให้สำรองออกก่อน</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note danger">
+    <strong>ความปลอดภัยข้อมูล (PDPA)</strong>
+    ชื่อและเลขบัตรประชาชนเข้ารหัสในฐานข้อมูล แต่ cache ใน Redis, ไฟล์ backup และ log อาจมีข้อมูลที่อ่านได้ ต้องจำกัดสิทธิ์เข้าถึงเซิร์ฟเวอร์ เข้ารหัส backup และกำหนดระยะเวลาเก็บตามนโยบาย สสจ.น่าน ระบบนี้ยังไม่มีการสำรองข้อมูลอัตโนมัติ ผู้ดูแลต้องตั้งเอง
+  </div>
+</section>
+
+<!-- ───────────────────────── TROUBLESHOOT ───────────────────────── -->
+<section class="card" id="troubleshoot">
+  <h2>7. ปัญหาที่พบบ่อยและวิธีแก้</h2>
+  <div class="table-scroll">
+  <table>
+    <tr><th>อาการ</th><th>สาเหตุที่เป็นไปได้</th><th>วิธีแก้</th><th>ใครทำ</th></tr>
+    <tr><td>แดชบอร์ดขึ้นว่าโรงพยาบาลข้อมูล "ล่าช้า" / "ยังไม่ซิงค์"</td><td>ไม่มีหน้าจอ NN-LRMS ของโรงพยาบาลนั้นเปิดอยู่ หรือเปิดโดยไม่ผ่าน HOSxP</td><td>เปิด NN-LRMS จากเมนูใน HOSxP บนเครื่องห้องคลอด แล้วกด "ดึงข้อมูลทันที"</td><td><span class="tag ward">ห้องคลอด</span></td></tr>
+    <tr><td>หน้าต่าง "ต้องอัปเดต HOSxP ก่อนใช้งาน"</td><td>HOSxP เวอร์ชันเก่ากว่าที่รองรับ</td><td>อัปเดต HOSxP เป็นเวอร์ชันที่หน้าต่างแจ้ง แล้วเปิดใหม่</td><td><span class="tag it">IT รพ.</span></td></tr>
+    <tr><td>"ไม่ได้รับสิทธิ์ใช้งานระบบ" / "โรงพยาบาลถูกปิดการใช้งาน"</td><td>โรงพยาบาลยังไม่ลงทะเบียน หรือถูกปิดใช้งานในระบบ</td><td>ติดต่อผู้ดูแลระบบ สสจ.น่าน ให้เพิ่ม/เปิดใช้งานในเมนู "ตั้งค่า → โรงพยาบาล"</td><td><span class="tag it">IT ส่วนกลาง</span></td></tr>
+    <tr><td>สถานะ "ระงับการซิงค์" / ข้อมูลไม่ผ่านตรวจสอบ</td><td>ข้อมูลที่ส่งมาไม่ตรงกับโรงพยาบาลที่ลงทะเบียน</td><td>ตรวจสอบสาเหตุ แล้วกด "เปิดใช้งานการซิงค์อีกครั้ง" ในเมนู "ตั้งค่า → โรงพยาบาล" จากนั้นให้โรงพยาบาลเปิด NN-LRMS จาก HOSxP ใหม่</td><td><span class="tag it">IT ส่วนกลาง</span></td></tr>
+    <tr><td>บอร์ดเตียงขึ้น "วอร์ดนี้ยังไม่มีเตียงใน HOSxP"</td><td>ยังไม่ได้ตั้งค่าห้อง/เตียงของวอร์ดใน HOSxP</td><td>เพิ่ม roomno / bedno ใน HOSxP หรือเลือกวอร์ดอื่น</td><td><span class="tag it">IT รพ.</span></td></tr>
+    <tr><td>ผู้ป่วยในบอร์ดไม่ตรงกับความจริง</td><td>เตียงใน HOSxP ไม่ถูกต้อง หรือการย้าย/จำหน่ายสำเร็จบางส่วน</td><td>แก้ใน HOSxP แล้วกดรีเฟรชบอร์ด</td><td><span class="tag ward">ห้องคลอด</span></td></tr>
+    <tr><td>เข้าด้วย ProviderID แล้วแก้ไขอะไรไม่ได้</td><td>ProviderID เป็นสิทธิ์อ่านอย่างเดียวโดยตั้งใจ</td><td>เปิดจากเมนูใน HOSxP เพื่อใช้สิทธิ์บันทึก</td><td>ผู้ใช้</td></tr>
+    <tr><td>ไม่เห็นเมนู "ตั้งค่า"</td><td>ไม่ใช่ผู้ดูแล หรือเข้าด้วย ProviderID หรือเลขบัตรไม่อยู่ใน <code>ADMIN_ALLOWED_CIDS</code></td><td>ขอให้ IT ส่วนกลางเพิ่มเลขบัตร แล้วเข้าด้วย BMS ใหม่</td><td><span class="tag it">IT ส่วนกลาง</span></td></tr>
+    <tr><td>ไม่ได้รับการแจ้งเตือน</td><td>ยังไม่ได้เลือกเหตุการณ์/โรงพยาบาลในโปรไฟล์</td><td>ตั้งค่าในเมนู "โปรไฟล์"</td><td>ผู้ใช้</td></tr>
+    <tr><td>ทั้งระบบเข้าไม่ได้</td><td>เซิร์ฟเวอร์หรือฐานข้อมูลล่ม</td><td>ตรวจ <code>docker compose ps</code>, <code>/api/health/ready</code> และ log ของ app</td><td><span class="tag it">IT ส่วนกลาง</span></td></tr>
+  </table>
+  </div>
+  <div class="note info">
+    <strong>ข้อความแจ้งข้อผิดพลาดในระบบ</strong>
+    ทุกข้อความบอกทั้งสิ่งที่ผิดพลาดและสิ่งที่ควรทำต่อ เมื่อต้องแจ้ง IT ให้ส่งข้อความนั้น พร้อมชื่อโรงพยาบาลและเวลาที่เกิดปัญหา
+  </div>
+</section>
+
+<footer class="end">
+  NN-LRMS · สำนักงานสาธารณสุขจังหวัดน่าน — เขตสุขภาพที่ 1 · <a href="/about">เกี่ยวกับระบบ</a> · <a href="/">เข้าสู่ระบบ</a>
+</footer>
+
+</main>
+</body>
+</html>

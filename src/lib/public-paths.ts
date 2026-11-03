@@ -8,6 +8,8 @@ export const PUBLIC_PATHS = [
   '/login',
   '/provider/complete',
   '/about',
+  // Static user manual (public/manual.html) — no PHI; readable before login.
+  '/manual.html',
   '/deck',
   '/api/auth',
   '/api/health',

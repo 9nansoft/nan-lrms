@@ -41,8 +41,20 @@ describe('AppShell', () => {
     render(<AppShell variant="hospital">page</AppShell>);
     const nav = screen.getByRole('navigation', { name: 'เมนูหลัก' });
     const links = within(nav).getAllByRole('link');
-    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/hospital-maternity-ward', '/profile']);
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/hospital-maternity-ward', '/profile', '/manual.html']);
     expect(within(nav).getByRole('link', { name: /ห้องคลอด/ })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('both variants link the user manual in a new tab', () => {
+    for (const variant of ['hospital', 'provincial'] as const) {
+      const { unmount } = render(<AppShell variant={variant}>page</AppShell>);
+      const nav = screen.getByRole('navigation', { name: 'เมนูหลัก' });
+      const manual = within(nav).getByRole('link', { name: /คู่มือการใช้งาน/ });
+      expect(manual).toHaveAttribute('href', '/manual.html');
+      expect(manual).toHaveAttribute('target', '_blank');
+      expect(manual).toHaveAttribute('rel', 'noopener');
+      unmount();
+    }
   });
 
   it('collapse button toggles the rail and keeps accessible names', async () => {
