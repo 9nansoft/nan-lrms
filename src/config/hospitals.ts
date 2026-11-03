@@ -19,6 +19,13 @@ export interface HospitalLevelConfig {
 }
 
 export const HOSPITAL_LEVELS: Record<HospitalLevel, HospitalLevelConfig> = {
+  [HospitalLevel.UNKNOWN]: {
+    level: HospitalLevel.UNKNOWN,
+    nameTh: 'ยังไม่ระบุระดับ',
+    nameEn: 'Unknown level',
+    description: 'ยังไม่มีข้อมูลระดับโรงพยาบาลที่ยืนยันแล้ว',
+    sortOrder: 99,
+  },
   // ─── SAP framework (อ.ก.พ. 3/2568) ─────────────────────────────────
   [HospitalLevel.P_PLUS]: {
     level: HospitalLevel.P_PLUS,

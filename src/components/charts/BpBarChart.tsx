@@ -1,6 +1,7 @@
 // T077: BpBarChart — grouped SBP/DBP bars with hypertension reference lines
 'use client';
 
+import { COLOR, MIN_TEXT_PX } from '@/config/design-tokens';
 import {
   ResponsiveContainer,
   BarChart,
@@ -44,7 +45,7 @@ export function BpBarChart({ vitals }: BpBarChartProps) {
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={bpData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="time" fontSize={11} />
+          <XAxis dataKey="time" fontSize={MIN_TEXT_PX} />
           <YAxis domain={[0, 200]} />
           <Tooltip
             formatter={(value, name) => {
@@ -60,9 +61,9 @@ export function BpBarChart({ vitals }: BpBarChartProps) {
           />
 
           {/* Hypertension reference line */}
-          <ReferenceLine y={140} stroke="#ef4444" strokeDasharray="3 3" label="140" />
+          <ReferenceLine y={140} stroke={COLOR.riskHigh} strokeDasharray="3 3" label="140" />
           {/* Hypotension reference line */}
-          <ReferenceLine y={90} stroke="#eab308" strokeDasharray="3 3" label="90" />
+          <ReferenceLine y={90} stroke={COLOR.riskMedium} strokeDasharray="3 3" label="90" />
 
           <Bar dataKey="sbp" fill="#3b82f6" radius={[4, 4, 0, 0]} />
           <Bar dataKey="dbp" fill="#93c5fd" radius={[4, 4, 0, 0]} />

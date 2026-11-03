@@ -27,6 +27,7 @@ export type ChipTone =
   | 'severity-8'
   | 'severity-10';
 
+// kept as raw palette on purpose (graded clinical scale, ruling R16); the lint rule does not inspect config-object strings
 export const CHIP_TONE_CLASSES: Record<ChipTone, { selected: string; unselected: string }> = {
   default: {
     selected: 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20',
@@ -163,13 +164,13 @@ export function DraggableChip({
           : 'แตะเพื่อเลือก · ลากซ้าย/ขวาเพื่อปรับค่า'
       }
       className={cn(
-        'min-w-[48px] cursor-ew-resize touch-none select-none rounded-md border px-3 py-1.5 text-[13px] font-semibold tabular-nums transition-all',
+        'min-w-[48px] cursor-ew-resize touch-none select-none rounded-md border px-3 py-1.5 text-caption font-semibold tabular-nums transition-all',
         isSelected ? toneClasses.selected : toneClasses.unselected,
         drag && drag.moved && !drag.clamped && 'scale-110 shadow-lg ring-2 ring-cyan-400',
         drag &&
           drag.moved &&
           drag.clamped &&
-          'scale-110 shadow-lg ring-2 ring-amber-400 cursor-not-allowed',
+          'scale-110 shadow-lg ring-2 ring-warn cursor-not-allowed',
       )}
     >
       {displayLabel}
@@ -235,7 +236,7 @@ export function SimpleChipRow({ options, selected, onPick, ariaLabel }: SimpleCh
             type="button"
             onClick={() => onPick(value)}
             className={cn(
-              'rounded-md border px-2.5 py-1 text-[12px] font-semibold transition-all',
+              'rounded-md border px-2.5 py-1 text-caption font-semibold transition-all',
               isSelected
                 ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
                 : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',

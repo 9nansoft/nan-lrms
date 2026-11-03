@@ -119,6 +119,8 @@ describe('Newborn Service', () => {
       // lbwRate is a percentage (0–100), matching the UI's "% ของทารกทั้งหมด".
       expect(kpis.lbwRate).toBe(50);
       expect(kpis.lowApgarCount).toBe(1);
+      // Same denominator as lbwRate: all births in the window.
+      expect(kpis.lowApgarRate).toBe(50);
       expect(kpis.avgBirthWeightG).toBe(2950);
     });
 
@@ -160,6 +162,7 @@ describe('Newborn Service', () => {
       expect(kpis.totalBirths).toBe(0);
       expect(kpis.lbwCount).toBe(0);
       expect(kpis.lbwRate).toBe(0);
+      expect(kpis.lowApgarRate).toBe(0);
       expect(kpis.avgBirthWeightG).toBe(0);
     });
 

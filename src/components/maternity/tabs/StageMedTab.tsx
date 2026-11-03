@@ -146,7 +146,7 @@ function LookupPicker({ ariaLabel, placeholder, initialQuery, fetch, onPick }: L
         onFocus={() => setOpen(true)}
         placeholder={placeholder}
         aria-label={ariaLabel}
-        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
       />
       <AnchoredDropdown
         open={open && (visibleItems.length > 0 || loading)}
@@ -154,7 +154,7 @@ function LookupPicker({ ariaLabel, placeholder, initialQuery, fetch, onPick }: L
         onDismiss={() => setOpen(false)}
       >
         {loading && visibleItems.length === 0 && (
-          <div className="px-3 py-2 text-[12px] text-slate-500">กำลังค้นหา…</div>
+          <div className="px-3 py-2 text-caption text-slate-500">กำลังค้นหา…</div>
         )}
         {visibleItems.map((it, idx) => (
           <button
@@ -169,9 +169,9 @@ function LookupPicker({ ariaLabel, placeholder, initialQuery, fetch, onPick }: L
             }}
             className="flex w-full flex-col gap-0.5 border-b border-slate-100 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-cyan-50/60"
           >
-            <span className="text-[14px] font-semibold text-slate-900">{it.primary}</span>
+            <span className="text-label font-semibold text-slate-900">{it.primary}</span>
             {it.secondary && (
-              <span className="font-mono text-[11px] text-slate-500">{it.secondary}</span>
+              <span className="font-mono text-caption text-slate-500">{it.secondary}</span>
             )}
           </button>
         ))}
@@ -193,7 +193,7 @@ interface InlineInputProps {
 }
 function InlineInput({ ariaLabel, value, onChange, placeholder, type = 'text' }: InlineInputProps) {
   const baseCls =
-    'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
+    'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
   if (type === 'date') {
     return (
       <BeDateInput aria-label={ariaLabel} value={value} onChange={onChange} className={baseCls} />
@@ -251,7 +251,7 @@ function EditRow({
           <div className="rounded-md border border-cyan-200 bg-white p-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
               <div className="flex flex-col gap-1">
-                <label className="text-[12px] font-semibold text-slate-700">
+                <label className="text-caption font-semibold text-slate-700">
                   ค้นหายา · Drug name
                 </label>
                 <LookupPicker
@@ -268,19 +268,19 @@ function EditRow({
                   }}
                   onPick={(it) => setDraft((d) => ({ ...d, icode: it.payload }))}
                 />
-                <div className="text-[11px] text-slate-500">
+                <div className="text-caption text-slate-500">
                   พิมพ์ชื่อยาบางส่วน — แตะเลือกจากผลค้นหา
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-[12px] font-semibold text-slate-700">รหัสยา · icode</label>
+                <label className="text-caption font-semibold text-slate-700">รหัสยา · icode</label>
                 <InlineInput
                   ariaLabel="icode"
                   value={draft.icode}
                   onChange={(v) => setDraft((d) => ({ ...d, icode: v }))}
                   placeholder="ระบบเติมเอง"
                 />
-                <div className="text-[11px] text-slate-500">เลือกจากผลค้นหา หรือพิมพ์เอง</div>
+                <div className="text-caption text-slate-500">เลือกจากผลค้นหา หรือพิมพ์เอง</div>
               </div>
             </div>
           </div>
@@ -288,7 +288,7 @@ function EditRow({
           {/* TIMING + QTY + SEQUENCE */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_0.8fr_0.8fr_1fr]">
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-semibold text-slate-700">วันที่</label>
+              <label className="text-caption font-semibold text-slate-700">วันที่</label>
               <InlineInput
                 ariaLabel="medication_date"
                 value={draft.medication_date}
@@ -297,7 +297,7 @@ function EditRow({
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-semibold text-slate-700">เวลา</label>
+              <label className="text-caption font-semibold text-slate-700">เวลา</label>
               <InlineInput
                 ariaLabel="medication_time"
                 value={draft.medication_time}
@@ -306,7 +306,7 @@ function EditRow({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-semibold text-slate-700">จำนวน</label>
+              <label className="text-caption font-semibold text-slate-700">จำนวน</label>
               <DraggableChipRow
                 ariaLabel="qty quick picks"
                 options={QTY_CHIPS}
@@ -323,7 +323,7 @@ function EditRow({
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-semibold text-slate-700">ลำดับ (med #)</label>
+              <label className="text-caption font-semibold text-slate-700">ลำดับ (med #)</label>
               <InlineInput
                 ariaLabel="med_number"
                 value={draft.med_number}
@@ -336,7 +336,7 @@ function EditRow({
 
           {/* NOTE */}
           <div className="flex flex-col gap-1">
-            <label className="text-[12px] font-semibold text-slate-700">หมายเหตุ</label>
+            <label className="text-caption font-semibold text-slate-700">หมายเหตุ</label>
             <InlineInput
               ariaLabel="medication_note"
               value={draft.medication_note}
@@ -351,7 +351,7 @@ function EditRow({
               type="button"
               onClick={onCancel}
               disabled={saving}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-caption font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
             >
               ยกเลิก
             </button>
@@ -359,7 +359,7 @@ function EditRow({
               type="button"
               onClick={onSave}
               disabled={saving || !draft.icode.trim()}
-              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-5 py-2 text-[13px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-5 py-2 text-caption font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
               title={!draft.icode.trim() ? 'ต้องเลือกยาก่อน' : undefined}
             >
               {saving ? 'กำลังบันทึก…' : 'บันทึก'}
@@ -391,7 +391,7 @@ export function StageMedTab({ an }: { an: string }) {
   }
   if (isLoading) return <div className="p-4 text-slate-500">กำลังโหลด…</div>;
   if (error) {
-    return <div className="p-4 text-red-600">โหลดไม่สำเร็จ: {(error as Error).message}</div>;
+    return <div className="p-4 text-danger-text">โหลดไม่สำเร็จ: {(error as Error).message}</div>;
   }
 
   const hcode = userInfo?.hospcode ?? '';
@@ -477,11 +477,11 @@ export function StageMedTab({ an }: { an: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 pb-3">
         <div className="flex items-center gap-3">
           <span aria-hidden className="block h-1.5 w-8 bg-cyan-600" />
-          <h2 className="text-[18px] font-bold tracking-tight text-slate-900">
+          <h2 className="text-title font-bold tracking-tight text-slate-900">
             บันทึกการให้ยาในห้องคลอด
           </h2>
           {rows.length > 0 && (
-            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-700">
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-caption font-semibold text-slate-700">
               {rows.length} รายการ
             </span>
           )}
@@ -490,7 +490,7 @@ export function StageMedTab({ an }: { an: string }) {
           type="button"
           onClick={startAdd}
           disabled={editingId !== null}
-          className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-4 py-2 text-[14px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+          className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-4 py-2 text-label font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
         >
           + เพิ่มรายการยา
         </button>
@@ -499,7 +499,7 @@ export function StageMedTab({ an }: { an: string }) {
       {saveError && (
         <div
           role="alert"
-          className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 font-mono text-[12px] font-semibold text-rose-700 shadow-sm"
+          className="rounded-lg border border-danger/40 bg-danger-tint px-3 py-2 font-mono text-caption font-semibold text-danger-text shadow-sm"
         >
           {saveError}
         </div>
@@ -507,16 +507,16 @@ export function StageMedTab({ an }: { an: string }) {
 
       {isEmpty ? (
         <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-8 text-center">
-          <div className="text-[14px] font-medium text-slate-600">ไม่พบข้อมูล</div>
-          <div className="mt-1 text-[12px] text-slate-500">
+          <div className="text-label font-medium text-slate-600">ไม่พบข้อมูล</div>
+          <div className="mt-1 text-caption text-slate-500">
             กดปุ่ม <strong>+ เพิ่มรายการยา</strong> ด้านบนเพื่อบันทึกยาที่ให้ในห้องคลอด
           </div>
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
-          <table className="w-full text-[14px]">
+          <table className="w-full text-label">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-[12px] font-bold uppercase tracking-wide text-slate-600">
+              <tr className="border-b border-slate-200 bg-slate-50 text-left text-caption font-bold uppercase tracking-wide text-slate-600">
                 <th className="px-4 py-3">วันที่ · เวลา</th>
                 <th className="px-4 py-3">ยา</th>
                 <th className="px-4 py-3">ผู้บันทึก</th>
@@ -559,7 +559,7 @@ export function StageMedTab({ an }: { an: string }) {
                         <span className="font-mono font-semibold tabular-nums text-slate-900">
                           {row.medication_date ?? '—'}
                         </span>
-                        <span className="font-mono text-[11px] tabular-nums text-slate-500">
+                        <span className="font-mono text-caption tabular-nums text-slate-500">
                           {row.medication_time ?? '—'}
                         </span>
                       </div>
@@ -571,7 +571,7 @@ export function StageMedTab({ an }: { an: string }) {
                             <span className="font-semibold text-slate-900">
                               {row.medication_name}
                             </span>
-                            <span className="font-mono text-[11px] text-slate-500">
+                            <span className="font-mono text-caption text-slate-500">
                               {row.icode}
                             </span>
                           </>
@@ -595,7 +595,7 @@ export function StageMedTab({ an }: { an: string }) {
                           type="button"
                           onClick={() => startEdit(row)}
                           disabled={editingId !== null}
-                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
+                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-caption font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
                         >
                           แก้ไข
                         </button>
@@ -603,7 +603,7 @@ export function StageMedTab({ an }: { an: string }) {
                           type="button"
                           onClick={() => remove(row.labour_stage_medication_id)}
                           disabled={editingId !== null || saving}
-                          className="rounded-md border border-rose-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-40"
+                          className="rounded-md border border-danger/40 bg-white px-3 py-1.5 text-caption font-semibold text-danger-text transition-colors hover:bg-danger-tint disabled:opacity-40"
                         >
                           ลบ
                         </button>

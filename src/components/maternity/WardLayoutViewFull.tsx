@@ -29,6 +29,14 @@ import { BedMoveReasonModal } from './BedMoveReasonModal';
 import type { BedSlot, BedOccupancyFull } from '@/types/maternity-ward';
 import type { ConnectionConfig } from '@/types/bms-browser';
 import type { MaternalScreenSummaryItem } from '@/types/api';
+import { UNPLACED_SECTION, formatRoomSummary, sharedBedNotice, unplacedBedLabel } from '@/config/ward-display';
+import {
+  groupBedsByRoom,
+  placeOccupants,
+  summarizeBeds,
+  type UnplacedOccupant,
+} from '@/services/ward-board';
+import { cn } from '@/lib/utils';
 
 export interface BedMovePayload {
   an: string;
@@ -78,44 +86,6 @@ export interface WardLayoutViewFullProps {
   maternalScreenSummaries?: Map<string, MaternalScreenSummaryItem> | null;
 }
 
-interface RoomGroup {
-  roomno: string;
-  room_name: string | null;
-  room_display_number: number | null;
-  beds: BedSlot[];
-}
-
-function groupByRoom(beds: BedSlot[]): RoomGroup[] {
-  const map = new Map<string, RoomGroup>();
-  for (const b of beds) {
-    let g = map.get(b.roomno);
-    if (!g) {
-      g = {
-        roomno: b.roomno,
-        room_name: b.room_name,
-        room_display_number: b.room_display_number,
-        beds: [],
-      };
-      map.set(b.roomno, g);
-    }
-    g.beds.push(b);
-  }
-  for (const g of map.values()) {
-    g.beds.sort((a, b) => {
-      const ao = a.bed_order ?? Number.MAX_SAFE_INTEGER;
-      const bo = b.bed_order ?? Number.MAX_SAFE_INTEGER;
-      if (ao !== bo) return ao - bo;
-      return a.bedno.localeCompare(b.bedno);
-    });
-  }
-  return [...map.values()].sort((a, b) => {
-    const ad = a.room_display_number ?? Number.MAX_SAFE_INTEGER;
-    const bd = b.room_display_number ?? Number.MAX_SAFE_INTEGER;
-    if (ad !== bd) return ad - bd;
-    return a.roomno.localeCompare(b.roomno);
-  });
-}
-
 // Drag-id encoding — bednos are unique per ward in HOSxP (PK on `bedno`).
 function dragId(bed: BedSlot): string {
   return `bed:${bed.bedno}`;
@@ -123,33 +93,36 @@ function dragId(bed: BedSlot): string {
 
 interface DraggableBedTileProps {
   bed: BedSlot;
-  occupant: BedOccupancyFull | null;
+  /** Everyone HOSxP has on this bed — more than one is a data conflict (I2). */
+  occupants: BedOccupancyFull[];
   now: number;
   onBedClick?: (an: string) => void;
   config?: ConnectionConfig | null;
   marketplaceToken?: string | null;
-  /** Already resolved by the caller (WardLayoutViewFull) via occupant.an — see maternalScreenSummaries above. */
-  maternalScreenSummary?: MaternalScreenSummaryItem | null;
+  /** Lookup by occupant.an — see maternalScreenSummaries above. */
+  maternalScreenSummaries?: Map<string, MaternalScreenSummaryItem> | null;
 }
 
 // Per-bed wrapper that enrols the tile as both droppable (always) and
-// draggable (only when occupied). Empty/locked tiles still need to be
-// droppable so a patient can be dropped onto them; locked drops are rejected
-// in the dispatcher.
+// draggable (only with exactly one occupant). Empty/locked tiles still need to
+// be droppable so a patient can be dropped onto them; locked drops are
+// rejected in the dispatcher. A shared bed is not draggable: which admission
+// would move is ambiguous, so the nurse fixes it in HOSxP.
 function DraggableBedTile({
   bed,
-  occupant,
+  occupants,
   now,
   onBedClick,
   config,
   marketplaceToken,
-  maternalScreenSummary,
+  maternalScreenSummaries,
 }: DraggableBedTileProps) {
   const id = dragId(bed);
+  const shared = occupants.length > 1;
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id });
   const draggable = useDraggable({
     id,
-    disabled: occupant === null,
+    disabled: occupants.length !== 1,
   });
   // Compose drop ref + drag ref onto the same wrapper.
   const composedRef = (node: HTMLDivElement | null) => {
@@ -165,23 +138,86 @@ function DraggableBedTile({
     <div
       ref={composedRef}
       style={style}
-      data-testid={`bed-${bed.bedno}`}
+      data-testid={`bed-slot-${bed.bedno}`}
       data-over={isOver ? 'true' : undefined}
-      className={isOver ? 'rounded-lg ring-2 ring-emerald-500 ring-offset-1' : undefined}
-      {...(occupant ? draggable.listeners : {})}
+      className={cn(
+        'flex flex-col gap-2',
+        // A vacant/locked card keeps its own short height (and drop ring)
+        // rather than stretching to the occupied tiles in its grid row.
+        occupants.length === 0 && 'self-start',
+        isOver && 'rounded-2xl ring-2 ring-brand ring-offset-2',
+      )}
+      {...(occupants.length === 1 ? draggable.listeners : {})}
       {...draggable.attributes}
     >
-      <BedTileFull
-        bedno={bed.bedno}
-        bedLock={bed.bed_lock as 'Y' | 'N' | null}
-        occupant={occupant}
-        now={now}
-        onClick={onBedClick}
-        config={config}
-        marketplaceToken={marketplaceToken}
-        maternalScreenSummary={maternalScreenSummary}
-      />
+      {shared && (
+        <p
+          role="status"
+          data-testid={`bed-conflict-${bed.bedno}`}
+          className="rounded-lg border border-danger/40 bg-danger-tint px-3 py-2 text-label font-semibold text-danger-text"
+        >
+          {sharedBedNotice(bed.bedno, occupants.length)}
+        </p>
+      )}
+      {(occupants.length > 0 ? occupants : [null]).map((o, i) => (
+        <BedTileFull
+          key={o?.an ?? 'vacant'}
+          bedno={bed.bedno}
+          testId={i === 0 ? `bed-${bed.bedno}` : `bed-${bed.bedno}-${i + 1}`}
+          bedLock={bed.bed_lock as 'Y' | 'N' | null}
+          occupant={o}
+          now={now}
+          onClick={onBedClick}
+          config={config}
+          marketplaceToken={marketplaceToken}
+          maternalScreenSummary={o ? (maternalScreenSummaries?.get(o.an) ?? null) : null}
+        />
+      ))}
     </div>
+  );
+}
+
+/** I2: admitted patients with a blank bed or a bed outside this layout. */
+function UnplacedSection({
+  unplaced,
+  now,
+  onBedClick,
+  config,
+  marketplaceToken,
+  maternalScreenSummaries,
+}: {
+  unplaced: UnplacedOccupant[];
+  now: number;
+  onBedClick?: (an: string) => void;
+  config?: ConnectionConfig | null;
+  marketplaceToken?: string | null;
+  maternalScreenSummaries?: Map<string, MaternalScreenSummaryItem> | null;
+}) {
+  if (unplaced.length === 0) return null;
+  return (
+    <section data-testid="ward-unplaced" aria-label={UNPLACED_SECTION.title}>
+      <header className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-danger/40 pb-2">
+        <h2 className="text-title text-danger-text">{UNPLACED_SECTION.title}</h2>
+        <p className="text-label text-ink-muted">{UNPLACED_SECTION.summary(unplaced.length)}</p>
+      </header>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
+        {unplaced.map(({ occupant, reason }, i) => (
+          <BedTileFull
+            key={occupant.an}
+            bedno={occupant.bedno ?? ''}
+            bedLabel={unplacedBedLabel({ reason, bedno: occupant.bedno })}
+            testId={`ward-unplaced-${i + 1}`}
+            bedLock={null}
+            occupant={occupant}
+            now={now}
+            onClick={onBedClick}
+            config={config}
+            marketplaceToken={marketplaceToken}
+            maternalScreenSummary={maternalScreenSummaries?.get(occupant.an) ?? null}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -197,8 +233,8 @@ export function WardLayoutViewFull({
   marketplaceToken,
   maternalScreenSummaries,
 }: WardLayoutViewFullProps) {
-  const rooms = groupByRoom(beds);
-  const occupantByBedno = new Map(occupancy.map((o) => [o.bedno, o] as const));
+  const rooms = groupBedsByRoom(beds);
+  const placement = placeOccupants(beds, occupancy);
   const bedByBedno = new Map(beds.map((b) => [b.bedno, b] as const));
 
   const [pending, setPending] = useState<{
@@ -222,9 +258,11 @@ export function WardLayoutViewFull({
     const sourceBed = bedByBedno.get(sourceBedno);
     const targetBed = bedByBedno.get(targetBedno);
     if (!sourceBed || !targetBed) return;
-    const sourceOccupant = occupantByBedno.get(sourceBedno);
-    const targetOccupant = occupantByBedno.get(targetBedno) ?? null;
-    if (!sourceOccupant) return;
+    // Only a single-occupant bed can be dragged (shared beds are disabled).
+    const sourceList = placement.byBed.get(sourceBedno) ?? [];
+    if (sourceList.length !== 1) return;
+    const sourceOccupant = sourceList[0];
+    const targetOccupant = placement.byBed.get(targetBedno)?.[0] ?? null;
     const decision = decideBedMoveAction({
       sourceBed,
       sourceOccupant,
@@ -266,97 +304,44 @@ export function WardLayoutViewFull({
         }
       `}</style>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <div className="flex flex-col gap-6">
+        {/* First, so a patient without a usable bed is the first thing seen. */}
+        <UnplacedSection
+          unplaced={placement.unplaced}
+          now={now}
+          onBedClick={onBedClick}
+          config={config}
+          marketplaceToken={marketplaceToken}
+          maternalScreenSummaries={maternalScreenSummaries}
+        />
         {rooms.map((room) => {
-          const occCount = room.beds.filter(
-            (b) => b.bed_lock !== 'Y' && occupantByBedno.has(b.bedno),
-          ).length;
-          const lockedCount = room.beds.filter((b) => b.bed_lock === 'Y').length;
-          const total = room.beds.length;
-          const free = Math.max(0, total - occCount - lockedCount);
+          // The room's own placed patients only — the ward-level summary adds
+          // the unplaced ones, so rooms + unplaced = ward (one counting rule).
+          const roomOccupants = room.beds.flatMap((b) => placement.byBed.get(b.bedno) ?? []);
+          const sum = summarizeBeds(room.beds, roomOccupants, now);
+          const roomTitle = room.room_name ?? `ห้อง ${room.roomno}`;
           return (
-            <section key={room.roomno}>
-              <header
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'auto 1fr auto',
-                  gap: 18,
-                  alignItems: 'baseline',
-                  paddingBottom: 12,
-                  marginBottom: 20,
-                  borderBottom: '1px solid #E2E8F0',
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: "'IBM Plex Mono', 'SF Mono', Consolas, monospace",
-                    fontSize: 11,
-                    letterSpacing: '0.22em',
-                    textTransform: 'uppercase',
-                    color: '#1565C0',
-                    fontWeight: 800,
-                  }}
-                >
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      width: 8,
-                      height: 8,
-                      background: '#1565C0',
-                      marginRight: 12,
-                      verticalAlign: 1,
-                      borderRadius: 1,
-                    }}
-                  />
-                  {`Room ${room.roomno}`}
+            <section key={room.roomno} data-testid={`ward-room-${room.roomno}`} aria-label={roomTitle}>
+              <header className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-border pb-2">
+                <div className="min-w-0">
+                  <h2 className="text-title text-brand">{roomTitle}</h2>
+                  <p className="text-caption text-ink-muted">รหัสห้อง {room.roomno}</p>
                 </div>
-                <div
-                  style={{
-                    fontSize: 18,
-                    fontWeight: 700,
-                    letterSpacing: '-0.005em',
-                    color: '#0F172A',
-                  }}
-                >
-                  {room.room_name ?? `ห้อง ${room.roomno}`}
-                </div>
-                <div
-                  style={{
-                    fontFamily: "'IBM Plex Mono', 'SF Mono', Consolas, monospace",
-                    fontSize: 11,
-                    letterSpacing: '0.16em',
-                    textTransform: 'uppercase',
-                    color: '#64748B',
-                    fontWeight: 700,
-                  }}
-                >
-                  {`${String(total).padStart(2, '0')} BEDS · ${String(occCount).padStart(2, '0')} OCC · ${String(free).padStart(2, '0')} FREE${lockedCount > 0 ? ` · ${String(lockedCount).padStart(2, '0')} LOCKED` : ''}`}
-                </div>
+                <p className="text-label tabular-nums text-ink-muted">{formatRoomSummary(sum)}</p>
               </header>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
-                  gap: 20,
-                }}
-              >
-                {room.beds.map((b) => {
-                  const occupant = occupantByBedno.get(b.bedno) ?? null;
-                  return (
-                    <DraggableBedTile
-                      key={b.bedno}
-                      bed={b}
-                      occupant={occupant}
-                      now={now}
-                      onBedClick={onBedClick}
-                      config={config}
-                      marketplaceToken={marketplaceToken}
-                      maternalScreenSummary={
-                        occupant ? (maternalScreenSummaries?.get(occupant.an) ?? null) : null
-                      }
-                    />
-                  );
-                })}
+              <div data-testid="ward-room-grid" className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
+                {room.beds.map((b) => (
+                  <DraggableBedTile
+                    key={b.bedno}
+                    bed={b}
+                    occupants={placement.byBed.get(b.bedno) ?? []}
+                    now={now}
+                    onBedClick={onBedClick}
+                    config={config}
+                    marketplaceToken={marketplaceToken}
+                    maternalScreenSummaries={maternalScreenSummaries}
+                  />
+                ))}
               </div>
             </section>
           );

@@ -71,7 +71,7 @@ describe('BedTileFull', () => {
     expect(screen.getByText(/นาง ทดสอบ ร\./)).toBeInTheDocument();
     expect(screen.getByText('AN1')).toBeInTheDocument();
     expect(screen.getByText('HN1')).toBeInTheDocument();
-    expect(screen.getByText('Allergy')).toBeInTheDocument();
+    expect(screen.getByText('แพ้ยา')).toBeInTheDocument();
     expect(screen.getByText('O')).toBeInTheDocument();
     expect(screen.getByText('ดร.X')).toBeInTheDocument();
     expect(screen.getByText('ประกันสุขภาพถ้วนหน้า')).toBeInTheDocument();
@@ -96,6 +96,48 @@ describe('BedTileFull', () => {
     // so PatientPhoto renders its neutral placeholder rather than fetching.
     render(<BedTileFull bedno="01" bedLock="N" occupant={occupant} now={now} />);
     expect(screen.getByTestId('patient-photo-placeholder')).toBeInTheDocument();
+  });
+
+  it('prolonged latent is the only tile alarm; the FHR dot is brand, motion-safe, and only with a reading', () => {
+    const { rerender } = render(
+      <BedTileFull bedno="01" bedLock="N" occupant={{ ...occupant, regtime: '01:00:00', last_cervix_cm: 3 }} now={now} />,
+    );
+    const crit = screen.getByTestId('bed-01');
+    expect(crit.dataset.stage).toBe('prolongedLatent');
+    expect(crit.className).toContain('border-danger');
+    const dot = screen.getByTestId('fhr-pulse');
+    expect(dot.className).toContain('bg-brand');
+    expect(dot.className).toContain('motion-safe:');
+    rerender(<BedTileFull bedno="01" bedLock="N" occupant={{ ...occupant, last_fhr: null }} now={now} />);
+    expect(screen.queryByTestId('fhr-pulse')).toBeNull();
+  });
+
+  it('labels are Thai; clinical abbreviations stay', () => {
+    render(<BedTileFull bedno="01" bedLock="N" occupant={occupant} now={now} />);
+    for (const t of [
+      'เตียง 01',
+      'สัญญาณชีพ (บันทึกพยาบาล)',
+      'ความก้าวหน้าการคลอด (พาร์โทกราฟ)',
+      'การหดรัดตัว',
+      'สารน้ำและยา',
+      'แพทย์',
+      'สิทธิ',
+      'อาการแรกรับ',
+      '4 ซม.',
+      '3/10 นาที · 45 วินาที · moderate',
+    ]) {
+      expect(screen.getByText(t)).toBeInTheDocument();
+    }
+    for (const t of ['BED', 'Vitals', 'Labour Progress', 'Interventions', 'Doctor', 'NKDA', 'Admit']) {
+      expect(screen.queryByText(t)).toBeNull();
+    }
+  });
+
+  it('B1: a patient on a locked bed stays visible, flagged as locked in HOSxP', () => {
+    render(<BedTileFull bedno="01" bedLock="Y" occupant={occupant} now={now} />);
+    expect(screen.getByText(/นาง ทดสอบ ร\./)).toBeInTheDocument();
+    expect(screen.getByTestId('bed-locked-occupied')).toHaveTextContent('เตียงถูกล็อกใน HOSxP');
+    expect(screen.queryByText('ปิดบำรุง')).toBeNull();
   });
 });
 
@@ -136,7 +178,7 @@ describe('BedTileFull — maternal-screen pills (Task H4)', () => {
     render(<BedTileFull bedno="01" bedLock="N" occupant={occupant} now={now} />);
     expect(screen.queryByTestId('bed-maternal-screen')).not.toBeInTheDocument();
     // Existing identity-row pills (Allergy/blood group) and core fields still render.
-    expect(screen.getByText('Allergy')).toBeInTheDocument();
+    expect(screen.getByText('แพ้ยา')).toBeInTheDocument();
     expect(screen.getByText('O')).toBeInTheDocument();
     expect(screen.getByText('AN1')).toBeInTheDocument();
     expect(screen.getByTestId('bed-01')).toBeInTheDocument();
@@ -205,20 +247,138 @@ describe('BedTileFull — maternal-screen pills (Task H4)', () => {
   });
 
   it('an EMERGENCY summary on a non-crit occupant does NOT alter the tile-level border/shadow (GC-H3 red is reserved for the crit alarm)', () => {
-    render(
-      <BedTileFull
-        bedno="01"
-        bedLock="N"
-        occupant={occupant}
-        now={now}
-        maternalScreenSummary={severeSummary}
-      />,
+    const { rerender } = render(<BedTileFull bedno="01" bedLock="N" occupant={occupant} now={now} />);
+    const plain = screen.getByTestId('bed-01');
+    const before = { className: plain.className, style: plain.getAttribute('style') };
+    rerender(
+      <BedTileFull bedno="01" bedLock="N" occupant={occupant} now={now} maternalScreenSummary={severeSummary} />,
     );
     const article = screen.getByTestId('bed-01');
-    // Non-crit article border/shadow, exactly as classify() would produce
-    // with no maternalScreenSummary at all (occupant is Stage I Active, not crit).
-    // jsdom normalizes hex to rgb() when serializing the style attribute.
-    expect(article.style.border).toBe('1.5px solid rgb(203, 213, 225)');
-    expect(article.style.boxShadow).toBe('0 1px 3px rgba(15, 23, 42, 0.06)');
+    expect(article.className).toBe(before.className);
+    expect(article.getAttribute('style')).toBe(before.style);
+    expect(article.dataset.stage).toBe('active');
+    expect(article.className).not.toContain('border-danger'); // red stays reserved for the stage alarm (GC-H3)
+  });
+});
+
+describe('BedTileFull — fix wave minors', () => {
+  it('9: a missing allergy count reads "unknown", never "no allergy history"', () => {
+    render(<BedTileFull bedno="01" bedLock="N" occupant={{ ...occupant, allergy_count: null }} now={now} />);
+    expect(screen.getByText('ไม่ทราบประวัติแพ้ยา')).toBeInTheDocument();
+    expect(screen.queryByText('ไม่มีประวัติแพ้ยา')).toBeNull();
+  });
+
+  it('9: zero recorded allergies still reads "no allergy history"', () => {
+    render(<BedTileFull bedno="01" bedLock="N" occupant={{ ...occupant, allergy_count: 0 }} now={now} />);
+    expect(screen.getByText('ไม่มีประวัติแพ้ยา')).toBeInTheDocument();
+  });
+
+  it('7: ≥12 h with NO cervix record says so; the alarm and stage rule are unchanged', () => {
+    const o = { ...occupant, regdate: '2026-04-19', regtime: '01:00:00', last_cervix_cm: null };
+    render(<BedTileFull bedno="01" bedLock="N" occupant={o} now={now} />);
+    expect(screen.getByText('ยังไม่มีบันทึกปากมดลูก ≥12 ชม.')).toBeInTheDocument();
+    expect(screen.queryByText('ระยะแฝงนาน · ประเมินด่วน')).toBeNull();
+    const article = screen.getByTestId('bed-01');
+    expect(article.dataset.stage).toBe('prolongedLatent');
+    expect(article.className).toContain('border-danger');
+  });
+
+  it('7: ≥12 h with a recorded cervix < 4 cm keeps "ระยะแฝงนาน · ประเมินด่วน"', () => {
+    const o = { ...occupant, regdate: '2026-04-19', regtime: '01:00:00', last_cervix_cm: 3 };
+    render(<BedTileFull bedno="01" bedLock="N" occupant={o} now={now} />);
+    expect(screen.getByText('ระยะแฝงนาน · ประเมินด่วน')).toBeInTheDocument();
+  });
+});
+
+// ─── feat/ward-summary: compact vacant tiles, empty clinical sections ──────
+describe('BedTileFull — compact vacant and locked tiles', () => {
+  it.each([
+    ['N', 'empty', 'เตียงว่าง', 'ว่าง', 'พร้อมรับผู้คลอด'],
+    ['Y', 'locked', 'ปิดใช้งาน', 'ปิดบำรุง', 'ล็อกใน HOSxP'],
+  ] as const)('bedLock %s → a short %s card: head, chip and status line, no forced height', (lock, stage, chip, word, line) => {
+    render(<BedTileFull bedno="05" bedLock={lock} occupant={null} now={now} />);
+    const tile = screen.getByTestId('bed-05');
+    expect(tile.dataset.stage).toBe(stage);
+    expect(tile).toHaveTextContent('เตียง 05');
+    expect(screen.getByText(chip)).toBeInTheDocument();
+    expect(screen.getByText(word)).toBeInTheDocument();
+    expect(screen.getByText(line)).toBeInTheDocument();
+    expect(tile.className).not.toMatch(/\bmin-h-/);
+    expect(tile.querySelector('.flex-1')).toBeNull();
+  });
+});
+
+describe('BedTileFull — a section with nothing recorded collapses to one muted line', () => {
+  const blank: BedOccupancyFull = {
+    ...occupant,
+    incharge_doctor_name: null,
+    pttype_name: null,
+    prediag: null,
+    admit_bw_kg: null,
+    patient_height: null,
+    last_weight: null,
+    last_height: null,
+    last_bsa: null,
+    last_bp_sys: null,
+    last_bp_dia: null,
+    last_temp: null,
+    last_pulse: null,
+    last_rr: null,
+    last_spo2: null,
+    last_spo2_o2: null,
+    last_cervix_cm: null,
+    last_station: null,
+    last_amniotic: null,
+    last_pain: null,
+    last_contr_freq: null,
+    last_contr_duration: null,
+    last_contr_strength: null,
+    last_fhr: null,
+    last_iv_fluids: null,
+    last_oxytocin_uml: null,
+    last_oxytocin_drops: null,
+  };
+  const section = (name: string) => document.querySelector<HTMLElement>(`[data-section="${name}"]`)!;
+
+  it('all five sections empty → each keeps its heading plus "ยังไม่มีบันทึก", no dash grids', () => {
+    render(<BedTileFull bedno="01" bedLock="N" occupant={blank} now={now} />);
+    for (const [name, heading] of [
+      ['admission', 'แพทย์ · สิทธิ · ร่างกาย'],
+      ['vitals', 'สัญญาณชีพ (บันทึกพยาบาล)'],
+      ['progress', 'ความก้าวหน้าการคลอด (พาร์โทกราฟ)'],
+      ['contractionFhr', 'การหดรัดตัว · FHR'],
+      ['fluids', 'สารน้ำและยา'],
+    ] as const) {
+      const el = section(name);
+      expect(el.dataset.empty).toBe('true');
+      expect(el).toHaveTextContent(heading);
+      expect(el).toHaveTextContent('ยังไม่มีบันทึก');
+      expect(el).not.toHaveTextContent('—');
+    }
+    expect(screen.getAllByText('ยังไม่มีบันทึก')).toHaveLength(5);
+    expect(screen.queryByText('BP')).toBeNull();
+    expect(screen.queryByText('Oxytocin')).toBeNull();
+    expect(screen.queryByTestId('fhr-pulse')).toBeNull();
+  });
+
+  it.each([
+    ['admission', { pttype_name: 'UC' }, ['แพทย์', 'สิทธิ', 'ร่างกาย', 'UC']],
+    ['vitals', { last_pulse: 88 }, ['BP', 'T (°C)', 'P', '88', 'SpO₂ RA']],
+    ['progress', { last_pain: 0 }, ['ปากมดลูก', 'ส่วนนำ', 'ถุงน้ำ', '0/10']],
+    ['contractionFhr', { last_fhr: 140 }, ['การหดรัดตัว', 'FHR (ครั้ง/นาที)', '140']],
+    ['fluids', { last_oxytocin_drops: 0 }, ['IV', 'Oxytocin', 'หยด', '0 หยด/นาที']],
+  ] as const)('%s: one recorded value renders the whole section exactly as before', (name, patch, texts) => {
+    render(<BedTileFull bedno="01" bedLock="N" occupant={{ ...blank, ...patch }} now={now} />);
+    const el = section(name);
+    expect(el.dataset.empty).toBe('false');
+    expect(el).not.toHaveTextContent('ยังไม่มีบันทึก');
+    for (const t of texts) expect(el).toHaveTextContent(t);
+    expect(screen.getAllByText('ยังไม่มีบันทึก')).toHaveLength(4);
+  });
+
+  it('a fully recorded tile shows no "ยังไม่มีบันทึก" line at all', () => {
+    render(<BedTileFull bedno="01" bedLock="N" occupant={occupant} now={now} />);
+    expect(screen.queryByText('ยังไม่มีบันทึก')).toBeNull();
+    expect(document.querySelectorAll('[data-section][data-empty="false"]')).toHaveLength(5);
   });
 });

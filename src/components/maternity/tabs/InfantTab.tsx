@@ -188,10 +188,10 @@ function ToggleChip({ label, checked, onToggle }: ToggleChipProps) {
       onClick={onToggle}
       aria-pressed={checked}
       className={cn(
-        'rounded-md border px-3 py-1.5 text-[12px] font-semibold transition-all',
+        'rounded-md border px-3 py-1.5 text-caption font-semibold transition-all',
         checked
-          ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-600/20'
-          : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700',
+          ? 'border-ok bg-ok-text text-white shadow-sm ring-2 ring-ok/20'
+          : 'border-slate-200 bg-white text-slate-600 hover:border-ok hover:bg-ok-tint/60 hover:text-ok-text',
       )}
     >
       {checked ? '✓ ' : ''}{label}
@@ -211,7 +211,7 @@ interface InlineInputProps {
 }
 function InlineInput({ ariaLabel, value, onChange, placeholder, type = 'text', width }: InlineInputProps) {
   const baseCls = cn(
-    'h-10 rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20',
+    'h-10 rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20',
     width ?? 'w-full',
   );
   if (type === 'date') {
@@ -260,12 +260,12 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
         <div className="space-y-4">
           {/* IDENTITY: infant_number + sex + condition + date/time */}
           <div className="rounded-md border border-cyan-200 bg-white p-3">
-            <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <div className="mb-2 text-caption font-bold uppercase tracking-wide text-slate-500">
               ทารกลำดับที่ · เพศ · สภาพ · เวลาเกิด
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[0.7fr_1.3fr_1.3fr_1fr_1fr]">
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-slate-700">ลำดับที่</label>
+                <label className="text-caption font-semibold text-slate-700">ลำดับที่</label>
                 <ChipRow
                   ariaLabel="infant_number quick picks"
                   options={INFANT_NUMBER_CHIPS}
@@ -281,7 +281,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-slate-700">เพศ</label>
+                <label className="text-caption font-semibold text-slate-700">เพศ</label>
                 <SimpleChipRow
                   ariaLabel="sex quick picks"
                   options={SEX_CHIPS}
@@ -296,7 +296,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-slate-700">สภาพแรกคลอด</label>
+                <label className="text-caption font-semibold text-slate-700">สภาพแรกคลอด</label>
                 <SimpleChipRow
                   ariaLabel="condition_type1 quick picks"
                   options={CONDITION1_CHIPS}
@@ -311,7 +311,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-slate-700">วันเกิด</label>
+                <label className="text-caption font-semibold text-slate-700">วันเกิด</label>
                 <div className="h-7" aria-hidden />
                 <InlineInput
                   ariaLabel="birth_date"
@@ -321,7 +321,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-slate-700">เวลาเกิด</label>
+                <label className="text-caption font-semibold text-slate-700">เวลาเกิด</label>
                 <div className="h-7" aria-hidden />
                 <InlineInput
                   ariaLabel="birth_time"
@@ -336,16 +336,16 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
           {/* ANTHROPOMETRY — drag-adjust per chip */}
           <div className="rounded-md border border-cyan-200 bg-white p-3">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <span className="text-caption font-bold uppercase tracking-wide text-slate-500">
                 ขนาดแรกเกิด
               </span>
-              <span className="text-[10px] text-slate-400">
+              <span className="text-caption text-slate-400">
                 แตะ = เลือก · ลากซ้าย/ขวา = ปรับค่า
               </span>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1.4fr_1fr_1fr]">
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-slate-700">
+                <label className="text-caption font-semibold text-slate-700">
                   น้ำหนักแรกเกิด (กรัม)
                 </label>
                 <ChipRow
@@ -365,7 +365,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-slate-700">ความยาว (ซม.)</label>
+                <label className="text-caption font-semibold text-slate-700">ความยาว (ซม.)</label>
                 <ChipRow
                   ariaLabel="body_length quick picks"
                   options={BODY_LENGTH_CHIPS}
@@ -383,7 +383,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-slate-700">รอบศีรษะ (ซม.)</label>
+                <label className="text-caption font-semibold text-slate-700">รอบศีรษะ (ซม.)</label>
                 <ChipRow
                   ariaLabel="head_length quick picks"
                   options={HEAD_LENGTH_CHIPS}
@@ -409,13 +409,13 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
               v1 surfaces totals only since the chip ladder is fast to enter. */}
           <div className="rounded-md border border-cyan-200 bg-white p-3">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <span className="text-caption font-bold uppercase tracking-wide text-slate-500">
                 APGAR Score
               </span>
-              <span className="text-[10px] text-slate-400">
-                <span className="text-emerald-600">●</span> 7–10 ปกติ
-                <span className="ml-2 text-amber-600">●</span> 4–6 ต้องเฝ้าระวัง
-                <span className="ml-2 text-rose-600">●</span> 0–3 วิกฤต
+              <span className="text-caption text-slate-400">
+                <span className="text-ok-text">●</span> 7–10 ปกติ
+                <span className="ml-2 text-warn-text">●</span> 4–6 ต้องเฝ้าระวัง
+                <span className="ml-2 text-danger-text">●</span> 0–3 วิกฤต
               </span>
             </div>
             <div className="space-y-2">
@@ -425,7 +425,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
                 { label: '10 นาที', key: 'apgar10' as const },
               ].map(({ label, key }) => (
                 <div key={key} className="flex items-center gap-3">
-                  <span className="w-16 text-[12px] font-semibold text-slate-600">{label}</span>
+                  <span className="w-16 text-caption font-semibold text-slate-600">{label}</span>
                   <ChipRow
                     ariaLabel={`${key} score`}
                     options={APGAR_CHIPS}
@@ -440,7 +440,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
 
           {/* BIRTH CHECKS */}
           <div className="rounded-md border border-cyan-200 bg-white p-3">
-            <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <div className="mb-2 text-caption font-bold uppercase tracking-wide text-slate-500">
               การให้ยา / วัคซีนแรกเกิด
             </div>
             <div className="flex flex-wrap gap-2">
@@ -480,7 +480,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
               type="button"
               onClick={onCancel}
               disabled={saving}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-caption font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
             >
               ยกเลิก
             </button>
@@ -488,7 +488,7 @@ function EditRow({ draft, setDraft, saving, onCancel, onSave }: EditRowProps) {
               type="button"
               onClick={onSave}
               disabled={saving || (!draft.sex.trim() && !draft.birth_weight.trim())}
-              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-5 py-2 text-[13px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-5 py-2 text-caption font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
               title={
                 !draft.sex.trim() && !draft.birth_weight.trim()
                   ? 'ระบุเพศหรือน้ำหนักก่อนบันทึก'
@@ -523,7 +523,7 @@ export function InfantTab({ an }: { an: string }) {
   }
   if (isLoading) return <div className="p-4 text-slate-500">กำลังโหลด…</div>;
   if (error) {
-    return <div className="p-4 text-red-600">โหลดไม่สำเร็จ: {(error as Error).message}</div>;
+    return <div className="p-4 text-danger-text">โหลดไม่สำเร็จ: {(error as Error).message}</div>;
   }
 
   const hcode = userInfo?.hospcode ?? '';
@@ -670,9 +670,9 @@ export function InfantTab({ an }: { an: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 pb-3">
         <div className="flex items-center gap-3">
           <span aria-hidden className="block h-1.5 w-8 bg-cyan-600" />
-          <h2 className="text-[18px] font-bold tracking-tight text-slate-900">ข้อมูลทารก</h2>
+          <h2 className="text-title font-bold tracking-tight text-slate-900">ข้อมูลทารก</h2>
           {rows.length > 0 && (
-            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-700">
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-caption font-semibold text-slate-700">
               {rows.length} ราย
             </span>
           )}
@@ -681,30 +681,30 @@ export function InfantTab({ an }: { an: string }) {
           type="button"
           onClick={startAdd}
           disabled={editingKey !== null}
-          className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-4 py-2 text-[14px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+          className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-4 py-2 text-label font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
         >
           + เพิ่มทารก
         </button>
       </div>
 
       {saveError && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-[13px] text-red-700">
+        <div className="rounded-md border border-danger/40 bg-danger-tint p-3 text-caption text-danger-text">
           {saveError}
         </div>
       )}
 
       {isEmpty ? (
         <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-8 text-center">
-          <div className="text-[14px] font-medium text-slate-600">ไม่พบข้อมูล</div>
-          <div className="mt-1 text-[12px] text-slate-500">
+          <div className="text-label font-medium text-slate-600">ไม่พบข้อมูล</div>
+          <div className="mt-1 text-caption text-slate-500">
             กดปุ่ม <strong>+ เพิ่มทารก</strong> ด้านบนเพื่อบันทึกทารกใหม่
           </div>
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
-          <table className="w-full text-[14px]">
+          <table className="w-full text-label">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-[12px] font-bold uppercase tracking-wide text-slate-600">
+              <tr className="border-b border-slate-200 bg-slate-50 text-left text-caption font-bold uppercase tracking-wide text-slate-600">
                 <th className="px-4 py-3">เพศ</th>
                 <th className="px-4 py-3 text-right">น้ำหนัก (ก.)</th>
                 <th className="px-4 py-3">APGAR (1′ / 5′ / 10′)</th>
@@ -747,10 +747,10 @@ export function InfantTab({ an }: { an: string }) {
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
                       {row.birth_weight ?? '—'}
                     </td>
-                    <td className="px-4 py-3 font-mono text-[13px] tabular-nums text-slate-700">
+                    <td className="px-4 py-3 font-mono text-caption tabular-nums text-slate-700">
                       {apg('apgar_score_min1')} / {apg('apgar_score_min5')} / {apg('apgar_score_min10')}
                     </td>
-                    <td className="px-4 py-3 font-mono text-[13px] text-slate-700">
+                    <td className="px-4 py-3 font-mono text-caption text-slate-700">
                       {(row.infant_hn as string | undefined) ?? '—'}
                     </td>
                     <td className="px-4 py-3">
@@ -759,7 +759,7 @@ export function InfantTab({ an }: { an: string }) {
                           type="button"
                           onClick={() => startEdit(row, index)}
                           disabled={editingKey !== null}
-                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
+                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-caption font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
                         >
                           แก้ไข
                         </button>
@@ -769,7 +769,7 @@ export function InfantTab({ an }: { an: string }) {
                           disabled={
                             editingKey !== null || saving || row.ipt_newborn_id === undefined
                           }
-                          className="rounded-md border border-rose-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-40"
+                          className="rounded-md border border-danger/40 bg-white px-3 py-1.5 text-caption font-semibold text-danger-text transition-colors hover:bg-danger-tint disabled:opacity-40"
                         >
                           ลบ
                         </button>

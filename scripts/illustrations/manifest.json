@@ -1,0 +1,49 @@
+{
+  "model": "Qwen-Image-2.1 via https://text2image-flux2.bmscloud.in.th/v1/generate (num_inference_steps 40)",
+  "license": "Qwen Research License — production use requires sign-off (see spec §7)",
+  "style": "Flat vector editorial illustration, soft rounded shapes, limited palette of deep indigo #2e3a87, warm terracotta #c0392b accents, sage green #3f8f4f, soft sky blue and cream, subtle paper grain, generous negative space, friendly and professional Thai public-health style, no text, no letters, no logos, no red cross symbol, use a small green cross if a medical symbol is needed",
+  "items": [
+    {
+      "file": "empty-ward.webp",
+      "aspect": "4:3",
+      "transparent": true,
+      "seed": 62304410640514919,
+      "prompt": "A calm Thai nurse standing BESIDE (not behind) an empty, neatly made hospital delivery bed, full body visible, bed in front-left and nurse to the right with clear space between them."
+    },
+    {
+      "file": "empty-referral.webp",
+      "aspect": "4:3",
+      "transparent": true,
+      "seed": 314070409494873979,
+      "prompt": "Centered compact composition with generous empty margin on all four sides: a small white ambulance with a green cross on a short gentle curved road between two small friendly hospital buildings marked with small green crosses, all three objects fully visible inside the frame and close together, a dotted route line, quiet and calm."
+    },
+    {
+      "file": "state-stale.webp",
+      "aspect": "4:3",
+      "transparent": true,
+      "seed": 3482118292227061430,
+      "prompt": "A small simple hospital building with a large wall clock beside it and a gently disconnected cable plug, conveying data waiting to sync, calm not alarming."
+    },
+    {
+      "file": "generic.webp",
+      "aspect": "4:3",
+      "transparent": true,
+      "seed": 5604033170171490886,
+      "prompt": "A tidy empty clipboard and a folded blanket on a soft rounded table, calm, nothing to do yet."
+    },
+    {
+      "file": "login-hero.webp",
+      "aspect": "3:2",
+      "transparent": false,
+      "seed": 6991217676267424919,
+      "prompt": "A Thai mother in a hospital gown cradling her newborn, a smiling Thai midwife nurse beside her checking a tablet, soft morning light through a window, cream background."
+    },
+    {
+      "file": "about-header.webp",
+      "aspect": "16:9",
+      "transparent": false,
+      "seed": 4050450674422409174,
+      "prompt": "Abstract decorative pattern of soft rounded shapes connected by thin indigo lines and small hospital icons with green crosses, clearly not a real map, cream background."
+    }
+  ]
+}

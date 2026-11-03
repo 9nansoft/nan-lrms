@@ -2,15 +2,19 @@
 // Sync freshness must be visible per hospital (constitution V), ANC must be a
 // first-class axis alongside labor, and rows must order by real workload.
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import type { DashboardHospital } from '@/types/api';
 import HospitalsPage from '@/app/(provincial)/hospitals/page';
+import { HOSPITAL_LEVELS } from '@/config/hospitals';
+import { HospitalLevel } from '@/types/domain';
 
+const nav = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: nav.push, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
   useParams: () => ({}),
+  usePathname: () => '/hospitals',
 }));
 
 // Leaflet cannot render in jsdom — stub the map, keep the props contract.
@@ -94,13 +98,13 @@ describe('HospitalsPage — KPI strip', () => {
     const sync = await screen.findByTestId('kpi-sync');
     // Only one hospital has fresh data.
     expect(within(sync).getByText('1')).toBeInTheDocument();
-    expect(within(sync).getByText(/ถูกบล็อก 1/)).toBeInTheDocument();
-    expect(within(sync).getByText(/ช้า 1/)).toBeInTheDocument();
+    expect(within(sync).getByText(/ระงับการซิงค์ 1/)).toBeInTheDocument();
+    expect(within(sync).getByText(/ล่าช้า 1/)).toBeInTheDocument();
   });
 
   it('shows a last-updated stamp in the header', async () => {
     renderPage();
-    expect(await screen.findByText(/อัปเดตล่าสุด/)).toBeInTheDocument();
+    expect(await screen.findByText(/ข้อมูลหน้านี้ ณ/)).toBeInTheDocument();
   });
 });
 
@@ -116,7 +120,7 @@ describe('HospitalsPage — roster rows', () => {
 
     const blocked = screen.getByTestId('hospital-row-11174');
     expect(blocked.getAttribute('data-sync')).toBe('blocked');
-    expect(within(blocked).getByText(/ถูกบล็อก/)).toBeInTheDocument();
+    expect(within(blocked).getByText(/ระงับการซิงค์/)).toBeInTheDocument();
   });
 
   it('shows ANC and labor counts per row', async () => {
@@ -153,5 +157,57 @@ describe('HospitalsPage — roster rows', () => {
 
     const none = within(screen.getByTestId('hospital-row-11174')).getByTestId('parto-cell');
     expect(none.getAttribute('data-parto')).toBe('none');
+  });
+});
+
+
+describe('HospitalsPage — list-page pattern (sub-project 4)', () => {
+  it('is a Thai page: one h1, page-data freshness, no English mono labels', async () => {
+    renderPage();
+    expect(await screen.findByRole('heading', { level: 1, name: 'โรงพยาบาลในเครือข่าย' })).toBeInTheDocument();
+    for (const en of ['PROVINCIAL REGISTRY', 'ROSTER', 'DATA SYNC', 'ANC REGISTRY', 'LABOR WARD', 'PARTOGRAPH QUALITY', 'Hospital roster', 'Network map', 'NODES']) {
+      expect(screen.queryByText(new RegExp(en))).toBeNull();
+    }
+  });
+
+  it('map and roster are section cards; the roster is grouped by level in Thai', async () => {
+    renderPage();
+    expect(await screen.findByRole('region', { name: 'แผนที่เครือข่ายโรงพยาบาล' })).toBeInTheDocument();
+    const roster = screen.getByRole('region', { name: 'รายชื่อโรงพยาบาล' });
+    expect(within(roster).getByRole('heading', { level: 3, name: new RegExp(HOSPITAL_LEVELS[HospitalLevel.M2].nameTh) })).toBeInTheDocument();
+    expect(within(roster).getByText(/แสดง 3 จาก 3 แห่ง/)).toBeInTheDocument();
+  });
+
+  it('the KPI tiles sit in a Thai summary SectionCard like the other list pages', async () => {
+    renderPage();
+    const summary = await screen.findByRole('region', { name: 'ภาพรวมเครือข่าย' });
+    expect(within(summary).getByTestId('kpi-roster')).toBeInTheDocument();
+  });
+
+  it('a row opens the hospital console; its name link does not double-navigate', async () => {
+    nav.push.mockClear();
+    renderPage();
+    const row = await screen.findByTestId('hospital-row-11173');
+    fireEvent.click(row);
+    expect(nav.push).toHaveBeenCalledWith('/hospitals/11173');
+    nav.push.mockClear();
+    fireEvent.click(within(row).getByRole('link', { name: 'โรงพยาบาลแม่จริม' }));
+    expect(nav.push).not.toHaveBeenCalled();
+  });
+
+  it('search filters the roster only and shows an empty state when nothing matches', async () => {
+    renderPage();
+    const box = await screen.findByRole('searchbox', { name: /ค้นหา/ });
+    fireEvent.change(box, { target: { value: 'ไม่มีชื่อนี้' } });
+    expect(await screen.findByText('ไม่พบโรงพยาบาลที่ตรงกับคำค้น')).toBeInTheDocument();
+    expect(screen.getByTestId('map-stub').getAttribute('data-pin-count')).toBe('3');
+  });
+
+  it('the area toggle is a pressed-state chip pair with counts', async () => {
+    renderPage();
+    const area = await screen.findByRole('group', { name: 'พื้นที่' });
+    const nan = within(area).getByRole('button', { name: /จ\.น่าน/ });
+    expect(nan).toHaveAttribute('aria-pressed', 'true');
+    expect(within(nan).getByText('3')).toBeInTheDocument();
   });
 });

@@ -114,7 +114,7 @@ function Field({
   label, ariaLabel, value, onChange, type = 'text', hint, readOnly, options,
 }: FieldProps) {
   const inputCls =
-    'h-11 w-full rounded-md border border-slate-200 bg-white px-3 text-[15px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
+    'h-11 w-full rounded-md border border-slate-200 bg-white px-3 text-body text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
   const numericCls = type === 'number' ? 'font-semibold tabular-nums' : '';
 
   // Display mode renders value as plain text (no <input>) so the readonly
@@ -126,13 +126,13 @@ function Field({
     const display = formatted === '' || formatted === undefined || formatted === null ? '—' : formatted;
     return (
       <div className="flex flex-col gap-1">
-        <span className="flex items-baseline gap-2 text-[13px] font-semibold text-slate-800">
+        <span className="flex items-baseline gap-2 text-caption font-semibold text-slate-800">
           <span className="truncate">{label}</span>
-          {hint && <span className="text-[11px] font-normal text-slate-500">{hint}</span>}
+          {hint && <span className="text-caption font-normal text-slate-500">{hint}</span>}
         </span>
         <span
           className={cn(
-            'min-h-[44px] flex items-center text-[15px] font-medium text-slate-900',
+            'min-h-[44px] flex items-center text-body font-medium text-slate-900',
             type === 'number' && 'tabular-nums font-semibold',
           )}
         >
@@ -144,9 +144,9 @@ function Field({
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="flex items-baseline gap-2 text-[13px] font-semibold text-slate-800">
+      <label className="flex items-baseline gap-2 text-caption font-semibold text-slate-800">
         <span className="truncate">{label}</span>
-        {hint && <span className="text-[11px] font-normal text-slate-500">{hint}</span>}
+        {hint && <span className="text-caption font-normal text-slate-500">{hint}</span>}
       </label>
       {options ? (
         <select
@@ -207,7 +207,7 @@ function Section({ title, tone, children, cols = 'grid-cols-2 sm:grid-cols-3 lg:
   return (
     <section className={cn('relative overflow-hidden rounded-lg bg-white shadow-sm ring-1', t.ring)}>
       <span aria-hidden className={cn('absolute left-0 top-0 bottom-0 w-1', t.bar)} />
-      <h4 className={cn('flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-[15px] font-bold tracking-tight', t.ink, t.bg)}>
+      <h4 className={cn('flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-body font-bold tracking-tight', t.ink, t.bg)}>
         {title}
       </h4>
       <div className={cn('grid gap-x-4 gap-y-3.5 p-5', cols)}>{children}</div>
@@ -267,7 +267,7 @@ export function PreLabourTab({ an }: { an: string }) {
   }
   const err = labour.error ?? pregnancy.error;
   if (err) {
-    return <div className="p-4 text-red-600">โหลดไม่สำเร็จ: {(err as Error).message}</div>;
+    return <div className="p-4 text-danger-text">โหลดไม่สำเร็จ: {(err as Error).message}</div>;
   }
 
   const hcode = userInfo?.hospcode ?? '';
@@ -357,7 +357,7 @@ export function PreLabourTab({ an }: { an: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 pb-3">
         <div className="flex items-center gap-3">
           <span aria-hidden className="block h-1.5 w-8 bg-cyan-600" />
-          <h2 className="text-[18px] font-bold tracking-tight text-slate-900">
+          <h2 className="text-title font-bold tracking-tight text-slate-900">
             ข้อมูลก่อนคลอด
           </h2>
         </div>
@@ -365,7 +365,7 @@ export function PreLabourTab({ an }: { an: string }) {
           <button
             type="button"
             onClick={startEdit}
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[14px] font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-label font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700"
           >
             แก้ไข
           </button>
@@ -375,7 +375,7 @@ export function PreLabourTab({ an }: { an: string }) {
               type="button"
               onClick={cancel}
               disabled={saving}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[14px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-label font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
             >
               ยกเลิก
             </button>
@@ -383,7 +383,7 @@ export function PreLabourTab({ an }: { an: string }) {
               type="button"
               onClick={save}
               disabled={saving}
-              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-6 py-2 text-[14px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-6 py-2 text-label font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
             >
               {saving ? 'กำลังบันทึก…' : 'บันทึก'}
             </button>
@@ -396,13 +396,13 @@ export function PreLabourTab({ an }: { an: string }) {
            expect that exact phrase, and pairing it with a call-to-action
            keeps the banner informative rather than a dead-end. */}
       {noRowsYet && editing && (
-        <div className="rounded-lg border-2 border-cyan-200 bg-cyan-50 px-4 py-3 text-[13px] text-cyan-900">
+        <div className="rounded-lg border-2 border-cyan-200 bg-cyan-50 px-4 py-3 text-caption text-cyan-900">
           ไม่พบข้อมูลก่อนคลอดสำหรับ AN <span className="font-mono font-bold">{an}</span> — กรอกฟอร์มด้านล่างแล้วกด <strong>บันทึก</strong> เพื่อสร้างข้อมูลใหม่
         </div>
       )}
 
       {saveError && (
-        <div role="alert" className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-[13px] font-semibold text-rose-700 shadow-sm">
+        <div role="alert" className="rounded-lg border border-danger/40 bg-danger-tint px-3 py-2 text-caption font-semibold text-danger-text shadow-sm">
           {saveError}
         </div>
       )}

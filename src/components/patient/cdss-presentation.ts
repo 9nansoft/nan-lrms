@@ -3,6 +3,7 @@
 import type { CdssSeverity, CdssSection } from '@/types/api';
 
 export const SEVERITY_DOT: Record<CdssSeverity, string> = {
+  // kept as raw palette on purpose (graded clinical scale, ruling R16); the lint rule does not inspect config-object strings
   CRITICAL: 'bg-red-500',
   ALERT: 'bg-orange-500',
   WARN: 'bg-amber-400',

@@ -17,7 +17,7 @@ import { PARTOGRAPH_QUALITY } from '@/config/hospital-network';
 import { bangkokStartOfMonth, bangkokStartOfToday } from '@/lib/bangkok-time';
 import { referralSlaCutoffs } from '@/config/referral-sla';
 import { ancOpsCutoffs } from '@/config/anc-ops';
-import { ancFreshnessCutoffs, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
+import { ancFreshnessSql, ancRegistryScopeSql } from '@/config/anc-freshness';
 import { toIsoString } from '@/lib/dates';
 import type {
   DashboardHospital,
@@ -67,17 +67,77 @@ interface DashboardRow {
 // rule set — preventing the "same hospital shows two different dot colors
 // on the two pages" inconsistency.
 
-interface PatientCountRow {
+export interface ActiveLaborRiskRow {
   hospital_id: string;
   hcode: string;
   risk_level: string | null;
   count: number;
 }
 
+/** ACTIVE labour per hospital by latest CPD risk — the one aggregate behind
+ *  every "high risk N" number (dashboard, status strip). */
+export async function countActiveLaborByRisk(
+  db: DatabaseAdapter,
+  opts: { hcode?: string } = {},
+): Promise<ActiveLaborRiskRow[]> {
+  const params: string[] = [];
+  let hcodeFilter = '';
+  if (opts.hcode) {
+    params.push(opts.hcode);
+    hcodeFilter = 'AND h.hcode = ?';
+  }
+  // SQLite-compatible: no LATERAL join, use subquery
+  const rows = await db.query<ActiveLaborRiskRow>(
+    `SELECT h.id as hospital_id, h.hcode,
+       (SELECT cs.risk_level FROM cpd_scores cs
+        WHERE cs.patient_id = cp.id
+        ORDER BY cs.calculated_at DESC LIMIT 1) as risk_level,
+       COUNT(cp.id) as count
+     FROM hospitals h
+     LEFT JOIN cached_patients cp ON cp.hospital_id = h.id AND cp.labor_status = 'ACTIVE'
+     WHERE h.is_active = true ${hcodeFilter}
+     GROUP BY h.id, h.hcode, risk_level`,
+    params,
+  );
+  return rows.map((r) => ({ ...r, count: Number(r.count) || 0 }));
+}
+
 export interface DashboardResult {
   hospitals: DashboardHospital[];
   summary: DashboardSummary;
   updatedAt: string;
+}
+
+export type DerivedSyncStatus = 'OK' | 'BLOCKED' | 'NEVER_SYNCED';
+
+/**
+ * The one sync verdict for a hospital row (dashboard, hospital list, status
+ * strip). Precedence:
+ *   1. data_purged_at non-null -> BLOCKED ('purged_pending_reonboard'),
+ *      even if the authenticity probe later wrote 'authentic' (it
+ *      shouldn't, since the cooldown blocks polling, but be explicit).
+ *   2. last_authenticity_status in failure set -> BLOCKED.
+ *   3. last_sync_at null -> NEVER_SYNCED (not onboarded, or onboarded but
+ *      the first cycle hasn't completed).
+ *   4. Otherwise OK — including hospitals with no BMS config row that sync
+ *      via webhook (a recorded sync is authoritative).
+ */
+export function deriveSyncStatus(h: {
+  has_bms_config: number | boolean | null;
+  last_authenticity_status: string | null;
+  data_purged_at: string | Date | null;
+  last_sync_at: string | Date | null;
+}): { syncStatus: DerivedSyncStatus; syncBlockedReason: string | null } {
+  const status = h.last_authenticity_status;
+  if (h.data_purged_at)
+    return { syncStatus: 'BLOCKED', syncBlockedReason: 'purged_pending_reonboard' };
+  if (status && SYNC_FAILURE_STATUSES.has(status))
+    return { syncStatus: 'BLOCKED', syncBlockedReason: status };
+  // A recorded sync is authoritative: webhook-only hospitals push data without
+  // a hospital_bms_config row (one live hospital on 2026-10-11), so a missing
+  // config row alone must not read as "never synced".
+  if (!h.last_sync_at) return { syncStatus: 'NEVER_SYNCED', syncBlockedReason: null };
+  return { syncStatus: 'OK', syncBlockedReason: null };
 }
 
 export async function getProvinceDashboard(db: DatabaseAdapter): Promise<DashboardResult> {
@@ -95,19 +155,8 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
      ORDER BY h.name`,
   );
 
-  // Get patient counts per hospital grouped by risk level
-  // SQLite-compatible: no LATERAL join, use subquery
-  const counts = await db.query<PatientCountRow>(`
-    SELECT h.id as hospital_id, h.hcode,
-      (SELECT cs.risk_level FROM cpd_scores cs
-       WHERE cs.patient_id = cp.id
-       ORDER BY cs.calculated_at DESC LIMIT 1) as risk_level,
-      COUNT(cp.id) as count
-    FROM hospitals h
-    LEFT JOIN cached_patients cp ON cp.hospital_id = h.id AND cp.labor_status = 'ACTIVE'
-    WHERE h.is_active = true
-    GROUP BY h.id, h.hcode, risk_level
-  `);
+  // Patient counts per hospital grouped by risk level (shared aggregate)
+  const counts = await countActiveLaborByRisk(db);
 
   // Build result
   const hospitalMap = new Map<string, DashboardHospital>();
@@ -117,30 +166,7 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
     // downstream consumers (map, mobile clients) get numbers.
     const lat = h.lat === null ? null : Number(h.lat);
     const lon = h.lon === null ? null : Number(h.lon);
-    // Sync verdict precedence:
-    //   1. data_purged_at non-null → BLOCKED ('purged_pending_reonboard'),
-    //      even if the authenticity probe later wrote 'authentic' (it
-    //      shouldn't, since the cooldown blocks polling, but be explicit).
-    //   2. last_authenticity_status in failure set → BLOCKED.
-    //   3. No BMS config row at all → NEVER_SYNCED.
-    //   4. last_sync_at null but has config → NEVER_SYNCED (onboarded but
-    //      first cycle hasn't completed).
-    //   5. Otherwise OK.
-    const hasConfig = h.has_bms_config === true || h.has_bms_config === 1;
-    const status = h.last_authenticity_status;
-    let syncStatus: 'OK' | 'BLOCKED' | 'NEVER_SYNCED' = 'OK';
-    let syncBlockedReason: string | null = null;
-    if (h.data_purged_at) {
-      syncStatus = 'BLOCKED';
-      syncBlockedReason = 'purged_pending_reonboard';
-    } else if (status && SYNC_FAILURE_STATUSES.has(status)) {
-      syncStatus = 'BLOCKED';
-      syncBlockedReason = status;
-    } else if (!hasConfig) {
-      syncStatus = 'NEVER_SYNCED';
-    } else if (!h.last_sync_at) {
-      syncStatus = 'NEVER_SYNCED';
-    }
+    const { syncStatus, syncBlockedReason } = deriveSyncStatus(h);
     hospitalMap.set(h.hcode, {
       hcode: h.hcode,
       name: h.name,
@@ -161,11 +187,19 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
 
   // ANC registry counts — pregnancy-stage journeys per current hospital, with
   // HR3 broken out. Honors is_active via the JOIN on hospitals.
+  //
+  // Freshness-gated via the shared predicate, exactly like the /pregnancies
+  // board and the dashboard stage card. Without the gates this counted every
+  // row ever marked PREGNANCY — women delivered or lost to follow-up years ago
+  // included — and the hospital console showed 3162 under the same "ANC
+  // REGISTRY" label the board rendered 1517 under.
+  const ancFresh = ancFreshnessSql('mj');
   const ancRows = await db.query<{
     hcode: string;
     total: number;
     hr3: number;
-  }>(`
+  }>(
+    `
     SELECT h.hcode,
            COUNT(*) AS total,
            SUM(CASE WHEN mj.anc_risk_level = 'HR3' THEN 1 ELSE 0 END) AS hr3
@@ -173,8 +207,11 @@ export async function getProvinceDashboard(db: DatabaseAdapter): Promise<Dashboa
     JOIN hospitals h ON h.id = mj.current_hospital_id
     WHERE h.is_active = true
       AND mj.care_stage = 'PREGNANCY'
+      AND ${ancFresh.clause}
     GROUP BY h.hcode
-  `);
+  `,
+    ancFresh.params,
+  );
   for (const r of ancRows) {
     const hospital = hospitalMap.get(r.hcode);
     if (!hospital) continue;
@@ -695,17 +732,14 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
   // and the board it links to can never show different totals (raw
   // care_stage='PREGNANCY' includes lost-to-follow-up and silently-delivered
   // rows the boards exclude).
-  const { edcOnOrAfter, lastAncOnOrAfter } = ancFreshnessCutoffs(new Date());
+  const stageAncFresh = ancFreshnessSql('');
   const pregnancyCounts = await db.query<{ anc_risk_level: string; count: number }>(
     `SELECT anc_risk_level, COUNT(*) as count FROM maternal_journeys
      WHERE care_stage = 'PREGNANCY'
-       AND (ga_weeks IS NULL OR ga_weeks <= ${ANC_MAX_GA_WEEKS})
-       AND (edc IS NULL OR edc >= ?)
-       AND (last_anc_date IS NULL OR last_anc_date >= ?)
-       AND (hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
-            OR current_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})
+       AND ${stageAncFresh.clause}
+       AND ${ancRegistryScopeSql('')}
      GROUP BY anc_risk_level`,
-    [edcOnOrAfter, lastAncOnOrAfter],
+    stageAncFresh.params,
   );
 
   const pregnancy = { total: 0, low: 0, hr1: 0, hr2: 0, hr3: 0 };
@@ -774,6 +808,7 @@ export async function getStageKPIs(db: DatabaseAdapter): Promise<DashboardStageK
   const deliveredJourneyRows = await db.query<{ total: number }>(
     `SELECT COUNT(*) as total FROM maternal_journeys mj
      WHERE mj.care_stage = 'DELIVERED'
+       AND mj.closed_reason IS NULL
        AND mj.stage_changed_at >= ?
        AND (mj.hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
             OR mj.current_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})`,
@@ -837,7 +872,7 @@ export async function getDashboardAlerts(
 ): Promise<DashboardAlerts> {
   const { overdueBefore } = referralSlaCutoffs(now);
   const { staleBefore, dueSoonBefore } = ancOpsCutoffs(now);
-  const { edcOnOrAfter, lastAncOnOrAfter } = ancFreshnessCutoffs(now);
+  const alertAncFresh = ancFreshnessSql('', now);
 
   // Actionable referrals: past-SLA INITIATED or active EMERGENCY.
   const refAlerts = await db.query<{ count: number }>(
@@ -852,18 +887,15 @@ export async function getDashboardAlerts(
   // Both ANC alerts run over the same gated registry as the pregnancies
   // board (GA ≤ 42, EDC within grace, last visit within the LTFU window).
   const gatedAnc = `care_stage = 'PREGNANCY'
-       AND (ga_weeks IS NULL OR ga_weeks <= ${ANC_MAX_GA_WEEKS})
-       AND (edc IS NULL OR edc >= ?)
-       AND (last_anc_date IS NULL OR last_anc_date >= ?)
-       AND (hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL}
-            OR current_hospital_id IN ${ACTIVE_HOSPITAL_IDS_SQL})`;
+       AND ${alertAncFresh.clause}
+       AND ${ancRegistryScopeSql('')}`;
 
   const overdueAnc = await db.query<{ count: number }>(
     `SELECT COUNT(*) as count FROM maternal_journeys
      WHERE ${gatedAnc}
        AND last_anc_date IS NOT NULL
        AND last_anc_date < ?`,
-    [edcOnOrAfter, lastAncOnOrAfter, staleBefore],
+    [...alertAncFresh.params, staleBefore],
   );
 
   const dueSoon = await db.query<{ count: number }>(
@@ -871,7 +903,7 @@ export async function getDashboardAlerts(
      WHERE ${gatedAnc}
        AND edc IS NOT NULL
        AND edc <= ?`,
-    [edcOnOrAfter, lastAncOnOrAfter, dueSoonBefore],
+    [...alertAncFresh.params, dueSoonBefore],
   );
 
   return {

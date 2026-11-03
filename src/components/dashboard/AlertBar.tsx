@@ -1,3 +1,4 @@
+// Kiosk-only since UI sub-project 2; normal mode renders province/AlertsSection.
 // AlertBar — persistent ribbon with "ALL CLEAR" resting state. Recalibrated
 // 2026-07-09: every tile is a number that can actually move, computed from
 // the same configs the drill-down boards use (see dashboard.ts:
@@ -12,6 +13,7 @@ import Link from 'next/link';
 import type { DashboardAlerts } from '@/types/api';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ALERT_DEFINITIONS, alarmTotal } from '@/components/dashboard/province/alert-definitions';
 
 interface AlertBarProps {
   alerts: DashboardAlerts;
@@ -57,7 +59,7 @@ function AlertTile({
       >
         <div style={{ width: 3, height: 28, background: color }} aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
+          <div className="font-mono text-caption uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
             {label}
           </div>
           <div
@@ -70,7 +72,7 @@ function AlertTile({
           </div>
         </div>
         <div
-          className="font-mono text-[32px] font-semibold leading-none tabular-nums"
+          className="font-mono text-kpi font-semibold leading-none tabular-nums"
           style={{ color, letterSpacing: '-0.02em' }}
         >
           {value}
@@ -78,11 +80,11 @@ function AlertTile({
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-sm whitespace-normal text-left leading-snug">
         <div className="space-y-1">
-          <div className="font-mono text-[12px] uppercase tracking-[0.14em] opacity-70">
+          <div className="font-mono text-caption uppercase tracking-[0.14em] opacity-70">
             {label}
           </div>
           <div className="text-sm font-semibold">{tooltipTitle}</div>
-          <div className="text-[13px] opacity-90">{tooltipBody}</div>
+          <div className="text-caption opacity-90">{tooltipBody}</div>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -92,7 +94,7 @@ function AlertTile({
 export function AlertBar({ alerts }: AlertBarProps) {
   // Only true alarms feed the leading total — due-soon is upcoming workload,
   // not an incident, so it must not push the ribbon into red on its own.
-  const total = alerts.referralAlerts + alerts.overdueAnc;
+  const total = alarmTotal(alerts);
   const hot = total > 0;
   const stateColor = hot ? 'var(--risk-high)' : 'var(--risk-low)';
 
@@ -100,7 +102,7 @@ export function AlertBar({ alerts }: AlertBarProps) {
     <div
       className={cn(
         'flex items-stretch border-b border-[var(--rule-strong)]',
-        hot ? 'bg-gradient-to-r from-red-50 to-white' : 'bg-white',
+        hot ? 'bg-gradient-to-r from-danger-tint to-surface-card' : 'bg-white',
       )}
     >
       {/* Leading state label — total across the two alarm categories. */}
@@ -119,11 +121,11 @@ export function AlertBar({ alerts }: AlertBarProps) {
             className={cn('h-1.5 w-1.5 rounded-full', hot && 'animate-pulse-hi')}
             aria-hidden="true"
           />
-          <span className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-dim)]">
+          <span className="font-mono text-caption uppercase tracking-[0.14em] text-[var(--ink-navy-dim)]">
             {hot ? 'ACTIVE ALERTS' : 'ALL CLEAR'}
           </span>
           <span
-            className="ml-auto font-mono text-[20px] font-semibold tabular-nums"
+            className="ml-auto font-mono text-title font-semibold tabular-nums"
             style={{ color: stateColor }}
           >
             {total}
@@ -134,7 +136,7 @@ export function AlertBar({ alerts }: AlertBarProps) {
             <div className="text-sm font-semibold">
               {hot ? 'สถานะรวม — มีงานค้างต้องจัดการ' : 'สถานะรวม — ปลอดเหตุการณ์'}
             </div>
-            <div className="text-[13px] opacity-90">
+            <div className="text-caption opacity-90">
               ผลรวมของ REFERRAL ACTION (ส่งต่อเกิน SLA/ฉุกเฉินค้าง) + OVERDUE ANC (ขาดนัดเกิน 35
               วัน). DUE ≤14D เป็นภาระงานล่วงหน้า ไม่นับรวมในสัญญาณเตือน.
               คลิกแต่ละช่องเพื่อเปิดหน้ารายการที่กรองไว้แล้ว.
@@ -142,55 +144,20 @@ export function AlertBar({ alerts }: AlertBarProps) {
           </div>
         </TooltipContent>
       </Tooltip>
-      <AlertTile
-        testId="alert-referrals"
-        href="/referrals?overdue=1"
-        label="REFERRAL ACTION"
-        value={alerts.referralAlerts}
-        zeroLabel="ไม่มีส่งต่อค้างเกิน SLA"
-        detail="เกิน SLA / ฉุกเฉินยังไม่ถึง"
-        tooltipTitle="เคสส่งต่อที่ต้องเร่งจัดการ"
-        tooltipBody={
-          <>
-            เคสส่งต่อสถานะ <strong>INITIATED</strong> ค้างเกิน <strong>24 ชั่วโมง</strong> รวมกับเคส{' '}
-            <strong>ฉุกเฉิน (EMERGENCY)</strong> ที่ยังไม่ถึงปลายทาง. ต่างจากเดิมที่นับเคสรอทั้งหมด
-            (ตัวเลขไม่เคยลด) — ช่องนี้จะเป็นศูนย์ได้เมื่อจัดการทัน. คลิกเพื่อเปิดรายการที่กรองแล้ว.
-          </>
-        }
-      />
-      <AlertTile
-        testId="alert-overdue-anc"
-        href="/pregnancies?cohort=anc_stale"
-        label="OVERDUE ANC"
-        value={alerts.overdueAnc}
-        zeroLabel="ANC ครบทุกราย"
-        detail="ขาดนัดเกิน 35 วัน"
-        tooltipTitle="หญิงตั้งครรภ์ขาดนัด ANC เกินเกณฑ์"
-        tooltipBody={
-          <>
-            นับเฉพาะทะเบียนครรภ์ที่ยัง active (ตัดรายคลอดแล้ว/หลุดติดตามออก เช่นเดียวกับหน้า
-            ฝากครรภ์) ที่นัดล่าสุดผ่านมาเกิน <strong>35 วัน</strong> — ตัวเลขเดียวกับช่อง MISSED ANC
-            ของหน้าฝากครรภ์. ปฏิบัติ: ติดตามให้กลับมาตรวจครรภ์ก่อนหลุดการติดตามที่ 60 วัน.
-          </>
-        }
-      />
-      <AlertTile
-        testId="alert-due-soon"
-        href="/pregnancies?cohort=due_soon"
-        label="DUE ≤14 DAYS"
-        value={alerts.dueSoon}
-        zeroLabel="ไม่มีครรภ์ใกล้คลอด"
-        detail="ใกล้ครบกำหนดคลอด"
-        tooltipTitle="ครรภ์ครบกำหนดภายใน 14 วัน"
-        hotColor="var(--risk-medium)"
-        tooltipBody={
-          <>
-            หญิงตั้งครรภ์ในทะเบียน active ที่ EDC อยู่ภายใน <strong>14 วัน</strong>{' '}
-            (รวมที่เลยกำหนดแล้ว) — ภาระงานคลอดที่กำลังมาถึงของทั้งจังหวัด ใช้วางแผนเตียง/ส่งต่อ.
-            แทนที่ช่อง IN-TRANSIT เดิมซึ่งเป็นศูนย์ตลอดเพราะสถานะส่งต่อไม่ถูกอัปเดตจากต้นทาง.
-          </>
-        }
-      />
+      {ALERT_DEFINITIONS.map((d) => (
+        <AlertTile
+          key={d.key}
+          testId={d.testId}
+          href={d.href}
+          label={d.kioskLabel}
+          value={alerts[d.key]}
+          zeroLabel={d.zeroLabel}
+          detail={d.kioskDetail}
+          tooltipTitle={d.tooltipTitle}
+          tooltipBody={d.tooltipBody}
+          hotColor={d.kind === 'workload' ? 'var(--risk-medium)' : undefined}
+        />
+      ))}
     </div>
   );
 }

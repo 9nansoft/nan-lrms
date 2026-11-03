@@ -1,1211 +1,177 @@
-// Dashboard — Province-wide situational-awareness surface.
-// Redesigned 2026-04-21 per docs/plans/2026-04-21-dashboard-redesign-brief.md
-// following the Claude Design handoff bundle. Air-traffic-control aesthetic,
-// institutional-navy accent, shared IA across normal + kiosk modes.
+// Provincial dashboard `/` — province-wide situational awareness for ward
+// nurses and coordinators. UI sub-project 2 (2026-10-11): a thin composition
+// over useProvinceDashboard (SWR + debounced SSE + browser poll) and the
+// section components in src/components/dashboard/province/. The kiosk keeps
+// its own frozen dark layout (KioskDashboard).
+// Spec: docs/superpowers/specs/2026-10-11-ui-dashboard-design.md
 'use client';
 
-import {
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-} from 'react';
-import { debounceLeadingTrailing, SSE_REFRESH_DEBOUNCE_MS } from '@/lib/debounce';
-import { useDashboard } from '@/hooks/useDashboard';
-import { useHighRiskPatients } from '@/hooks/useHighRiskPatients';
-import { useSSE, type SseConnectionState } from '@/hooks/useSSE';
-import { useKioskMode } from '@/hooks/useKioskMode';
-import { useMapShare, MAP_SHARE_MIN, MAP_SHARE_MAX } from '@/hooks/useMapShare';
-import { useOnboardHosxpWebhook } from '@/hooks/useOnboardHosxpWebhook';
-import { useOnboardHosxpSync, type OnboardHosxpSyncState } from '@/hooks/useOnboardHosxpSync';
-import { useBrowserPoll } from '@/hooks/useBrowserPoll';
+import { useState } from 'react';
+import { NETWORK_RETRY_REMEDY } from '@/lib/actionable-errors';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
-import { AlertBar } from '@/components/dashboard/AlertBar';
-import { ProvinceVitalsStrip } from '@/components/dashboard/ProvinceVitalsStrip';
-import { HighRiskPatientList } from '@/components/dashboard/HighRiskPatientList';
-import { HospitalTable } from '@/components/dashboard/HospitalTable';
-import { ProvinceMap } from '@/components/dashboard/ProvinceMap';
-import { StageKPICards } from '@/components/dashboard/StageKPICards';
-import { ShiftSummary } from '@/components/dashboard/ShiftSummary';
-import { SectionLabel } from '@/components/dashboard/shared';
-import { KioskHeader } from '@/components/dashboard/KioskHeader';
-import { OnlineUsersBadge } from '@/components/dashboard/OnlineUsersBadge';
-// SimulationControl was moved to /admin (Simulation tab) on 2026-04-22 so
-// the dashboard header stays compact for clinical users. Still dev/admin-
-// gated by the server-side simulationGuard.
-import { HospitalDetailDialog } from '@/components/dashboard/HospitalDetailDialog';
+import { useKioskMode } from '@/hooks/useKioskMode';
+import { useProvinceDashboard } from '@/hooks/useProvinceDashboard';
+import { PageHeader } from '@/components/shared/PageHeader';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
-import { ConnectionStatus as ConnectionStatusEnum } from '@/types/domain';
-import { classifySyncHealth } from '@/config/hospital-network';
-import { Copy, Info, Monitor, RefreshCw, Maximize2, Expand } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
-
-// Truthful SSE health indicator — `chip` feeds the control strip, `stream`
-// feeds the kiosk strip and footer. Driven by useSSE().connectionState so a
-// dropped EventSource no longer displays as "OK" on the war-room screens.
-const SSE_STATUS_META: Record<SseConnectionState, { chip: string; stream: string; color: string }> =
-  {
-    connected: { chip: 'LIVE · SSE OK', stream: 'SSE · STREAM OK', color: 'var(--risk-low)' },
-    connecting: {
-      chip: 'SSE · CONNECTING',
-      stream: 'SSE · CONNECTING',
-      color: 'var(--ink-navy-muted)',
-    },
-    reconnecting: {
-      chip: 'SSE · RECONNECTING',
-      stream: 'SSE · RECONNECTING',
-      color: 'var(--risk-medium)',
-    },
-  };
-
-// Draggable map / hospital-list split in the Province overview column
-// (normal mode): the constants here style the divider; the persisted value
-// itself lives in useMapShare (localStorage-backed, effect-free).
-
-
-function formatSyncTime(value?: string | null): string {
-  if (!value) return 'none yet';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString('th-TH', {
-    timeZone: 'Asia/Bangkok',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-}
-
-function formatCounts(counts?: Record<string, number>): string {
-  if (!counts) return '';
-  return Object.entries(counts)
-    .map(([key, value]) => `${key}=${value}`)
-    .join(', ');
-}
-
-function buildHosxpSyncReport(
-  state: OnboardHosxpSyncState | null,
-  status: string,
-  help: string,
-): string {
-  const lines = [
-    'NN-LRMS HOSxP Sync Report',
-    `Generated: ${new Date().toISOString()}`,
-    '',
-    `STATUS: ${status}`,
-    `PHASE: ${state?.phase ?? 'unknown'}`,
-    `HCODE: ${state?.hcode ?? 'unknown'}`,
-    `CONNECTION: ${state?.connectionStatus ?? 'unknown'}`,
-    `DB TYPE: ${state?.databaseType ?? 'not detected'}`,
-    `HELP: ${help}`,
-    `LAST CYCLE: ${state?.lastRunAt ?? 'none'}`,
-    `LAST SUCCESS: ${state?.lastSuccessAt ?? 'none'}`,
-    `LAST ERROR: ${state?.lastErrorAt ?? 'none'} ${state?.lastError ?? ''}`.trim(),
-    `NEXT CYCLE: ${state?.nextRunAt ?? 'none'}`,
-    `HOSPITAL SYNC: ${state?.hospitalLastSyncAt ?? 'none'}`,
-    `CYCLES: ${state?.successCount ?? 0} successful / ${state?.cycleCount ?? 0} attempted`,
-    '',
-    'Counters:',
-    `- IPT local: active=${state?.activePatients ?? 0}, cached=${state?.cachedPatients ?? 0}, latest=${state?.latestPatientSyncedAt ?? 'none'}`,
-    `- IPT source: read=${state?.lastStats?.activePatientsRead ?? 0}, synced=${state?.lastStats?.activePatientsSynced ?? 0}`,
-    `- ANC local: pregnancies=${state?.activeAncJourneys ?? 0}, latest=${state?.latestAncSyncedAt ?? 'none'}`,
-    `- ANC source: read=${state?.lastStats?.anc.sourcePatientsRead ?? 0}, mapped=${state?.lastStats?.anc.sourcePatientsMapped ?? 0}, synced=${state?.lastStats?.anc.patientsSynced ?? 0}`,
-    `- ANC visits: read=${state?.lastStats?.anc.servicesRead ?? 0}, mapped=${state?.lastStats?.anc.servicesMapped ?? 0}`,
-    `- ANC risk: risk=${state?.lastStats?.anc.risksMapped ?? 0}, classifying=${state?.lastStats?.anc.classifyingMapped ?? 0}`,
-    `- Partograph: read=${state?.lastStats?.partographRowsRead ?? 0}, upserted=${state?.lastStats?.partographRowsUpserted ?? 0}`,
-    `- Referrals: active=${state?.activeReferrals ?? 0}, outgoing=${state?.outgoingReferrals ?? 0}, incoming=${state?.incomingReferrals ?? 0}`,
-  ];
-
-  if (state?.error || state?.detail || state?.lastError || state?.lastStats?.anc.error) {
-    lines.push(
-      '',
-      'Errors:',
-      `- error=${state?.error ?? 'none'}`,
-      `- detail=${state?.detail ?? 'none'}`,
-      `- lastError=${state?.lastError ?? 'none'}`,
-      `- ancError=${state?.lastStats?.anc.error ?? 'none'}`,
-      `- ancSkipped=${state?.lastStats?.anc.skippedReason ?? 'none'}`,
-    );
-  }
-
-  lines.push('', 'Step log:');
-  const steps = state?.lastSteps ?? [];
-  if (steps.length === 0) {
-    lines.push('- no step log recorded yet');
-  } else {
-    for (const step of steps) {
-      const counts = formatCounts(step.counts);
-      lines.push(
-        `- [${step.at}] cycle=${step.cycle} ${step.status.toUpperCase()} ${step.name}: ${step.message}${counts ? ` (${counts})` : ''}${step.detail ? ` | ${step.detail}` : ''}`,
-      );
-    }
-  }
-
-  return lines.join('\n');
-}
+import { HospitalDetailDialog } from '@/components/dashboard/HospitalDetailDialog';
+import { ShiftSummary } from '@/components/dashboard/ShiftSummary';
+import { KioskDashboard } from '@/components/dashboard/province/KioskDashboard';
+import { DashboardHeaderActions } from '@/components/dashboard/province/DashboardHeaderActions';
+import { OnboardingWebhookAlert } from '@/components/dashboard/province/OnboardingWebhookAlert';
+import { AlertsSection } from '@/components/dashboard/province/AlertsSection';
+import { LaborVitalsSection } from '@/components/dashboard/province/LaborVitalsSection';
+import { ContinuumSection } from '@/components/dashboard/province/ContinuumSection';
+import { HighRiskSection } from '@/components/dashboard/province/HighRiskSection';
+import { CareStageSection } from '@/components/dashboard/province/CareStageSection';
+import { ProvinceOverviewPanel } from '@/components/dashboard/province/ProvinceOverviewPanel';
+import { ProvinceOverviewDialog } from '@/components/dashboard/province/ProvinceOverviewDialog';
+import { HosxpSyncDialog } from '@/components/dashboard/province/HosxpSyncDialog';
+import type { OverviewMode } from '@/components/dashboard/province/OverviewModeToggle';
 
 export default function DashboardPage() {
   useSetBreadcrumbs([{ label: 'แดชบอร์ด' }]);
-  // Auto-provisions the HOSxP `webhook_setting` row for module_id=3 /
-  // setting_code='NN-LRMS' on first onboarding. No-op when the row already
-  // exists or when the BMS session / marketplace_token isn't present.
-  const { state: onboardingState } = useOnboardHosxpWebhook();
-  const { state: hosxpSyncState } = useOnboardHosxpSync();
-  // Drives the browser-side HOSxP poll. Server-side scheduled polling is
-  // disabled, so this hook is the only thing keeping cached_patients fresh
-  // for this user's hospital. UI updates flow through the SSE broadcast
-  // emitted by /api/sync/browser-push → processWebhookPayload (already
-  // subscribed via useSSE). `runNow` lets the manual "ดึงข้อมูล" button kick
-  // off a cycle on demand instead of waiting for the 60s timer.
-  const { state: browserPollState, runNow: runBrowserPollNow } = useBrowserPoll();
-  const [onboardingErrorDismissed, setOnboardingErrorDismissed] = useState(false);
-  const [hosxpSyncDialogOpen, setHosxpSyncDialogOpen] = useState(false);
-  const [hosxpReportCopied, setHosxpReportCopied] = useState(false);
-  const {
-    hospitals,
-    summary,
-    stageKPIs,
-    alerts,
-    trends,
-    continuum,
-    updatedAt,
-    isLoading,
-    error,
-    mutate,
-  } = useDashboard();
-  const {
-    patients: highRiskPatients,
-    isLoading: hrLoading,
-    mutate: hrMutate,
-  } = useHighRiskPatients();
+  const d = useProvinceDashboard();
   const { isKiosk, toggleKiosk, exitKiosk } = useKioskMode();
-  const [overviewMode, setOverviewMode] = useState<'map' | 'list'>('map');
+  const [overviewMode, setOverviewMode] = useState<OverviewMode>('map');
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [selectedHospital, setSelectedHospital] = useState<string | null>(null);
   const [detailHcode, setDetailHcode] = useState<string | null>(null);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [hosxpOpen, setHosxpOpen] = useState(false);
+
+  // Map pin or list row: highlight the marker and open the hospital detail.
   const openHospitalDetail = (hcode: string | null) => {
     setSelectedHospital(hcode);
     if (hcode) setDetailHcode(hcode);
   };
 
-  // Draggable map / hospital-list split in the Province overview column.
-  // Starts at the persisted value (or 40%) and clamps to [15%, 85%]. The
-  // persisted value arrives via useSyncExternalStore right after hydration
-  // so SSR never sees localStorage and no mount effect is needed.
-  const { mapShare, previewMapShare, saveMapShare, commitMapShare } = useMapShare();
-  const overviewColRef = useRef<HTMLDivElement | null>(null);
-  const mapDragStart = useRef<{ y: number; share: number } | null>(null);
-  const startMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    mapDragStart.current = { y: e.clientY, share: mapShare };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const moveMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = mapDragStart.current;
-    const col = overviewColRef.current;
-    if (!drag || !col) return;
-    const height = col.getBoundingClientRect().height;
-    if (height <= 0) return;
-    const next = drag.share + ((drag.y - e.clientY) / height) * 100;
-    const clamped = Math.min(MAP_SHARE_MAX, Math.max(MAP_SHARE_MIN, next));
-    previewMapShare(clamped);
-  };
-  const endMapDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    mapDragStart.current = null;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // capture already released (e.g. on pointercancel)
-    }
-    saveMapShare();
-  };
-  const onDividerKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    const delta =
-      e.key === 'ArrowUp' || e.key === 'PageUp'
-        ? 1
-        : e.key === 'ArrowDown' || e.key === 'PageDown'
-          ? -1
-          : 0;
-    if (delta === 0) return;
-    e.preventDefault();
-    const step = e.key.startsWith('Page') ? 10 : 1;
-    const next = Math.min(MAP_SHARE_MAX, Math.max(MAP_SHARE_MIN, mapShare + delta * step));
-    commitMapShare(next);
-  };
-
-  const refreshAll = () => {
-    mutate();
-    hrMutate();
-  };
-  // Manual refresh fires a browser-poll cycle then revalidates SWR. The
-  // SSE fan-out from /api/sync/browser-push will also trigger refreshAll
-  // (via useSSE.onPatientUpdate / onSyncComplete below); calling refreshAll
-  // again here is a fallback for the no-rows-changed case where SSE stays
-  // silent but the user still expects "ดึงข้อมูล" to feel responsive.
-  const triggerSync = async () => {
-    await runBrowserPollNow();
-    refreshAll();
-  };
-  const syncing = browserPollState.isRunning;
-
-  // SSE reaction is debounced (leading+trailing): sync cycles from ~24
-  // hospitals arrive continuously, and an undebounced refetch-per-event was
-  // the 2026-07-17 79-req/s incident. Built over the stable SWR mutates so
-  // the debouncer's timer state survives re-renders.
-  const debouncedSseRefresh = useMemo(
-    () =>
-      debounceLeadingTrailing(() => {
-        mutate();
-        hrMutate();
-      }, SSE_REFRESH_DEBOUNCE_MS),
-    [mutate, hrMutate],
-  );
-  const { connectionState: sseState } = useSSE({
-    onPatientUpdate: debouncedSseRefresh,
-    onConnectionStatus: () => mutate(),
-    onSyncComplete: debouncedSseRefresh,
-  });
-  const sseMeta = SSE_STATUS_META[sseState];
-
-  if (isLoading) {
-    return <LoadingState message="กำลังโหลด Dashboard..." />;
-  }
+  if (d.isLoading) return <LoadingState message="กำลังโหลดภาพรวมจังหวัด..." />;
 
   // Fetch failed with nothing cached — an all-zero dashboard is
   // indistinguishable from an empty province, so show the failure instead.
-  if (error && !updatedAt) {
+  if (d.error && !d.updatedAt) {
     return (
       <ErrorState
-        message="ไม่สามารถโหลดข้อมูล Dashboard ได้"
-        detail={error instanceof Error ? error.message : String(error)}
-        onRetry={refreshAll}
+        message="ไม่สามารถโหลดข้อมูลภาพรวมจังหวัดได้"
+        detail={d.error instanceof Error ? d.error.message : String(d.error)}
+        remedy={NETWORK_RETRY_REMEDY}
+        onRetry={d.refreshAll}
       />
     );
   }
-  // Fetch failed but SWR still holds the last good payload — keep rendering
-  // it and flag the staleness (Constitution VI: offline shows cached data
-  // with its timestamp).
-  const dataStale = Boolean(error && updatedAt);
 
-  const onlineCount = hospitals.filter(
-    (h) => h.connectionStatus === ConnectionStatusEnum.ONLINE,
-  ).length;
-  // Data freshness beats transport status: a hospital can be ONLINE with a
-  // two-week-old sync. Same classifier as the /hospitals board.
-  const freshCount = hospitals.filter(
-    (h) => classifySyncHealth(h.syncStatus, h.lastSyncAt) === 'ok',
-  ).length;
-  const ancFallback = continuum ? { hr3: continuum.anc.hr3, dueSoon: continuum.anc.dueSoon } : null;
-
-  // ═══════════════════════════════════════════════════════════════
-  // KIOSK MODE — 1920×1080 wall display, dark phosphor-glow palette
-  // ═══════════════════════════════════════════════════════════════
   if (isKiosk) {
     return (
-      <div
-        className="min-h-screen text-[var(--kiosk-ink)]"
-        style={{
-          background: 'var(--kiosk-bg)',
-          backgroundImage:
-            'radial-gradient(ellipse at 50% 0%, rgba(87,196,255,0.06), transparent 55%)',
-        }}
-      >
-        <KioskHeader
-          updatedAt={updatedAt}
-          onExit={exitKiosk}
-          onlineCount={freshCount}
-          totalCount={hospitals.length}
-        />
-
-        {dataStale && (
-          <ErrorState
-            variant="banner"
-            message="การเชื่อมต่อล้มเหลว — แสดงข้อมูลเดิมจากแคช"
-            lastUpdatedAt={updatedAt}
-            onRetry={refreshAll}
-          />
-        )}
-
-        <div className="px-7 pt-4 pb-4 space-y-4">
-          {/* 01 — Alerts ribbon (kiosk variant) */}
-          <div
-            className="border"
-            style={{ borderColor: 'var(--kiosk-rule)', background: 'var(--kiosk-panel)' }}
-          >
-            <AlertBar alerts={alerts} />
-          </div>
-
-          {/* 02 — Province vitals (reuses normal component; will need kiosk variant later) */}
-          <div
-            className="border"
-            style={{ borderColor: 'var(--kiosk-rule)', background: 'var(--kiosk-panel)' }}
-          >
-            <ProvinceVitalsStrip summary={summary} trends={trends} continuum={continuum} />
-          </div>
-
-          {/* 03+04 — HIGH-risk + Province map (side-by-side, kiosk privacy on list) */}
-          <div className="grid grid-cols-12 gap-4">
-            <div
-              className="col-span-7 border p-4"
-              style={{ borderColor: 'var(--kiosk-rule)', background: 'var(--kiosk-panel)' }}
-            >
-              <HighRiskPatientList
-                patients={highRiskPatients}
-                isLoading={hrLoading}
-                variant="kiosk"
-                maxRows={8}
-                ancFallback={ancFallback}
-                totalActive={summary?.totalActive}
-                totalHigh={summary?.totalHigh}
-              />
-            </div>
-            <div
-              className="col-span-5 flex flex-col gap-3 border p-4"
-              style={{ borderColor: 'var(--kiosk-rule)', background: 'var(--kiosk-panel)' }}
-            >
-              <SectionLabel idx={4} right={<span>{hospitals.length} NODES</span>}>
-                Province map
-              </SectionLabel>
-              <div
-                className="flex-1 border"
-                style={{ borderColor: 'var(--kiosk-rule)', minHeight: 360 }}
-              >
-                <ProvinceMap
-                  hospitals={hospitals}
-                  selected={selectedHospital}
-                  onSelect={openHospitalDetail}
-                  mode="kiosk"
-                  size="full"
-                />
-              </div>
-              <div
-                className="flex justify-between font-mono text-[13px] tracking-[0.12em]"
-                style={{ color: 'var(--kiosk-dim)' }}
-              >
-                <span>
-                  <span style={{ color: 'var(--kiosk-high)' }}>●</span> HIGH
-                </span>
-                <span>
-                  <span style={{ color: 'var(--kiosk-med)' }}>●</span> MED
-                </span>
-                <span>
-                  <span style={{ color: 'var(--kiosk-low)' }}>●</span> LOW
-                </span>
-                <span>
-                  <span style={{ color: 'var(--kiosk-dim)' }}>○</span> IDLE
-                </span>
-                <span>
-                  <span style={{ color: 'var(--kiosk-high)' }}>✕</span> OFFLINE
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom status strip */}
-        <div
-          className="flex gap-5 border-t px-7 py-2 font-mono text-[13px] tracking-[0.14em]"
-          style={{ borderColor: 'var(--kiosk-rule)', color: 'var(--kiosk-dim)' }}
-        >
-          <span>NN-LRMS</span>
-          <span>PPHO WAR-ROOM</span>
-          <span>MCH PROVINCIAL NETWORK</span>
-          <span className="flex-1" />
-          <span style={{ color: sseState === 'connected' ? undefined : 'var(--kiosk-med)' }}>
-            {sseMeta.stream}
-          </span>
-          <span>
-            {freshCount}/{hospitals.length} DATA FRESH
-          </span>
-          <span style={{ color: 'var(--kiosk-ink)' }}>ESC TO EXIT</span>
-        </div>
-      </div>
+      <KioskDashboard
+        hospitals={d.hospitals}
+        summary={d.summary}
+        trends={d.trends}
+        continuum={d.continuum}
+        alerts={d.alerts}
+        highRiskPatients={d.highRiskPatients}
+        hrLoading={d.hrLoading}
+        updatedAt={d.updatedAt}
+        dataStale={d.dataStale}
+        onRetry={d.refreshAll}
+        freshCount={d.freshCount}
+        reportingCount={d.reportingCount}
+        sseState={d.sseState}
+        selectedHospital={selectedHospital}
+        onSelectHospital={openHospitalDetail}
+        onExit={exitKiosk}
+      />
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // NORMAL MODE — desk/laptop, interactive, air-traffic-control aesthetic
-  // ═══════════════════════════════════════════════════════════════
-  //
-  // Layout (2026-04-21 redesign, requested by product): the Province overview
-  // (map / hospital list) is promoted to a tall, sticky right column that
-  // starts immediately under the top navbar and fills the viewport height.
-  // Everything else (control strip, alerts, vitals, high-risk, stage KPIs,
-  // shift summary) stacks in the left column. When the left side is longer
-  // than the viewport, the map stays pinned in place — which is the point:
-  // provincial situational-awareness at a glance while you scroll detail.
-  //
-  // Height math: ~60px covers the single-row navbar plus its 3px accent
-  // strip. Keep it in sync if the navbar ever gains a second row again.
-  const showOnboardingError = !!onboardingState?.error && !onboardingErrorDismissed;
-  const hosxpSyncStatus =
-    hosxpSyncState?.error || hosxpSyncState?.lastError || hosxpSyncState?.phase === 'failed'
-      ? 'ERROR'
-      : hosxpSyncState?.phase === 'querying_hosxp'
-        ? 'QUERYING'
-        : hosxpSyncState?.started
-          ? 'RUNNING'
-          : hosxpSyncState?.alreadyRunning
-            ? 'RUNNING'
-            : hosxpSyncState?.ran === false
-              ? 'SKIPPED'
-              : 'STARTING';
-  const hosxpSyncDetail = hosxpSyncState?.error
-    ? hosxpSyncState.error
-    : hosxpSyncState?.lastError
-      ? hosxpSyncState.lastError
-      : hosxpSyncStatus === 'RUNNING' || hosxpSyncStatus === 'QUERYING'
-        ? `${hosxpSyncState?.phase ?? 'scheduled'} · ${hosxpSyncState?.successCount ?? 0}/${hosxpSyncState?.cycleCount ?? 0} cycles`
-        : hosxpSyncStatus === 'SKIPPED'
-          ? 'NO BMS SESSION'
-          : 'CONNECTING';
-  const hosxpSyncHelp =
-    hosxpSyncState?.error === 'hospital_not_registered'
-      ? 'โรงพยาบาลนี้ยังไม่ได้เปิดใช้งานในทะเบียน NN-LRMS'
-      : hosxpSyncState?.error === 'missing_bms_session'
-        ? 'ยังไม่ได้รับ BMS session จาก HOSxP launcher'
-        : hosxpSyncState?.error === 'invalid_bms_url'
-          ? 'BMS URL จาก session ไม่ถูกต้อง'
-          : hosxpSyncState?.error
-            ? 'ตรวจสอบรายละเอียดจาก server log หากข้อความด้านล่างยังไม่พอ'
-            : hosxpSyncStatus === 'RUNNING' || hosxpSyncStatus === 'QUERYING'
-              ? 'ระบบกำลังดึงข้อมูลจาก HOSxP เป็นรอบอัตโนมัติ'
-              : 'ระบบกำลังเริ่มการเชื่อมต่อ HOSxP';
-  const copyHosxpSyncReport = async () => {
-    const report = buildHosxpSyncReport(hosxpSyncState, hosxpSyncStatus, hosxpSyncHelp);
-    try {
-      await navigator.clipboard.writeText(report);
-      setHosxpReportCopied(true);
-      window.setTimeout(() => setHosxpReportCopied(false), 1800);
-    } catch {
-      setHosxpReportCopied(false);
-    }
-  };
-
   return (
-    <div style={{ background: 'var(--surface-cool)' }}>
-      {dataStale && (
+    <div className="@container min-h-full bg-surface-page">
+      {/* Fetch failed but SWR still holds the last good payload — keep it on
+          screen with its timestamp (Constitution VI). */}
+      {d.dataStale && (
         <ErrorState
           variant="banner"
           message="การเชื่อมต่อล้มเหลว — แสดงข้อมูลเดิมจากแคช"
-          lastUpdatedAt={updatedAt}
-          onRetry={refreshAll}
+          lastUpdatedAt={d.updatedAt}
+          remedy="ระบบจะลองใหม่อัตโนมัติทุก 30 วินาที หรือกด ลองใหม่"
+          onRetry={d.refreshAll}
         />
       )}
-      {showOnboardingError && (
-        <div
-          role="alert"
-          className="flex items-start gap-3 border-b px-5 py-3 font-mono text-[14px] leading-snug"
-          style={{
-            background: 'color-mix(in srgb, var(--risk-high) 10%, white)',
-            borderColor: 'var(--risk-high)',
-            color: 'var(--ink-navy)',
-          }}
-        >
-          <div
-            className="shrink-0 rounded px-1.5 py-0.5 font-semibold uppercase tracking-wider"
-            style={{
-              background: 'var(--risk-high)',
-              color: 'white',
-              fontSize: '10px',
-            }}
-          >
-            HOSxP WEBHOOK
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold">ไม่สามารถอัปเดต webhook_setting บน HOSxP</div>
-            <div className="mt-0.5 truncate" style={{ color: 'var(--ink-navy-dim)' }}>
-              {onboardingState?.error}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setOnboardingErrorDismissed(true)}
-            className="shrink-0 px-2 py-0.5 uppercase tracking-wider"
-            style={{
-              border: '1px solid var(--rule-strong)',
-              background: 'white',
-              color: 'var(--ink-navy-dim)',
-              fontSize: '10px',
-            }}
-          >
-            ซ่อน
-          </button>
-        </div>
-      )}
-      <div
-        className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_520px]"
-        style={{ alignItems: 'start' }}
-      >
-        {/* ═══════════════════ LEFT COLUMN ═══════════════════ */}
-        <div className="min-w-0 border-r border-[var(--rule-strong)]">
-          {/* 00 — Dashboard-specific control strip */}
-          <div
-            className="flex flex-wrap items-center gap-3 bg-white px-5 py-2 font-mono text-[13px]"
-            style={{ borderBottom: '1px solid var(--rule-strong)', color: 'var(--ink-navy-dim)' }}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{
-                  background: sseMeta.color,
-                  boxShadow: `0 0 0 3px color-mix(in srgb, ${sseMeta.color} 25%, transparent)`,
-                }}
-                aria-hidden="true"
-              />
-              <span className="font-semibold text-[var(--ink-navy)]">{sseMeta.chip}</span>
-            </span>
-            <span className="tabular-nums">
-              <span className="font-semibold text-[var(--ink-navy)]">{freshCount}</span>
-              <span className="text-[var(--ink-navy-muted)]">/{hospitals.length}</span> ข้อมูลสด
-            </span>
-            <OnlineUsersBadge />
-            {updatedAt && (
-              <span className="tabular-nums">
-                UPDATED{' '}
-                <span className="font-semibold text-[var(--ink-navy)]">
-                  {new Date(updatedAt).toLocaleTimeString('th-TH', {
-                    timeZone: 'Asia/Bangkok',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: false,
-                  })}
-                </span>
-              </span>
-            )}
-            <span className="text-[var(--ink-navy-muted)]">· {hospitals.length} NODES</span>
-            <button
-              type="button"
-              onClick={() => setHosxpSyncDialogOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-sm border px-2 py-1 transition-colors hover:bg-[var(--accent-navy-soft)]"
-              style={{
-                borderColor:
-                  hosxpSyncStatus === 'ERROR'
-                    ? 'var(--risk-high)'
-                    : hosxpSyncStatus === 'RUNNING' || hosxpSyncStatus === 'QUERYING'
-                      ? 'var(--risk-low)'
-                      : 'var(--rule-strong)',
-                background:
-                  hosxpSyncStatus === 'ERROR'
-                    ? 'color-mix(in srgb, var(--risk-high) 8%, white)'
-                    : hosxpSyncStatus === 'RUNNING' || hosxpSyncStatus === 'QUERYING'
-                      ? 'color-mix(in srgb, var(--risk-low) 8%, white)'
-                      : 'white',
-                color: hosxpSyncStatus === 'ERROR' ? 'var(--risk-high)' : 'var(--ink-navy-dim)',
-              }}
-              title={hosxpSyncDetail}
-            >
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{
-                  background:
-                    hosxpSyncStatus === 'ERROR'
-                      ? 'var(--risk-high)'
-                      : hosxpSyncStatus === 'RUNNING' || hosxpSyncStatus === 'QUERYING'
-                        ? 'var(--risk-low)'
-                        : 'var(--ink-navy-muted)',
-                }}
-                aria-hidden="true"
-              />
-              <span className="font-semibold text-[var(--ink-navy)]">HOSxP SYNC</span>
-              <span>{hosxpSyncStatus}</span>
-              <Info className="h-3 w-3" aria-hidden="true" />
-            </button>
-
-            <div className="ml-auto flex items-center gap-1.5">
-              <button
-                onClick={() => triggerSync()}
-                disabled={syncing}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border bg-white px-2.5 py-1.5 font-mono text-[13px] font-medium tracking-[0.06em] transition-colors hover:bg-[var(--accent-navy-soft)] disabled:opacity-50"
-                style={{ borderColor: 'var(--rule-strong)', color: 'var(--ink-navy-dim)' }}
-                title="ดึงข้อมูลทันที"
-              >
-                <RefreshCw className={cn('h-3 w-3', syncing && 'animate-spin')} />
-                ดึงข้อมูล
-              </button>
-              <button
-                onClick={toggleKiosk}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2.5 py-1.5 font-mono text-[13px] font-semibold tracking-[0.06em] text-white transition-colors"
-                style={{ background: 'var(--accent-navy)' }}
-                title="เปิดโหมดจอภาพ (Kiosk Mode)"
-              >
-                <Monitor className="h-3.5 w-3.5" />
-                โหมดจอภาพ
-              </button>
-            </div>
-          </div>
-
-          {/* 01 — Alert ribbon */}
-          <AlertBar alerts={alerts} />
-
-          {/* 02 — Province vitals strip */}
-          <ProvinceVitalsStrip summary={summary} trends={trends} continuum={continuum} />
-
-          {/* 03 — HIGH-risk & active labor */}
-          <div className="bg-white p-5">
-            <HighRiskPatientList
-              patients={highRiskPatients}
-              isLoading={hrLoading}
-              ancFallback={ancFallback}
-              totalActive={summary?.totalActive}
-              totalHigh={summary?.totalHigh}
+      <div className="flex flex-col gap-5 px-4 py-5 md:px-6">
+        <PageHeader
+          title="ภาพรวมจังหวัดน่าน"
+          subtitle="ผู้คลอดและหญิงตั้งครรภ์ทุกโรงพยาบาลที่ส่งข้อมูลเข้า NN-LRMS"
+          freshness={{ lastSyncAt: d.updatedAt, label: 'ข้อมูลหน้านี้ ณ' }}
+          actions={
+            <DashboardHeaderActions
+              sseState={d.sseState}
+              hosxpStatus={d.hosxpStatus}
+              hosxpDetail={d.hosxpDetail}
+              onOpenHosxp={() => setHosxpOpen(true)}
+              syncing={d.syncing}
+              onSync={() => void d.triggerSync()}
+              onKiosk={toggleKiosk}
             />
-
-            {/* 05 — Stage KPIs */}
-            <div className="mt-6">
-              <SectionLabel idx={5} right={<span>CARE CONTINUUM</span>}>
-                Stage KPIs
-              </SectionLabel>
-              <div className="mt-2.5">
-                <StageKPICards stageKPIs={stageKPIs} />
-              </div>
-            </div>
-
-            {/* 06 — Shift summary */}
-            <div className="mt-6">
-              <ShiftSummary trends={trends} />
-            </div>
-          </div>
-        </div>
-
-        {/* ═══════════════════ RIGHT COLUMN (tall, sticky) ═══════════════════
-            Outer <aside> fills the grid cell (= left column height) so there's
-            never dead whitespace beside the left content; the inner wrapper is
-            `position: sticky` so the map stays pinned under the navbar while
-            the left column scrolls. Height of the sticky block =
-            viewport − navbar. */}
-        <aside className="hidden bg-white lg:block" style={{ alignSelf: 'stretch' }}>
-          <div
-            className="flex flex-col"
-            style={{
-              position: 'sticky',
-              top: 0,
-              height: 'calc(100vh - 60px)',
-            }}
-          >
-            <div className="flex items-center justify-between border-b border-[var(--rule-strong)] px-4 py-2.5">
-              <div className="flex items-baseline gap-2.5">
-                <span className="font-mono text-[12px] font-bold tracking-[0.18em] text-[var(--accent-navy)]">
-                  03
-                </span>
-                <span className="font-mono text-[14px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-navy)]">
-                  Province overview
-                </span>
-                <span className="font-mono text-[12px] text-[var(--ink-navy-muted)]">
-                  {onlineCount}/{hospitals.length} ONLINE
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setOverviewMode('map')}
-                  className={cn(
-                    'cursor-pointer border-b-[1.5px] bg-transparent px-2 py-0.5 font-mono text-[12px] tracking-[0.1em]',
-                    overviewMode === 'map' ? 'font-semibold' : 'font-normal',
-                  )}
-                  style={{
-                    color: overviewMode === 'map' ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
-                    borderColor: overviewMode === 'map' ? 'var(--accent-navy)' : 'transparent',
-                  }}
-                >
-                  MAP
-                </button>
-                <button
-                  onClick={() => setOverviewMode('list')}
-                  className={cn(
-                    'cursor-pointer border-b-[1.5px] bg-transparent px-2 py-0.5 font-mono text-[12px] tracking-[0.1em]',
-                    overviewMode === 'list' ? 'font-semibold' : 'font-normal',
-                  )}
-                  style={{
-                    color: overviewMode === 'list' ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
-                    borderColor: overviewMode === 'list' ? 'var(--accent-navy)' : 'transparent',
-                  }}
-                >
-                  LIST
-                </button>
-                <button
-                  onClick={() => setOverviewOpen(true)}
-                  className="ml-1 inline-flex cursor-pointer items-center gap-1 rounded-sm bg-transparent px-1.5 py-0.5 font-mono text-[12px] tracking-[0.1em] transition-colors hover:bg-[var(--accent-navy-soft)]"
-                  style={{ color: 'var(--ink-navy-muted)' }}
-                  aria-label="ขยายแผนที่เต็มจอ"
-                  title="ขยายเต็มจอ"
-                >
-                  <Expand className="h-3 w-3" />
-                  EXPAND
-                </button>
-              </div>
-            </div>
-
-            {/* Content: map OR list fills the rest of the height */}
-            <div ref={overviewColRef} className="flex min-h-0 flex-1 flex-col">
-              {overviewMode === 'map' ? (
-                <>
-                  {/* Map sized by the user's draggable split (default 40%);
-                    the hospital list below takes the remaining space. */}
-                  <div className="min-h-0" style={{ flex: `0 0 ${mapShare}%` }}>
-                    <ProvinceMap
-                      hospitals={hospitals}
-                      selected={selectedHospital}
-                      onSelect={openHospitalDetail}
-                      size="full"
-                    />
-                  </div>
-                  {/* Draggable divider — pointer-drag (or ArrowUp/ArrowDown)
-                    resizes the map / list split; persisted to localStorage. */}
-                  <div
-                    role="separator"
-                    aria-orientation="horizontal"
-                    aria-valuemin={MAP_SHARE_MIN}
-                    aria-valuemax={MAP_SHARE_MAX}
-                    aria-valuenow={Math.round(mapShare)}
-                    aria-label="ปรับสัดส่วนแผนที่ / รายชื่อโรงพยาบาล"
-                    tabIndex={0}
-                    title="ลากเพื่อปรับสัดส่วนแผนที่ / รายชื่อ"
-                    className="group flex h-2 shrink-0 cursor-row-resize touch-none select-none items-center justify-center border-t border-[var(--rule-strong)] bg-[var(--surface-cool)] outline-none transition-colors hover:bg-[var(--accent-navy-soft)] focus-visible:bg-[var(--accent-navy-soft)]"
-                    onPointerDown={startMapDrag}
-                    onPointerMove={moveMapDrag}
-                    onPointerUp={endMapDrag}
-                    onPointerCancel={endMapDrag}
-                    onKeyDown={onDividerKeyDown}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="h-1 w-10 rounded-full border border-[var(--rule-strong)] bg-white transition-colors group-hover:border-[var(--accent-navy)] group-hover:bg-[var(--accent-navy-soft)]"
-                    />
-                  </div>
-                  {/* Compact hospital list under the map for at-a-glance.
-                    Clicking a row navigates to /hospitals/<hcode>; the
-                    onSelect callback still fires so the map marker briefly
-                    highlights during the route transition. Mirrors the
-                    mobile-fallback HospitalTable below — sidebar lists are
-                    primary navigation, the overview-dialog list stays modal. */}
-                  <div
-                    className="min-h-0 overflow-auto border-t border-[var(--rule-strong)]"
-                    style={{ flex: '1 1 auto' }}
-                  >
-                    <div className="sticky top-0 z-10 flex justify-between border-b border-[var(--rule-hair)] bg-white px-3 py-1 font-mono text-[12px] tracking-[0.12em] text-[var(--ink-navy-muted)]">
-                      <span>HOSPITAL · SORTED BY SEVERITY</span>
-                      <span>{hospitals.length}</span>
-                    </div>
-                    <HospitalTable
-                      hospitals={hospitals}
-                      selected={selectedHospital}
-                      onSelect={openHospitalDetail}
-                      navigateOnClick
-                    />
-                  </div>
-                </>
-              ) : (
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <div className="sticky top-0 z-10 flex justify-between border-b border-[var(--rule-strong)] bg-white px-3 py-1.5 font-mono text-[12px] tracking-[0.12em] text-[var(--ink-navy-muted)]">
-                    <span>HOSPITAL · SORTED BY SEVERITY</span>
-                    <span>{hospitals.length} NODES</span>
-                  </div>
-                  <HospitalTable
-                    hospitals={hospitals}
-                    selected={selectedHospital}
-                    onSelect={openHospitalDetail}
-                    navigateOnClick
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </aside>
-
-        {/* Mobile fallback — map stacks below left column on narrow screens.
-            Kept simple: single fixed height, no sticky. */}
-        <div className="border-t border-[var(--rule-strong)] bg-white lg:hidden">
-          <div className="flex items-center justify-between border-b border-[var(--rule-strong)] px-4 py-2">
-            <span className="font-mono text-[14px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-navy)]">
-              Province overview
-            </span>
-            <button
-              onClick={() => setOverviewOpen(true)}
-              className="inline-flex items-center gap-1 rounded-sm border border-[var(--rule-strong)] px-2 py-0.5 font-mono text-[12px] tracking-[0.1em] text-[var(--ink-navy-dim)]"
-            >
-              <Expand className="h-3 w-3" />
-              EXPAND
-            </button>
-          </div>
-          <div style={{ height: 360 }}>
-            <ProvinceMap
-              hospitals={hospitals}
-              selected={selectedHospital}
-              onSelect={openHospitalDetail}
+          }
+        />
+        {d.onboardingError && !onboardingDismissed && (
+          <OnboardingWebhookAlert error={d.onboardingError} onDismiss={() => setOnboardingDismissed(true)} />
+        )}
+        {/* Two columns only when the page itself (not the viewport) is wide
+            enough: the shell sidebar takes 232px. */}
+        <div className="grid grid-cols-1 items-start gap-5 @min-[1160px]:grid-cols-[minmax(0,1fr)_400px]">
+          <div className="flex min-w-0 flex-col gap-5">
+            <AlertsSection alerts={d.alerts} />
+            <LaborVitalsSection summary={d.summary} trends={d.trends} />
+            {d.continuum && <ContinuumSection continuum={d.continuum} />}
+            <HighRiskSection
+              patients={d.highRiskPatients}
+              isLoading={d.hrLoading}
+              totalActive={d.summary.totalActive}
+              totalHigh={d.summary.totalHigh}
+              ancFallback={d.ancFallback}
             />
+            <CareStageSection stageKPIs={d.stageKPIs} />
+            <ShiftSummary trends={d.trends} />
           </div>
-          {/* Primary hospital list below the GIS map — clicking a row
-              navigates to /hospitals/<hcode>. The select callback still
-              fires so the map marker briefly highlights during the route
-              transition. Other HospitalTable instances on this page (kiosk
-              strip, overview dialog) keep the toggle-select-and-open-modal
-              behaviour. */}
-          <HospitalTable
-            hospitals={hospitals}
+          <ProvinceOverviewPanel
+            hospitals={d.hospitals}
+            onlineCount={d.onlineCount}
             selected={selectedHospital}
             onSelect={openHospitalDetail}
-            navigateOnClick
+            // One Leaflet map at a time: while the dialog is open the panel
+            // behind it shows its list view (the map unmounts).
+            mode={overviewOpen ? 'list' : overviewMode}
+            onModeChange={setOverviewMode}
+            onExpand={() => setOverviewOpen(true)}
           />
         </div>
       </div>
 
-      {/* Footer */}
-      <div
-        className="flex justify-between border-t border-[var(--rule-strong)] px-5 py-2.5 font-mono text-[12px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
-        style={{ background: 'var(--surface-cool)' }}
-      >
-        <span>NN-LRMS · PPHO WAR-ROOM · MCH PROVINCIAL NETWORK</span>
-        <span className="flex items-center gap-3">
-          <span
-            className="inline-flex items-center gap-1"
-            style={{ color: sseState === 'connected' ? undefined : 'var(--risk-medium)' }}
-          >
-            {sseMeta.stream}
-          </span>
-          <span>
-            {freshCount}/{hospitals.length} DATA FRESH
-          </span>
-          <OnlineUsersBadge />
-          <button
-            onClick={toggleKiosk}
-            className="hidden items-center gap-1 rounded-sm border border-[var(--rule-strong)] bg-white px-2 py-0.5 text-[var(--ink-navy-dim)] hover:bg-[var(--accent-navy-soft)] hover:text-[var(--accent-navy)] md:inline-flex"
-            title="เปิดโหมดจอภาพ"
-          >
-            <Maximize2 className="h-3 w-3" />
-            KIOSK
-          </button>
-        </span>
-      </div>
-
-      {/* Hospital detail dialog — opens from map pin or table row */}
       <HospitalDetailDialog
         hcode={detailHcode}
-        hospital={hospitals.find((h) => h.hcode === detailHcode)}
-        allHighRiskPatients={highRiskPatients}
+        hospital={d.hospitals.find((h) => h.hcode === detailHcode)}
+        allHighRiskPatients={d.highRiskPatients}
         open={detailHcode !== null}
         onClose={() => setDetailHcode(null)}
       />
-
-      {/* Section 03 expand dialog — full-viewport map + list */}
-      <Dialog open={overviewOpen} onOpenChange={setOverviewOpen}>
-        <DialogContent
-          className="!max-w-[96vw] h-[92vh] w-[96vw] gap-0 overflow-hidden p-0 sm:max-w-[96vw]"
-          style={{ background: 'var(--surface-cool)' }}
-        >
-          <DialogHeader
-            className="flex flex-row items-center justify-between gap-4 border-b px-5 py-3"
-            style={{ borderColor: 'var(--rule-strong)', background: 'var(--accent-navy)' }}
-          >
-            <div className="flex items-baseline gap-3">
-              <span className="font-mono text-[12px] font-bold tracking-[0.18em] text-[#ffe89a]">
-                03
-              </span>
-              <DialogTitle className="text-[18px] font-semibold uppercase tracking-[0.08em] text-white">
-                Province overview
-              </DialogTitle>
-              <DialogDescription className="font-mono text-[13px] tracking-[0.12em] text-white/70">
-                {onlineCount}/{hospitals.length} ONLINE · ESC TO CLOSE
-              </DialogDescription>
-            </div>
-            <div className="flex gap-1 pr-10">
-              <button
-                onClick={() => setOverviewMode('map')}
-                className={cn(
-                  'cursor-pointer rounded-sm px-3 py-1.5 font-mono text-[13px] tracking-[0.1em] transition-colors',
-                  overviewMode === 'map'
-                    ? 'bg-white font-semibold'
-                    : 'bg-white/10 text-white hover:bg-white/20',
-                )}
-                style={{ color: overviewMode === 'map' ? 'var(--accent-navy-strong)' : undefined }}
-              >
-                MAP
-              </button>
-              <button
-                onClick={() => setOverviewMode('list')}
-                className={cn(
-                  'cursor-pointer rounded-sm px-3 py-1.5 font-mono text-[13px] tracking-[0.1em] transition-colors',
-                  overviewMode === 'list'
-                    ? 'bg-white font-semibold'
-                    : 'bg-white/10 text-white hover:bg-white/20',
-                )}
-                style={{ color: overviewMode === 'list' ? 'var(--accent-navy-strong)' : undefined }}
-              >
-                LIST
-              </button>
-            </div>
-          </DialogHeader>
-
-          {/* Split: large map on left, hospital list on right */}
-          <div
-            className="grid flex-1 overflow-hidden"
-            style={{
-              gridTemplateColumns:
-                overviewMode === 'list' ? '1fr' : 'minmax(0, 2fr) minmax(420px, 1fr)',
-              minHeight: 0,
-            }}
-          >
-            {overviewMode === 'map' && (
-              <div
-                className="min-h-0 border-r bg-white"
-                style={{ borderColor: 'var(--rule-strong)' }}
-              >
-                <ProvinceMap
-                  hospitals={hospitals}
-                  selected={selectedHospital}
-                  onSelect={openHospitalDetail}
-                  size="full"
-                />
-              </div>
-            )}
-            <div className="flex min-h-0 flex-col overflow-hidden bg-white p-4">
-              <div className="mb-2 flex justify-between px-1 font-mono text-[12px] tracking-[0.12em] text-[var(--ink-navy-muted)]">
-                <span>HOSPITAL · SORTED BY SEVERITY</span>
-                <span>{hospitals.length} NODES</span>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto">
-                <HospitalTable
-                  hospitals={hospitals}
-                  selected={selectedHospital}
-                  onSelect={openHospitalDetail}
-                />
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={hosxpSyncDialogOpen} onOpenChange={setHosxpSyncDialogOpen}>
-        <DialogContent className="max-h-[92vh] w-[min(1120px,calc(100vw-32px))] max-w-none gap-0 overflow-hidden p-0">
-          <DialogHeader
-            className="border-b px-5 py-4"
-            style={{ borderColor: 'var(--rule-strong)', background: 'white' }}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <DialogTitle className="font-mono text-[17px] uppercase tracking-[0.08em] text-[var(--ink-navy)]">
-                HOSxP sync status
-              </DialogTitle>
-              <button
-                type="button"
-                onClick={copyHosxpSyncReport}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border px-2 py-1 font-mono text-[13px] uppercase tracking-[0.08em] text-[var(--ink-navy-dim)] hover:bg-[var(--surface-cool)]"
-                style={{ borderColor: 'var(--rule-strong)' }}
-              >
-                <Copy className="h-3.5 w-3.5" />
-                {hosxpReportCopied ? 'Copied' : 'Copy report'}
-              </button>
-            </div>
-            <DialogDescription className="text-[15px] text-[var(--ink-navy-dim)]">
-              {hosxpSyncHelp}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[calc(92vh-96px)] space-y-3 overflow-y-auto bg-white p-5 text-[15px] text-[var(--ink-navy-dim)]">
-            <div className="grid grid-cols-[150px_1fr] gap-x-4 gap-y-2 font-mono text-[14px]">
-              <span className="text-[var(--ink-navy-muted)]">STATUS</span>
-              <span className="font-semibold text-[var(--ink-navy)]">{hosxpSyncStatus}</span>
-              <span className="text-[var(--ink-navy-muted)]">PHASE</span>
-              <span>{hosxpSyncState?.phase ?? 'unknown'}</span>
-              <span className="text-[var(--ink-navy-muted)]">HCODE</span>
-              <span>{hosxpSyncState?.hcode ?? 'unknown'}</span>
-              <span className="text-[var(--ink-navy-muted)]">CONNECTION</span>
-              <span>{hosxpSyncState?.connectionStatus ?? 'unknown'}</span>
-              <span className="text-[var(--ink-navy-muted)]">DB TYPE</span>
-              <span>{hosxpSyncState?.databaseType ?? 'not detected'}</span>
-              <span className="text-[var(--ink-navy-muted)]">INTERVAL</span>
-              <span>
-                {hosxpSyncState?.intervalMs
-                  ? `${Math.round(hosxpSyncState.intervalMs / 1000)} seconds`
-                  : 'not started'}
-              </span>
-              <span className="text-[var(--ink-navy-muted)]">LAST CYCLE</span>
-              <span>{formatSyncTime(hosxpSyncState?.lastRunAt)}</span>
-              <span className="text-[var(--ink-navy-muted)]">LAST SUCCESS</span>
-              <span>{formatSyncTime(hosxpSyncState?.lastSuccessAt)}</span>
-              <span className="text-[var(--ink-navy-muted)]">NEXT CYCLE</span>
-              <span>{formatSyncTime(hosxpSyncState?.nextRunAt)}</span>
-              <span className="text-[var(--ink-navy-muted)]">HOSPITAL SYNC</span>
-              <span>{formatSyncTime(hosxpSyncState?.hospitalLastSyncAt)}</span>
-              <span className="text-[var(--ink-navy-muted)]">PATIENTS</span>
-              <span>
-                IPT {hosxpSyncState?.activePatients ?? 0} active ·{' '}
-                {hosxpSyncState?.cachedPatients ?? 0} cached
-              </span>
-              <span className="text-[var(--ink-navy-muted)]">ACTIVE ANC</span>
-              <span>
-                {hosxpSyncState?.activeAncJourneys ?? 0} pregnancies · latest{' '}
-                {formatSyncTime(hosxpSyncState?.latestAncSyncedAt)}
-              </span>
-              <span className="text-[var(--ink-navy-muted)]">ANC SOURCE</span>
-              <span>
-                HOSxP {hosxpSyncState?.lastStats?.anc.sourcePatientsRead ?? 0} read ·{' '}
-                {hosxpSyncState?.lastStats?.anc.sourcePatientsMapped ?? 0} mapped ·{' '}
-                {hosxpSyncState?.lastStats?.anc.patientsSynced ?? 0} synced
-              </span>
-              <span className="text-[var(--ink-navy-muted)]">ANC VISITS</span>
-              <span>
-                {hosxpSyncState?.lastStats?.anc.servicesRead ?? 0} read ·{' '}
-                {hosxpSyncState?.lastStats?.anc.servicesMapped ?? 0} mapped
-              </span>
-              <span className="text-[var(--ink-navy-muted)]">ANC RISK DATA</span>
-              <span>
-                risk {hosxpSyncState?.lastStats?.anc.risksMapped ?? 0} · classifying{' '}
-                {hosxpSyncState?.lastStats?.anc.classifyingMapped ?? 0}
-              </span>
-              <span className="text-[var(--ink-navy-muted)]">HOSxP SOURCE READ</span>
-              <span>
-                IPT {hosxpSyncState?.lastStats?.activePatientsRead ?? 0} · partograph{' '}
-                {hosxpSyncState?.lastStats?.partographRowsRead ?? 0}
-              </span>
-              <span className="text-[var(--ink-navy-muted)]">REFERRALS</span>
-              <span>
-                {hosxpSyncState?.activeReferrals ?? 0} active · out{' '}
-                {hosxpSyncState?.outgoingReferrals ?? 0} · in{' '}
-                {hosxpSyncState?.incomingReferrals ?? 0}
-              </span>
-              <span className="text-[var(--ink-navy-muted)]">CYCLES</span>
-              <span>
-                {hosxpSyncState?.successCount ?? 0} successful / {hosxpSyncState?.cycleCount ?? 0}{' '}
-                attempted
-              </span>
-              {hosxpSyncState?.statusCode && (
-                <>
-                  <span className="text-[var(--ink-navy-muted)]">HTTP</span>
-                  <span>{hosxpSyncState.statusCode}</span>
-                </>
-              )}
-              {hosxpSyncState?.stage && (
-                <>
-                  <span className="text-[var(--ink-navy-muted)]">FAILED AT</span>
-                  <span>{hosxpSyncState.stage}</span>
-                </>
-              )}
-            </div>
-
-            {(hosxpSyncState?.error || hosxpSyncState?.lastError) && (
-              <div
-                className="border px-3 py-2 font-mono text-[14px] leading-relaxed"
-                style={{
-                  borderColor: 'var(--risk-high)',
-                  background: 'color-mix(in srgb, var(--risk-high) 7%, white)',
-                  color: 'var(--ink-navy)',
-                }}
-              >
-                <div className="font-semibold text-[var(--risk-high)]">
-                  {hosxpSyncState.error ?? 'HOSxP sync cycle failed'}
-                </div>
-                {hosxpSyncState.detail && <div className="mt-1">{hosxpSyncState.detail}</div>}
-                {hosxpSyncState.lastError && <div className="mt-1">{hosxpSyncState.lastError}</div>}
-              </div>
-            )}
-
-            {!hosxpSyncState?.error && !hosxpSyncState?.lastError && (
-              <div
-                className="border px-3 py-2 font-mono text-[14px] leading-relaxed"
-                style={{
-                  borderColor: 'var(--rule-strong)',
-                  background: 'var(--surface-cool)',
-                  color: 'var(--ink-navy)',
-                }}
-              >
-                {hosxpSyncState?.lastStats?.anc.error
-                  ? `ANC sync failed: ${hosxpSyncState.lastStats.anc.error}`
-                  : hosxpSyncState?.lastStats?.anc.skippedReason
-                    ? `ANC not synced: ${hosxpSyncState.lastStats.anc.skippedReason}`
-                    : hosxpSyncState?.phase === 'querying_hosxp'
-                      ? 'กำลัง query HOSxP: active labour patients, active ANC, ANC visits และ partograph observations'
-                      : hosxpSyncState?.successCount
-                        ? `รอบล่าสุดสำเร็จ: IPT ${hosxpSyncState.lastStats?.activePatientsSynced ?? 0}, ANC ${hosxpSyncState.lastStats?.anc.patientsSynced ?? 0}, visits ${hosxpSyncState.lastStats?.anc.servicesMapped ?? 0}, partograph ${hosxpSyncState.lastStats?.partographRowsUpserted ?? 0}`
-                        : 'เริ่ม loop แล้ว กำลังรอผล sync รอบแรกจาก HOSxP'}
-              </div>
-            )}
-
-            <div
-              className="border font-mono text-[14px]"
-              style={{ borderColor: 'var(--rule-strong)' }}
-            >
-              <div
-                className="flex items-center justify-between border-b px-3 py-2"
-                style={{ borderColor: 'var(--rule-hair)', background: 'var(--surface-cool)' }}
-              >
-                <span className="font-semibold uppercase tracking-[0.08em] text-[var(--ink-navy)]">
-                  Step log
-                </span>
-                <span className="text-[var(--ink-navy-muted)]">
-                  latest cycle · {hosxpSyncState?.lastSteps?.length ?? 0} entries
-                </span>
-              </div>
-              <div
-                className="max-h-[260px] overflow-auto divide-y"
-                style={{ borderColor: 'var(--rule-hair)' }}
-              >
-                {(hosxpSyncState?.lastSteps?.length ?? 0) === 0 ? (
-                  <div className="px-3 py-3 text-[var(--ink-navy-muted)]">
-                    No step log recorded yet. Wait for the next sync cycle or reload the dashboard.
-                  </div>
-                ) : (
-                  hosxpSyncState?.lastSteps?.map((step, index) => {
-                    const tone =
-                      step.status === 'error'
-                        ? 'var(--risk-high)'
-                        : step.status === 'warning'
-                          ? 'var(--risk-medium)'
-                          : step.status === 'success'
-                            ? 'var(--risk-low)'
-                            : 'var(--ink-navy-muted)';
-                    return (
-                      <div
-                        key={`${step.cycle}-${step.name}-${index}`}
-                        className="grid grid-cols-[92px_1fr] gap-3 px-3 py-2"
-                      >
-                        <div className="text-[var(--ink-navy-muted)]">
-                          <div>{formatSyncTime(step.at)}</div>
-                          <div className="mt-0.5 uppercase" style={{ color: tone }}>
-                            {step.status}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="font-semibold text-[var(--ink-navy)]">{step.name}</div>
-                          <div className="mt-0.5 text-[var(--ink-navy-dim)]">{step.message}</div>
-                          {step.counts && (
-                            <div className="mt-1 text-[var(--ink-navy-muted)]">
-                              {formatCounts(step.counts)}
-                            </div>
-                          )}
-                          {step.detail && (
-                            <div className="mt-1 whitespace-pre-wrap text-[var(--risk-high)]">
-                              {step.detail}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="border-t pt-3" style={{ borderColor: 'var(--rule-hair)' }}>
-              <div className="font-mono text-[13px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
-                Checks
-              </div>
-              <div className="mt-1 leading-relaxed">
-                The sync starts only when the user opens this page from a valid HOSxP/BMS session
-                and the hospital code is active in NN-LRMS. If status is ERROR, fix the item above
-                and reload this page.
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ProvinceOverviewDialog
+        open={overviewOpen}
+        onOpenChange={setOverviewOpen}
+        hospitals={d.hospitals}
+        onlineCount={d.onlineCount}
+        selected={selectedHospital}
+        onSelect={openHospitalDetail}
+        mode={overviewMode}
+        onModeChange={setOverviewMode}
+      />
+      <HosxpSyncDialog
+        open={hosxpOpen}
+        onOpenChange={setHosxpOpen}
+        state={d.hosxpSyncState}
+        status={d.hosxpStatus}
+        help={d.hosxpHelp}
+      />
     </div>
   );
 }

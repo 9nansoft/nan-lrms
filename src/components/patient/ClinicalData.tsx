@@ -1,7 +1,7 @@
-// ClinicalData — 8-tile grid of clinical measurements. Redesigned 2026-04-21
-// (v3): each metric has a clinical normal band; abnormal / borderline values
-// get tinted backgrounds + status badges so the clinician's eye lands on
-// the clinically-actionable numbers first.
+// ClinicalData — grid of clinical measurements. Each metric has a clinical
+// normal band; abnormal / borderline values get tinted backgrounds (STATUS_TONE
+// token classes) + Thai status badges so the clinician's eye lands on the
+// clinically-actionable numbers first. Severity thresholds are unchanged.
 'use client';
 
 import {
@@ -19,6 +19,9 @@ import {
   Stethoscope,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { STATUS_TONE, type StatusTone } from '@/config/status-tone';
+import { GA_TERM_LABEL_TH, classifyGaTerm } from '@/config/obstetric-display';
+import { cn } from '@/lib/utils';
 
 interface ClinicalDataProps {
   gravida: number | null;
@@ -49,23 +52,12 @@ interface ClinicalDataProps {
 
 type Severity = 'normal' | 'borderline' | 'abnormal' | 'neutral';
 
-function sevColor(s: Severity): string {
-  switch (s) {
-    case 'abnormal':   return 'var(--risk-high)';
-    case 'borderline': return 'var(--risk-medium)';
-    case 'normal':     return 'var(--risk-low)';
-    default:           return 'var(--accent-navy)';
-  }
-}
-
-function sevBg(s: Severity): string {
-  switch (s) {
-    case 'abnormal':   return 'color-mix(in srgb, #ef4444 12%, white)';
-    case 'borderline': return 'color-mix(in srgb, #eab308 12%, white)';
-    case 'normal':     return 'color-mix(in srgb, #22c55e 8%, white)';
-    default:           return 'white';
-  }
-}
+const SEV_TONE: Record<Severity, StatusTone | null> = {
+  abnormal: 'danger',
+  borderline: 'warn',
+  normal: 'ok',
+  neutral: null,
+};
 
 // Clinical thresholds — these mirror the CPD rule set used in the risk
 // scorer; duplicated here only for UI severity so the tile can render a
@@ -145,7 +137,6 @@ function sevGa(weeks: number | null): Severity {
 function Tile({
   icon,
   label,
-  labelEn,
   value,
   unit,
   severity = 'neutral',
@@ -153,64 +144,48 @@ function Tile({
 }: {
   icon: ReactNode;
   label: string;
-  labelEn: string;
   value: ReactNode;
   unit?: string;
   severity?: Severity;
   note?: string;
 }) {
-  const c = sevColor(severity);
-  const bg = sevBg(severity);
+  const tone = SEV_TONE[severity];
+  const t = tone ? STATUS_TONE[tone] : null;
   const showBadge = severity === 'abnormal' || severity === 'borderline';
   return (
     <div
-      className="relative flex flex-col gap-0.5 border px-2.5 py-2"
-      style={{
-        borderColor: 'var(--rule-strong)',
-        borderLeft: `3px solid ${c}`,
-        background: bg,
-      }}
+      className={cn(
+        'relative flex flex-col gap-0.5 rounded-xl border border-border border-l-4 px-2.5 py-2',
+        t ? cn(t.accent, t.tint) : 'border-l-brand bg-surface-card',
+      )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="inline-flex items-center gap-1.5" style={{ color: c }}>
-          <span className="flex h-3 w-3 items-center justify-center">{icon}</span>
-          <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.1em]">
-            {labelEn}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <div className="inline-flex items-center gap-1.5 text-label text-ink-muted">
+          <span aria-hidden="true" className="flex h-3.5 w-3.5 items-center justify-center">
+            {icon}
           </span>
+          {label}
         </div>
         {showBadge && (
           <span
-            className="inline-flex items-center gap-0.5 rounded-sm px-1 py-0.5 font-mono text-[9px] font-bold tracking-[0.06em] text-white"
-            style={{ background: c }}
+            className={cn(
+              'inline-flex shrink-0 items-center gap-0.5 rounded-full px-2 py-0.5 text-caption font-semibold',
+              severity === 'abnormal'
+                ? 'bg-danger text-white'
+                : 'border border-warn/40 bg-surface-card text-warn-text',
+            )}
           >
-            <AlertTriangle className="h-2.5 w-2.5" />
-            {severity === 'abnormal' ? 'ALERT' : 'WARN'}
+            <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+            {severity === 'abnormal' ? 'ผิดปกติ' : 'เฝ้าระวัง'}
           </span>
         )}
-        {severity === 'normal' && (
-          <span style={{ color: c }}>
-            <CheckCircle2 className="h-3 w-3" />
-          </span>
-        )}
+        {severity === 'normal' && <CheckCircle2 aria-hidden="true" className={cn('h-3.5 w-3.5', t?.text)} />}
       </div>
       <div className="mt-0.5 flex items-baseline gap-1">
-        <span
-          className="font-mono text-[20px] font-bold leading-none tabular-nums"
-          style={{
-            color: severity === 'neutral' ? 'var(--ink-navy)' : c,
-            letterSpacing: '-0.02em',
-          }}
-        >
-          {value}
-        </span>
-        {unit && (
-          <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">{unit}</span>
-        )}
+        <span className={cn('text-title tabular-nums', t ? t.text : 'text-ink')}>{value}</span>
+        {unit && <span className="text-caption text-ink-muted">{unit}</span>}
       </div>
-      <div className="font-mono text-[10px] text-[var(--ink-navy-dim)]">
-        {label}
-        {note && <span className="ml-1 text-[var(--ink-navy-muted)]">· {note}</span>}
-      </div>
+      {note && <div className="text-caption text-ink-muted">{note}</div>}
     </div>
   );
 }
@@ -279,59 +254,36 @@ export function ClinicalData({
     cervicalOpenCmAdmit != null || effacementPctAdmit != null ||
     (stationAdmit != null && stationAdmit !== '');
 
-  const dash = <span className="text-[var(--ink-navy-muted)]">—</span>;
+  const dash = <span className="text-ink-muted">—</span>;
+  const gaTerm = classifyGaTerm(gaWeeks);
   const weightSev = sevWeightGain(effectiveWeightDiff);
-  const weightColor = sevColor(weightSev);
-  const weightBg = sevBg(weightSev);
+  const weightTone = SEV_TONE[weightSev];
+  const wt = weightTone ? STATUS_TONE[weightTone] : null;
   const weightShowBadge = weightSev === 'abnormal' || weightSev === 'borderline';
 
   return (
-    <div
-      className="rounded-sm border"
-      style={{ borderColor: 'var(--rule-strong)' }}
-    >
-      <div
-        className="flex items-center gap-2 border-b px-3 py-2"
-        style={{
-          borderColor: 'var(--rule-strong)',
-          background: 'linear-gradient(135deg, var(--accent-navy-soft) 0%, white 60%)',
-        }}
-      >
-        <Activity className="h-4 w-4" style={{ color: 'var(--accent-navy)' }} />
-        <h3 className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[var(--ink-navy)]">
-          ข้อมูลทางคลินิก
-        </h3>
+    <div className="rounded-2xl border border-border bg-surface-card">
+      <div className="flex items-center gap-2 border-b border-border bg-brand-soft/40 px-3 py-2">
+        <Activity aria-hidden="true" className="h-4 w-4 text-brand" />
+        <h3 className="text-body-lg text-ink">ข้อมูลทางคลินิก</h3>
       </div>
-      <div className="grid grid-cols-2 gap-2 p-2 md:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-2 p-2">
         <Tile
           icon={<Activity className="h-3 w-3" />}
-          label={pregNo != null ? `ครรภ์ที่ ${pregNo}` : 'G_P_A_L'}
-          labelEn="OB FORMULA"
+          label={pregNo != null ? `ครรภ์ที่ ${pregNo}` : 'ครรภ์ G_P_A_L'}
           value={gpalText ?? dash}
         />
         <Tile
           icon={<Calendar className="h-3 w-3" />}
           label="อายุครรภ์"
-          labelEn="GA"
           value={gaText ?? dash}
-          unit="wk"
+          unit="สัปดาห์"
           severity={sevGa(gaWeeks)}
-          note={
-            gaWeeks == null
-              ? undefined
-              : gaWeeks < 34
-                ? 'Very Preterm'
-                : gaWeeks < 37
-                  ? 'Preterm'
-                  : gaWeeks > 41
-                    ? 'Post-term'
-                    : 'Term'
-          }
+          note={gaTerm ? GA_TERM_LABEL_TH[gaTerm] : undefined}
         />
         <Tile
           icon={<Baby className="h-3 w-3" />}
           label="ฝากครรภ์"
-          labelEn="ANC"
           value={ancCount != null ? ancCount : dash}
           unit="ครั้ง"
           severity={sevAnc(ancCount)}
@@ -348,7 +300,6 @@ export function ClinicalData({
         <Tile
           icon={<Ruler className="h-3 w-3" />}
           label="ส่วนสูง"
-          labelEn="HEIGHT"
           value={heightCm != null ? heightCm : dash}
           unit="ซม."
           severity={sevHeight(heightCm)}
@@ -365,65 +316,62 @@ export function ClinicalData({
 
         {/* Weight-gain — inline expression so the arrow + delta read as one cell */}
         <div
-          className="relative flex flex-col gap-0.5 border px-2.5 py-2"
-          style={{
-            borderColor: 'var(--rule-strong)',
-            borderLeft: `3px solid ${weightColor}`,
-            background: weightBg,
-          }}
+          className={cn(
+            'relative flex flex-col gap-0.5 rounded-xl border border-border border-l-4 px-2.5 py-2',
+            wt ? cn(wt.accent, wt.tint) : 'border-l-brand bg-surface-card',
+          )}
         >
-          <div className="flex items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-1.5" style={{ color: weightColor }}>
-              <Scale className="h-3 w-3" />
-              <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.1em]">
-                WEIGHT GAIN
-              </span>
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+            <div className="inline-flex items-center gap-1.5 text-label text-ink-muted">
+              <Scale aria-hidden="true" className="h-3.5 w-3.5" />
+              น้ำหนักที่เพิ่ม
             </div>
             {weightShowBadge && weightDiffKg != null && (
               <span
-                className="inline-flex items-center gap-0.5 rounded-sm px-1 py-0.5 font-mono text-[9px] font-bold tracking-[0.06em] text-white"
-                style={{ background: weightColor }}
+                className={cn(
+                  'inline-flex shrink-0 items-center gap-0.5 rounded-full px-2 py-0.5 text-caption font-semibold',
+                  weightSev === 'abnormal'
+                    ? 'bg-danger text-white'
+                    : 'border border-warn/40 bg-surface-card text-warn-text',
+                )}
               >
-                <AlertTriangle className="h-2.5 w-2.5" />
-                {weightSev === 'abnormal' ? 'ALERT' : 'WARN'}
+                <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+                {weightSev === 'abnormal' ? 'ผิดปกติ' : 'เฝ้าระวัง'}
               </span>
             )}
           </div>
-          <div className="mt-0.5 font-mono text-[13px] tabular-nums text-[var(--ink-navy-dim)]">
+          <div className="mt-0.5 text-body tabular-nums text-ink-muted">
             {hasFullWeight && preWeight !== null && effectiveWeightDiff != null ? (
               <>
                 <span>{preWeight}</span>
-                <span className="mx-0.5 text-[var(--ink-navy-muted)]">→</span>
-                <span className="font-semibold text-[var(--ink-navy)]">{weightKg}</span>
-                <span className="mx-0.5 text-[var(--ink-navy-muted)]">=</span>
-                <span className="font-bold" style={{ color: weightColor }}>
+                <span className="mx-0.5 text-ink-muted">→</span>
+                <span className="font-semibold text-ink">{weightKg}</span>
+                <span className="mx-0.5 text-ink-muted">=</span>
+                <span className={cn('font-bold', wt?.text)}>
                   {effectiveWeightDiff >= 0 ? '+' : ''}{effectiveWeightDiff}
                 </span>
-                <span className="ml-0.5 text-[10px] text-[var(--ink-navy-muted)]">กก.</span>
+                <span className="ml-0.5 text-caption text-ink-muted">กก.</span>
               </>
             ) : effectiveWeightDiff != null ? (
               <>
-                <span className="font-bold" style={{ color: weightColor }}>
+                <span className={cn('font-bold', wt?.text)}>
                   {effectiveWeightDiff >= 0 ? '+' : ''}{effectiveWeightDiff}
                 </span>
-                <span className="ml-0.5 text-[10px] text-[var(--ink-navy-muted)]">กก.</span>
+                <span className="ml-0.5 text-caption text-ink-muted">กก.</span>
               </>
             ) : (
               dash
             )}
           </div>
-          <div className="font-mono text-[10px] text-[var(--ink-navy-dim)]">
+          <div className="text-caption text-ink-muted">
             ส่วนต่างน้ำหนัก
-            {effectiveWeightDiff != null && effectiveWeightDiff > 20 && (
-              <span className="ml-1 text-[var(--ink-navy-muted)]">· เกินเกณฑ์</span>
-            )}
+            {effectiveWeightDiff != null && effectiveWeightDiff > 20 && <span className="ml-1">· เกินเกณฑ์</span>}
           </div>
         </div>
 
         <Tile
           icon={<Ruler className="h-3 w-3" />}
           label="ยอดมดลูก"
-          labelEn="FUNDAL HT."
           value={fundalHeightCm != null ? fundalHeightCm : dash}
           unit="ซม."
           severity={sevFundal(fundalHeightCm)}
@@ -431,7 +379,6 @@ export function ClinicalData({
         <Tile
           icon={<Baby className="h-3 w-3" />}
           label="น้ำหนักเด็ก U/S"
-          labelEn="US WEIGHT"
           value={usWeightG != null ? usWeightG.toLocaleString() : dash}
           unit="ก."
           severity={sevUsWeight(usWeightG)}
@@ -447,8 +394,7 @@ export function ClinicalData({
         />
         <Tile
           icon={<Droplets className="h-3 w-3" />}
-          label="Hematocrit"
-          labelEn="HCT"
+          label="ฮีมาโตคริต (Hct)"
           value={hematocritPct != null ? hematocritPct : dash}
           unit="%"
           severity={sevHct(hematocritPct)}
@@ -470,21 +416,14 @@ export function ClinicalData({
           a row of empty tiles. */}
       {(hasAdmitVitals || hasAdmitCervix) && (
         <>
-          <div
-            className="border-t px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-navy-dim)]"
-            style={{
-              borderColor: 'var(--rule-strong)',
-              background: 'color-mix(in srgb, var(--accent-navy) 4%, white)',
-            }}
-          >
-            แรกรับ · ADMISSION SNAPSHOT
+          <div className="border-t border-border bg-brand-soft/40 px-3 py-1.5 text-label text-ink">
+            ค่าแรกรับ
           </div>
-          <div className="grid grid-cols-2 gap-2 p-2 md:grid-cols-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-2 p-2">
             {hasAdmitVitals && (
               <Tile
                 icon={<HeartPulse className="h-3 w-3" />}
                 label="ความดันโลหิต"
-                labelEn="BP ADMIT"
                 value={
                   bpSystolicAdmit != null && bpDiastolicAdmit != null
                     ? `${bpSystolicAdmit}/${bpDiastolicAdmit}`
@@ -509,7 +448,6 @@ export function ClinicalData({
               <Tile
                 icon={<Activity className="h-3 w-3" />}
                 label="ชีพจร"
-                labelEn="PULSE ADMIT"
                 value={pulseAdmit != null ? pulseAdmit : dash}
                 unit="bpm"
                 severity={sevAdmitPulse(pulseAdmit)}
@@ -519,7 +457,6 @@ export function ClinicalData({
               <Tile
                 icon={<Thermometer className="h-3 w-3" />}
                 label="อุณหภูมิ"
-                labelEn="TEMP ADMIT"
                 value={temperatureAdmit != null ? temperatureAdmit.toFixed(1) : dash}
                 unit="°C"
                 severity={sevAdmitTemp(temperatureAdmit)}
@@ -538,7 +475,6 @@ export function ClinicalData({
               <Tile
                 icon={<Wind className="h-3 w-3" />}
                 label="อัตราการหายใจ"
-                labelEn="RR ADMIT"
                 value={rrAdmit != null ? rrAdmit : dash}
                 unit="/min"
               />
@@ -547,7 +483,6 @@ export function ClinicalData({
               <Tile
                 icon={<Stethoscope className="h-3 w-3" />}
                 label="ปากมดลูกแรกรับ"
-                labelEn="CERVIX ADMIT"
                 value={cervicalOpenCmAdmit != null ? cervicalOpenCmAdmit : dash}
                 unit="ซม."
                 severity={sevAdmitCervix(cervicalOpenCmAdmit)}
@@ -566,7 +501,6 @@ export function ClinicalData({
               <Tile
                 icon={<Stethoscope className="h-3 w-3" />}
                 label="Effacement"
-                labelEn="EFF. ADMIT"
                 value={effacementPctAdmit != null ? effacementPctAdmit : dash}
                 unit="%"
               />
@@ -575,7 +509,6 @@ export function ClinicalData({
               <Tile
                 icon={<Stethoscope className="h-3 w-3" />}
                 label="Station"
-                labelEn="STATION ADMIT"
                 value={stationAdmit != null && stationAdmit !== '' ? stationAdmit : dash}
               />
             )}

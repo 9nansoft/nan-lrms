@@ -3,6 +3,9 @@ import { randomUUID } from 'crypto';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { CareStage, AncRiskLevel } from '@/types/domain';
 import type { MaternalJourney } from '@/types/domain';
+import { ANC_ABSENT_CLOSE_GRACE_DAYS, ANC_ABSENT_CLOSED_REASON } from '@/config/anc-freshness';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface CreateJourneyInput {
   hospitalId: string;
@@ -124,6 +127,79 @@ export async function transitionToLabor(db: DatabaseAdapter, journeyId: string):
       WHERE id = ? AND care_stage <> ?`,
     [CareStage.LABOR, now, now, journeyId, CareStage.LABOR],
   );
+}
+
+/**
+ * ANC reconciliation: close this hospital's PREGNANCY journeys that HOSxP no
+ * longer lists as active ANC (discharged, delivered, labour status changed).
+ * The ANC ingest is upsert-only, so without this a woman HOSxP dropped stays
+ * on the board until the date gates expire her — and never, when she has no
+ * dates (รพ.หนองสองห้อง, 2026-10-28).
+ *
+ * `activeCidHashes` must be the COMPLETE active set from a successful pull;
+ * callers pass nothing when the list may be truncated. Only journeys still in
+ * this hospital's care are touched (a referred-out woman belongs to her
+ * current hospital), never one with an active labour admission, and only once
+ * no sync from any hospital has refreshed her for ANC_ABSENT_CLOSE_GRACE_DAYS.
+ * stage_changed_at is set to when she was last seen so a backlog closed today
+ * does not read as today's stage changes.
+ */
+export async function closeAbsentAncJourneys(
+  db: DatabaseAdapter,
+  args: { hospitalId: string; activeCidHashes: string[]; now?: Date },
+): Promise<number> {
+  const now = args.now ?? new Date();
+  const cutoff = new Date(now.getTime() - ANC_ABSENT_CLOSE_GRACE_DAYS * DAY_MS).toISOString();
+  const active = [...new Set(args.activeCidHashes)];
+  const notListed =
+    active.length > 0
+      ? `AND (mj.cid_hash IS NULL OR mj.cid_hash NOT IN (${active.map(() => '?').join(', ')}))`
+      : '';
+  const rows = await db.query<{ id: string }>(
+    `UPDATE maternal_journeys AS mj
+        SET care_stage = ?, closed_reason = ?,
+            stage_changed_at = COALESCE(mj.synced_at, mj.updated_at), updated_at = ?
+      WHERE mj.hospital_id = ? AND mj.current_hospital_id = ?
+        AND mj.care_stage = ?
+        AND COALESCE(mj.synced_at, mj.updated_at) < ?
+        ${notListed}
+        AND NOT EXISTS (
+          SELECT 1 FROM cached_patients cp
+           WHERE cp.cid_hash = mj.cid_hash AND cp.cid_hash <> '' AND cp.labor_status = 'ACTIVE'
+        )
+      RETURNING mj.id`,
+    [
+      CareStage.DELIVERED,
+      ANC_ABSENT_CLOSED_REASON,
+      now.toISOString(),
+      args.hospitalId,
+      args.hospitalId,
+      CareStage.PREGNANCY,
+      cutoff,
+      ...active,
+    ],
+  );
+  return rows.length;
+}
+
+/**
+ * Undo closeAbsentAncJourneys for a woman HOSxP lists again (a transient
+ * drop, or a discharge reversed). Journeys that ended any other way — a
+ * recorded delivery — are never reopened. Returns whether it reopened.
+ */
+export async function reopenReconciledJourney(
+  db: DatabaseAdapter,
+  journeyId: string,
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const rows = await db.query<{ id: string }>(
+    `UPDATE maternal_journeys
+        SET care_stage = ?, closed_reason = NULL, stage_changed_at = ?, updated_at = ?
+      WHERE id = ? AND care_stage = ? AND closed_reason = ?
+      RETURNING id`,
+    [CareStage.PREGNANCY, now, now, journeyId, CareStage.DELIVERED, ANC_ABSENT_CLOSED_REASON],
+  );
+  return rows.length > 0;
 }
 
 export async function transitionToDelivered(db: DatabaseAdapter, journeyId: string): Promise<void> {

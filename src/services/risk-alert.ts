@@ -19,7 +19,7 @@
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
-import { mophAlertsEnabled } from '@/config/moph-alert-config';
+import { mophAlertsEnabled, mophAlertLocalDate } from '@/config/moph-alert-config';
 import { isValidCid } from '@/services/moph-prompt';
 import {
   subscribersForEvent,
@@ -69,6 +69,37 @@ interface Recipient {
    *  monitors, consult doctors) are always 'full'; a self-subscriber carries
    *  whatever their preference row says. */
   detailLevel: NotificationDetailLevel;
+}
+
+interface StoredAlertEvent {
+  caseId: string;
+  hospitalId: string;
+  originHcode: string;
+  hospitalName: string | null;
+  province: string;
+  alertSource: string;
+  severity: AlertSeverity;
+  ruleId: string;
+  title: string;
+  patientNameEnc: string | null;
+  confirmUrl: string | null;
+  localDate: string;
+}
+
+interface QueuedAlertEventRow {
+  id: string;
+  case_id: string;
+  hospital_id: string;
+  origin_hcode: string;
+  hospital_name: string | null;
+  province: string | null;
+  alert_source: string;
+  severity: string;
+  rule_id: string;
+  title: string;
+  patient_name_enc: string | null;
+  confirm_url: string | null;
+  local_date: string;
 }
 
 // HR3/item-based HIGH-risk vocabulary (codex review P1/P2: was anc_cpd/cpd_high,
@@ -207,6 +238,26 @@ async function enqueueAlertEvent(
     logger.debug('moph_alert_skipped_disabled', { caseRef: ctx.caseRef });
     return 0;
   }
+  const title = alertTitle({ severity, hospitalName: ctx.hospitalName });
+  const key = getEncryptionKey();
+  if (ctx.patientName && !key) {
+    logger.error('moph_alert_encryption_key_missing', { hospitalId: ctx.hospitalId });
+  }
+  const patientNameEnc = ctx.patientName && key ? encrypt(ctx.patientName, key) : null;
+  const event: StoredAlertEvent = {
+    caseId: ctx.caseRef,
+    hospitalId: ctx.hospitalId,
+    originHcode: ctx.originHcode,
+    hospitalName: ctx.hospitalName,
+    province: ctx.province,
+    alertSource,
+    severity,
+    ruleId,
+    title,
+    patientNameEnc,
+    confirmUrl: ctx.confirmUrl ?? null,
+    localDate: ctx.localDate,
+  };
   // alertSource IS the event key subscriptions are stored under (it is what
   // lands in moph_alert_log.alert_source), so it doubles as the event filter.
   // hospitalCodeOverride stays undefined: the preference gate keys on the hcode
@@ -221,26 +272,95 @@ async function enqueueAlertEvent(
     alertSource,
   );
   if (recipients.length === 0) {
-    logger.warn('moph_alert_no_recipients', { hospitalId: ctx.hospitalId, caseRef: ctx.caseRef });
+    const queued = await queueAlertEvent(db, event);
+    if (queued) {
+      logger.warn('moph_alert_no_recipients', {
+        hospitalId: ctx.hospitalId,
+        caseRef: ctx.caseRef,
+        deferred: true,
+      });
+    }
     return 0;
   }
-
-  const title = alertTitle({ severity, hospitalName: ctx.hospitalName });
-  // Encrypt the patient name ONCE per enqueue (staff scope only). Center rows
-  // store NULL — they must never carry patient PII at rest or in the message.
-  const key = getEncryptionKey();
-  if (ctx.patientName && !key) {
-    // Fail loud: a missing ENCRYPTION_KEY silently drops the staff patient name
-    // (codex gap-sweep). This is a misconfiguration, not a normal path.
-    logger.error('moph_alert_encryption_key_missing', { hospitalId: ctx.hospitalId });
+  const inserted = await insertRecipientAlerts(db, event, recipients);
+  try {
+    await markMatchingQueuedEventMaterialized(db, event);
+  } catch (error) {
+    // Delivery rows are already durable. A stale queue row is safe because a
+    // later replay conflict-skips the same recipient rows.
+    logger.warn('moph_alert_deferred_status_update_failed', {
+      hospitalId: event.hospitalId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
-  const patientNameEnc = ctx.patientName && key ? encrypt(ctx.patientName, key) : null;
+  logger.info('moph_alert_enqueued', {
+    caseRef: ctx.caseRef,
+    severity,
+    alertSource,
+    ruleId,
+    recipients: inserted,
+  });
+  return inserted;
+}
 
+async function queueAlertEvent(db: DatabaseAdapter, event: StoredAlertEvent): Promise<boolean> {
+  const result = await db.query<{ c: number }>(
+    `INSERT INTO moph_alert_event_queue
+       (id, case_id, hospital_id, origin_hcode, hospital_name, province,
+        alert_source, severity, rule_id, title, patient_name_enc, confirm_url,
+        local_date, status, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'awaiting_recipients',NOW(),NOW())
+     ON CONFLICT (case_id, hospital_id, alert_source, severity, rule_id, local_date)
+     DO NOTHING
+     RETURNING 1::int AS c`,
+    [
+      randomUuid(),
+      event.caseId,
+      event.hospitalId,
+      event.originHcode,
+      event.hospitalName,
+      event.province || null,
+      event.alertSource,
+      event.severity,
+      event.ruleId,
+      event.title,
+      event.patientNameEnc,
+      event.confirmUrl,
+      event.localDate,
+    ],
+  );
+  return result.length > 0;
+}
+
+async function markMatchingQueuedEventMaterialized(
+  db: DatabaseAdapter,
+  event: StoredAlertEvent,
+): Promise<void> {
+  await db.query(
+    `UPDATE moph_alert_event_queue
+     SET status = 'materialized', materialized_at = NOW(), updated_at = NOW()
+     WHERE case_id = $1 AND hospital_id = $2 AND alert_source = $3
+       AND severity = $4 AND rule_id = $5 AND local_date = $6
+       AND status = 'awaiting_recipients'`,
+    [
+      event.caseId,
+      event.hospitalId,
+      event.alertSource,
+      event.severity,
+      event.ruleId,
+      event.localDate,
+    ],
+  );
+}
+
+async function insertRecipientAlerts(
+  db: DatabaseAdapter,
+  event: StoredAlertEvent,
+  recipients: Recipient[],
+): Promise<number> {
   let inserted = 0;
-  for (const r of recipients) {
-    const isStaff = r.scope === 'hospital_staff';
-    // ON CONFLICT DO NOTHING on the dedup unique index — repeat enqueues are
-    // idempotent (codex #5).
+  for (const recipient of recipients) {
+    const isStaff = recipient.scope === 'hospital_staff';
     const result = await db.query<{ c: number }>(
       `INSERT INTO moph_alert_log
          (id, case_id, hospital_id, origin_hcode, hospital_name, recipient_cid,
@@ -250,36 +370,148 @@ async function enqueueAlertEvent(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending',0,$14,$15,NOW(),NOW())
        ON CONFLICT (case_id, hospital_id, recipient_cid, alert_source, severity, rule_id, local_date)
        DO NOTHING
-       RETURNING 1::int as c`,
+       RETURNING 1::int AS c`,
       [
         randomUuid(),
-        ctx.caseRef,
-        ctx.hospitalId,
-        ctx.originHcode,
-        ctx.hospitalName,
-        r.cid,
-        r.scope,
-        // Persisted so the drain can render to the right depth — the recipient
-        // list is gone by the time the message is built.
-        r.detailLevel,
-        alertSource,
-        severity,
-        ruleId,
-        title,
-        isStaff ? patientNameEnc : null, // PDPA: center rows never store the name
-        ctx.localDate,
-        ctx.confirmUrl ?? null,
+        event.caseId,
+        event.hospitalId,
+        event.originHcode,
+        event.hospitalName,
+        recipient.cid,
+        recipient.scope,
+        recipient.detailLevel,
+        event.alertSource,
+        event.severity,
+        event.ruleId,
+        event.title,
+        isStaff ? event.patientNameEnc : null,
+        event.localDate,
+        event.confirmUrl,
       ],
     );
     if (result.length > 0) inserted++;
   }
-  logger.info('moph_alert_enqueued', {
-    caseRef: ctx.caseRef,
-    severity,
-    alertSource,
-    ruleId,
-    recipients: inserted,
-  });
+  return inserted;
+}
+
+async function insertRecipientAlertsUntilDeadline(
+  db: DatabaseAdapter,
+  event: StoredAlertEvent,
+  recipients: Recipient[],
+  deadlineMs: number,
+  now: () => number,
+): Promise<{ inserted: number; complete: boolean }> {
+  // A prior replay may have inserted only part of the recipient set before its
+  // budget elapsed. Read those rows once and skip them in memory so conflict
+  // checks for already-durable recipients cannot consume every later budget.
+  const existingRows = await db.query<{ recipient_cid: string }>(
+    `SELECT recipient_cid FROM moph_alert_log
+     WHERE case_id = $1 AND hospital_id = $2 AND alert_source = $3
+       AND severity = $4 AND rule_id = $5 AND local_date = $6`,
+    [
+      event.caseId,
+      event.hospitalId,
+      event.alertSource,
+      event.severity,
+      event.ruleId,
+      event.localDate,
+    ],
+  );
+  const existing = new Set(existingRows.map((row) => row.recipient_cid));
+  let inserted = 0;
+  for (const recipient of recipients) {
+    if (existing.has(recipient.cid)) continue;
+    if (now() >= deadlineMs) return { inserted, complete: false };
+    inserted += await insertRecipientAlerts(db, event, [recipient]);
+    existing.add(recipient.cid);
+  }
+  return { inserted, complete: true };
+}
+
+/**
+ * Re-resolve recipients for today's deferred events and materialize normal
+ * pending delivery rows. Event and delivery unique keys make retries and
+ * concurrent drains crash-safe. Older events are explicitly expired so a late
+ * opt-in cannot deliver stale clinical alerts.
+ */
+export async function materializeDeferredAlertEvents(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  opts: { maxEvents?: number; deadlineMs?: number; now?: () => number } = {},
+): Promise<number> {
+  const today = mophAlertLocalDate();
+  const maxEvents = Math.max(1, Math.min(Math.trunc(opts.maxEvents ?? 25), 100));
+  const deadlineMs = opts.deadlineMs ?? Number.POSITIVE_INFINITY;
+  const now = opts.now ?? Date.now;
+  await db.query(
+    `UPDATE moph_alert_event_queue
+     SET status = 'expired', updated_at = NOW()
+     WHERE hospital_id = $1 AND status = 'awaiting_recipients' AND local_date <> $2`,
+    [hospitalId, today],
+  );
+  const rows = await db.query<QueuedAlertEventRow>(
+    `SELECT id, case_id, hospital_id, origin_hcode, hospital_name, province,
+            alert_source, severity, rule_id, title, patient_name_enc, confirm_url, local_date
+     FROM moph_alert_event_queue
+     WHERE hospital_id = $1 AND status = 'awaiting_recipients' AND local_date = $2
+     ORDER BY updated_at, created_at
+     LIMIT $3`,
+    [hospitalId, today, maxEvents],
+  );
+  let inserted = 0;
+  for (const row of rows) {
+    if (now() >= deadlineMs) break;
+    try {
+      const recipients = await resolveRecipients(
+        db,
+        row.hospital_id,
+        row.province ?? '',
+        undefined,
+        row.alert_source,
+      );
+      if (recipients.length === 0) {
+        // Move unresolved work to the back of the queue so it cannot starve
+        // later events that become deliverable during the same day.
+        await db.query(
+          `UPDATE moph_alert_event_queue SET updated_at = NOW()
+           WHERE id = $1 AND status = 'awaiting_recipients'`,
+          [row.id],
+        );
+        continue;
+      }
+      const event: StoredAlertEvent = {
+        caseId: row.case_id,
+        hospitalId: row.hospital_id,
+        originHcode: row.origin_hcode,
+        hospitalName: row.hospital_name,
+        province: row.province ?? '',
+        alertSource: row.alert_source,
+        severity: row.severity as AlertSeverity,
+        ruleId: row.rule_id,
+        title: row.title,
+        patientNameEnc: row.patient_name_enc,
+        confirmUrl: row.confirm_url,
+        localDate: row.local_date,
+      };
+      const progress = await insertRecipientAlertsUntilDeadline(
+        db,
+        event,
+        recipients,
+        deadlineMs,
+        now,
+      );
+      inserted += progress.inserted;
+      if (progress.complete) {
+        await markMatchingQueuedEventMaterialized(db, event);
+      }
+    } catch (error) {
+      logger.warn('moph_alert_deferred_materialize_failed', {
+        hospitalId,
+        eventId: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   return inserted;
 }
 

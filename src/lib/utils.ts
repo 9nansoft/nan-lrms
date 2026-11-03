@@ -1,9 +1,24 @@
 // T037: General utilities + shadcn cn()
 import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
 import { RiskLevel, type HospitalLevel } from '@/types/domain';
 import { RISK_LEVELS } from '@/config/risk-levels';
 import { HOSPITAL_LEVELS } from '@/config/hospitals';
+import { TYPE_SCALE } from '@/config/design-tokens';
+
+// The design-system type scale (text-caption … text-kpi) must be recognised as
+// font-size utilities; otherwise tailwind-merge reads them as text colours and
+// silently drops them when a real colour class (text-brand) follows.
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [{ text: Object.keys(TYPE_SCALE) }],
+      // --shadow-soft is a custom @theme shadow; without it shadow-none cannot
+      // override it and both classes survive.
+      shadow: [{ shadow: ['soft'] }],
+    },
+  },
+});
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

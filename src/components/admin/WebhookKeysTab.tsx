@@ -1,11 +1,11 @@
-// WebhookKeysTab — manage per-hospital Webhook API keys. Redesigned
-// 2026-04-21 to match the dashboard aesthetic: flush KPI strip, mono-bordered
-// pills, navy accents, risk-palette "create reveal" banner.
+// WebhookKeysTab — manage per-hospital Webhook API keys: KPI tiles, a create
+// form, a one-time key reveal and a typed-prefix revoke gate, on the
+// direction-C tokens.
 'use client';
 
 import { useState } from 'react';
 import useSWR from 'swr';
-import { KeyRound, Copy, Check, AlertTriangle, Trash2, Plus, X } from 'lucide-react';
+import { Copy, Check, AlertTriangle, Trash2, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -17,6 +17,13 @@ import {
 } from '@/components/ui/dialog';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { KpiGrid } from '@/components/shared/KpiGrid';
+import { KpiTile } from '@/components/shared/KpiTile';
+import { DataTable } from '@/components/shared/DataTable';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { DEFAULT_ACTION_REMEDY } from '@/lib/action-failure';
+import { SELECT_CLASS, StatusPill } from './admin-ui';
 
 interface WebhookKey {
   id: string;
@@ -171,17 +178,6 @@ export function WebhookKeysTab() {
     setRevokeError(null);
   };
 
-  const kpis: Array<{ k: string; v: number; color: string; label: string }> = [
-    { k: 'TOTAL', v: keys.length, color: 'var(--accent-navy)', label: 'คีย์ทั้งหมด' },
-    { k: 'ACTIVE', v: activeCount, color: 'var(--risk-low)', label: 'ใช้งานได้' },
-    {
-      k: 'REVOKED',
-      v: keys.length - activeCount,
-      color: 'var(--ink-navy-muted)',
-      label: 'ยกเลิกแล้ว',
-    },
-  ];
-
   const loadError = keysError || hospitalsError;
 
   return (
@@ -189,7 +185,9 @@ export function WebhookKeysTab() {
       {loadError ? (
         <ErrorState
           variant="banner"
+          className="rounded-xl border"
           message="โหลด API Keys หรือรายชื่อโรงพยาบาลไม่สำเร็จ — รายการอาจไม่ครบถ้วน"
+          remedy="ตรวจสอบการเชื่อมต่อ แล้วกด ลองใหม่"
           onRetry={() => {
             void mutate();
             void mutateHospitals();
@@ -197,168 +195,111 @@ export function WebhookKeysTab() {
         />
       ) : null}
 
-      {/* KPI strip */}
-      <div
-        className="grid border bg-white"
-        style={{
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-          borderColor: 'var(--rule-strong)',
-        }}
-      >
-        {kpis.map((k, i) => (
-          <div
-            key={k.k}
-            className="flex flex-col gap-1 px-4 py-3"
-            style={{
-              borderLeft: `2px solid ${k.color}`,
-              borderRight: i < kpis.length - 1 ? '1px solid var(--rule-strong)' : undefined,
-            }}
-          >
-            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
-              {k.k}
-            </div>
-            <div
-              className="font-mono text-[28px] font-semibold leading-none tabular-nums"
-              style={{ color: k.color, letterSpacing: '-0.02em' }}
-            >
-              {k.v}
-            </div>
-            <div className="font-mono text-[10px] text-[var(--ink-navy-dim)]">{k.label}</div>
-          </div>
-        ))}
-      </div>
+      <KpiGrid>
+        <KpiTile label="คีย์ทั้งหมด" count={keys.length} />
+        <KpiTile label="ใช้งานได้" count={activeCount} tone="ok" />
+        <KpiTile label="ยกเลิกแล้ว" count={keys.length - activeCount} />
+      </KpiGrid>
 
-      {/* Create form */}
-      <form
-        onSubmit={handleCreate}
-        className="border bg-white px-4 py-3"
-        style={{ borderColor: 'var(--rule-strong)' }}
+      <SectionCard
+        title="สร้าง API Key ใหม่"
+        description="เลือกโรงพยาบาลและตั้งชื่อคีย์ — คีย์เต็มจะแสดงเพียงครั้งเดียวหลังสร้าง"
       >
-        <div className="mb-2 flex items-center gap-1.5">
-          <KeyRound className="h-3.5 w-3.5" style={{ color: 'var(--accent-navy)' }} />
-          <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-navy)]">
-            สร้าง API Key ใหม่
-          </h3>
-        </div>
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-[220px_1fr_auto]">
-          <div>
-            <label
-              htmlFor="hcode"
-              className="mb-1 block font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]"
-            >
-              โรงพยาบาล
-            </label>
-            <select
-              id="hcode"
-              value={formHcode}
-              onChange={(e) => setFormHcode(e.target.value)}
-              disabled={creating}
-              className="h-8 w-full rounded-sm border bg-white px-2 text-[12px] focus:border-[var(--accent-navy)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-navy-soft)] disabled:opacity-50"
-              style={{ borderColor: 'var(--rule-strong)' }}
-              required
-            >
-              <option value="">— เลือก —</option>
-              {hospitals.map((h) => (
-                <option key={h.hcode} value={h.hcode}>
-                  {h.name} ({h.hcode})
-                </option>
-              ))}
-            </select>
+        <form onSubmit={handleCreate}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[220px_minmax(0,1fr)_auto]">
+            <div>
+              <label htmlFor="hcode" className="mb-1 block text-label text-ink">
+                โรงพยาบาล
+              </label>
+              <select
+                id="hcode"
+                value={formHcode}
+                onChange={(e) => setFormHcode(e.target.value)}
+                disabled={creating}
+                className={SELECT_CLASS}
+                required
+              >
+                <option value="">— เลือก —</option>
+                {hospitals.map((h) => (
+                  <option key={h.hcode} value={h.hcode}>
+                    {h.name} ({h.hcode})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="label" className="mb-1 block text-label text-ink">
+                ชื่อคีย์
+              </label>
+              <Input
+                id="label"
+                value={formLabel}
+                onChange={(e) => setFormLabel(e.target.value)}
+                placeholder="เช่น Production webhook — Chiang Rai"
+                disabled={creating}
+                required
+                className="h-11 text-body"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                type="submit"
+                disabled={creating || !formHcode || !formLabel.trim()}
+                className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong"
+              >
+                <Plus aria-hidden="true" className="h-4 w-4" />
+                {creating ? 'กำลังสร้าง...' : 'สร้าง Key'}
+              </Button>
+            </div>
           </div>
-          <div>
-            <label
-              htmlFor="label"
-              className="mb-1 block font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]"
-            >
-              Label
-            </label>
-            <Input
-              id="label"
-              value={formLabel}
-              onChange={(e) => setFormLabel(e.target.value)}
-              placeholder="เช่น Production webhook — Chiang Rai"
-              disabled={creating}
-              required
-              className="h-8 text-[12px]"
+          {createError && (
+            <ErrorState
+              variant="banner"
+              className="mt-3 rounded-xl border"
+              message={createError}
+              remedy={DEFAULT_ACTION_REMEDY}
             />
-          </div>
-          <div className="flex items-end">
-            <Button
-              type="submit"
-              disabled={creating || !formHcode || !formLabel.trim()}
-              className="h-8 gap-1.5 text-[12px]"
-              style={{ background: 'var(--accent-navy)' }}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {creating ? 'กำลังสร้าง...' : 'สร้าง Key'}
-            </Button>
-          </div>
-        </div>
-        {createError && (
-          <div
-            className="mt-2 border px-2.5 py-1.5 font-mono text-[11px]"
-            style={{ borderColor: 'var(--risk-high)', color: 'var(--risk-high)' }}
-          >
-            {createError}
-          </div>
-        )}
-      </form>
+          )}
+        </form>
+      </SectionCard>
 
       {justCreated && (
-        <div className="border-2 bg-white px-4 py-3" style={{ borderColor: 'var(--risk-medium)' }}>
+        <div className="rounded-2xl border border-warn/40 bg-warn-tint p-4">
           <div className="mb-2 flex items-start justify-between gap-3">
             <div className="flex items-start gap-2">
-              <AlertTriangle
-                className="mt-0.5 h-4 w-4 shrink-0"
-                style={{ color: 'var(--risk-medium)' }}
-              />
+              <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warn-text" />
               <div>
-                <div
-                  className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em]"
-                  style={{ color: 'var(--risk-medium)' }}
-                >
+                <div className="text-body font-semibold text-warn-text">
                   บันทึก API Key นี้ไว้ทันที — ระบบจะไม่แสดงให้เห็นอีก
                 </div>
-                <div className="mt-0.5 font-mono text-[11px] text-[var(--ink-navy-dim)]">
+                <div className="mt-0.5 text-label text-ink-muted">
                   {justCreated.hospitalName} ({justCreated.hcode}) · {justCreated.label}
                 </div>
               </div>
             </div>
             <button
               onClick={() => setJustCreated(null)}
-              className="rounded-sm p-1 text-[var(--ink-navy-muted)] hover:bg-[var(--accent-navy-soft)] hover:text-[var(--accent-navy)]"
+              className="rounded-lg p-2 text-ink-muted hover:bg-brand-soft hover:text-brand"
               title="ปิด"
+              aria-label="ปิด"
             >
-              <X className="h-3.5 w-3.5" />
+              <X aria-hidden="true" className="h-4 w-4" />
             </button>
           </div>
-          <div
-            className="flex items-center gap-2 border bg-[var(--surface-cool)] px-3 py-2"
-            style={{ borderColor: 'var(--rule-strong)' }}
-          >
-            <code className="flex-1 overflow-x-auto font-mono text-[12px] text-[var(--ink-navy)]">
-              {justCreated.apiKey}
-            </code>
-            <Button
-              onClick={handleCopy}
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 text-[11px]"
-            >
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2">
+            <code className="flex-1 overflow-x-auto font-mono text-label text-ink">{justCreated.apiKey}</code>
+            <Button onClick={handleCopy} variant="outline" size="sm" className="h-9 gap-1.5 text-label">
               {copied ? (
-                <Check className="h-3 w-3" style={{ color: 'var(--risk-low)' }} />
+                <Check aria-hidden="true" className="h-4 w-4 text-ok-text" />
               ) : (
-                <Copy className="h-3 w-3" />
+                <Copy aria-hidden="true" className="h-4 w-4" />
               )}
               {copied ? 'คัดลอกแล้ว' : 'คัดลอก'}
             </Button>
           </div>
-          <div className="mt-2 font-mono text-[10px] tracking-[0.04em] text-[var(--ink-navy-dim)]">
+          <div className="mt-2 text-label text-ink-muted">
             ใช้ค่านี้ในส่วน{' '}
-            <code
-              className="rounded-sm border px-1 font-mono text-[10px]"
-              style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-cool)' }}
-            >
+            <code className="rounded border border-border bg-surface-card px-1 font-mono text-caption">
               Authorization: Bearer &lt;key&gt;
             </code>{' '}
             เมื่อส่ง webhook
@@ -366,155 +307,118 @@ export function WebhookKeysTab() {
         </div>
       )}
 
-      {/* Keys table */}
-      <div
-        className="border bg-white overflow-x-auto"
-        style={{ borderColor: 'var(--rule-strong)' }}
-      >
-        <div
-          className="grid gap-2 border-b px-3 py-2 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
-          style={{
-            gridTemplateColumns: '1fr 1fr 110px 130px 130px 80px 80px',
-            borderColor: 'var(--rule-strong)',
-          }}
-        >
-          <div>HOSPITAL</div>
-          <div>LABEL</div>
-          <div>PREFIX</div>
-          <div>CREATED</div>
-          <div>LAST USED</div>
-          <div>STATUS</div>
-          <div className="text-right">ACTION</div>
-        </div>
-        {keys.length === 0 ? (
-          <div className="px-3 py-10 text-center">
-            <KeyRound className="mx-auto mb-2 h-8 w-8 text-[var(--ink-navy-muted)] opacity-50" />
-            <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
-              ยังไม่มี API Key — สร้างด้านบน
-            </p>
-          </div>
-        ) : (
-          keys.map((k) => (
-            <div
-              key={k.id}
-              className="grid items-center gap-2 border-b px-3 py-2"
-              style={{
-                gridTemplateColumns: '1fr 1fr 110px 130px 130px 80px 80px',
-                borderColor: 'var(--rule-hair)',
-                minHeight: 44,
-                opacity: k.isActive ? 1 : 0.55,
-              }}
-            >
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-medium text-[var(--ink-navy)]">
-                  {k.hospitalName}
+      <SectionCard title="API Key ทั้งหมด">
+        <DataTable
+          caption="API Key ทั้งหมด"
+          rows={keys}
+          rowKey={(k) => k.id}
+          empty={
+            <EmptyState
+              illustration="generic"
+              title="ยังไม่มี API Key"
+              description="สร้างคีย์แรกด้านบน แล้วส่งให้ทีม IT ของโรงพยาบาล"
+              className="shadow-none"
+            />
+          }
+          columns={[
+            {
+              key: 'hospital',
+              header: 'โรงพยาบาล',
+              cell: (k) => (
+                <div className="min-w-0">
+                  <div className="truncate text-body font-medium text-ink">{k.hospitalName}</div>
+                  <div className="font-mono text-caption tabular-nums text-ink-muted">{k.hcode}</div>
                 </div>
-                <div className="font-mono text-[10px] tabular-nums text-[var(--ink-navy-muted)]">
-                  {k.hcode}
-                </div>
-              </div>
-              <div className="truncate text-[12px] text-[var(--ink-navy-dim)]">{k.label}</div>
-              <div>
-                <code
-                  className="rounded-sm border px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-navy-dim)]"
-                  style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-cool)' }}
-                >
+              ),
+            },
+            { key: 'label', header: 'ชื่อคีย์', cell: (k) => <span className="text-body text-ink">{k.label}</span> },
+            {
+              key: 'prefix',
+              header: 'รหัสขึ้นต้น',
+              cell: (k) => (
+                <code className="rounded border border-border bg-surface-muted px-1.5 py-0.5 font-mono text-caption text-ink-muted">
                   {k.keyPrefix}…
                 </code>
-              </div>
-              <div className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-dim)]">
-                {formatDateTime(k.createdAt)}
-              </div>
-              <div className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-dim)]">
-                {k.lastUsedAt ? (
-                  formatDateTime(k.lastUsedAt)
+              ),
+            },
+            {
+              key: 'created',
+              header: 'สร้างเมื่อ',
+              cell: (k) => <span className="text-label tabular-nums text-ink-muted">{formatDateTime(k.createdAt)}</span>,
+            },
+            {
+              key: 'used',
+              header: 'ใช้ล่าสุด',
+              cell: (k) =>
+                k.lastUsedAt ? (
+                  <span className="text-label tabular-nums text-ink-muted">{formatDateTime(k.lastUsedAt)}</span>
                 ) : (
-                  <span className="italic text-[var(--ink-navy-muted)]">ยังไม่เคยใช้</span>
-                )}
-              </div>
-              <div>
-                {k.isActive ? (
-                  <span
-                    className="inline-block border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
-                    style={{ color: 'var(--risk-low)', borderColor: 'var(--risk-low)' }}
-                  >
-                    ACTIVE
-                  </span>
-                ) : (
-                  <span
-                    className="inline-block border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
-                    style={{
-                      color: 'var(--ink-navy-muted)',
-                      borderColor: 'var(--rule-strong)',
-                    }}
-                  >
-                    REVOKED
-                  </span>
-                )}
-              </div>
-              <div className="text-right">
-                {k.isActive && (
-                  <button
+                  <span className="text-label text-ink-muted">ยังไม่เคยใช้</span>
+                ),
+            },
+            {
+              key: 'status',
+              header: 'สถานะ',
+              cell: (k) => (
+                <StatusPill tone={k.isActive ? 'ok' : 'neutral'}>{k.isActive ? 'ใช้งาน' : 'ยกเลิกแล้ว'}</StatusPill>
+              ),
+            },
+            {
+              key: 'actions',
+              header: 'จัดการ',
+              cell: (k) =>
+                k.isActive ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => setRevokeTarget(k)}
-                    className="inline-flex items-center gap-1 rounded-sm px-1.5 py-1 font-mono text-[10px] transition-colors hover:bg-red-50"
-                    style={{ color: 'var(--risk-high)' }}
+                    aria-label={`ยกเลิกคีย์ ${k.keyPrefix}`}
+                    className="h-9 gap-1 text-label text-danger-text hover:bg-danger-tint"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 aria-hidden="true" className="h-4 w-4" />
                     ยกเลิก
-                  </button>
-                )}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+                  </Button>
+                ) : (
+                  <span className="text-ink-muted">—</span>
+                ),
+            },
+          ]}
+        />
+      </SectionCard>
 
       <Dialog open={!!revokeTarget} onOpenChange={(open) => !open && closeRevokeModal()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5" style={{ color: 'var(--risk-high)' }} />
+            <DialogTitle className="flex items-center gap-2 text-title text-danger-text">
+              <AlertTriangle aria-hidden="true" className="h-5 w-5" />
               ยืนยันการยกเลิก API Key
             </DialogTitle>
           </DialogHeader>
 
           {revokeTarget && (
             <div className="space-y-4">
-              <div
-                className="space-y-1 border px-3 py-2 font-mono text-[11px]"
-                style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-cool)' }}
-              >
+              <div className="space-y-1 rounded-lg border border-border bg-surface-muted px-3 py-2 text-label">
                 <div>
-                  <span className="text-[var(--ink-navy-muted)]">โรงพยาบาล:</span>{' '}
-                  {revokeTarget.hospitalName}
+                  <span className="text-ink-muted">โรงพยาบาล:</span> {revokeTarget.hospitalName}
                 </div>
                 <div>
-                  <span className="text-[var(--ink-navy-muted)]">Label:</span> {revokeTarget.label}
+                  <span className="text-ink-muted">Label:</span> {revokeTarget.label}
                 </div>
                 <div>
-                  <span className="text-[var(--ink-navy-muted)]">Prefix:</span>{' '}
+                  <span className="text-ink-muted">Prefix:</span>{' '}
                   <code className="font-mono">{revokeTarget.keyPrefix}</code>
                 </div>
               </div>
 
-              <div
-                className="border px-3 py-2 font-mono text-[11px]"
-                style={{ borderColor: 'var(--risk-high)', color: 'var(--risk-high)' }}
-              >
+              <div className="rounded-lg border border-danger/40 bg-danger-tint px-3 py-2 text-label text-danger-text">
                 คีย์ที่ยกเลิกแล้วจะใช้งานไม่ได้ทันที — webhooks
                 จากโรงพยาบาลนี้จะถูกปฏิเสธจนกว่าจะสร้างคีย์ใหม่
               </div>
 
               <div>
-                <label
-                  htmlFor="confirmPrefix"
-                  className="mb-1 block font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]"
-                >
+                <label htmlFor="confirmPrefix" className="mb-1 block text-label text-ink">
                   พิมพ์{' '}
-                  <code
-                    className="rounded-sm border px-1 font-mono text-[10px] text-[var(--ink-navy-dim)]"
-                    style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-cool)' }}
-                  >
+                  <code className="rounded border border-border bg-surface-muted px-1 font-mono text-caption text-ink-muted">
                     {revokeTarget.keyPrefix}
                   </code>{' '}
                   เพื่อยืนยัน
@@ -531,12 +435,12 @@ export function WebhookKeysTab() {
               </div>
 
               {revokeError && (
-                <div
-                  className="border px-3 py-2 font-mono text-[11px]"
-                  style={{ borderColor: 'var(--risk-high)', color: 'var(--risk-high)' }}
-                >
-                  {revokeError}
-                </div>
+                <ErrorState
+                  variant="banner"
+                  className="rounded-xl border"
+                  message={revokeError}
+                  remedy={DEFAULT_ACTION_REMEDY}
+                />
               )}
             </div>
           )}
@@ -551,7 +455,7 @@ export function WebhookKeysTab() {
               disabled={revoking || !revokeTarget || revokeInput !== revokeTarget.keyPrefix}
               className="gap-2"
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 aria-hidden="true" className="h-4 w-4" />
               {revoking ? 'กำลังยกเลิก...' : 'ยืนยันยกเลิก'}
             </Button>
           </DialogFooter>

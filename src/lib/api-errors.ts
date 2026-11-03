@@ -73,6 +73,12 @@ export const ApiErrors = {
     message: 'ไม่พบใบส่งต่อที่ระบุ หรือโรงพยาบาลของคุณไม่มีสิทธิ์ดำเนินการกับใบส่งต่อนี้',
     suggestedAction: 'ตรวจสอบ referralId และ fromHospitalCode แล้วลองใหม่อีกครั้ง',
   },
+  REFERRAL_DESTINATION_NOT_FOUND: {
+    error: 'Referral destination not found',
+    code: 'REFERRAL_DESTINATION_NOT_FOUND',
+    message: 'ไม่พบรหัสโรงพยาบาลปลายทางในทะเบียนโรงพยาบาล',
+    suggestedAction: 'ตรวจสอบ toHospitalCode ให้ตรงกับรหัส MOPH หรือติดต่อผู้ดูแลเพื่อปรับปรุงทะเบียนโรงพยาบาล',
+  },
   INVALID_REFERRAL_STATUS: {
     error: 'Invalid referral status',
     code: 'INVALID_REFERRAL_STATUS',

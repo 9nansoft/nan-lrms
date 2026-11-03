@@ -1,9 +1,12 @@
-// ShiftSummary — "this shift vs. last" temporal signal for the coordinator.
-// Lives in zone 06 of the redesigned dashboard. Wired to DashboardTrends as of
-// 2026-04-21; previously showed static placeholder data.
+// ShiftSummary — "this shift vs. last" for the coordinator. Wired to
+// DashboardTrends since 2026-04-21 (server aggregates). UI sub-project 2:
+// a Thai SectionCard of KpiTiles.
 'use client';
 
 import type { DashboardTrends } from '@/types/api';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { KpiGrid } from '@/components/shared/KpiGrid';
+import { KpiTile } from '@/components/shared/KpiTile';
 
 interface ShiftSummaryProps {
   trends: DashboardTrends;
@@ -11,47 +14,36 @@ interface ShiftSummaryProps {
 
 export function ShiftSummary({ trends }: ShiftSummaryProps) {
   const { currentShift, previousShift } = trends;
-  const rows: Array<[string, number, number]> = [
-    ['ADMISSIONS', currentShift.admissions, previousShift.admissions],
-    ['DELIVERED', currentShift.delivered, previousShift.delivered],
-    ['REFERRED', currentShift.referred, previousShift.referred],
-  ];
+  const rows = [
+    { key: 'admissions', label: 'รับเข้า', now: currentShift.admissions, prev: previousShift.admissions },
+    { key: 'delivered', label: 'คลอด', now: currentShift.delivered, prev: previousShift.delivered },
+    { key: 'referred', label: 'ส่งต่อ', now: currentShift.referred, prev: previousShift.referred },
+  ] as const;
 
   return (
-    <div className="border border-[var(--rule-strong)] bg-white p-4">
-      <div className="flex items-center justify-between">
-        <div className="font-mono text-[12px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
-          SHIFT SUMMARY
-        </div>
-        <div
-          className="font-mono text-[12px] text-[var(--ink-navy-dim)]"
+    <SectionCard
+      title="สรุปเวร"
+      description={previousShift.label ? `เปรียบเทียบกับ ${previousShift.label}` : undefined}
+      actions={
+        <span
+          className="text-label text-ink-muted"
           title={`เวรปัจจุบันเริ่ม ${new Date(currentShift.windowStart).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}`}
         >
           {currentShift.label || '—'}
-        </div>
-      </div>
-      <div className="mt-2.5 grid grid-cols-3 gap-2.5">
-        {rows.map(([label, c, p]) => (
-          <div key={label}>
-            <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
-              {label}
-            </div>
-            <div className="flex items-baseline gap-1.5">
-              <div className="font-mono text-[26px] font-semibold leading-none text-[var(--ink-navy)] tabular-nums">
-                {c}
-              </div>
-              <div className="font-mono text-[12px] text-[var(--ink-navy-muted)]">
-                vs {p} last
-              </div>
-            </div>
-          </div>
+        </span>
+      }
+    >
+      <KpiGrid>
+        {rows.map((r) => (
+          <KpiTile
+            key={r.key}
+            testId={`shift-${r.key}`}
+            label={r.label}
+            count={r.now}
+            sub={`เวรก่อน ${r.prev.toLocaleString('en-US')}`}
+          />
         ))}
-      </div>
-      {previousShift.label && (
-        <div className="mt-2 border-t border-[var(--rule-hair)] pt-1.5 font-mono text-[11px] text-[var(--ink-navy-muted)]">
-          เปรียบเทียบกับ {previousShift.label}
-        </div>
-      )}
-    </div>
+      </KpiGrid>
+    </SectionCard>
   );
 }

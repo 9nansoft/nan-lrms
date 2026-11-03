@@ -1,18 +1,28 @@
-// ANC risk chip — bordered mono chip in the shared risk palette. Used by the
-// referrals board (via components/referrals/chips) and the pregnancies board.
+// ANC risk chip — renders through the shared RiskChip. Used by the referrals
+// board (via components/referrals/chips) and the pregnancies board.
 'use client';
 
-import { ANC_RISK_COLOR, ANC_RISK_FALLBACK_COLOR } from '@/config/anc-risk-display';
+import { RiskChip } from '@/components/shared/RiskChip';
+import { ANC_RISK_LABEL_TH, ANC_TO_RISK_LEVEL } from '@/config/anc-risk-display';
 
 export function AncRiskChip({ level }: { level: string }) {
-  const color = ANC_RISK_COLOR[level] ?? ANC_RISK_FALLBACK_COLOR;
+  const mapped = ANC_TO_RISK_LEVEL[level];
+  if (!mapped) {
+    // Unknown/legacy code: neutral chip, still labelled.
+    return (
+      <span
+        data-risk={level}
+        role="status"
+        aria-label={level}
+        className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-caption font-semibold text-ink-muted"
+      >
+        {level}
+      </span>
+    );
+  }
   return (
-    <span
-      data-risk={level}
-      className="inline-block border px-1 py-px font-mono text-[12px] font-semibold tracking-[0.04em]"
-      style={{ color, borderColor: color, background: 'transparent' }}
-    >
+    <RiskChip level={mapped} size="sm" label={ANC_RISK_LABEL_TH[level] ?? level} data-risk={level}>
       {level}
-    </span>
+    </RiskChip>
   );
 }

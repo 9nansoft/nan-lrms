@@ -155,12 +155,12 @@ function ProviderCompleteContent() {
   if (error || !summary) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
-        <div className="w-full max-w-md rounded-lg border border-red-200 bg-white p-6 text-center shadow-sm">
-          <Shield className="mx-auto h-10 w-10 text-red-500" />
+        <div className="w-full max-w-md rounded-lg border border-danger/40 bg-white p-6 text-center shadow-sm">
+          <Shield className="mx-auto h-10 w-10 text-danger" />
           <h1 className="mt-4 text-lg font-semibold text-slate-900">
             เข้าสู่ระบบ ProviderID ไม่สำเร็จ
           </h1>
-          <p className="mt-2 text-sm text-red-600">{error ?? 'ไม่พบข้อมูลการเข้าสู่ระบบ'}</p>
+          <p className="mt-2 text-sm text-danger-text">{error ?? 'ไม่พบข้อมูลการเข้าสู่ระบบ'}</p>
           <button
             type="button"
             onClick={() => router.replace('/login')}
@@ -208,7 +208,7 @@ function ProviderCompleteContent() {
                     {[org.district, org.province, org.affiliation].filter(Boolean).join(' · ')}
                   </div>
                 </div>
-                <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+                <span className="rounded bg-ok-tint px-2 py-1 text-xs font-semibold text-ok-text">
                   อ่านอย่างเดียว
                 </span>
               </div>

@@ -12,7 +12,7 @@ import useSWR from 'swr';
 import { useSSE } from '@/hooks/useSSE';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { LoadingState } from '@/components/shared/LoadingState';
-import { SectionLabel } from '@/components/dashboard/shared';
+import { SectionCard } from '@/components/shared/SectionCard';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import { ANC_RISK_COLOR, ANC_RISK_LABEL_TH } from '@/config/anc-risk-display';
@@ -61,7 +61,6 @@ import {
   HelpCircle,
   Activity,
   Ruler,
-  MapPin,
   User,
   TrendingUp,
   Syringe,
@@ -69,7 +68,7 @@ import {
 } from 'lucide-react';
 
 // Poll cadence for the detail feed. Single source for both the SWR
-// refreshInterval and the footer "REFRESHING EVERY …s" caption so they can
+// refreshInterval and the footer "รีเฟรชอัตโนมัติทุก … วินาที" caption so they can
 // never drift apart. Live SSE updates arrive between polls (see useSSE below).
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -379,7 +378,7 @@ function Pill({
 }) {
   return (
     <span
-      className="inline-flex items-center gap-1 border px-2 py-0.5 font-mono text-[11px] font-semibold tracking-[0.06em]"
+      className="inline-flex items-center gap-1 border px-2 py-0.5 font-mono text-caption font-semibold tracking-[0.06em]"
       style={{
         color,
         borderColor: borderColor ?? color,
@@ -402,7 +401,7 @@ function VisitChip({
 }) {
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.04em]"
+      className="inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-caption font-semibold tracking-[0.04em]"
       style={{ color, borderColor: color }}
     >
       {icon}
@@ -424,7 +423,7 @@ function LabResult({
   const v = value ?? null;
   const abn = v ? (abnormalIf ? abnormalIf(v) : false) : false;
   return (
-    <span className="inline-flex items-center gap-1 font-mono text-[11px]">
+    <span className="inline-flex items-center gap-1 font-mono text-caption">
       <span className="text-[var(--ink-navy-muted)]">{label}</span>
       <span
         className="font-semibold tabular-nums"
@@ -462,14 +461,14 @@ function LabTile({
         }}
       >
         <div
-          className="inline-flex items-center gap-1 font-mono text-[9px] font-bold uppercase tracking-[0.12em]"
+          className="inline-flex items-center gap-1 font-mono text-caption font-bold uppercase tracking-[0.12em]"
           style={{ color: 'var(--risk-high)' }}
         >
           <AlertTriangle className="h-2.5 w-2.5" />
           {label}
         </div>
         <div
-          className="inline-flex w-fit items-center rounded-sm px-1.5 py-0.5 font-mono text-[12px] font-bold tabular-nums text-white"
+          className="inline-flex w-fit items-center rounded-sm px-1.5 py-0.5 font-mono text-caption font-bold tabular-nums text-white"
           style={{ background: 'var(--risk-high)' }}
         >
           {value ?? '—'}
@@ -499,10 +498,10 @@ function LabTile({
         background: palette.bg,
       }}
     >
-      <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+      <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
         {label}
       </div>
-      <div className="font-mono text-[13px] font-bold tabular-nums" style={{ color: palette.fg }}>
+      <div className="font-mono text-caption font-bold tabular-nums" style={{ color: palette.fg }}>
         {value ?? '—'}
       </div>
     </div>
@@ -566,36 +565,36 @@ function VaccineTile({
       <div className="flex items-baseline gap-1.5">
         <Syringe className="h-3 w-3" style={{ color: accent }} />
         <span
-          className="font-mono text-[10px] font-bold uppercase tracking-[0.1em]"
+          className="font-mono text-caption font-bold uppercase tracking-[0.1em]"
           style={{ color: fg }}
         >
           {label}
         </span>
         {subLabel && (
-          <span className="font-mono text-[9px] text-[var(--ink-navy-muted)]">{subLabel}</span>
+          <span className="font-mono text-caption text-[var(--ink-navy-muted)]">{subLabel}</span>
         )}
       </div>
       {given ? (
         <div
-          className="flex items-center gap-1 font-mono text-[12px] font-bold tabular-nums"
+          className="flex items-center gap-1 font-mono text-caption font-bold tabular-nums"
           style={{ color: fg }}
         >
           <CheckCircle2 className="h-3 w-3" />
           GIVEN
           {latest?.givenAtGa != null && (
-            <span className="font-normal text-[10px] text-[var(--ink-navy-muted)]">
+            <span className="font-normal text-caption text-[var(--ink-navy-muted)]">
               @ {latest.givenAtGa}w
             </span>
           )}
           {latest?.dose != null && (
-            <span className="font-normal text-[10px] text-[var(--ink-navy-muted)]">
+            <span className="font-normal text-caption text-[var(--ink-navy-muted)]">
               dose {latest.dose}
             </span>
           )}
         </div>
       ) : (
         <div
-          className="flex items-center gap-1 font-mono text-[12px] font-bold tabular-nums"
+          className="flex items-center gap-1 font-mono text-caption font-bold tabular-nums"
           style={{ color: fg }}
         >
           {overdue ? <AlertTriangle className="h-3 w-3" /> : null}
@@ -636,7 +635,7 @@ function MetricTile({
       className="relative flex flex-col gap-1 px-4 py-3"
       style={{ background: bgTint, borderTop: `3px solid ${c}` }}
     >
-      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+      <div className="flex items-center gap-1.5 text-label text-ink-muted">
         {icon && (
           <span
             className="inline-flex h-5 w-5 items-center justify-center rounded-sm"
@@ -649,12 +648,12 @@ function MetricTile({
       </div>
       <div className="flex items-baseline gap-2">
         <div
-          className="font-mono text-[22px] font-semibold leading-none tabular-nums"
+          className="font-mono text-title font-semibold leading-none tabular-nums"
           style={{ color: 'var(--ink-navy)', letterSpacing: '-0.01em' }}
         >
           {value}
         </div>
-        {sub && <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">{sub}</div>}
+        {sub && <div className="font-mono text-caption text-[var(--ink-navy-muted)]">{sub}</div>}
       </div>
     </div>
   );
@@ -682,7 +681,7 @@ function Sparkline({
 }) {
   const pts = values.filter((v): v is number => v != null);
   if (pts.length < 1) {
-    return <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">—</span>;
+    return <span className="font-mono text-caption text-[var(--ink-navy-muted)]">—</span>;
   }
   const min = Math.min(...pts, lowBand ?? Infinity);
   const max = Math.max(...pts, highBand ?? -Infinity);
@@ -794,13 +793,13 @@ function TrendRow({
       }}
     >
       <div
-        className="inline-flex items-center justify-start rounded-sm px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-[0.08em]"
+        className="inline-flex items-center justify-start rounded-sm px-2 py-0.5 font-mono text-caption font-bold uppercase tracking-[0.08em]"
         style={{ background: labelBg, color: c }}
       >
         {label}
       </div>
       <div
-        className="inline-flex items-baseline gap-0.5 rounded-sm border px-1.5 py-0.5 font-mono text-[13px] font-bold tabular-nums"
+        className="inline-flex items-baseline gap-0.5 rounded-sm border px-1.5 py-0.5 font-mono text-caption font-bold tabular-nums"
         style={{
           background: valueBg,
           color: valueColor,
@@ -809,7 +808,7 @@ function TrendRow({
       >
         {current != null ? format(current) : '—'}
         {current != null && unit && (
-          <span className="text-[10px] font-normal" style={{ color: 'var(--ink-navy-muted)' }}>
+          <span className="text-caption font-normal" style={{ color: 'var(--ink-navy-muted)' }}>
             {unit}
           </span>
         )}
@@ -818,7 +817,7 @@ function TrendRow({
         )}
       </div>
       <div
-        className="font-mono text-[10px] font-semibold tabular-nums"
+        className="font-mono text-caption font-semibold tabular-nums"
         style={{ color: deltaColor }}
       >
         {delta != null && delta !== 0
@@ -867,13 +866,13 @@ function GaProgressBar({
   ).length;
   return (
     <div>
-      <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+      <div className="flex items-baseline justify-between font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
         <span>WHO 8-CONTACT SCHEDULE · GA PROGRESS</span>
         <span>
           {gaWeeks != null ? (
             <>
               {gaWeeks}
-              <span className="text-[9px]">w</span> · {trimester}
+              <span className="text-caption">w</span> · {trimester}
             </>
           ) : (
             <span
@@ -940,7 +939,7 @@ function GaProgressBar({
           );
         })}
       </div>
-      <div className="mt-2 flex justify-between font-mono text-[9px] text-[var(--ink-navy-muted)]">
+      <div className="mt-2 flex justify-between font-mono text-caption text-[var(--ink-navy-muted)]">
         {WHO_CONTACT_WEEKS.map((week, i) => (
           <span
             key={week}
@@ -1137,13 +1136,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         style={{ background: 'var(--surface-cool)', minHeight: '100%' }}
       >
         <Icon className="h-10 w-10 text-[var(--ink-navy-muted)] opacity-50" />
-        <p className="font-mono text-[12px] text-[var(--ink-navy-muted)]">{heading}</p>
+        <p className="font-mono text-caption text-[var(--ink-navy-muted)]">{heading}</p>
         {error ? (
-          <p className="max-w-md text-center font-mono text-[11px] text-red-600">{apiMessage}</p>
+          <p className="max-w-md text-center font-mono text-caption text-danger-text">{apiMessage}</p>
         ) : null}
         <button
           onClick={() => router.back()}
-          className="inline-flex items-center gap-1.5 rounded-sm border bg-white px-3 py-1.5 font-mono text-[11px] text-[var(--ink-navy-dim)] hover:bg-[var(--accent-navy-soft)]"
+          className="inline-flex items-center gap-1.5 rounded-sm border bg-white px-3 py-1.5 font-mono text-caption text-[var(--ink-navy-dim)] hover:bg-[var(--accent-navy-soft)]"
           style={{ borderColor: 'var(--rule-strong)' }}
         >
           <ArrowLeft className="h-3.5 w-3.5" /> กลับ
@@ -1167,13 +1166,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
   const nextSchedule = derived?.next;
 
   return (
-    <div
-      style={{
-        color: 'var(--ink-navy)',
-        background: 'var(--surface-cool)',
-        zoom: 1.15,
-      }}
-    >
+    <div className="@container min-h-full bg-surface-page text-ink">
       {/* ─── Control strip ─── */}
       <div
         className="flex items-center justify-between gap-3 bg-white px-5 py-2"
@@ -1181,9 +1174,9 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
       >
         <button
           onClick={() => router.back()}
-          className="inline-flex items-center gap-1 font-mono text-[11px] tracking-[0.1em] text-[var(--ink-navy-muted)] hover:text-[var(--accent-navy)]"
+          className="inline-flex items-center gap-1 text-label text-ink-muted hover:text-brand"
         >
-          <ArrowLeft className="h-3.5 w-3.5" /> BACK
+          <ArrowLeft className="h-3.5 w-3.5" /> ย้อนกลับ
         </button>
         <KpiTip
           title="ความสดของข้อมูล"
@@ -1191,7 +1184,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           trigger={
             <div
               data-testid="sync-stamp"
-              className="flex cursor-default items-center gap-1.5 font-mono text-[11px] text-[var(--ink-navy-muted)]"
+              className="flex cursor-default items-center gap-1.5 font-mono text-caption text-[var(--ink-navy-muted)]"
             />
           }
         >
@@ -1213,7 +1206,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           {ancAssessment?.incomplete && (
             <IncompleteAssessmentMarker missingCount={ancAssessment.missingRequired.length} />
           )}
-          <Pill label={stageLabel.toUpperCase()} color={stageColor} />
+          <Pill label={stageLabel} color={stageColor} />
         </div>
       </div>
 
@@ -1222,20 +1215,18 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         className="px-5 py-3"
         style={{
           borderBottom: '1px solid var(--rule-strong)',
-          background: 'linear-gradient(90deg, var(--accent-navy-soft) 0%, #f4f6fb 70%, white 100%)',
+          background: 'linear-gradient(90deg, var(--brand-soft) 0%, var(--surface-page) 70%, var(--surface-card) 100%)',
         }}
       >
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--accent-navy)]">
-          PROVINCIAL REGISTRY · JOURNEY DETAIL
-        </div>
+        <div className="text-label text-brand">ข้อมูลการตั้งครรภ์รายบุคคล</div>
         <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <h1
-            className="text-[26px] font-bold leading-tight"
+            className="text-page font-bold leading-tight"
             style={{ color: 'var(--ink-navy)', letterSpacing: '-0.01em' }}
           >
             {maskName(journey.name)}
           </h1>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[12px] text-[var(--ink-navy-dim)]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-caption text-[var(--ink-navy-dim)]">
             <span className="inline-flex items-center gap-1">
               <User className="h-3 w-3 text-[var(--ink-navy-muted)]" />
               HN <span className="font-semibold text-[var(--ink-navy)]">{journey.hn}</span>
@@ -1295,7 +1286,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
             {journey.bloodGroup && (
               <span className="inline-flex items-center gap-1">
                 <Droplets className="h-3 w-3 text-[var(--ink-navy-muted)]" />
-                BLOOD{' '}
+                หมู่เลือด{' '}
                 <span className="font-semibold text-[var(--ink-navy)]">
                   {journey.bloodGroup}
                   {journey.rhFactor === 'NEG' ? (
@@ -1313,7 +1304,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 <span className="font-semibold text-[var(--ink-navy)] tabular-nums">
                   {derived.heightCm}
                 </span>
-                <span className="text-[10px] text-[var(--ink-navy-muted)]">cm</span>
+                <span className="text-caption text-[var(--ink-navy-muted)]">cm</span>
               </span>
             )}
             {derived?.bmi != null && (
@@ -1356,7 +1347,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 background: `color-mix(in srgb, ${accent} 7%, white)`,
               }}
             >
-              <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-[var(--ink-navy-dim)]">
+              <div className="flex flex-wrap items-center gap-2 font-mono text-caption text-[var(--ink-navy-dim)]">
                 <Activity className="h-3.5 w-3.5" style={{ color: accent }} />
                 <span className="font-bold uppercase tracking-[0.1em]" style={{ color: accent }}>
                   LABOR RECORD
@@ -1375,7 +1366,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               <Link
                 data-testid="labor-admission-link"
                 href={`/patients/${la.hcode}-${la.an}`}
-                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 font-mono text-[11px] font-bold tracking-[0.06em] text-white transition-colors hover:opacity-90"
+                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 font-mono text-caption font-bold tracking-[0.06em] text-white transition-colors hover:opacity-90"
                 style={{ background: 'var(--accent-navy)' }}
               >
                 เปิดข้อมูลห้องคลอด / Partograph →
@@ -1385,30 +1376,24 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         })()}
 
       {/* ─── Pregnancy summary strip (6 tiles) ─── */}
-      <div
-        className="grid bg-white"
-        style={{
-          gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
-          borderBottom: '1px solid var(--rule-strong)',
-        }}
-      >
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] border-b border-border bg-surface-card">
         <KpiTip
           title="อายุครรภ์ (GA)"
           body="อายุครรภ์เป็นสัปดาห์จาก HOSxP (หรือคำนวณย้อนจาก EDC เมื่อไม่มีค่า) — ครบกำหนดที่ 37 สัปดาห์, เกิน 41 สัปดาห์แสดงสีแดง (post-term)"
           trigger={<div className="cursor-default" />}
         >
           <MetricTile
-            label="GA"
+            label="อายุครรภ์ (GA)"
             value={journey.gaWeeks != null ? `${journey.gaWeeks}w` : '—'}
             sub={
               journey.gaWeeks != null
                 ? journey.gaWeeks >= 37
-                  ? 'Term'
+                  ? 'ครบกำหนด'
                   : journey.gaWeeks >= 28
-                    ? 'Third tri'
+                    ? 'ไตรมาส 3'
                     : journey.gaWeeks >= 14
-                      ? 'Second tri'
-                      : 'First tri'
+                      ? 'ไตรมาส 2'
+                      : 'ไตรมาส 1'
                 : undefined
             }
             color={
@@ -1426,7 +1411,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           trigger={<div className="cursor-default" />}
         >
           <MetricTile
-            label="EDC"
+            label="กำหนดคลอด (EDC)"
             value={formatThaiShort(journey.edc)}
             sub={
               derived?.daysToEdc != null
@@ -1449,9 +1434,8 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           trigger={<div className="cursor-default" />}
         >
           <MetricTile
-            label="LMP"
+            label="ประจำเดือนครั้งสุดท้าย (LMP)"
             value={formatThaiShort(journey.lmp)}
-            sub="ประจำเดือนครั้งสุดท้าย"
             color="var(--ink-navy-muted)"
             icon={<Calendar className="h-3 w-3" />}
           />
@@ -1462,7 +1446,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           trigger={<div className="cursor-default" />}
         >
           <MetricTile
-            label="ANC VISITS"
+            label="ฝากครรภ์ (ครั้ง)"
             value={journey.ancVisitCount}
             sub={
               derived?.daysSinceLastAnc != null
@@ -1483,13 +1467,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           trigger={<div className="cursor-default" />}
         >
           <MetricTile
-            label="1ST CONTACT"
+            label="ฝากครรภ์ครั้งแรก"
             value={derived?.firstVisitGa != null ? `${derived.firstVisitGa}w` : '—'}
             sub={
               derived?.lateFirstContact
-                ? 'LATE — RTCOG < 10w'
+                ? 'ช้ากว่าเกณฑ์ RTCOG (< 10 สัปดาห์)'
                 : derived?.firstVisitGa != null
-                  ? 'RTCOG on-time'
+                  ? 'ตรงเกณฑ์ RTCOG'
                   : undefined
             }
             color={
@@ -1508,7 +1492,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           trigger={<div className="cursor-default" />}
         >
           <MetricTile
-            label="NEXT DUE"
+            label="นัดถัดไป"
             value={
               nextSchedule?.status === 'NEXT'
                 ? `${nextSchedule.ga}w`
@@ -1550,29 +1534,20 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
       </div>
 
       {/* ═══ 2-col main ═══ */}
-      <div
-        className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]"
-        style={{ alignItems: 'start' }}
-      >
+      <div className="grid grid-cols-1 items-start gap-5 p-4 md:p-5 @min-[1160px]:grid-cols-[minmax(0,1fr)_400px]">
         {/* ─── LEFT: timeline + trends + labs ─── */}
-        <div className="min-w-0 border-r border-[var(--rule-strong)] bg-white p-5 space-y-6">
+        <div className="flex min-w-0 flex-col gap-5">
           {/* 01 — Vital trends (new) */}
-          <section>
-            <SectionLabel
-              idx={1}
-              right={<span>{derived?.visitsChrono.length ?? 0} VISITS · L→R OLDEST→NEWEST</span>}
-            >
-              Vital trends
-            </SectionLabel>
+          <SectionCard title="แนวโน้มสัญญาณชีพ" description={`${derived?.visitsChrono.length ?? 0} ครั้ง · เรียงจากเก่าไปใหม่ (ซ้าย → ขวา)`}>
             <div className="mt-2 border bg-white" style={{ borderColor: 'var(--rule-strong)' }}>
               {(derived?.visitsChrono.length ?? 0) === 0 ? (
-                <div className="px-4 py-8 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                <div className="px-4 py-8 text-center font-mono text-caption text-[var(--ink-navy-muted)]">
                   ยังไม่มีข้อมูลเพียงพอสำหรับแสดงแนวโน้ม
                 </div>
               ) : (
                 <>
                   <div
-                    className="grid items-center gap-2 border-b px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-[0.12em]"
+                    className="grid items-center gap-2 border-b px-3 py-2 font-mono text-caption font-bold uppercase tracking-[0.12em]"
                     style={{
                       gridTemplateColumns: '96px 80px 54px 1fr',
                       borderColor: 'var(--accent-navy)',
@@ -1640,20 +1615,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 </>
               )}
             </div>
-          </section>
+          </SectionCard>
 
           {/* 02 — ANC timeline */}
-          <section>
-            <SectionLabel
-              idx={2}
-              right={
-                <span>
-                  {ancVisits.length} VISIT{ancVisits.length === 1 ? '' : 'S'}
-                </span>
-              }
-            >
-              ANC visit timeline
-            </SectionLabel>
+          <SectionCard title="ประวัติการฝากครรภ์" description={`${ancVisits.length} ครั้ง`}>
             <div
               className="mt-2 border bg-white overflow-x-auto"
               style={{ borderColor: 'var(--rule-strong)' }}
@@ -1661,14 +1626,14 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               {(derived?.visitsChrono.length ?? 0) === 0 ? (
                 <div className="px-4 py-8 text-center">
                   <Calendar className="mx-auto mb-2 h-6 w-6 text-[var(--ink-navy-muted)] opacity-50" />
-                  <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                  <p className="font-mono text-caption text-[var(--ink-navy-muted)]">
                     ยังไม่มีประวัติการฝากครรภ์
                   </p>
                 </div>
               ) : (
                 <>
                   <div
-                    className="grid gap-2 border-b px-3 py-2 font-mono text-[10px] font-bold tracking-[0.1em]"
+                    className="grid gap-2 border-b px-3 py-2 font-mono text-caption font-bold tracking-[0.1em]"
                     style={{
                       gridTemplateColumns:
                         '32px 100px 120px 42px 50px 54px 56px 76px 54px 74px 62px 1fr',
@@ -1734,7 +1699,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                         // (re-sync, transfer, or two visits on the same day),
                         // so visitNumber alone is not unique within a journey.
                         key={`${v.visitDate}-${v.visitNumber}-${idx}`}
-                        className="grid items-center gap-2 border-b px-3 text-[12px] transition-colors hover:bg-[var(--accent-navy-soft)]"
+                        className="grid items-center gap-2 border-b px-3 text-caption transition-colors hover:bg-[var(--accent-navy-soft)]"
                         style={{
                           gridTemplateColumns:
                             '32px 100px 120px 42px 50px 54px 56px 76px 54px 74px 62px 1fr',
@@ -1745,7 +1710,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                         }}
                       >
                         <div
-                          className="inline-flex h-6 w-7 items-center justify-center rounded-sm font-mono text-[11px] font-bold tabular-nums"
+                          className="inline-flex h-6 w-7 items-center justify-center rounded-sm font-mono text-caption font-bold tabular-nums"
                           style={{
                             background: 'var(--accent-navy)',
                             color: 'white',
@@ -1753,11 +1718,11 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                         >
                           {v.visitNumber}
                         </div>
-                        <div className="font-mono text-[11px] tabular-nums">
+                        <div className="font-mono text-caption tabular-nums">
                           {formatThai(v.visitDate)}
                         </div>
                         <div
-                          className="truncate text-[11px]"
+                          className="truncate text-caption"
                           style={{ color: 'var(--ink-navy-dim)' }}
                           title={v.hospitalName ?? '—'}
                         >
@@ -1765,13 +1730,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                             <span className="text-[var(--ink-navy-muted)]">—</span>
                           )}
                         </div>
-                        <div className="font-mono text-[11px] tabular-nums text-[var(--ink-navy-muted)]">
+                        <div className="font-mono text-caption tabular-nums text-[var(--ink-navy-muted)]">
                           {gap != null ? `${gap}d` : '—'}
                         </div>
                         <div className="font-mono tabular-nums">
                           {v.gaWeeks ?? '—'}
                           {v.gaWeeks != null && (
-                            <span className="text-[10px] text-[var(--ink-navy-muted)]">w</span>
+                            <span className="text-caption text-[var(--ink-navy-muted)]">w</span>
                           )}
                         </div>
                         <div className="font-mono tabular-nums">{v.fundalHeightCm ?? '—'}</div>
@@ -1803,7 +1768,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                           {v.fetalHr ?? '—'}
                         </div>
                         <div
-                          className="font-mono text-[11px] tracking-[0.04em]"
+                          className="font-mono text-caption tracking-[0.04em]"
                           style={{
                             color:
                               v.presentation &&
@@ -1814,7 +1779,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                         >
                           {presentationLabel(v.presentation)}
                         </div>
-                        <div className="font-mono text-[11px] tracking-[0.04em] text-[var(--ink-navy-dim)]">
+                        <div className="font-mono text-caption tracking-[0.04em] text-[var(--ink-navy-dim)]">
                           {engagementLabel(v.engagement)}
                         </div>
                         <div className="flex flex-wrap gap-1">
@@ -1869,12 +1834,12 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                           )}
                           {v.calciumGiven && <VisitChip label="Ca" color="var(--ink-navy-muted)" />}
                           {!anyFlag && !anyUnknown && (
-                            <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--risk-low)]">
+                            <span className="inline-flex items-center gap-1 font-mono text-caption text-[var(--risk-low)]">
                               <CheckCircle2 className="h-2.5 w-2.5" /> OK
                             </span>
                           )}
                           {!anyFlag && anyUnknown && (
-                            <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--risk-medium)]">
+                            <span className="inline-flex items-center gap-1 font-mono text-caption text-[var(--risk-medium)]">
                               <HelpCircle className="h-2.5 w-2.5" /> ไม่ได้บันทึกครบ
                             </span>
                           )}
@@ -1885,19 +1850,15 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 </>
               )}
             </div>
-          </section>
+          </SectionCard>
 
           {/* 03 — Labs + screening + PMH (RTCOG OB 66-029 booking panel) */}
-          <section>
-            <SectionLabel
-              idx={3}
-              right={
-                (derived?.labFlags.length ?? 0) > 0 ? (
+          <SectionCard title="ผลตรวจทางห้องปฏิบัติการ คัดกรอง และโรคประจำตัว" actions={(derived?.labFlags.length ?? 0) > 0 ? (
                   <span className="flex flex-wrap items-center gap-1">
                     {derived!.labFlags.map((f) => (
                       <span
                         key={f.key}
-                        className="inline-flex items-center border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
+                        className="inline-flex items-center border px-1.5 py-0.5 font-mono text-caption font-semibold tracking-[0.06em]"
                         style={{ color: f.color, borderColor: f.color }}
                       >
                         {f.label}
@@ -1905,12 +1866,8 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     ))}
                   </span>
                 ) : (
-                  <span>ALL CLEAR</span>
-                )
-              }
-            >
-              Labs · screening · PMH
-            </SectionLabel>
+                  <span className="text-label text-ok-text">ไม่พบค่าผิดปกติ</span>
+                )}>
 
             {/* Iron contraindication banner — RTCOG: no iron in Hb H / β-thal */}
             {derived?.ironContra && (
@@ -1923,10 +1880,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               >
                 <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[var(--risk-high)]" />
                 <div>
-                  <div className="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--risk-high)]">
+                  <div className="font-mono text-caption font-bold uppercase tracking-[0.12em] text-[var(--risk-high)]">
                     ห้ามให้ iron supplement
                   </div>
-                  <div className="text-[12px] leading-snug text-[var(--ink-navy-dim)]">
+                  <div className="text-caption leading-snug text-[var(--ink-navy-dim)]">
                     ผู้ป่วยมี <b>{derived.ironContra}</b> — ต้องงดธาตุเหล็ก (RTCOG OB 66-029
                     เนื่องจากภาวะ iron overload)
                   </div>
@@ -1936,7 +1893,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
 
             {/* Sub-group 3a — Serology (infectious + blood type) */}
             <div className="mt-2">
-              <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+              <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                 SEROLOGY · BLOOD TYPE
               </div>
               <div
@@ -2008,7 +1965,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
 
             {/* Sub-group 3b — Thalassemia screening (RTCOG 1st-visit) */}
             <div className="mt-3">
-              <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+              <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                 THALASSEMIA · MCV / DCIP / Hb E
               </div>
               <div
@@ -2062,7 +2019,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
 
             {/* Sub-group 3c — Cervical / Aneuploidy / GBS screening */}
             <div className="mt-3">
-              <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+              <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                 SCREENING · CERVICAL · ANEUPLOIDY · GBS
               </div>
               <div
@@ -2118,10 +2075,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 className="mt-3 border bg-white px-4 py-3"
                 style={{ borderColor: 'var(--rule-strong)' }}
               >
-                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   PMH · โรคประจำตัว / ประวัติการรักษา
                 </div>
-                <div className="mt-1 text-[13px] leading-relaxed text-[var(--ink-navy-dim)]">
+                <div className="mt-1 text-caption leading-relaxed text-[var(--ink-navy-dim)]">
                   {journey.pastMedicalHistory}
                 </div>
               </div>
@@ -2177,7 +2134,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     title="ประวัติเสี่ยงสูง"
                     body="ปัจจัยเสี่ยงระดับประวัติจากระเบียนฝากครรภ์ (RTCOG OB 66-029) — แสดงเฉพาะข้อที่มีข้อมูล; โปรตีนปัสสาวะ 24 ชม. แดงเมื่อเข้าเกณฑ์ครรภ์เป็นพิษ"
                     trigger={
-                      <div className="cursor-default font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]" />
+                      <div className="cursor-default font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]" />
                     }
                   >
                     HIGH-RISK HISTORY · ประวัติเสี่ยงสูง
@@ -2219,21 +2176,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 </div>
               );
             })()}
-          </section>
+          </SectionCard>
 
           {/* 04 — Immunization (RTCOG: Tdap every pregnancy 27-36w) */}
-          <section>
-            <SectionLabel
-              idx={4}
-              right={
-                <span>
-                  {derived?.immunization.tdap.length ?? 0} TDAP ·{' '}
-                  {derived?.immunization.influenza.length ?? 0} FLU
-                </span>
-              }
-            >
-              Immunization
-            </SectionLabel>
+          <SectionCard title="วัคซีน" description={`Tdap ${derived?.immunization.tdap.length ?? 0} ครั้ง · ไข้หวัดใหญ่ ${derived?.immunization.influenza.length ?? 0} ครั้ง`}>
             <div
               className="mt-2 grid grid-cols-4 gap-0 border bg-white"
               style={{ borderColor: 'var(--rule-strong)' }}
@@ -2267,13 +2213,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 }
               />
             </div>
-          </section>
+          </SectionCard>
 
           {/* 05 — Ultrasound timeline (T1 dating, T2 anatomy, T3 wellbeing) */}
-          <section>
-            <SectionLabel idx={5} right={<span>T1 DATING · T2 ANATOMY · T3 WELLBEING</span>}>
-              Ultrasound &amp; fetal wellbeing
-            </SectionLabel>
+          <SectionCard title="อัลตราซาวด์และสุขภาพทารกในครรภ์" description="ไตรมาส 1 กำหนดอายุครรภ์ · ไตรมาส 2 ตรวจโครงสร้าง · ไตรมาส 3 ประเมินสุขภาพทารก">
             <div
               className="mt-2 grid grid-cols-1 gap-0 border bg-white md:grid-cols-3"
               style={{ borderColor: 'var(--rule-strong)' }}
@@ -2283,17 +2226,17 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 className="flex flex-col gap-1 px-3 py-2"
                 style={{ borderRight: '1px solid var(--rule-hair)' }}
               >
-                <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   T1 · DATING
                 </div>
-                <div className="text-[12px] text-[var(--ink-navy)]">
+                <div className="text-caption text-[var(--ink-navy)]">
                   {journey.datingMethod ? (
                     <span className="font-semibold">{journey.datingMethod}</span>
                   ) : (
                     <span className="text-[var(--ink-navy-muted)]">— ไม่ระบุวิธี —</span>
                   )}
                 </div>
-                <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-caption text-[var(--ink-navy-muted)]">
                   LMP {formatThaiShort(journey.lmp)} · EDC {formatThaiShort(journey.edc)}
                 </div>
               </div>
@@ -2303,13 +2246,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 className="flex flex-col gap-1 px-3 py-2"
                 style={{ borderRight: '1px solid var(--rule-hair)' }}
               >
-                <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   T2 · ANATOMY (18-22w)
                 </div>
                 {journey.anatomyScanDate ? (
                   <>
                     <div
-                      className="font-semibold text-[12px]"
+                      className="font-semibold text-caption"
                       style={{
                         color:
                           journey.anatomyScanResult === 'ABNORMAL'
@@ -2319,14 +2262,14 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     >
                       {journey.anatomyScanResult ?? 'PENDING'}
                     </div>
-                    <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                    <div className="font-mono text-caption text-[var(--ink-navy-muted)]">
                       {formatThaiShort(journey.anatomyScanDate)}
                       {journey.efwG != null && ` · EFW ${journey.efwG} g`}
                     </div>
                   </>
                 ) : (
                   <div
-                    className="text-[12px]"
+                    className="text-caption"
                     style={{
                       color:
                         (journey.gaWeeks ?? 0) > 22 ? 'var(--risk-high)' : 'var(--ink-navy-muted)',
@@ -2339,7 +2282,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
 
               {/* T3 wellbeing */}
               <div className="flex flex-col gap-1 px-3 py-2">
-                <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                   T3 · WELLBEING (≥28w)
                 </div>
                 {(() => {
@@ -2353,7 +2296,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     );
                   if (!latestT3) {
                     return (
-                      <div className="text-[12px] text-[var(--ink-navy-muted)]">
+                      <div className="text-caption text-[var(--ink-navy-muted)]">
                         {(journey.gaWeeks ?? 0) < 28
                           ? 'ยังไม่ถึง 28 สัปดาห์'
                           : '— ยังไม่มีข้อมูล —'}
@@ -2361,7 +2304,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     );
                   }
                   return (
-                    <div className="flex flex-wrap gap-2 text-[12px]">
+                    <div className="flex flex-wrap gap-2 text-caption">
                       {latestT3.nstResult && (
                         <span
                           className="font-mono"
@@ -2403,21 +2346,11 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 })()}
               </div>
             </div>
-          </section>
+          </SectionCard>
 
           {/* 04 — Newborn outcomes (only if present) */}
           {newborns.length > 0 && (
-            <section>
-              <SectionLabel
-                idx={4}
-                right={
-                  <span>
-                    {newborns.length} INFANT{newborns.length === 1 ? '' : 'S'}
-                  </span>
-                }
-              >
-                Newborn outcomes
-              </SectionLabel>
+            <SectionCard title="ผลลัพธ์ทารกแรกเกิด" description={`${newborns.length} คน`}>
               <div className="mt-2 grid gap-3 sm:grid-cols-2">
                 {newborns.map((nb) => {
                   const lbw =
@@ -2435,18 +2368,18 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     >
                       <div className="flex items-baseline justify-between">
                         <div
-                          className="font-semibold text-[15px]"
+                          className="font-semibold text-body"
                           style={{ color: 'var(--ink-navy)' }}
                         >
                           <Baby className="mr-1 inline h-4 w-4 text-[var(--accent-navy)]" />
                           ทารกคนที่ {nb.infantNumber}
                           {nb.sex && (
-                            <span className="ml-2 font-mono text-[11px] font-normal text-[var(--ink-navy-muted)]">
+                            <span className="ml-2 font-mono text-caption font-normal text-[var(--ink-navy-muted)]">
                               {SEX_LABEL_TH[nb.sex] ?? nb.sex}
                             </span>
                           )}
                         </div>
-                        <span className="font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
+                        <span className="font-mono text-caption tracking-[0.1em] text-[var(--ink-navy-muted)]">
                           {formatThaiDateTime(nb.bornAt)}
                         </span>
                       </div>
@@ -2477,7 +2410,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                           style={{ borderColor: 'var(--rule-hair)' }}
                         >
                           <AlertTriangle className="h-3 w-3 text-[var(--risk-high)]" />
-                          <span className="font-mono text-[10px] tracking-[0.1em] text-[var(--risk-high)]">
+                          <span className="font-mono text-caption tracking-[0.1em] text-[var(--risk-high)]">
                             ADVERSE OUTCOME — flagged for follow-up
                           </span>
                         </div>
@@ -2486,21 +2419,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   );
                 })}
               </div>
-            </section>
+            </SectionCard>
           )}
         </div>
 
         {/* ─── RIGHT: sticky clinical summary rail ─── */}
-        <aside className="hidden lg:block bg-white" style={{ alignSelf: 'stretch' }}>
-          <div
-            className="flex flex-col space-y-0"
-            style={{
-              position: 'sticky',
-              top: 0,
-              maxHeight: 'calc((100vh - 60px) / 1.15)',
-              overflowY: 'auto',
-            }}
-          >
+        <aside data-testid="journey-rail" className="min-w-0 overflow-hidden rounded-2xl bg-surface-card shadow-soft @min-[1160px]:sticky @min-[1160px]:top-[calc(var(--app-header-h,0px)_+_16px)]">
+          <div className="flex flex-col @min-[1160px]:max-h-[calc(100dvh_-_var(--app-header-h,0px)_-_32px)] @min-[1160px]:overflow-y-auto">
             {/* Risk assessment — always shown; extra emphasis when HR2+ */}
             <div
               className="px-4 py-3"
@@ -2512,13 +2437,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
             >
               <div className="flex items-baseline gap-2">
                 <span
-                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-caption font-bold tracking-[0.08em] text-white"
                   style={{ background: highRisk ? 'var(--risk-high)' : 'var(--accent-navy)' }}
                 >
                   01
                 </span>
                 <span
-                  className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]"
+                  className="font-mono text-caption font-semibold uppercase tracking-[0.1em]"
                   style={{ color: highRisk ? 'var(--risk-high)' : 'var(--accent-navy-strong)' }}
                 >
                   Risk assessment
@@ -2531,7 +2456,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                       label={latestRisk.riskLevel}
                       color={ANC_RISK_COLOR[latestRisk.riskLevel] ?? 'var(--ink-navy-muted)'}
                     />
-                    <span className="text-[12px] text-[var(--ink-navy-dim)]">
+                    <span className="text-caption text-[var(--ink-navy-dim)]">
                       {ANC_RISK_LABEL_TH[latestRisk.riskLevel] ?? latestRisk.riskLevel}
                     </span>
                   </div>
@@ -2542,18 +2467,18 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                       />
                     </div>
                   )}
-                  <div className="mt-1 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]">
+                  <div className="mt-1 font-mono text-caption tracking-[0.1em] text-[var(--ink-navy-muted)]">
                     SCREENED {formatThai(latestRisk.screenedAt)}
                   </div>
                   {latestRisk.recommendedFacility && (
                     <div
-                      className="mt-2 rounded-sm border p-2 text-[12px]"
+                      className="mt-2 rounded-sm border p-2 text-caption"
                       style={{
                         borderColor: 'var(--rule-strong)',
                         background: 'var(--surface-sunken)',
                       }}
                     >
-                      <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
+                      <span className="font-mono text-caption uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
                         แนะนำส่งต่อ ·{' '}
                       </span>
                       <span className="font-semibold text-[var(--ink-navy)]">
@@ -2563,33 +2488,33 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   )}
                   {latestRisk.triggeredRules.length > 0 ? (
                     <div className="mt-3">
-                      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                      <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                         ปัจจัยเสี่ยง · {latestRisk.triggeredRules.length} ข้อ
                       </div>
                       <ul className="mt-1.5 space-y-1">
                         {latestRisk.triggeredRules.map((rule) => (
                           <li
                             key={rule}
-                            className="flex items-start gap-1.5 text-[12px] leading-snug"
+                            className="flex items-start gap-1.5 text-caption leading-snug"
                             style={{ color: 'var(--ink-navy-dim)' }}
                           >
                             <AlertTriangle
                               className="mt-0.5 h-3 w-3 shrink-0"
                               style={{ color: 'var(--risk-medium)' }}
                             />
-                            <span className="text-[11px]">{RULE_LABEL_TH[rule] ?? rule}</span>
+                            <span className="text-caption">{RULE_LABEL_TH[rule] ?? rule}</span>
                           </li>
                         ))}
                       </ul>
                     </div>
                   ) : (
-                    <div className="mt-2 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                    <div className="mt-2 font-mono text-caption text-[var(--ink-navy-muted)]">
                       ไม่มีปัจจัยเสี่ยง
                     </div>
                   )}
                 </>
               ) : (
-                <div className="mt-2 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                <div className="mt-2 font-mono text-caption text-[var(--ink-navy-muted)]">
                   ยังไม่มีการประเมินความเสี่ยง
                 </div>
               )}
@@ -2619,7 +2544,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
             >
               <div className="flex items-baseline gap-2">
                 <span
-                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-caption font-bold tracking-[0.08em] text-white"
                   style={{
                     background:
                       nextSchedule?.status === 'NEXT' && nextSchedule.dueStatus === 'overdue'
@@ -2634,7 +2559,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   02
                 </span>
                 <span
-                  className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]"
+                  className="font-mono text-caption font-semibold uppercase tracking-[0.1em]"
                   style={{ color: 'var(--ink-navy)' }}
                 >
                   Next action
@@ -2644,7 +2569,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 <div className="mt-2">
                   <div className="flex items-baseline gap-2">
                     <span
-                      className="font-mono text-[22px] font-semibold tabular-nums leading-none"
+                      className="font-mono text-title font-semibold tabular-nums leading-none"
                       style={{
                         color:
                           nextSchedule.dueStatus === 'overdue'
@@ -2656,12 +2581,12 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     >
                       {nextSchedule.ga}w
                     </span>
-                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                    <span className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                       WHO CONTACT
                     </span>
                   </div>
                   <div
-                    className="mt-1 text-[12px]"
+                    className="mt-1 text-caption"
                     style={{
                       color:
                         nextSchedule.dueStatus === 'overdue'
@@ -2676,7 +2601,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                         : `อีก ${nextSchedule.weeksAway} สัปดาห์`}
                   </div>
                   {derived?.daysSinceLastAnc != null && derived.daysSinceLastAnc > 28 && (
-                    <div className="mt-2 flex items-center gap-1 font-mono text-[11px] text-[var(--risk-high)]">
+                    <div className="mt-2 flex items-center gap-1 font-mono text-caption text-[var(--risk-high)]">
                       <AlertTriangle className="h-3 w-3" />
                       NO ANC FOR {derived.daysSinceLastAnc}d
                     </div>
@@ -2684,14 +2609,14 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 </div>
               ) : nextSchedule?.status === 'UNKNOWN_GA' ? (
                 <div
-                  className="mt-2 flex items-start gap-1.5 text-[12px]"
+                  className="mt-2 flex items-start gap-1.5 text-caption"
                   style={{ color: 'var(--risk-medium)' }}
                 >
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   ไม่ทราบอายุครรภ์ — ประเมินตารางนัดไม่ได้
                 </div>
               ) : (
-                <div className="mt-2 text-[12px] text-[var(--risk-low)]">
+                <div className="mt-2 text-caption text-[var(--risk-low)]">
                   ครบทั้ง 8 contact แล้ว
                 </div>
               )}
@@ -2701,11 +2626,11 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   instead of silently rendering an empty section. */}
               {journey.gaWeeks == null ? (
                 <div className="mt-3 border-t pt-2" style={{ borderColor: 'var(--rule-hair)' }}>
-                  <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                  <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                     RTCOG · การตรวจที่เลยกำหนด
                   </div>
                   <div
-                    className="mt-1.5 flex items-start gap-1.5 text-[11px]"
+                    className="mt-1.5 flex items-start gap-1.5 text-caption"
                     style={{ color: 'var(--risk-medium)' }}
                   >
                     <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -2715,14 +2640,14 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               ) : (
                 (derived?.overdue.length ?? 0) > 0 && (
                   <div className="mt-3 border-t pt-2" style={{ borderColor: 'var(--rule-hair)' }}>
-                    <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
+                    <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
                       RTCOG · การตรวจที่เลยกำหนด
                     </div>
                     <ul className="mt-1.5 space-y-1">
                       {derived!.overdue.map((o) => (
                         <li
                           key={o.key}
-                          className="flex items-start gap-1.5 text-[11px]"
+                          className="flex items-start gap-1.5 text-caption"
                           style={{
                             color:
                               o.severity === 'high' ? 'var(--risk-high)' : 'var(--risk-medium)',
@@ -2731,7 +2656,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                           <span>
                             {o.labelTh}
-                            <span className="ml-1 font-mono text-[9px] opacity-70">
+                            <span className="ml-1 font-mono text-caption opacity-70">
                               DUE ≤ {o.dueBy}
                             </span>
                           </span>
@@ -2754,7 +2679,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
             >
               <div className="flex items-baseline gap-2">
                 <span
-                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                  className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-caption font-bold tracking-[0.08em] text-white"
                   style={{
                     background: isReferred ? 'var(--risk-medium)' : 'var(--accent-navy)',
                   }}
@@ -2762,16 +2687,16 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   03
                 </span>
                 <span
-                  className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]"
+                  className="font-mono text-caption font-semibold uppercase tracking-[0.1em]"
                   style={{ color: 'var(--ink-navy)' }}
                 >
                   Hospital
                 </span>
               </div>
-              <div className="mt-2 space-y-1.5 text-[12px]">
+              <div className="mt-2 space-y-1.5 text-caption">
                 <div className="flex items-center gap-1.5">
                   <Hospital className="h-3.5 w-3.5 text-[var(--ink-navy-muted)]" />
-                  <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
+                  <span className="font-mono text-caption uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
                     REGISTERED AT
                   </span>
                 </div>
@@ -2781,7 +2706,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 >
                   {journey.hospitalName}
                 </Link>
-                <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                <div className="font-mono text-caption text-[var(--ink-navy-muted)]">
                   HCODE {journey.hcode} · REG {formatThai(journey.registeredAt)}
                   {derived?.daysSinceRegistered != null && ` · ${derived.daysSinceRegistered}d ago`}
                 </div>
@@ -2789,7 +2714,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                   <>
                     <div className="mt-2 flex items-center gap-1.5">
                       <ArrowRightLeft className="h-3.5 w-3.5 text-[var(--risk-medium)]" />
-                      <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--risk-medium)]">
+                      <span className="font-mono text-caption uppercase tracking-[0.1em] text-[var(--risk-medium)]">
                         CURRENT
                       </span>
                     </div>
@@ -2799,7 +2724,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     >
                       {journey.currentHospitalName}
                     </Link>
-                    <div className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                    <div className="font-mono text-caption text-[var(--ink-navy-muted)]">
                       HCODE {journey.currentHcode}
                     </div>
                   </>
@@ -2818,7 +2743,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
               <div className="flex items-baseline justify-between">
                 <div className="flex items-baseline gap-2">
                   <span
-                    className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-[10px] font-bold tracking-[0.08em] text-white"
+                    className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-sm px-1.5 font-mono text-caption font-bold tracking-[0.08em] text-white"
                     style={{
                       background:
                         referrals.length > 0 ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
@@ -2827,14 +2752,14 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                     04
                   </span>
                   <span
-                    className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]"
+                    className="font-mono text-caption font-semibold uppercase tracking-[0.1em]"
                     style={{ color: 'var(--ink-navy)' }}
                   >
                     Referral history
                   </span>
                 </div>
                 <span
-                  className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 font-mono text-[10px] font-bold tabular-nums"
+                  className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 font-mono text-caption font-bold tabular-nums"
                   style={{
                     background:
                       referrals.length > 0 ? 'var(--accent-navy-soft)' : 'var(--surface-sunken)',
@@ -2845,7 +2770,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 </span>
               </div>
               {referrals.length === 0 ? (
-                <div className="mt-2 font-mono text-[11px] text-[var(--ink-navy-muted)]">
+                <div className="mt-2 font-mono text-caption text-[var(--ink-navy-muted)]">
                   ยังไม่มีประวัติการส่งต่อ
                 </div>
               ) : (
@@ -2879,7 +2804,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                             />
                           )}
                         </div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[12px]">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-caption">
                           <span className="text-[var(--ink-navy-dim)]">{ref.fromHospital}</span>
                           <ArrowRightLeft className="h-3 w-3 text-[var(--ink-navy-muted)]" />
                           <span className="font-semibold text-[var(--ink-navy)]">
@@ -2887,11 +2812,11 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                           </span>
                         </div>
                         {ref.reason && (
-                          <div className="mt-1 text-[11px] leading-snug text-[var(--ink-navy-dim)]">
+                          <div className="mt-1 text-caption leading-snug text-[var(--ink-navy-dim)]">
                             {ref.reason}
                           </div>
                         )}
-                        <div className="mt-1 font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
+                        <div className="mt-1 font-mono text-caption tracking-[0.08em] text-[var(--ink-navy-muted)]">
                           {formatRelativeTime(ref.initiatedAt)}
                           {ref.arrivedAt && (
                             <>
@@ -2910,62 +2835,20 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
             </div>
 
             {/* Tiny id footer */}
-            <div className="px-4 py-2 font-mono text-[10px] tracking-[0.08em] text-[var(--ink-navy-muted)]">
-              JOURNEY ID{' '}
-              <span className="font-semibold text-[var(--ink-navy)]">{journey.id.slice(0, 8)}</span>
+            <div className="px-4 py-2 text-caption text-ink-muted">
+              รหัสการตั้งครรภ์{' '}
+              <span className="font-semibold tabular-nums text-ink">{journey.id.slice(0, 8)}</span>
             </div>
           </div>
         </aside>
-
-        {/* Mobile fallback — same panels, no sticky */}
-        <div className="bg-white p-5 space-y-4 lg:hidden border-t border-[var(--rule-strong)]">
-          {latestRisk && (
-            <section>
-              <div className="flex items-baseline gap-2 mb-1">
-                <span className="font-mono text-[10px] font-bold tracking-[0.18em] text-[var(--accent-navy)]">
-                  01
-                </span>
-                <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]">
-                  Risk · {latestRisk.riskLevel}
-                </span>
-              </div>
-              {latestRisk.triggeredRules.length > 0 && (
-                <ul className="text-[12px] space-y-1">
-                  {latestRisk.triggeredRules.map((r) => (
-                    <li key={r} className="text-[11px] text-[var(--ink-navy-dim)]">
-                      · {RULE_LABEL_TH[r] ?? r}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-          <section>
-            <div className="flex items-baseline gap-2 mb-1">
-              <MapPin className="h-3 w-3 text-[var(--ink-navy-muted)]" />
-              <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.1em]">
-                {journey.hospitalName}
-              </span>
-            </div>
-            {isReferred && journey.currentHospitalName && (
-              <div className="font-mono text-[11px] text-[var(--risk-medium)]">
-                → {journey.currentHospitalName}
-              </div>
-            )}
-          </section>
-        </div>
       </div>
 
       {/* ─── Footer ─── */}
-      <div
-        className="flex justify-between bg-white px-5 py-2 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
-        style={{ borderTop: '1px solid var(--rule-strong)' }}
-      >
+      <div className="flex flex-wrap justify-between gap-2 border-t border-border bg-surface-card px-5 py-2 text-caption text-ink-muted">
         <span>
-          JOURNEY ID{' '}
-          <span className="font-semibold text-[var(--ink-navy)]">{journey.id.slice(0, 8)}</span>
+          รหัสการตั้งครรภ์ <span className="font-semibold tabular-nums text-ink">{journey.id.slice(0, 8)}</span>
         </span>
-        <span>REFRESHING EVERY {REFRESH_INTERVAL_MS / 1000}s</span>
+        <span>รีเฟรชอัตโนมัติทุก {REFRESH_INTERVAL_MS / 1000} วินาที</span>
       </div>
     </div>
   );

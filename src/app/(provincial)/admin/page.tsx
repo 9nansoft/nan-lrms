@@ -1,161 +1,89 @@
-// Admin — system configuration. Redesigned 2026-04-21 per the
-// air-traffic-control aesthetic: flush header, inline navy tabs,
-// sharp-cornered bordered panels.
-// 2026-04-22:
-//   - added ActiveProvince + Hospitals management tabs (multi-province)
-//   - split content into 2-col: tabs on left, live GIS map preview on right
+// Admin — system configuration on the direction-C shell (sub-project 5).
+// Authorization is NOT here: middleware.ts + isAdminAuthorized gate /admin and
+// every /api/admin route. Two columns (panel + map) only when the content box
+// itself is ≥ 1160px — the sidebar takes 232px (dashboard D6). The old 1.15 CSS scale is
+// gone (it overflowed at 1024px and skewed Leaflet hit-testing).
 'use client';
 
 import { useState } from 'react';
+import { Activity, Bell, Building2, Database, FlaskConical, Globe, KeyRound, UsersRound, type LucideIcon } from 'lucide-react';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
-import {
-  KeyRound,
-  Database,
-  Globe,
-  Building2,
-  FlaskConical,
-  UsersRound,
-  Activity,
-  Bell,
-} from 'lucide-react';
-import { BmsConfigTab } from '@/components/admin/BmsConfigTab';
-import { WebhookKeysTab } from '@/components/admin/WebhookKeysTab';
+import { PageHeader } from '@/components/shared/PageHeader';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ActiveProvinceTab } from '@/components/admin/ActiveProvinceTab';
 import { HospitalsTab } from '@/components/admin/HospitalsTab';
-import { AdminMapPane } from '@/components/admin/AdminMapPane';
-import { SimulationTab } from '@/components/admin/SimulationTab';
-import { OnlineUsersTab } from '@/components/admin/OnlineUsersTab';
+import { BmsConfigTab } from '@/components/admin/BmsConfigTab';
+import { WebhookKeysTab } from '@/components/admin/WebhookKeysTab';
 import { SyncOverviewTab } from '@/components/admin/SyncOverviewTab';
+import { OnlineUsersTab } from '@/components/admin/OnlineUsersTab';
+import { SimulationTab } from '@/components/admin/SimulationTab';
 import { MophAlertsTab } from '@/components/admin/MophAlertsTab';
-import { cn } from '@/lib/utils';
+import { AdminMapPane } from '@/components/admin/AdminMapPane';
 
-type TabKey =
-  | 'province'
-  | 'hospitals'
-  | 'bms-config'
-  | 'webhook-keys'
-  | 'sync-overview'
-  | 'online-users'
-  | 'simulation'
-  | 'moph-alerts';
+type TabKey = 'province' | 'hospitals' | 'bms-config' | 'webhook-keys' | 'sync-overview' | 'online-users' | 'simulation' | 'moph-alerts';
+
+const TABS: ReadonlyArray<{ key: TabKey; label: string; icon: LucideIcon }> = [
+  { key: 'province', label: 'จังหวัดหลัก', icon: Globe },
+  { key: 'hospitals', label: 'โรงพยาบาล', icon: Building2 },
+  { key: 'bms-config', label: 'การเชื่อมต่อ BMS', icon: Database },
+  { key: 'webhook-keys', label: 'คีย์ Webhook', icon: KeyRound },
+  { key: 'sync-overview', label: 'สถานะการซิงค์', icon: Activity },
+  { key: 'online-users', label: 'ผู้ใช้ออนไลน์', icon: UsersRound },
+  { key: 'simulation', label: 'จำลองข้อมูล', icon: FlaskConical },
+  { key: 'moph-alerts', label: 'แจ้งเตือน MOPH (LINE)', icon: Bell },
+];
 
 export default function AdminPage() {
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'ตั้งค่า' }]);
-
   const [activeTab, setActiveTab] = useState<TabKey>('province');
   // Map pin click → HospitalsTab opens the edit dialog for that hcode.
   const [autoEditHcode, setAutoEditHcode] = useState<string | null>(null);
-
   const handleSelectHospitalFromMap = (hcode: string) => {
     setActiveTab('hospitals');
     setAutoEditHcode(hcode);
   };
 
   return (
-    <div
-      style={{
-        color: 'var(--ink-navy)',
-        background: 'var(--surface-cool)',
-        zoom: 1.15,
-      }}
-    >
-      {/* Header strip */}
-      <div
-        className="flex flex-wrap items-baseline gap-x-4 gap-y-1 bg-white px-5 py-2.5"
-        style={{ borderBottom: '1px solid var(--rule-strong)' }}
-      >
-        <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
-            PROVINCIAL REGISTRY · ADMIN
-          </div>
-          <h1
-            className="mt-0.5 text-[22px] font-bold leading-tight tracking-tight"
-            style={{ color: 'var(--ink-navy)' }}
+    <div className="@container min-h-full bg-surface-page">
+      <div className="flex flex-col gap-5 px-4 py-5 md:px-6">
+        <PageHeader
+          title="ตั้งค่าระบบ"
+          subtitle="จังหวัดหลัก ทะเบียนโรงพยาบาล การเชื่อมต่อ HOSxP คีย์ Webhook และการแจ้งเตือน — สำหรับผู้ดูแลระบบ สสจ."
+        />
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabKey)} className="gap-5">
+          <TabsList
+            variant="line"
+            aria-label="หมวดการตั้งค่า"
+            className="w-full max-w-full flex-wrap justify-start gap-1 border-b border-border pb-1 group-data-horizontal/tabs:h-auto"
           >
-            ตั้งค่าระบบ
-          </h1>
-        </div>
-        <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
-          จังหวัดหลัก · ทะเบียนโรงพยาบาล · BMS Tunnel · Webhook API Keys · Sync Status · Online
-          Users · Simulation
-        </p>
-      </div>
-
-      {/* Tab strip */}
-      <div
-        className="flex flex-wrap items-center gap-3 bg-white px-5 py-2.5"
-        style={{ borderBottom: '1px solid var(--rule-strong)' }}
-      >
-        <div
-          className="inline-flex items-center border bg-white"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          {[
-            { k: 'province' as const, label: 'จังหวัดหลัก', icon: Globe },
-            { k: 'hospitals' as const, label: 'โรงพยาบาล', icon: Building2 },
-            { k: 'bms-config' as const, label: 'BMS Tunnel', icon: Database },
-            { k: 'webhook-keys' as const, label: 'Webhook API Keys', icon: KeyRound },
-            { k: 'sync-overview' as const, label: 'Sync Status', icon: Activity },
-            { k: 'online-users' as const, label: 'Online Users', icon: UsersRound },
-            { k: 'simulation' as const, label: 'จำลองข้อมูล', icon: FlaskConical },
-            { k: 'moph-alerts' as const, label: 'MOPH Alerts', icon: Bell },
-          ].map((t, i) => {
-            const active = activeTab === t.k;
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.k}
-                onClick={() => setActiveTab(t.k)}
-                className={cn(
-                  'inline-flex items-center gap-1.5 px-3 py-1.5 font-mono text-[11px] tracking-[0.06em] transition-colors',
-                  active ? 'font-semibold' : 'font-normal hover:bg-[var(--accent-navy-soft)]',
-                )}
-                style={{
-                  background: active ? 'var(--accent-navy-soft)' : 'white',
-                  color: active ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
-                  borderLeft: i > 0 ? '1px solid var(--rule-strong)' : undefined,
-                }}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 2-col content: tabs on the left, GIS map preview on the right. The
-          map is sticky on wide viewports so scrolling the tab content
-          (hospital table, keys) doesn't lose the spatial context. */}
-      <div
-        className="grid gap-0 bg-white"
-        style={{ gridTemplateColumns: 'minmax(520px, 1fr) minmax(420px, 1fr)' }}
-      >
-        <div className="px-5 pt-4 pb-6" style={{ borderRight: '1px solid var(--rule-strong)' }}>
-          {activeTab === 'province' ? (
-            <ActiveProvinceTab />
-          ) : activeTab === 'hospitals' ? (
-            <HospitalsTab
-              autoEditHcode={autoEditHcode}
-              onAutoEditConsumed={() => setAutoEditHcode(null)}
-            />
-          ) : activeTab === 'bms-config' ? (
-            <BmsConfigTab />
-          ) : activeTab === 'webhook-keys' ? (
-            <WebhookKeysTab />
-          ) : activeTab === 'sync-overview' ? (
-            <SyncOverviewTab />
-          ) : activeTab === 'online-users' ? (
-            <OnlineUsersTab />
-          ) : activeTab === 'moph-alerts' ? (
-            <MophAlertsTab />
-          ) : (
-            <SimulationTab />
-          )}
-        </div>
-        <div className="px-5 pt-4 pb-6">
-          <AdminMapPane onSelectHospital={handleSelectHospitalFromMap} />
-        </div>
+            {TABS.map(({ key, label, icon: Icon }) => (
+              <TabsTrigger key={key} value={key} className="h-10 flex-none px-3 text-label data-active:text-brand">
+                <Icon aria-hidden="true" className="h-4 w-4" />
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <div className="grid grid-cols-1 items-start gap-5 @min-[1160px]:grid-cols-[minmax(0,1fr)_420px]">
+            <div className="min-w-0">
+              <TabsContent value="province"><ActiveProvinceTab /></TabsContent>
+              <TabsContent value="hospitals">
+                <HospitalsTab autoEditHcode={autoEditHcode} onAutoEditConsumed={() => setAutoEditHcode(null)} />
+              </TabsContent>
+              <TabsContent value="bms-config"><BmsConfigTab /></TabsContent>
+              <TabsContent value="webhook-keys"><WebhookKeysTab /></TabsContent>
+              <TabsContent value="sync-overview"><SyncOverviewTab /></TabsContent>
+              <TabsContent value="online-users"><OnlineUsersTab /></TabsContent>
+              <TabsContent value="simulation"><SimulationTab /></TabsContent>
+              <TabsContent value="moph-alerts"><MophAlertsTab /></TabsContent>
+            </div>
+            <section
+              aria-label="แผนที่โรงพยาบาล"
+              className="min-w-0 @min-[1160px]:sticky @min-[1160px]:top-[calc(var(--app-header-h,0px)+16px)]"
+            >
+              <AdminMapPane onSelectHospital={handleSelectHospitalFromMap} />
+            </section>
+          </div>
+        </Tabs>
       </div>
     </div>
   );

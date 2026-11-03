@@ -148,3 +148,93 @@ describe('useMaternityWardStateFull — ward selection', () => {
     expect(result.current.health).toBe('ok');
   });
 });
+
+describe('useMaternityWardStateFull — lastUpdatedAt (ward freshness)', () => {
+  it('is null before the first occupancy fetch and an ISO time after it succeeds', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg });
+    mockListWards.mockResolvedValue([{ ward: '03', name: 'ห้องคลอด', real_bedcount: 1 }]);
+    mockListInventory.mockResolvedValue([]);
+    mockListOccupancy.mockResolvedValue([]);
+    const { result } = renderHook(() => useMaternityWardStateFull(), { wrapper });
+    expect(result.current.lastUpdatedAt).toBeNull();
+    await waitFor(() => expect(result.current.lastUpdatedAt).not.toBeNull(), { timeout: 2000 });
+    expect(Number.isFinite(Date.parse(result.current.lastUpdatedAt!))).toBe(true);
+  });
+
+  it('stays null when the occupancy feed has never succeeded', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg });
+    mockListWards.mockResolvedValue([{ ward: '03', name: 'ห้องคลอด', real_bedcount: 1 }]);
+    mockListInventory.mockResolvedValue([]);
+    mockListOccupancy.mockRejectedValue(new Error('down'));
+    const { result } = renderHook(() => useMaternityWardStateFull(), { wrapper });
+    await waitFor(() => expect(result.current.health).toBe('error'), { timeout: 2000 });
+    expect(result.current.lastUpdatedAt).toBeNull();
+  });
+
+  it('exports the occupancy cadence the page quotes', async () => {
+    const mod = await import('@/hooks/useMaternityWardStateFull');
+    expect(mod.WARD_OCCUPANCY_REFRESH_MS).toBe(20_000);
+  });
+});
+
+// C1: "not loaded" and "failed" must never look like "empty". The page reads
+// these flags to choose LoadingState / ErrorState over the bed grid.
+describe('useMaternityWardStateFull — per-feed load state (C1)', () => {
+  it('beds/occupancy are not loaded until their own fetch resolves', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg });
+    mockListWards.mockResolvedValue([{ ward: '03', name: 'ห้องคลอด', real_bedcount: 1 }]);
+    mockListInventory.mockResolvedValue([]);
+    mockListOccupancy.mockImplementation(() => new Promise(() => {}));
+    const { result } = renderHook(() => useMaternityWardStateFull(), { wrapper });
+    expect(result.current.bedsLoaded).toBe(false);
+    expect(result.current.occupancyLoaded).toBe(false);
+    await waitFor(() => expect(result.current.bedsLoaded).toBe(true), { timeout: 2000 });
+    expect(result.current.occupancyLoaded).toBe(false);
+    expect(result.current.occupancyError).toBeNull();
+  });
+
+  it('reports each feed error separately with the time the failure began', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg });
+    mockListWards.mockResolvedValue([{ ward: '03', name: 'ห้องคลอด', real_bedcount: 1 }]);
+    mockListInventory.mockResolvedValue([]);
+    mockListOccupancy.mockRejectedValue(new Error('occupancy down'));
+    const before = Date.now();
+    const { result } = renderHook(() => useMaternityWardStateFull(), { wrapper });
+    await waitFor(() => expect(result.current.occupancyError?.message).toBe('occupancy down'), { timeout: 2000 });
+    expect(result.current.occupancyLoaded).toBe(false);
+    expect(result.current.bedsError).toBeNull();
+    expect(result.current.wardsError).toBeNull();
+    expect(result.current.failingSince).not.toBeNull();
+    expect(Date.parse(result.current.failingSince!)).toBeGreaterThanOrEqual(before - 1000);
+  });
+
+  it('failingSince is null while every feed is healthy', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg });
+    mockListWards.mockResolvedValue([{ ward: '03', name: 'ห้องคลอด', real_bedcount: 1 }]);
+    mockListInventory.mockResolvedValue([]);
+    mockListOccupancy.mockResolvedValue([]);
+    const { result } = renderHook(() => useMaternityWardStateFull(), { wrapper });
+    await waitFor(() => expect(result.current.occupancyLoaded).toBe(true), { timeout: 2000 });
+    expect(result.current.failingSince).toBeNull();
+  });
+
+  it('switching ward drops the old freshness: lastUpdatedAt is null until the new ward loads', async () => {
+    mockBmsSession.mockReturnValue({ config: cfg });
+    mockListWards.mockResolvedValue([
+      { ward: '03', name: 'ห้องคลอด A', real_bedcount: 1 },
+      { ward: '05', name: 'ห้องคลอด B', real_bedcount: 1 },
+    ]);
+    mockListInventory.mockResolvedValue([]);
+    mockListOccupancy.mockImplementation((_c: unknown, ward: string) =>
+      ward === '05' ? new Promise(() => {}) : Promise.resolve([]),
+    );
+    const { result } = renderHook(() => useMaternityWardStateFull(), { wrapper });
+    await waitFor(() => expect(result.current.lastUpdatedAt).not.toBeNull(), { timeout: 2000 });
+    act(() => {
+      result.current.setSelectedWard('05');
+    });
+    await waitFor(() => expect(result.current.ward).toBe('05'), { timeout: 2000 });
+    expect(result.current.occupancyLoaded).toBe(false);
+    expect(result.current.lastUpdatedAt).toBeNull();
+  });
+});

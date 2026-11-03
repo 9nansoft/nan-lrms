@@ -8,7 +8,7 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { toIsoString } from '@/lib/dates';
 import { decryptSafe } from '@/lib/encryption';
 import { CareStage } from '@/types/domain';
-import { ancFreshnessCutoffs, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
+import { ancFreshnessCutoffs, ancRegistryScopeSql, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
 import { ANC_OPS, ancOpsCutoffs } from '@/config/anc-ops';
 import type {
   AncOpsCounts,
@@ -75,7 +75,12 @@ function buildJourneyWhere(
     // app code and bound as params so this runs identically on Postgres/SQLite.
     if (filters.stage === CareStage.PREGNANCY) {
       const { edcOnOrAfter, lastAncOnOrAfter } = ancFreshnessCutoffs(now);
+      // Hospital scope comes from the shared config so this board and the
+      // dashboard cards select the same women. The gates below stay spelled out
+      // rather than using ancFreshnessSql(): the 'ltfu' cohort swaps the
+      // last-ANC gate for the window just past it, which needs them separable.
       clause += `
+        AND ${ancRegistryScopeSql('mj')}
         AND (mj.ga_weeks IS NULL OR mj.ga_weeks <= ?)
         AND (mj.edc IS NULL OR mj.edc >= ?)`;
       params.push(ANC_MAX_GA_WEEKS, edcOnOrAfter);

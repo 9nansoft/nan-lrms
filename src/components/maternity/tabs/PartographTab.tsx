@@ -137,7 +137,7 @@ export function PartographTab({
   }
   if (isLoading) return <div className="p-4 text-slate-500">กำลังโหลด…</div>;
   if (error) {
-    return <div className="p-4 text-red-600">โหลดไม่สำเร็จ: {(error as Error).message}</div>;
+    return <div className="p-4 text-danger-text">โหลดไม่สำเร็จ: {(error as Error).message}</div>;
   }
 
   const hcode = userInfo?.hospcode ?? '';
@@ -191,9 +191,9 @@ export function PartographTab({
   // Compact badge matching the Delphi chart-tab caption — only the most severe
   // bucket is shown (e.g. critical wins over alert). Hidden when empty.
   const badge = cdssCounts.critical > 0
-    ? { label: `วิกฤต ${cdssCounts.critical}`, cls: 'bg-rose-100 text-rose-700' }
+    ? { label: `วิกฤต ${cdssCounts.critical}`, cls: 'bg-danger-tint text-danger-text' }
     : cdssCounts.alert > 0
-      ? { label: `เตือน ${cdssCounts.alert}`, cls: 'bg-amber-100 text-amber-800' }
+      ? { label: `เตือน ${cdssCounts.alert}`, cls: 'bg-warn-tint text-warn-text' }
       : cdssCounts.warn > 0
         ? { label: `ระวัง ${cdssCounts.warn}`, cls: 'bg-sky-100 text-sky-800' }
         : null;
@@ -210,7 +210,7 @@ export function PartographTab({
               {badge && (
                 <span
                   className={cn(
-                    'rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide',
+                    'rounded px-1.5 py-0.5 text-caption font-semibold tracking-wide',
                     badge.cls,
                   )}
                 >
@@ -224,7 +224,7 @@ export function PartographTab({
             type="button"
             onClick={openAdd}
             disabled={dialog.open}
-            className="ml-auto rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+            className="ml-auto rounded bg-ok-text px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
           >
             + เพิ่มเวลาใหม่
           </button>

@@ -2,7 +2,7 @@
 // per-patient sync freshness stamp, referral history strip, and newborn
 // outcomes card (both from the linked maternal journey).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within, act } from '@testing-library/react';
+import { render, screen, within, act, fireEvent } from '@testing-library/react';
 import { Suspense } from 'react';
 import PatientDetailPage from '@/app/(provincial)/patients/[an]/page';
 import type { MaternalScreenAssessmentDto } from '@/types/api';
@@ -108,31 +108,34 @@ const journeyContext = {
   ],
 };
 
-vi.mock('@/hooks/usePatient', () => ({
-  usePatient: () => ({
-    patient,
-    cpdScore: null,
-    journeyContext,
-    vitals: [],
-    contractions: [],
-    isLoading: false,
-    error: null,
-    vitalsError: null,
-    contractionsError: null,
-    mutate: vi.fn(),
-    mutateVitals: vi.fn(),
-    mutateContractions: vi.fn(),
-  }),
+const { mockUsePatient, mockUsePartogram } = vi.hoisted(() => ({
+  mockUsePatient: vi.fn(),
+  mockUsePartogram: vi.fn(),
 }));
+vi.mock('@/hooks/usePatient', () => ({ usePatient: mockUsePatient }));
+vi.mock('@/hooks/usePartogram', () => ({ usePartogram: mockUsePartogram }));
 
-vi.mock('@/hooks/usePartogram', () => ({
-  usePartogram: () => ({ partogram: null, error: undefined, mutate: vi.fn() }),
-}));
+const patientOk = () => ({
+  patient,
+  cpdScore: null,
+  journeyContext,
+  vitals: [],
+  contractions: [],
+  isLoading: false,
+  error: null,
+  vitalsError: null,
+  contractionsError: null,
+  mutate: vi.fn(),
+  mutateVitals: vi.fn(),
+  mutateContractions: vi.fn(),
+});
 
 // Default: flag off, matching production — existing tests above must render
 // identically to before this feature existed without touching their
 // assertions.
 beforeEach(() => {
+  mockUsePatient.mockImplementation(patientOk);
+  mockUsePartogram.mockReturnValue({ partogram: null, error: undefined, mutate: vi.fn() });
   mockUseMaternalScreenings.mockReturnValue({
     uiEnabled: false,
     latest: null,
@@ -305,3 +308,117 @@ describe('PatientDetailPage — maternal screening shadow card (flag-gated)', ()
     expect(tierChip.getAttribute('data-tier')).toBe('LOCAL_SEVERE');
   });
 });
+
+const partogramFixture = {
+  startTime: patient.admitDate,
+  entries: [],
+  observations: [
+    {
+      id: 'obs-1',
+      observeDatetime: '2026-10-11T08:00:00',
+      hourNo: 1,
+      fetalHeartRate: 190, // abnormal per sevFhr
+      amnioticFluid: null,
+      amnioticTypeName: null,
+      moulding: null,
+      cervicalDilationCm: 5,
+      descentOfHead: null,
+      contractionPer10Min: 3,
+      contractionDurationSec: 40,
+      contractionStrength: null,
+      oxytocinUml: null,
+      oxytocinDropsMin: null,
+      drugsIvFluids: null,
+      pulse: 88,
+      bpSystolic: 120,
+      bpDiastolic: 80,
+      temperature: 37,
+      urineVolumeMl: null,
+      urineProtein: null,
+      urineGlucose: null,
+      urineAcetone: null,
+      note: null,
+      entryStaff: null,
+    },
+  ],
+  alerts: [],
+  severity: { highest: null, counts: { critical: 0, alert: 0, warn: 0, info: 0 } },
+  source: 'hosxp' as const,
+  lastObservedAt: null,
+};
+
+describe('PatientDetailPage — sub-project 3 layout', () => {
+  it('has no page zoom, Thai chrome and tabs, and no English mono labels', async () => {
+    await renderPage();
+    expect(document.querySelector('[style*="zoom"]')).toBeNull();
+    expect(screen.getByText('ย้อนกลับ')).toBeInTheDocument();
+    expect(screen.getByText('ดูอย่างเดียว · มุมมองระดับจังหวัด')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'สรุป' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /^พาร์โทกราฟ/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'การหดรัดตัว' })).toBeInTheDocument();
+    const text = document.body.textContent ?? '';
+    for (const en of [
+      'BACK',
+      'READ-ONLY',
+      'PROVINCIAL VIEW',
+      'LIVE MONITORING',
+      'ADMISSION RECORD',
+      'INFANT(S)',
+      'NEWBORN OUTCOMES',
+      'ANC VISITS',
+      'LAST VISIT',
+      'Contractions',
+    ]) {
+      expect(text).not.toContain(en);
+    }
+  });
+
+  it('ANC strip uses the shared ANC chip and Thai care stage', async () => {
+    await renderPage();
+    expect(document.querySelector('[data-risk="HR2"]')).not.toBeNull();
+    expect(screen.getByText('ระยะการดูแล: ระหว่างคลอด')).toBeInTheDocument();
+  });
+
+  it.each([
+    [400, 'รูปแบบรหัสผู้คลอดในลิงก์ไม่ถูกต้อง'],
+    [404, 'ไม่พบข้อมูลผู้คลอดรายนี้'],
+    [500, 'โหลดข้อมูลผู้คลอดไม่สำเร็จ'],
+  ])('HTTP %s → "%s" with remedy, raw detail, retry and a way back', async (status, message) => {
+    const mutate = vi.fn();
+    mockUsePatient.mockImplementation(() => ({
+      ...patientOk(),
+      patient: null,
+      error: Object.assign(new Error('api says no'), { status }),
+      mutate,
+    }));
+    await renderPage();
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(message);
+    expect(alert).toHaveTextContent('วิธีแก้:');
+    expect(alert).toHaveTextContent('api says no');
+    fireEvent.click(screen.getByRole('button', { name: /ลองใหม่/ }));
+    expect(mutate).toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'กลับหน้าแดชบอร์ด' })).toHaveAttribute('href', '/');
+  });
+
+  it('partograph renders at its native width inside a scroll box; observations are a captioned table', async () => {
+    mockUsePartogram.mockReturnValue({ partogram: partogramFixture, error: undefined, mutate: vi.fn() });
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /^พาร์โทกราฟ/ }));
+    const scroll = screen.getByTestId('partograph-scroll');
+    expect(scroll.className).toContain('overflow-x-auto');
+    expect((scroll.firstElementChild as HTMLElement).style.minWidth).toBe('900px');
+    expect(screen.getByTestId('partograph-form')).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: 'บันทึกการสังเกตพาร์โทกราฟ' });
+    // The SVG form also labels the abnormal FHR, so scope to the table.
+    expect(within(table).getByText('190').className).toContain('text-danger-text');
+    expect(screen.getByText('ยังไม่มีข้อมูลสัญญาณชีพ')).toBeInTheDocument();
+  });
+
+  it('no partogram yet → EmptyState in the partograph tab', async () => {
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /^พาร์โทกราฟ/ }));
+    expect(screen.getByText('ยังไม่มีข้อมูลพาร์โทกราฟสำหรับผู้คลอดรายนี้')).toBeInTheDocument();
+  });
+});
+

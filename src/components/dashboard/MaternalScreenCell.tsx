@@ -60,7 +60,7 @@ function TierChip({
       data-tier={tier}
       className={cn(
         'inline-block border px-1 py-0.5 font-mono font-semibold tracking-[0.03em]',
-        isKiosk ? 'text-[11px]' : 'text-[10px]',
+        isKiosk ? 'text-[11px]' : 'text-caption',
       )}
       style={{ color, borderColor: color, background: 'transparent' }}
     >
@@ -86,7 +86,7 @@ function AcuityChip({
       data-acuity={acuity}
       className={cn(
         'inline-block border px-1 py-0.5 font-mono font-semibold tracking-[0.03em]',
-        isKiosk ? 'text-[11px]' : 'text-[10px]',
+        isKiosk ? 'text-[11px]' : 'text-caption',
       )}
       style={{ color, borderColor: color, background: 'transparent' }}
     >
@@ -135,7 +135,7 @@ export function MaternalScreenCell({
       {assessedAt !== null && (
         <span
           data-testid="maternal-screen-cell-age"
-          className="font-mono text-[10px]"
+          className="font-mono text-caption"
           style={{ color: ageColor }}
         >
           {formatRelativeAge(assessedAt, 'short')}

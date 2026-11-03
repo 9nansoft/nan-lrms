@@ -12,7 +12,7 @@ describe('StaleBanner', () => {
       screen.getByText('ระบบไม่สามารถเชื่อมต่อ HOSxP ได้ — ข้อมูลที่แสดงอาจไม่เป็นปัจจุบัน'),
     ).toBeTruthy();
     const banner = container.firstElementChild as HTMLElement;
-    expect(banner.className).toContain('bg-red-600');
+    expect(banner.className).toContain('bg-danger');
   });
 
   it('renders yellow banner with hospital names when specific hospitals are offline', () => {
@@ -23,7 +23,7 @@ describe('StaleBanner', () => {
       screen.getByText('โรงพยาบาลออฟไลน์: รพ.สต.บ้านนา, รพ.สต.ท่าม่วง'),
     ).toBeTruthy();
     const banner = container.firstElementChild as HTMLElement;
-    expect(banner.className).toContain('bg-yellow-500');
+    expect(banner.className).toContain('bg-warn-tint');
   });
 
   it('returns null when no hospitals are offline', () => {

@@ -18,6 +18,12 @@ export function mophAlertsEnabled(): boolean {
   return process.env.MOPH_ALERTS_ENABLED !== 'false';
 }
 
+/** The Bangkok calendar day (YYYY-MM-DD) that alert dedup + expiry key on.
+ *  An alert is only "current" on the day it was raised; prior-day rows expire. */
+export function mophAlertLocalDate(now: Date = new Date()): string {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+}
+
 export interface MophAlertLimits {
   /** Max pending rows processed per drain invocation. */
   maxAlertsPerDrain: number;

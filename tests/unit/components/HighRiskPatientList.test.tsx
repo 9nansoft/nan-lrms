@@ -74,10 +74,10 @@ describe('HighRiskPatientList', () => {
     expect(screen.getAllByText(/High-risk/i).length).toBeGreaterThan(0);
   });
 
-  it('renders tab counts (HIGH-RISK ONLY and ALL ACTIVE)', () => {
+  it('renders tab counts (เฉพาะเสี่ยงสูง and ทั้งหมดในห้องคลอด)', () => {
     render(<HighRiskPatientList patients={samplePatients} />);
-    expect(screen.getByText(/HIGH-RISK ONLY/)).toBeTruthy();
-    expect(screen.getByText(/ALL ACTIVE/)).toBeTruthy();
+    expect(screen.getByText(/เฉพาะเสี่ยงสูง/)).toBeTruthy();
+    expect(screen.getByText(/ทั้งหมดในห้องคลอด/)).toBeTruthy();
   });
 
   it('renders AN numbers for HIGH-risk tab (default)', () => {
@@ -87,9 +87,9 @@ describe('HighRiskPatientList', () => {
     expect(screen.getByText('AN003')).toBeTruthy();
   });
 
-  it('switches to ALL ACTIVE tab and shows every patient', () => {
+  it('switches to the ทั้งหมดในห้องคลอด tab and shows every patient', () => {
     render(<HighRiskPatientList patients={samplePatients} />);
-    fireEvent.click(screen.getByText(/ALL ACTIVE/));
+    fireEvent.click(screen.getByText(/ทั้งหมดในห้องคลอด/));
     expect(screen.getByText('AN001')).toBeTruthy();
     expect(screen.getByText('AN002')).toBeTruthy();
     expect(screen.getByText('AN003')).toBeTruthy();
@@ -97,7 +97,7 @@ describe('HighRiskPatientList', () => {
 
   it('sorts patients by CPD score descending (highest first)', () => {
     const { container } = render(<HighRiskPatientList patients={samplePatients} />);
-    fireEvent.click(screen.getByText(/ALL ACTIVE/));
+    fireEvent.click(screen.getByText(/ทั้งหมดในห้องคลอด/));
     const rows = container.querySelectorAll('[data-testid="patient-row"]');
     expect(rows.length).toBe(3);
     expect(rows[0].textContent).toContain('AN003'); // cpd 15
@@ -127,7 +127,7 @@ describe('HighRiskPatientList', () => {
 
   it('shows no-data text for null lastVitalAt', () => {
     render(<HighRiskPatientList patients={[samplePatients[2]]} />);
-    expect(screen.getByText(/no data/)).toBeTruthy();
+    expect(screen.getByText(/ไม่มีข้อมูล/)).toBeTruthy();
   });
 
   it('shows empty state when no patients', () => {
@@ -166,9 +166,9 @@ describe('HighRiskPatientList', () => {
     expect(highChips.length).toBe(2);
   });
 
-  it('switches to ALL ACTIVE tab and shows MEDIUM risk chip', () => {
+  it('switches to the ทั้งหมดในห้องคลอด tab and shows MEDIUM risk chip', () => {
     const { container } = render(<HighRiskPatientList patients={samplePatients} />);
-    fireEvent.click(screen.getByText(/ALL ACTIVE/));
+    fireEvent.click(screen.getByText(/ทั้งหมดในห้องคลอด/));
     const medChips = container.querySelectorAll('[data-risk="MEDIUM"]');
     expect(medChips.length).toBe(1);
   });

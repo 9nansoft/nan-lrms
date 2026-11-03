@@ -6,7 +6,14 @@
 // Optimistic with revert on error and an actionable Thai message — the same
 // contract the single-switch version had (constitution §V).
 import { useEffect, useState, useCallback } from 'react';
+import { Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
+import { LoadingState } from '@/components/shared/LoadingState';
 import { NAN_HOSPITALS } from '@/config/hospitals';
+import { cn } from '@/lib/utils';
 
 interface NotificationEventDto {
   key: string;
@@ -29,7 +36,7 @@ interface PreferenceDto {
 }
 
 const TIER_LABEL: Record<NotificationEventDto['tier'], string> = {
-  urgent: 'ทันที',
+  urgent: 'แจ้งทันที',
   digest: 'สรุปรายวัน',
 };
 
@@ -45,13 +52,14 @@ export function NotificationPreferenceCard() {
   const [ownHospitalCode, setOwnHospitalCode] = useState('');
   const [events, setEvents] = useState<NotificationEventDto[]>([]);
   const [preferences, setPreferences] = useState<PreferenceDto[]>([]);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<{ message: string; remedy: string; retry?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [addCode, setAddCode] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch('/api/profile/notification-preference');
       if (!res.ok) throw new Error('http');
@@ -71,7 +79,7 @@ export function NotificationPreferenceCard() {
       setEvents(body.events as NotificationEventDto[]);
       setPreferences(body.preferences as PreferenceDto[]);
     } catch {
-      setError('โหลดการตั้งค่าไม่สำเร็จ ลองใหม่อีกครั้ง');
+      setError({ message: 'โหลดการตั้งค่าไม่สำเร็จ', remedy: 'ตรวจสอบการเชื่อมต่อเครือข่าย แล้วกด ลองใหม่', retry: true });
     } finally {
       setLoading(false);
     }
@@ -95,7 +103,7 @@ export function NotificationPreferenceCard() {
         ? rows.map((r) => (r.hospitalCode === row.hospitalCode ? row : r))
         : [...rows, row],
     );
-    setError('');
+    setError(null);
     setBusy(true);
     try {
       const res = await fetch('/api/profile/notification-preference', {
@@ -120,7 +128,7 @@ export function NotificationPreferenceCard() {
       );
     } catch {
       setPreferences(previous);
-      setError('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง');
+      setError({ message: 'บันทึกไม่สำเร็จ — การตั้งค่ากลับเป็นค่าเดิมแล้ว', remedy: 'ตรวจสอบการเชื่อมต่อ แล้วเลือกอีกครั้ง' });
     } finally {
       setBusy(false);
     }
@@ -129,7 +137,7 @@ export function NotificationPreferenceCard() {
   async function removeHospital(hospitalCode: string) {
     const previous = preferences;
     setPreferences((rows) => rows.filter((r) => r.hospitalCode !== hospitalCode));
-    setError('');
+    setError(null);
     setBusy(true);
     try {
       const res = await fetch(
@@ -139,7 +147,7 @@ export function NotificationPreferenceCard() {
       if (!res.ok) throw new Error('http');
     } catch {
       setPreferences(previous);
-      setError('ลบไม่สำเร็จ ลองใหม่อีกครั้ง');
+      setError({ message: 'ลบไม่สำเร็จ — ยังติดตามโรงพยาบาลนี้อยู่', remedy: 'ตรวจสอบการเชื่อมต่อ แล้วกด เลิกติดตาม อีกครั้ง' });
     } finally {
       setBusy(false);
     }
@@ -179,157 +187,156 @@ export function NotificationPreferenceCard() {
   const ownIsFollowed = preferences.some((r) => r.hospitalCode === ownHospitalCode);
 
   return (
-    <section className="space-y-4 rounded-2xl border border-slate-200 p-4">
-      <div>
-        <p className="font-medium">การแจ้งเตือนทาง LINE (MOPH Prompt)</p>
-        <p className="text-xs text-slate-500">
-          เลือกเหตุการณ์ที่ต้องการรับ และโรงพยาบาลที่ต้องการติดตาม
-        </p>
-      </div>
+    <SectionCard title="การแจ้งเตือนทาง LINE (MOPH Prompt)" description="เลือกเหตุการณ์ที่ต้องการรับ และโรงพยาบาลที่ต้องการติดตาม">
+      <div className="space-y-4">
+        {loading && <LoadingState message="กำลังโหลดการตั้งค่า…" className="py-4" />}
+        {busy && (
+          <p role="status" className="flex items-center gap-2 text-label text-ink-muted">
+            <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> กำลังบันทึก…
+          </p>
+        )}
+        {error && (
+          <ErrorState
+            variant="banner"
+            className="rounded-xl border"
+            message={error.message}
+            remedy={error.remedy}
+            onRetry={error.retry ? () => void load() : undefined}
+          />
+        )}
 
-      {loading && <p className="text-xs text-slate-500">กำลังโหลดการตั้งค่า…</p>}
-      {busy && <p className="text-xs text-slate-500">กำลังบันทึก…</p>}
-      {error && (
-        <p className="text-sm text-rose-700" role="alert">
-          {error}
-        </p>
-      )}
+        {/* Suppressed while an error is showing: "you follow nothing" is a claim
+            about saved state we cannot make when the load failed. */}
+        {!loading && !error && preferences.length === 0 && (
+          <EmptyState
+            illustration="generic"
+            title="ยังไม่ได้ติดตามโรงพยาบาลใด"
+            description="เพิ่มโรงพยาบาลก่อน จึงจะได้รับแจ้งเตือนทาง LINE"
+            className="shadow-none"
+          />
+        )}
 
-      {/* Suppressed while an error is showing: "you follow nothing" is a claim
-          about saved state we cannot make when the load failed. */}
-      {!loading && !error && preferences.length === 0 && (
-        <p className="text-xs text-slate-500">
-          ยังไม่ได้ติดตามโรงพยาบาลใด — เพิ่มโรงพยาบาลก่อนจึงจะได้รับแจ้งเตือน
-        </p>
-      )}
-
-      {preferences.map((row) => {
-        const isOwn = row.hospitalCode === ownHospitalCode;
-        const hasDigest = events.some((e) => e.tier === 'digest' && row.events.includes(e.key));
-        return (
-          <div key={row.hospitalCode} className="rounded-xl border border-slate-200 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-medium">{hospitalLabel(row.hospitalCode)}</p>
-                <p className="text-xs text-slate-500">
+        {preferences.map((row) => {
+          const isOwn = row.hospitalCode === ownHospitalCode;
+          const hasDigest = events.some((e) => e.tier === 'digest' && row.events.includes(e.key));
+          return (
+            <div key={row.hospitalCode} className="rounded-xl border border-border bg-surface-card p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-body-lg text-ink">{hospitalLabel(row.hospitalCode)}</p>
                   {/* Read from the row, not re-derived here: the server decides
                       how much detail a hospital's alerts may carry, and this
                       line is the user's only view of that decision. */}
-                  {row.detailLevel === 'full'
-                    ? 'โรงพยาบาลของคุณ — แจ้งเตือนระดับผู้ป่วยได้'
-                    : 'รับเฉพาะยอดรวม ไม่ระบุตัวผู้ป่วย'}
-                </p>
+                  <p
+                    className={cn(
+                      'inline-flex rounded-full px-2.5 py-0.5 text-caption font-semibold',
+                      row.detailLevel === 'full' ? 'bg-ok-tint text-ok-text' : 'bg-surface-muted text-ink-muted',
+                    )}
+                  >
+                    {row.detailLevel === 'full' ? 'โรงพยาบาลของคุณ — แจ้งเตือนระดับผู้ป่วยได้' : 'รับเฉพาะยอดรวม ไม่ระบุตัวผู้ป่วย'}
+                  </p>
+                </div>
+                {!isOwn && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void removeHospital(row.hospitalCode)}
+                    disabled={busy}
+                    aria-label={`เลิกติดตาม ${row.hospitalCode}`}
+                    className="h-9 border-border text-label text-ink-muted hover:text-danger-text"
+                  >
+                    เลิกติดตาม
+                  </Button>
+                )}
               </div>
-              {!isOwn && (
-                <button
-                  onClick={() => void removeHospital(row.hospitalCode)}
-                  disabled={busy}
-                  className="text-xs text-slate-500 hover:text-rose-700 disabled:opacity-50"
-                  aria-label={`เลิกติดตาม ${row.hospitalCode}`}
-                >
-                  เลิกติดตาม
-                </button>
+
+              {tiers.map((tier) => {
+                const tierEvents = events.filter((e) => e.tier === tier);
+                if (tierEvents.length === 0) return null;
+                return (
+                  <fieldset key={tier} className="mt-3">
+                    <legend className="mb-1 text-label text-ink-muted">{TIER_LABEL[tier]}</legend>
+                    {tierEvents.map((e) => (
+                      <label key={e.key} className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg px-2 py-2 hover:bg-surface-muted">
+                        <input
+                          type="checkbox"
+                          aria-label={e.labelTh}
+                          checked={effectiveEvents(row).includes(e.key)}
+                          disabled={busy}
+                          onChange={() => toggleEvent(row, e.key)}
+                          className="mt-0.5 h-5 w-5 shrink-0 accent-brand"
+                        />
+                        <span className="text-body text-ink">
+                          {e.labelTh}
+                          <span className="block text-label text-ink-muted">{e.descriptionTh}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                );
+              })}
+
+              {hasDigest && (
+                <label className="mt-3 flex flex-wrap items-center gap-3 text-body text-ink">
+                  เวลาส่งสรุปรายวัน
+                  <select
+                    value={row.digestHour}
+                    aria-label="เวลาส่งสรุปรายวัน"
+                    disabled={busy}
+                    onChange={(ev) => void save({ ...row, digestHour: Number(ev.target.value) })}
+                    className="h-11 rounded-lg border border-border bg-surface-card px-3 text-body"
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>{String(h).padStart(2, '0')}:00 น.</option>
+                    ))}
+                  </select>
+                </label>
               )}
             </div>
+          );
+        })}
 
-            {tiers.map((tier) => {
-              const tierEvents = events.filter((e) => e.tier === tier);
-              if (tierEvents.length === 0) return null;
-              return (
-                <div key={tier} className="mt-2">
-                  <p className="text-[11px] font-semibold text-slate-400">{TIER_LABEL[tier]}</p>
-                  {tierEvents.map((e) => (
-                    <label key={e.key} className="mt-1 flex items-start gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        aria-label={e.labelTh}
-                        checked={effectiveEvents(row).includes(e.key)}
-                        disabled={busy}
-                        onChange={() => toggleEvent(row, e.key)}
-                        className="mt-1"
-                      />
-                      <span>
-                        {e.labelTh}
-                        <span className="block text-xs text-slate-500">{e.descriptionTh}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              );
-            })}
+        {/* Without this a new user, who has no rows at all, would have to know
+            their own 5-digit hospital code to receive anything. */}
+        {!loading && ownHospitalCode !== '' && !ownIsFollowed && (
+          <Button onClick={() => followHospital(ownHospitalCode)} disabled={busy} className="h-11 bg-brand text-body text-white hover:bg-brand-strong">
+            เพิ่มโรงพยาบาลของคุณ ({hospitalLabel(ownHospitalCode)})
+          </Button>
+        )}
 
-            {hasDigest && (
-              <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
-                เวลาส่งสรุปรายวัน
-                <select
-                  value={row.digestHour}
-                  aria-label="เวลาส่งสรุปรายวัน"
-                  disabled={busy}
-                  onChange={(ev) => void save({ ...row, digestHour: Number(ev.target.value) })}
-                  className="rounded border border-slate-300 px-2 py-1"
-                >
-                  {Array.from({ length: 24 }, (_, h) => (
-                    <option key={h} value={h}>
-                      {String(h).padStart(2, '0')}:00 น.
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+        {/* A picker rather than free text — it cannot produce an invalid code.
+            Hospitals that are not yours are stored as 'aggregate'. */}
+        <div className="space-y-1.5">
+          <label htmlFor="watch-hospital" className="text-label text-ink">
+            ติดตามโรงพยาบาลอื่น (จะได้รับเฉพาะยอดรวม ไม่ระบุตัวผู้ป่วย)
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              id="watch-hospital"
+              value={addCode}
+              onChange={(e) => setAddCode(e.target.value)}
+              aria-label="เพิ่มโรงพยาบาลที่ต้องการติดตาม"
+              className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-surface-card px-3 text-body"
+            >
+              <option value="">เลือกโรงพยาบาล…</option>
+              {NAN_HOSPITALS.filter((h) => !preferences.some((r) => r.hospitalCode === h.hcode)).map((h) => (
+                <option key={h.hcode} value={h.hcode}>{h.name} ({h.hcode})</option>
+              ))}
+            </select>
+            <Button
+              disabled={!addCode || busy}
+              onClick={() => {
+                const code = addCode;
+                setAddCode('');
+                followHospital(code);
+              }}
+              className="h-11 bg-brand px-5 text-body text-white hover:bg-brand-strong"
+            >
+              เพิ่ม
+            </Button>
           </div>
-        );
-      })}
-
-      {/* Without this a new user, who has no rows at all, would have to know
-          their own 5-digit hospital code to receive anything. */}
-      {!loading && ownHospitalCode !== '' && !ownIsFollowed && (
-        <button
-          onClick={() => followHospital(ownHospitalCode)}
-          disabled={busy}
-          className="rounded bg-teal-600 px-3 py-1 text-sm text-white disabled:opacity-50"
-        >
-          เพิ่มโรงพยาบาลของคุณ ({hospitalLabel(ownHospitalCode)})
-        </button>
-      )}
-
-      {/* Restored now that aggregate rendering is enforced end to end: a
-          hospital that is not yours is stored as 'aggregate' and its alerts
-          arrive without the case reference, the patient name or the deep-link.
-          A picker rather than free text — it cannot produce an invalid code. */}
-      <div className="space-y-1">
-        <label htmlFor="watch-hospital" className="text-xs text-slate-500">
-          ติดตามโรงพยาบาลอื่น (จะได้รับเฉพาะยอดรวม ไม่ระบุตัวผู้ป่วย)
-        </label>
-        <div className="flex items-center gap-2">
-          <select
-            id="watch-hospital"
-            value={addCode}
-            onChange={(e) => setAddCode(e.target.value)}
-            aria-label="เพิ่มโรงพยาบาลที่ต้องการติดตาม"
-            className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
-          >
-            <option value="">เลือกโรงพยาบาล…</option>
-            {NAN_HOSPITALS.filter((h) => !preferences.some((r) => r.hospitalCode === h.hcode)).map(
-              (h) => (
-                <option key={h.hcode} value={h.hcode}>
-                  {h.name} ({h.hcode})
-                </option>
-              ),
-            )}
-          </select>
-          <button
-            disabled={!addCode || busy}
-            onClick={() => {
-              const code = addCode;
-              setAddCode('');
-              followHospital(code);
-            }}
-            className="rounded bg-teal-600 px-3 py-1 text-sm text-white disabled:opacity-50"
-          >
-            เพิ่ม
-          </button>
         </div>
       </div>
-    </section>
+    </SectionCard>
   );
 }

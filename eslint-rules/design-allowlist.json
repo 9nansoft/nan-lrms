@@ -1,0 +1,8 @@
+{
+  "maxEntries": 3,
+  "files": {
+    "src/components/dashboard/KioskHeader.tsx": "kiosk keeps its own larger type scale and dark palette (spec §1); not migrated",
+    "src/components/dashboard/MaternalScreenCell.tsx": "kiosk branch text-[11px] is kiosk-only; kiosk keeps its own scale (spec §1)",
+    "src/components/dashboard/OnlineUsersBadge.tsx": "dark navy badge palette (#0b1b2e/#e6ecf5) is a one-off with no token; migrate with sub-projects 2-5 (dashboard)"
+  }
+}

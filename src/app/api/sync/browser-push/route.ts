@@ -41,6 +41,7 @@ import {
   processWebhookPayload,
   processAncWebhook,
   processPartographWebhook,
+  reconcileAncActiveCids,
   validatePayload,
   validateAncPayload,
   validatePartographPayload,
@@ -62,7 +63,10 @@ interface BrowserPushBody {
    *  because it crosses the trust boundary — narrowed with a typeof check at
    *  the one place it is read, never fed into persistence or control flow. */
   labor?: Omit<WebhookPayload, 'hospitalCode'> & { withBirthDate?: unknown };
-  anc?: Omit<WebhookAncPayload, 'hospitalCode' | 'type'>;
+  /** `activeCids`: every CID HOSxP's active-ANC query returned this cycle
+   *  (before the name probe), omitted when the pull may be truncated. Typed
+   *  `unknown` — validated by reconcileAncActiveCids before use. */
+  anc?: Omit<WebhookAncPayload, 'hospitalCode' | 'type'> & { activeCids?: unknown };
   partograph?: Omit<WebhookPartographPayload, 'hospitalCode' | 'type'>;
   /** Raw HOSxP delivery rows (labour infants + ipt_pregnancy summaries)
    *  since the server-issued cutoff — see GET below. */
@@ -163,6 +167,7 @@ export async function POST(request: NextRequest) {
         visitConflicts: number;
         fieldOverflows: number;
       };
+      ancReconcile?: { closed: number };
       partograph?: { accepted: number; skipped: number };
       newborns?: { upserted: number; journeys: number; failedAns: number };
       referrals?: {
@@ -330,12 +335,16 @@ export async function POST(request: NextRequest) {
     // ANC. Same validator as /api/webhooks/patient-data — rejects bundles
     // with malformed CIDs / missing pregNo / etc. before processAncWebhook
     // creates phantom maternal_journeys.
+    // An empty patients list is legitimate when only activeCids rides along
+    // (the name probe dropped everyone) — nothing to persist, still reconcile.
+    let ancPersistFailed = false;
     const ancValidation =
-      body.anc && Array.isArray(body.anc.patients)
+      body.anc && Array.isArray(body.anc.patients) && body.anc.patients.length > 0
         ? validateAncPayload({ type: 'anc_data', hospitalCode: hcode, patients: body.anc.patients })
         : null;
     if (ancValidation && (!ancValidation.valid || !ancValidation.payload)) {
       hadWarning = true;
+      ancPersistFailed = true;
       await appendSyncStep(hospitalId, runId, {
         name: 'persist_anc',
         status: 'error',
@@ -426,10 +435,58 @@ export async function POST(request: NextRequest) {
         }
       } catch (e) {
         hadWarning = true;
+        ancPersistFailed = true;
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_anc',
           status: 'warning',
           message: 'ANC persist failed (continuing with labor + partograph).',
+          detail: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    // ANC reconciliation: close pregnancies HOSxP no longer lists (discharged
+    // / delivered). Only against a complete active set — the client omits
+    // activeCids when its pull was truncated — and never after a failed
+    // persist, which may have left listed women un-refreshed.
+    if (body.anc?.activeCids !== undefined && !ancPersistFailed) {
+      try {
+        const r = await reconcileAncActiveCids(
+          db,
+          hospitalId,
+          body.anc.activeCids,
+          ancValidation?.payload?.patients.map((p) => p.cid) ?? [],
+        );
+        if (r.ok) {
+          result.ancReconcile = { closed: r.closed };
+          await appendSyncStep(hospitalId, runId, {
+            name: 'reconcile_anc',
+            status: 'success',
+            message: `Closed ${r.closed} pregnancies no longer listed as active ANC in HOSxP (${r.listed} listed).`,
+            counts: { closed: r.closed, listed: r.listed },
+          });
+          if (r.closed > 0) {
+            logger.info('anc_absent_reconciled', {
+              hospitalId,
+              closed: r.closed,
+              listed: r.listed,
+            });
+          }
+        } else {
+          hadWarning = true;
+          await appendSyncStep(hospitalId, runId, {
+            name: 'reconcile_anc',
+            status: 'error',
+            message: 'ANC active list was malformed; no pregnancies were closed.',
+            detail: r.error,
+          });
+        }
+      } catch (e) {
+        hadWarning = true;
+        await appendSyncStep(hospitalId, runId, {
+          name: 'reconcile_anc',
+          status: 'warning',
+          message: 'ANC reconciliation failed; pregnancies stay as they were until the next sync.',
           detail: e instanceof Error ? e.message : String(e),
         });
       }

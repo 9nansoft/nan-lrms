@@ -42,6 +42,8 @@ const FK_DEPENDENT_TABLES = [
   'cached_patients',
   'maternal_journeys',
   // direct hospital children
+  'moph_alert_log',
+  'moph_alert_event_queue',
   'webhook_api_keys',
   'hospital_bms_config',
 ] as const;

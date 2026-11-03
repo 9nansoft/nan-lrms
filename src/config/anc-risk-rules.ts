@@ -1,4 +1,5 @@
 // ANC risk classification rules — 4-tier model from provincial screening guidelines
+import { COLOR } from '@/config/design-tokens';
 import { AncRiskLevel } from '@/types/domain';
 
 export interface AncRiskInput {
@@ -103,8 +104,8 @@ export const ANC_RISK_CONFIGS: Record<AncRiskLevel, AncRiskLevelConfig> = {
     level: AncRiskLevel.LOW,
     labelTh: 'ความเสี่ยงต่ำ',
     labelEn: 'Low Risk',
-    color: '#22c55e',
-    bgColor: '#dcfce7',
+    color: COLOR.riskLow,
+    bgColor: COLOR.riskLowTint,
     facilityTh: 'รพ.สต.',
     providerTh: 'พยาบาล/จนท.',
     action: 'ฝากครรภ์ปกติ',
@@ -113,8 +114,8 @@ export const ANC_RISK_CONFIGS: Record<AncRiskLevel, AncRiskLevelConfig> = {
     level: AncRiskLevel.HR1,
     labelTh: 'เสี่ยงสูง ระดับ 1',
     labelEn: 'High Risk 1',
-    color: '#eab308',
-    bgColor: '#fef9c3',
+    color: COLOR.riskMedium,
+    bgColor: COLOR.riskMediumTint,
     facilityTh: 'รพ.ชุมชน',
     providerTh: 'แพทย์/พยาบาล',
     action: 'ฝากครรภ์ รพ.ชุมชน โดยแพทย์',
@@ -133,8 +134,8 @@ export const ANC_RISK_CONFIGS: Record<AncRiskLevel, AncRiskLevelConfig> = {
     level: AncRiskLevel.HR3,
     labelTh: 'เสี่ยงสูง ระดับ 3',
     labelEn: 'High Risk 3',
-    color: '#ef4444',
-    bgColor: '#fee2e2',
+    color: COLOR.riskHigh,
+    bgColor: COLOR.riskHighTint,
     facilityTh: 'รพ.จังหวัด/รพศ.',
     providerTh: 'สูติแพทย์/MFM',
     action: 'ส่งต่อ รพ.จังหวัด/รพศ. ดูแลโดย MFM',

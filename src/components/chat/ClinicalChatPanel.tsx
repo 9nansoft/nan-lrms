@@ -197,7 +197,7 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
 
   return (
     <div className="fixed bottom-5 right-5 z-40 flex w-[22rem] flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl">
-      <div className="flex items-center justify-between rounded-t-2xl bg-teal-600 px-4 py-3 text-white">
+      <div className="flex items-center justify-between rounded-t-2xl bg-brand px-4 py-3 text-white">
         <button
           onClick={() => setOpen((o) => !o)}
           className="flex flex-1 items-center gap-2 text-left text-sm font-medium"
@@ -212,7 +212,7 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
               onClick={() => void resetChat()}
               title="เริ่มบทสนทนาใหม่ (ล้างประวัติทั้งฝั่งเครื่องและเซิร์ฟเวอร์)"
               aria-label="เริ่มบทสนทนาใหม่"
-              className="rounded p-1.5 hover:bg-teal-700"
+              className="rounded p-1.5 hover:bg-brand-strong"
             >
               <RotateCcw size={15} />
             </button>
@@ -241,7 +241,7 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
                     <button
                       key={s}
                       onClick={() => void ask(s)}
-                      className="rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] text-teal-800 hover:bg-teal-100"
+                      className="rounded-full border border-brand bg-brand-soft px-2.5 py-1 text-caption text-brand hover:bg-brand-soft/70"
                     >
                       {s}
                     </button>
@@ -254,9 +254,9 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
                 key={i}
                 className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                   m.role === 'user'
-                    ? 'ml-auto bg-teal-100 text-teal-900'
+                    ? 'ml-auto bg-brand-soft text-brand'
                     : m.error
-                      ? 'bg-rose-50 text-rose-800'
+                      ? 'bg-danger-tint text-danger-text'
                       : 'bg-slate-100 text-slate-800'
                 }`}
               >
@@ -272,7 +272,7 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
                         Array.from(new Set(m.sources)).map((s) => (
                           <span
                             key={s}
-                            className="flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[10px] text-slate-500"
+                            className="flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-caption text-slate-500"
                             title={`ข้อมูลจากเครื่องมือ: ${s}`}
                           >
                             <BookOpen size={10} />
@@ -281,7 +281,7 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
                         ))}
                       <button
                         onClick={() => void copyMessage(i, m.content)}
-                        className="ml-auto flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-800"
+                        className="ml-auto flex items-center gap-1 text-caption text-slate-500 hover:text-slate-800"
                         aria-label="คัดลอกคำตอบ"
                       >
                         {copied === i ? <Check size={11} /> : <Copy size={11} />}
@@ -295,7 +295,7 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
             {!busy && messages.some((m) => m.error) && lastQuestionRef.current && (
               <button
                 onClick={() => void ask(lastQuestionRef.current as string)}
-                className="flex items-center gap-1 text-xs text-teal-700 hover:underline"
+                className="flex items-center gap-1 text-xs text-brand hover:underline"
               >
                 <RefreshCw size={12} /> ลองถามใหม่อีกครั้ง
               </button>
@@ -307,7 +307,7 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
                 <span className="tabular-nums">{elapsed}s</span>
                 <button
                   onClick={stop}
-                  className="ml-auto flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] hover:bg-slate-100"
+                  className="ml-auto flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-caption hover:bg-slate-100"
                   aria-label="หยุดการตอบ"
                 >
                   <Square size={9} /> หยุด
@@ -327,12 +327,12 @@ export function ClinicalChatPanel({ mode = 'clinical' }: { mode?: ClinicalChatMo
               }}
               rows={2}
               placeholder="พิมพ์คำถามเป็นภาษาไทย…"
-              className="flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             />
             <button
               onClick={send}
               disabled={busy || !input.trim()}
-              className="rounded-lg bg-teal-600 p-2 text-white disabled:opacity-50"
+              className="rounded-lg bg-brand p-2 text-white disabled:opacity-50"
               aria-label="ส่งคำถาม"
             >
               <Send size={16} />

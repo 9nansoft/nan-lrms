@@ -52,7 +52,7 @@ export interface LookupAutocompleteProps {
 }
 
 const DEFAULT_INPUT_CLS =
-  'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
+  'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
 
 export function LookupAutocomplete({
   ariaLabel,
@@ -144,7 +144,7 @@ export function LookupAutocomplete({
         onDismiss={() => setOpen(false)}
       >
         {loading && visibleItems.length === 0 && (
-          <div className="px-3 py-2 text-[12px] text-slate-500">กำลังค้นหา…</div>
+          <div className="px-3 py-2 text-caption text-slate-500">กำลังค้นหา…</div>
         )}
         {visibleItems.map((it) => (
           <button
@@ -160,9 +160,9 @@ export function LookupAutocomplete({
             }}
             className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-cyan-50/60"
           >
-            <span className="text-[14px] font-semibold text-slate-900">{it.primary}</span>
+            <span className="text-label font-semibold text-slate-900">{it.primary}</span>
             {it.secondary && (
-              <span className="font-mono text-[11px] text-slate-500">{it.secondary}</span>
+              <span className="font-mono text-caption text-slate-500">{it.secondary}</span>
             )}
           </button>
         ))}

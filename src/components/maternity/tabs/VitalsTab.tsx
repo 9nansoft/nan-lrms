@@ -35,7 +35,7 @@ export function VitalsTab({ an }: { an: string }) {
   }
   if (isLoading) return <div className="p-4 text-slate-500">กำลังโหลด…</div>;
   if (error) {
-    return <div className="p-4 text-red-600">โหลดไม่สำเร็จ: {(error as Error).message}</div>;
+    return <div className="p-4 text-danger-text">โหลดไม่สำเร็จ: {(error as Error).message}</div>;
   }
 
   const hcode = userInfo?.hospcode ?? '';
@@ -89,7 +89,7 @@ export function VitalsTab({ an }: { an: string }) {
             type="button"
             onClick={openAdd}
             disabled={dialog.open}
-            className="ml-auto rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+            className="ml-auto rounded bg-ok-text px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
           >
             + เพิ่มข้อมูลใหม่
           </button>

@@ -33,6 +33,10 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  // Arrival probes intentionally exclude old referrals; keep the fixture's
+  // July referral inside that window regardless of the calendar date.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-07-20T00:00:00Z'));
   db = await createTestDb();
   const now = new Date().toISOString();
   for (const [id, hcode] of [
@@ -53,6 +57,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await db.close?.();
   vi.restoreAllMocks();
 });

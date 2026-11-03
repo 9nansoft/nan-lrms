@@ -1,6 +1,5 @@
-// BmsConfigTab — per-hospital BMS tunnel URL configuration. Redesigned
-// 2026-04-21 to match the dashboard aesthetic: flush KPI strip, sharp-
-// cornered bordered hospital tiles, navy accents.
+// BmsConfigTab — per-hospital BMS tunnel URL configuration: KPI tiles and
+// bordered hospital tiles on the direction-C tokens.
 'use client';
 
 import { useState } from 'react';
@@ -17,6 +16,11 @@ import {
 } from '@/components/ui/dialog';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
+import { InlineNotice } from '@/components/shared/InlineNotice';
+import { KpiGrid } from '@/components/shared/KpiGrid';
+import { KpiTile } from '@/components/shared/KpiTile';
+import type { StatusTone } from '@/config/status-tone';
+import { StatusPill, TONE_CLASSES } from './admin-ui';
 
 interface AdminHospital {
   hcode: string;
@@ -67,37 +71,21 @@ const TUNNEL_STATUS_META: Record<
   TunnelStatus,
   {
     label: string;
-    color: string;
+    tone: StatusTone;
     Icon: typeof Wifi;
   }
 > = {
-  ONLINE: {
-    label: 'BMS tunnel online',
-    color: 'var(--risk-low)',
-    Icon: Wifi,
-  },
-  CONFIGURED: {
-    label: 'URL saved · not validated',
-    color: 'var(--risk-medium)',
-    Icon: WifiOff,
-  },
-  EXPIRED: {
-    label: 'session expired',
-    color: 'var(--risk-high)',
-    Icon: WifiOff,
-  },
-  NOT_CONFIGURED: {
-    label: 'ยังไม่ตั้งค่า Tunnel URL',
-    color: 'var(--ink-navy-muted)',
-    Icon: WifiOff,
-  },
+  ONLINE: { label: 'BMS tunnel ออนไลน์', tone: 'ok', Icon: Wifi },
+  CONFIGURED: { label: 'บันทึก URL แล้ว · ยังไม่ยืนยัน', tone: 'warn', Icon: WifiOff },
+  EXPIRED: { label: 'session หมดอายุ', tone: 'danger', Icon: WifiOff },
+  NOT_CONFIGURED: { label: 'ยังไม่ตั้งค่า Tunnel URL', tone: 'neutral', Icon: WifiOff },
 };
 
 function formatLastSync(value: string | null) {
-  if (!value) return 'LAST SYNC —';
+  if (!value) return 'ซิงค์ล่าสุด —';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'LAST SYNC —';
-  return `LAST SYNC ${date.toLocaleString('th-TH', {
+  if (Number.isNaN(date.getTime())) return 'ซิงค์ล่าสุด —';
+  return `ซิงค์ล่าสุด ${date.toLocaleString('th-TH', {
     dateStyle: 'short',
     timeStyle: 'short',
   })}`;
@@ -181,58 +169,26 @@ export function BmsConfigTab() {
     }
   };
 
-  const kpis: Array<{ k: string; v: number; color: string; label: string }> = [
-    { k: 'TOTAL', v: hospitals.length, color: 'var(--accent-navy)', label: 'โรงพยาบาล' },
-    { k: 'ONLINE', v: connectedCount, color: 'var(--risk-low)', label: 'BMS session active' },
-    { k: 'CONFIGURED', v: configuredCount, color: 'var(--risk-medium)', label: 'มี Tunnel URL' },
-  ];
-
   return (
     <div className="space-y-5">
       {error ? (
         <ErrorState
           variant="banner"
+          className="rounded-xl border"
           message="โหลดรายชื่อโรงพยาบาลไม่สำเร็จ — ตัวเลขและสถานะ tunnel อาจไม่เป็นปัจจุบัน"
+          remedy="ตรวจสอบการเชื่อมต่อ แล้วกด ลองใหม่"
           onRetry={() => void mutate()}
         />
       ) : null}
 
-      {/* KPI strip */}
-      <div
-        className="grid border bg-white"
-        style={{
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-          borderColor: 'var(--rule-strong)',
-        }}
-      >
-        {kpis.map((k, i) => (
-          <div
-            key={k.k}
-            className="flex flex-col gap-1 px-4 py-3"
-            style={{
-              borderLeft: `2px solid ${k.color}`,
-              borderRight: i < kpis.length - 1 ? '1px solid var(--rule-strong)' : undefined,
-            }}
-          >
-            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--ink-navy-muted)]">
-              {k.k}
-            </div>
-            <div
-              className="font-mono text-[28px] font-semibold leading-none tabular-nums"
-              style={{ color: k.color, letterSpacing: '-0.02em' }}
-            >
-              {k.v}
-            </div>
-            <div className="font-mono text-[10px] text-[var(--ink-navy-dim)]">{k.label}</div>
-          </div>
-        ))}
-      </div>
+      <KpiGrid>
+        <KpiTile label="โรงพยาบาลทั้งหมด" count={hospitals.length} />
+        <KpiTile label="มี BMS session" count={connectedCount} tone="ok" />
+        <KpiTile label="มี Tunnel URL" count={configuredCount} />
+      </KpiGrid>
 
       {/* Hospital tiles */}
-      <div
-        className="grid grid-cols-1 gap-0 border md:grid-cols-2 xl:grid-cols-3"
-        style={{ borderColor: 'var(--rule-strong)' }}
-      >
+      <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2">
         {hospitals.map((h) => {
           const hasConfig = !!h.bmsConfig?.tunnelUrl;
           const tunnelStatus = getTunnelStatus(h);
@@ -241,65 +197,46 @@ export function BmsConfigTab() {
           return (
             <div
               key={h.hcode}
-              className="flex flex-col gap-2 border-b border-r bg-white px-4 py-3 last:border-b-0"
-              style={{ borderColor: 'var(--rule-hair)' }}
+              className="flex flex-col gap-2 rounded-xl border border-border bg-surface-card p-4"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-medium text-[var(--ink-navy)]">
-                      {h.name}
-                    </span>
-                    <span
-                      className="shrink-0 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[var(--ink-navy-dim)]"
-                      style={{ borderColor: 'var(--rule-strong)' }}
-                    >
+                    <span className="truncate text-body font-medium text-ink">{h.name}</span>
+                    <span className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-caption tabular-nums text-ink-muted">
                       {h.level}
                     </span>
                   </div>
-                  <div className="mt-0.5 font-mono text-[10px] tabular-nums text-[var(--ink-navy-muted)]">
-                    {h.hcode}
-                  </div>
+                  <div className="mt-0.5 font-mono text-caption tabular-nums text-ink-muted">{h.hcode}</div>
                 </div>
                 <button
                   onClick={() => handleEdit(h)}
-                  className="rounded-sm p-1.5 text-[var(--ink-navy-muted)] transition-colors hover:bg-[var(--accent-navy-soft)] hover:text-[var(--accent-navy)]"
+                  className="rounded-lg p-2 text-ink-muted transition-colors hover:bg-brand-soft hover:text-brand"
                   title="แก้ไข"
+                  aria-label={`แก้ไข BMS ของ ${h.name}`}
                 >
-                  <Pencil className="h-3.5 w-3.5" />
+                  <Pencil aria-hidden="true" className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="flex items-center gap-1.5 font-mono text-[11px]">
-                <TunnelIcon className="h-3 w-3" style={{ color: tunnelStatusMeta.color }} />
-                <span
-                  className={
-                    hasConfig
-                      ? 'truncate text-[var(--ink-navy-dim)]'
-                      : 'text-[var(--ink-navy-muted)]'
-                  }
-                >
+              <div className="flex items-center gap-1.5 text-caption">
+                <TunnelIcon
+                  aria-hidden="true"
+                  className={`h-3.5 w-3.5 shrink-0 ${TONE_CLASSES[tunnelStatusMeta.tone].text}`}
+                />
+                <span className={hasConfig ? 'truncate font-mono text-ink-muted' : 'text-ink-muted'}>
                   {h.bmsConfig?.tunnelUrl ?? 'ยังไม่ตั้งค่า Tunnel URL'}
                 </span>
               </div>
 
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.06em]"
-                  style={{
-                    color: tunnelStatusMeta.color,
-                    borderColor: tunnelStatusMeta.color,
-                  }}
-                >
-                  <TunnelIcon className="h-3 w-3" />
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption">
+                <StatusPill tone={tunnelStatusMeta.tone} icon={tunnelStatusMeta.Icon}>
                   {tunnelStatusMeta.label}
-                </span>
-                <span className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
-                  {formatLastSync(h.lastSyncAt)}
-                </span>
+                </StatusPill>
+                <span className="text-caption text-ink-muted">{formatLastSync(h.lastSyncAt)}</span>
                 {h.bmsConfig?.databaseType && (
-                  <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--ink-navy-muted)]">
-                    <Database className="h-3 w-3" />
+                  <span className="inline-flex items-center gap-1 font-mono text-caption text-ink-muted">
+                    <Database aria-hidden="true" className="h-3.5 w-3.5" />
                     {h.bmsConfig.databaseType}
                   </span>
                 )}
@@ -319,7 +256,7 @@ export function BmsConfigTab() {
 
           <div className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="tunnelUrl" className="text-sm font-medium text-[var(--ink-navy)]">
+              <label htmlFor="tunnelUrl" className="text-label text-ink">
                 Tunnel URL
               </label>
               <Input
@@ -330,27 +267,25 @@ export function BmsConfigTab() {
               />
             </div>
 
-            {saveMessage && (
-              <div
-                className="border px-3 py-2 font-mono text-[11px]"
-                style={{
-                  borderColor: saveMessage.includes('สำเร็จ')
-                    ? 'var(--risk-low)'
-                    : 'var(--risk-high)',
-                  color: saveMessage.includes('สำเร็จ') ? 'var(--risk-low)' : 'var(--risk-high)',
-                }}
-              >
-                {saveMessage}
-              </div>
-            )}
+            {saveMessage &&
+              (saveMessage.includes('สำเร็จ') ? (
+                <InlineNotice tone="ok">{saveMessage}</InlineNotice>
+              ) : (
+                <ErrorState
+                  variant="banner"
+                  className="rounded-xl border"
+                  message={saveMessage}
+                  remedy="ตรวจสอบ Tunnel URL แล้วกด บันทึก อีกครั้ง"
+                />
+              ))}
 
             {testResult && (
               <div
-                className="border px-3 py-2 font-mono text-[11px]"
-                style={{
-                  borderColor: testResult.connected ? 'var(--risk-low)' : 'var(--risk-high)',
-                  color: testResult.connected ? 'var(--risk-low)' : 'var(--risk-high)',
-                }}
+                className={`rounded-xl border px-3 py-2 text-label ${
+                  testResult.connected
+                    ? 'border-ok/40 bg-ok-tint text-ok-text'
+                    : 'border-danger/40 bg-danger-tint text-danger-text'
+                }`}
               >
                 {testResult.connected ? (
                   <div className="space-y-0.5">
@@ -380,8 +315,7 @@ export function BmsConfigTab() {
             <Button
               onClick={handleSave}
               disabled={saving || !tunnelUrl.trim()}
-              className="gap-2"
-              style={{ background: 'var(--accent-navy)' }}
+              className="gap-2 bg-brand text-white hover:bg-brand-strong"
             >
               <Save className="h-4 w-4" />
               {saving ? 'กำลังบันทึก...' : 'บันทึก'}

@@ -16,6 +16,8 @@ interface ErrorStateProps {
   variant?: 'page' | 'banner';
   /** banner variant: timestamp of the cached data still being displayed. */
   lastUpdatedAt?: string | null;
+  /** What the user should do next; rendered as "วิธีแก้: …". */
+  remedy?: string;
   className?: string;
 }
 
@@ -36,6 +38,7 @@ export function ErrorState({
   onRetry,
   variant = 'page',
   lastUpdatedAt,
+  remedy,
   className,
 }: ErrorStateProps) {
   if (variant === 'banner') {
@@ -43,29 +46,24 @@ export function ErrorState({
       <div
         role="alert"
         className={cn(
-          'flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-5 py-2 font-mono text-[11px]',
+          'flex flex-wrap items-center gap-3 border-b border-warn/40 bg-warn-tint px-5 py-2 text-caption text-ink',
           className,
         )}
-        style={{
-          background: 'color-mix(in srgb, var(--risk-medium) 12%, white)',
-          borderColor: 'var(--risk-medium)',
-          color: 'var(--ink-navy)',
-        }}
       >
-        <AlertTriangle className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--risk-medium)' }} />
+        <AlertTriangle className="h-4 w-4 shrink-0 text-warn" />
         <span className="font-semibold">{message}</span>
         {lastUpdatedAt && (
-          <span style={{ color: 'var(--ink-navy-dim)' }}>
+          <span className="text-ink-muted">
             แสดงข้อมูลล่าสุดเมื่อ{' '}
             <span className="font-semibold tabular-nums">{formatBangkokTime(lastUpdatedAt)}</span>
           </span>
         )}
+        {remedy && <span className="text-ink-muted">วิธีแก้: {remedy}</span>}
         {onRetry && (
           <button
             type="button"
             onClick={onRetry}
-            className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-sm border bg-white px-2 py-0.5 transition-colors hover:bg-[var(--accent-navy-soft)]"
-            style={{ borderColor: 'var(--rule-strong)', color: 'var(--ink-navy-dim)' }}
+            className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-sm border border-border bg-white px-2 py-0.5 text-ink-muted transition-colors hover:bg-brand-soft"
           >
             <RefreshCw className="h-3 w-3" />
             ลองใหม่
@@ -78,20 +76,17 @@ export function ErrorState({
   return (
     <div
       role="alert"
-      className={cn('flex flex-col items-center justify-center gap-3 py-16 text-center', className)}
-      style={{ color: 'var(--ink-navy-muted)' }}
+      className={cn('flex flex-col items-center justify-center gap-3 py-16 text-center text-ink-muted', className)}
     >
-      <AlertTriangle className="h-10 w-10 opacity-40" />
-      <p className="font-mono text-[12px] font-semibold" style={{ color: 'var(--risk-high)' }}>
-        {message}
-      </p>
-      {detail && <p className="max-w-md font-mono text-[11px]">{detail}</p>}
+      <AlertTriangle className="h-8 w-8 text-danger" />
+      <p className="text-body text-danger-text font-semibold">{message}</p>
+      {detail && <p className="max-w-md text-caption">{detail}</p>}
+      {remedy && <p className="text-body text-ink-muted">วิธีแก้: {remedy}</p>}
       {onRetry && (
         <button
           type="button"
           onClick={onRetry}
-          className="inline-flex items-center gap-1.5 rounded-sm border bg-white px-3 py-1.5 font-mono text-[11px] transition-colors hover:bg-[var(--accent-navy-soft)]"
-          style={{ borderColor: 'var(--rule-strong)', color: 'var(--ink-navy-dim)' }}
+          className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-white px-3 py-1.5 text-caption text-ink-muted transition-colors hover:bg-brand-soft"
         >
           <RefreshCw className="h-3 w-3" />
           ลองใหม่

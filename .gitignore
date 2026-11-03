@@ -99,3 +99,9 @@ public/*-deck-*.zip
 backups/
 logs/
 .freebuff/
+
+# Playwright private artefacts (may contain PHI)
+e2e-private/
+
+# Python bytecode (scripts/illustrations/generate.py)
+__pycache__/

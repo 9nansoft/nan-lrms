@@ -2,6 +2,7 @@
 'use client';
 
 import useSWR from 'swr';
+import { LIST_PAGE } from '@/config/list-page';
 import type {
   DashboardResponse,
   DashboardStageKPIs,
@@ -64,7 +65,7 @@ export function useDashboard() {
   const { data, error, isLoading, isValidating, mutate } = useSWR<DashboardWithExtras>(
     '/api/dashboard',
     {
-      refreshInterval: 30000,
+      refreshInterval: LIST_PAGE.refreshMs,
       revalidateOnFocus: true,
     },
   );

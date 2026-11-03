@@ -11,6 +11,7 @@ import { generateKey, decryptSafe } from '@/lib/encryption';
 import {
   enqueueHighRiskAlert,
   enqueueEmergencyAlert,
+  materializeDeferredAlertEvents,
   type AlertEventContext,
   type EmergencyEventContext,
 } from '@/services/risk-alert';
@@ -47,7 +48,7 @@ describe('risk-alert enqueue orchestrator', () => {
     hospitalId = randomUUID();
     await db.query(
       `INSERT INTO hospitals (id, hcode, name, level, province_code, is_active, created_at, updated_at)
-       VALUES ($1,'10682','รพ.ขอนแก่น','P_PLUS','30',true,NOW(),NOW())`,
+       VALUES ($1,'10682','รพ.น่าน','P_PLUS','30',true,NOW(),NOW())`,
       [hospitalId],
     );
     // one active + one inactive consult doctor + one active with a MALFORMED cid
@@ -82,7 +83,7 @@ describe('risk-alert enqueue orchestrator', () => {
     ({
       hospitalId,
       originHcode: '10682',
-      hospitalName: 'รพ.ขอนแก่น',
+      hospitalName: 'รพ.น่าน',
       caseRef: 'ANC-2026-0001',
       province: '30',
       confirmUrl: 'https://app/case/ANC-2026-0001',
@@ -140,8 +141,8 @@ describe('risk-alert enqueue orchestrator', () => {
     const staff = rows.find((r) => r.recipient_scope === 'hospital_staff')!;
     const center = rows.find((r) => r.recipient_scope === 'province_center')!;
     // hospital_name stored on both (it's the sender context, not patient PII)
-    expect(staff.hospital_name).toBe('รพ.ขอนแก่น');
-    expect(center.hospital_name).toBe('รพ.ขอนแก่น');
+    expect(staff.hospital_name).toBe('รพ.น่าน');
+    expect(center.hospital_name).toBe('รพ.น่าน');
     // staff row carries the ENCRYPTED patient name (decrypts back); center is NULL
     expect(staff.patient_name_enc).not.toBeNull();
     expect(decryptSafe(staff.patient_name_enc)).toBe('น.ส. เอ');
@@ -154,6 +155,95 @@ describe('risk-alert enqueue orchestrator', () => {
     expect(second).toBe(0);
     const count = await db.query<{ c: number }>(`SELECT COUNT(*)::int as c FROM moph_alert_log`);
     expect(count[0].c).toBe(first);
+  });
+
+  it('persists one deduplicated event when no recipient is configured', async () => {
+    await db.query(`DELETE FROM notification_preferences`);
+    await db.query(`DELETE FROM moph_center_monitors`);
+
+    const first = await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
+    const second = await enqueueHighRiskAlert(db, baseCtx<AlertEventContext>({}));
+
+    expect(first).toBe(0);
+    expect(second).toBe(0);
+    const deliveryRows = await db.query<{ c: number }>(
+      `SELECT COUNT(*)::int AS c FROM moph_alert_log`,
+    );
+    expect(deliveryRows[0].c).toBe(0);
+    const queued = await db.query<{
+      c: number;
+      status: string;
+      patient_name_enc: string | null;
+    }>(
+      `SELECT COUNT(*)::int AS c, MIN(status) AS status,
+              MIN(patient_name_enc) AS patient_name_enc
+       FROM moph_alert_event_queue`,
+    );
+    expect(queued[0].c).toBe(1);
+    expect(queued[0].status).toBe('awaiting_recipients');
+    expect(decryptSafe(queued[0].patient_name_enc)).toBe('น.ส. A');
+  });
+
+  it('marks a matching deferred event materialized when a normal enqueue later finds recipients', async () => {
+    await db.query(`DELETE FROM notification_preferences`);
+    await db.query(`DELETE FROM moph_center_monitors`);
+    const context = baseCtx<AlertEventContext>({});
+    expect(await enqueueHighRiskAlert(db, context)).toBe(0);
+
+    await upsertNotificationPreference(db, '3320500282121', HOSPITAL_HCODE, true);
+    expect(await enqueueHighRiskAlert(db, context)).toBe(1);
+
+    const queued = await db.query<{ status: string }>(
+      `SELECT status FROM moph_alert_event_queue WHERE case_id = $1`,
+      [context.caseRef],
+    );
+    expect(queued[0].status).toBe('materialized');
+  });
+
+  it('keeps a partially materialized event awaiting and resumes without duplicate recipients', async () => {
+    await db.query(`DELETE FROM notification_preferences`);
+    await db.query(`DELETE FROM moph_center_monitors`);
+    const context = baseCtx<AlertEventContext>({
+      localDate: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' }),
+    });
+    expect(await enqueueHighRiskAlert(db, context)).toBe(0);
+
+    await upsertNotificationPreference(db, '3320500282121', HOSPITAL_HCODE, true);
+    await db.query(
+      `INSERT INTO moph_center_monitors
+         (id, province, cid, name, is_active, created_at, updated_at)
+       VALUES ($1,'30','3320500282130','ศูนย์กลาง ขก.',true,NOW(),NOW())`,
+      [randomUUID()],
+    );
+
+    const ticks = [0, 0, 20];
+    const first = await materializeDeferredAlertEvents(db, hospitalId, {
+      maxEvents: 5,
+      deadlineMs: 10,
+      now: () => ticks.shift() ?? 20,
+    });
+    expect(first).toBe(1);
+    const partial = await db.query<{ status: string }>(
+      `SELECT status FROM moph_alert_event_queue WHERE case_id = $1`,
+      [context.caseRef],
+    );
+    expect(partial[0].status).toBe('awaiting_recipients');
+
+    const second = await materializeDeferredAlertEvents(db, hospitalId, {
+      maxEvents: 5,
+      deadlineMs: Number.POSITIVE_INFINITY,
+    });
+    expect(second).toBe(1);
+    const recipients = await db.query<{ recipient_cid: string }>(
+      `SELECT recipient_cid FROM moph_alert_log WHERE case_id = $1 ORDER BY recipient_cid`,
+      [context.caseRef],
+    );
+    expect(recipients.map((r) => r.recipient_cid)).toEqual(['3320500282121', '3320500282130']);
+    const completed = await db.query<{ status: string }>(
+      `SELECT status FROM moph_alert_event_queue WHERE case_id = $1`,
+      [context.caseRef],
+    );
+    expect(completed[0].status).toBe('materialized');
   });
 
   it('distinct rule_id on same case → both kept (emergencies co-fire)', async () => {

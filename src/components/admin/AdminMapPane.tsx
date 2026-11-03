@@ -134,12 +134,12 @@ export function AdminMapPane({ onSelectHospital }: AdminMapPaneProps = {}) {
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
-          GIS PREVIEW · {activeName} ({activeCode})
+        <div className="text-label text-ink-muted">
+          แผนที่โรงพยาบาล · {activeName} ({activeCode})
         </div>
-        <div className="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--ink-navy-muted)]">
-          <MapPin className="h-3 w-3" />
-          {pinnedCount}/{totalActive} pinned
+        <div className="inline-flex items-center gap-1 text-label text-ink-muted">
+          <MapPin aria-hidden="true" className="h-3.5 w-3.5" />
+          ปักหมุดแล้ว {pinnedCount}/{totalActive} แห่ง
         </div>
       </div>
       {/* Leaflet needs a parent with a resolved pixel height — `h-full` inside
@@ -147,8 +147,8 @@ export function AdminMapPane({ onSelectHospital }: AdminMapPaneProps = {}) {
           by its taller sibling's content. Use an explicit height on the map
           frame so the tiles + GeoJSON always render. */}
       <div
-        className="relative w-full overflow-hidden border bg-white"
-        style={{ borderColor: 'var(--rule-strong)', height: 560 }}
+        className="relative w-full overflow-hidden rounded-2xl border border-border bg-surface-card"
+        style={{ height: 560 }}
       >
         {loadError ? (
           // Bordered placeholder (the frame already has a border) so the admin
@@ -176,9 +176,8 @@ export function AdminMapPane({ onSelectHospital }: AdminMapPaneProps = {}) {
           />
         )}
       </div>
-      <p className="mt-2 font-mono text-[10px] leading-snug text-[var(--ink-navy-muted)]">
-        แผนที่ใช้ active province จากการตั้งค่า · โรงพยาบาลที่ไม่มีพิกัดจะใช้ centroid
-        ของอำเภอเป็นจุดแสดง
+      <p className="mt-2 text-caption text-ink-muted">
+        แผนที่ใช้จังหวัดหลักจากการตั้งค่า · โรงพยาบาลที่ไม่มีพิกัดจะใช้ centroid ของอำเภอเป็นจุดแสดง
       </p>
     </div>
   );

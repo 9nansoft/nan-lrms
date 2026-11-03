@@ -44,8 +44,8 @@ describe('VitalSignGauge', () => {
   it('shows correct color for normal range (green)', () => {
     render(<VitalSignGauge {...baseProps} value={75} />);
     const valueEl = screen.getByText('75');
-    // Value within normalMin-normalMax => green (#22c55e)
-    expect(valueEl.style.color).toBe('rgb(34, 197, 94)');
+    // Value within normalMin-normalMax => green (COLOR.riskLow)
+    expect(valueEl.style.color).toBe('rgb(63, 143, 79)'); // COLOR.riskLow
   });
 
   it('shows correct color for warning range (yellow)', () => {
@@ -53,7 +53,7 @@ describe('VitalSignGauge', () => {
     // normalMin=60, 80% of normalMin = 48; value 50 is < 60 but >= 48 => yellow
     render(<VitalSignGauge {...baseProps} value={50} />);
     const valueEl = screen.getByText('50');
-    expect(valueEl.style.color).toBe('rgb(234, 179, 8)'); // #eab308 yellow
+    expect(valueEl.style.color).toBe('rgb(208, 138, 0)'); // COLOR.riskMedium
   });
 
   it('shows correct color for critical range (red)', () => {
@@ -61,7 +61,7 @@ describe('VitalSignGauge', () => {
     // normalMin=60, 80% = 48; value 40 < 48 => red
     render(<VitalSignGauge {...baseProps} value={40} />);
     const valueEl = screen.getByText('40');
-    expect(valueEl.style.color).toBe('rgb(239, 68, 68)'); // #ef4444 red
+    expect(valueEl.style.color).toBe('rgb(192, 57, 43)'); // COLOR.riskHigh
   });
 
   it('renders label text', () => {

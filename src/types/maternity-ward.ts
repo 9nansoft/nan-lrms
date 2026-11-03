@@ -1,11 +1,15 @@
 // src/types/maternity-ward.ts
-export interface MaternityWard { ward: string; name: string; real_bedcount: number | null; }
+export interface MaternityWard {
+  ward: string;
+  name: string;
+  real_bedcount: number | null;
+}
 
 export interface BedSlot {
   bedno: string;
   roomno: string;
   bed_order: number | null;
-  bed_lock: string | null;          // 'Y' | 'N' | null
+  bed_lock: string | null; // 'Y' | 'N' | null
   bed_status_type_id: number | null;
   room_name: string | null;
   room_display_number: number | null;
@@ -20,6 +24,8 @@ export interface BedOccupancy {
   bedno: string;
   roomno: string;
   bedtype: string | null;
+  /** HOSxP ipt.ipt_admit_type_id (src/config/hosxp-admit-types.ts). 4 = newborn. */
+  ipt_admit_type_id?: number | string | null;
   roomname: string | null;
   pname: string | null;
   fname: string | null;
@@ -69,8 +75,8 @@ export interface BedOccupancy {
  */
 export interface BedOccupancyFull extends BedOccupancy {
   // Identifier flags (rendered as outlined pills in the bed-tile identity row)
-  blood_grp: string | null;        // A / B / AB / O — null when not on file
-  allergy_count: number | null;    // 0 → NKDA pill; >0 → ALLERGY pill (red)
+  blood_grp: string | null; // A / B / AB / O — null when not on file
+  allergy_count: number | null; // 0 → NKDA pill; >0 → ALLERGY pill (red)
   // Latest partograph (labour progress, FHR, contractions, interventions)
   last_station: string | null;
   last_fhr: number | null;
@@ -178,9 +184,9 @@ export interface NurseNoteRow {
   heart_rate: number | null;
   bp_systolic: number | null;
   bp_diastolic: number | null;
-  ibps: number | null;   // invasive BP sys
-  ibpd: number | null;   // invasive BP dia
-  imap: number | null;   // invasive MAP
+  ibps: number | null; // invasive BP sys
+  ibpd: number | null; // invasive BP dia
+  imap: number | null; // invasive MAP
   respiratory_rate: number | null;
   // Extended vitals
   spo2_ra: number | null;
@@ -195,8 +201,8 @@ export interface NurseNoteRow {
   news2_score_type_id: number | null;
   sos_score: number | null;
   consciousness_level_type_id: number | null;
-  has_hypercapnic_rf: string | null;      // 'Y'/'N'
-  has_oxygen_ventilator: string | null;   // 'Y'/'N'
+  has_hypercapnic_rf: string | null; // 'Y'/'N'
+  has_oxygen_ventilator: string | null; // 'Y'/'N'
   // Biometric
   weight: number | null;
   height: number | null;
@@ -218,13 +224,20 @@ export interface NurseNoteRow {
   // Fluid intake
   fluid_intake_oral: number | null;
   fluid_intake_parenteral: number | null;
-  fluid_intake_1: string | null;   fluid_intake_1_int: number | null;
-  fluid_intake_2: string | null;   fluid_intake_2_int: number | null;
-  fluid_intake_3: string | null;   fluid_intake_3_int: number | null;
-  fluid_intake_4: string | null;   fluid_intake_4_int: number | null;
-  fluid_intake_medication1: string | null;  fluid_intake_medication1_int: number | null;
-  fluid_intake_medication2: string | null;  fluid_intake_medication2_int: number | null;
-  fluid_intake_medication3: string | null;  fluid_intake_medication3_int: number | null;
+  fluid_intake_1: string | null;
+  fluid_intake_1_int: number | null;
+  fluid_intake_2: string | null;
+  fluid_intake_2_int: number | null;
+  fluid_intake_3: string | null;
+  fluid_intake_3_int: number | null;
+  fluid_intake_4: string | null;
+  fluid_intake_4_int: number | null;
+  fluid_intake_medication1: string | null;
+  fluid_intake_medication1_int: number | null;
+  fluid_intake_medication2: string | null;
+  fluid_intake_medication2_int: number | null;
+  fluid_intake_medication3: string | null;
+  fluid_intake_medication3_int: number | null;
   // Fluid output
   fluid_output_urine: number | null;
   fluid_output_emesis: number | null;
@@ -307,8 +320,8 @@ export interface StageMedRow {
   medication_time: string | null;
   staff: string | null;
   medication_note: string | null;
-  medication_name?: string;   // joined from s_drugitems
-  staff_name?: string;        // joined from opduser
+  medication_name?: string; // joined from s_drugitems
+  staff_name?: string; // joined from opduser
 }
 
 export interface ComplicationRow {
@@ -367,7 +380,7 @@ export interface IptDischargeRow {
  *  schema has 70+ columns; we surface the clinically meaningful subset. */
 export interface ReferOutRow {
   referout_id: number;
-  vn: string;                // = AN for IPD admissions
+  vn: string; // = AN for IPD admissions
   hn?: string | null;
   refer_date: string | null;
   refer_time: string | null;
@@ -399,7 +412,7 @@ export interface ReferOutRow {
  *  vn = AN for IPD; hospcode and refer_hospcode are stored as the same
  *  value (legacy alias the Delphi form keeps in sync). */
 export type ReferOutArgs = {
-  referout_id?: number;       // present on UPDATE
+  referout_id?: number; // present on UPDATE
   an: string;
   hn?: string | null;
 } & Partial<Omit<ReferOutRow, 'referout_id' | 'vn' | 'hn'>>;
@@ -423,8 +436,8 @@ export interface BedMoveRow {
 
 export interface DischargeArgs {
   an: string;
-  dchdate: string;   // ISO date
-  dchtime: string;   // HH:mm:ss
+  dchdate: string; // ISO date
+  dchtime: string; // HH:mm:ss
   /** dchtype.dchtype code (varchar 2) — '01' With Approval, '02' Against
    *  Advice, '04' By Transfer, '08'/'09' Dead, etc. Resolve via DCHTYPE_LOOKUP. */
   dchtype: string;

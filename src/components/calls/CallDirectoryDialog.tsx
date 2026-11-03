@@ -97,12 +97,12 @@ export function CallDirectoryDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-[16px]">
-            <Video className="h-4 w-4 text-emerald-600" /> {title}
+          <DialogTitle className="flex items-center gap-2 text-body-lg">
+            <Video className="h-4 w-4 text-ok-text" /> {title}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center justify-between text-[12px] text-slate-500">
+        <div className="flex items-center justify-between text-caption text-slate-500">
           <span>เลือกได้หลายคน — แสดงเฉพาะผู้ใช้ที่ออนไลน์</span>
           <button
             onClick={() => void load()}
@@ -115,17 +115,17 @@ export function CallDirectoryDialog({
         </div>
 
         {loading && !hospitals && (
-          <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-slate-500">
+          <div className="flex items-center justify-center gap-2 py-8 text-caption text-slate-500">
             <Loader2 className="h-4 w-4 animate-spin" /> กำลังโหลดรายชื่อ…
           </div>
         )}
 
         {error && (
-          <div className="rounded-md border border-red-200 bg-red-50 p-3 text-[13px] text-red-700">
+          <div className="rounded-md border border-danger/40 bg-danger-tint p-3 text-caption text-danger-text">
             {error}
             <button
               onClick={() => void load()}
-              className="mt-2 block cursor-pointer rounded-md border border-red-300 px-3 py-1 text-[12px] font-semibold text-red-700 hover:bg-red-100"
+              className="mt-2 block cursor-pointer rounded-md border border-danger/40 px-3 py-1 text-caption font-semibold text-danger-text hover:bg-danger-tint"
             >
               ลองใหม่
             </button>
@@ -133,17 +133,17 @@ export function CallDirectoryDialog({
         )}
 
         {hospitals && hospitals.length === 0 && (
-          <div className="py-8 text-center text-[13px] text-slate-500">
+          <div className="py-8 text-center text-caption text-slate-500">
             ไม่มีผู้ใช้ท่านอื่นออนไลน์ในขณะนี้ — ลองรีเฟรชอีกครั้งภายหลัง
           </div>
         )}
 
         {hospitals?.map((hospital) => (
           <div key={hospital.hospitalCode} className="rounded-md border border-slate-200">
-            <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-[13px] font-semibold text-slate-700">
+            <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-caption font-semibold text-slate-700">
               <Building2 className="h-4 w-4 text-slate-400" />
               {hospital.hospitalName}
-              <span className="ml-auto text-[11px] font-normal text-slate-400">
+              <span className="ml-auto text-caption font-normal text-slate-400">
                 {hospital.users.length} คนออนไลน์
               </span>
             </div>
@@ -156,7 +156,7 @@ export function CallDirectoryDialog({
                       type="button"
                       onClick={() => toggle(hospital, user)}
                       className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition-colors ${
-                        checked ? 'bg-emerald-50' : 'hover:bg-slate-50'
+                        checked ? 'bg-ok-tint' : 'hover:bg-slate-50'
                       }`}
                     >
                       <input
@@ -164,14 +164,14 @@ export function CallDirectoryDialog({
                         checked={checked}
                         readOnly
                         tabIndex={-1}
-                        className="h-4 w-4 accent-emerald-600"
+                        className="h-4 w-4 accent-ok"
                         aria-label={`เลือก ${user.name}`}
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium text-slate-900">
+                        <span className="block truncate text-caption font-medium text-slate-900">
                           {user.name}
                         </span>
-                        <span className="block text-[11px] text-slate-500">{user.role}</span>
+                        <span className="block text-caption text-slate-500">{user.role}</span>
                       </span>
                     </button>
                   </li>
@@ -182,7 +182,7 @@ export function CallDirectoryDialog({
         ))}
 
         {actionError && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-800">
+          <div className="rounded-md border border-warn/40 bg-warn-tint p-3 text-caption text-warn-text">
             {actionError}
           </div>
         )}
@@ -190,7 +190,7 @@ export function CallDirectoryDialog({
         <button
           onClick={() => void submit()}
           disabled={selected.size === 0 || submitting}
-          className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-ok-text px-3 py-2 text-caption font-semibold text-white transition-colors hover:bg-ok-text/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin" />

@@ -76,13 +76,13 @@ describe('PatientHeader', () => {
 
   it('shows CpdBadge with score when cpdScore is provided', () => {
     render(<PatientHeader {...baseProps} />);
-    expect(screen.getByText('CPD Score')).toBeTruthy();
+    expect(screen.getByText('คะแนน CPD')).toBeTruthy();
     expect(screen.getByText('7')).toBeTruthy();
   });
 
   it('does not render CpdBadge when cpdScore is null', () => {
     render(<PatientHeader {...baseProps} cpdScore={null} />);
-    expect(screen.queryByText('CPD Score')).toBeNull();
+    expect(screen.queryByText('คะแนน CPD')).toBeNull();
   });
 
   it('shows ConnectionStatus when hospital has connectionStatus', () => {
@@ -122,33 +122,25 @@ describe('PatientHeader', () => {
     expect(screen.queryByText('น.น.')).toBeNull();
   });
 
-  // The identity band was redesigned onto a navy gradient, so the weight-diff
-  // coloring shifted from the light-theme --risk-* CSS variables to lighter
-  // tailwind-300/400 tones that still read as green/amber/red on dark navy.
-  // These tests pin the semantic color category rather than the exact hex.
+  // The weight-diff tone comes from CPD_FACTOR_WEIGHTS.weightDiffKg (0 / 1 / 2
+  // points -> ok / warn / danger); these tests pin that semantic category.
   const weightDiffColor = (container: HTMLElement, text: string): string | null => {
     const span = [...container.querySelectorAll('span')].find((el) => el.textContent === text);
-    return span?.getAttribute('style') ?? null;
+    return span?.dataset.tone ?? null;
   };
 
   it('colors weight diff green (safe) when gain <= 15', () => {
     const { container } = render(<PatientHeader {...baseProps} weightKg={60} weightDiffKg={10} />);
-    const style = weightDiffColor(container, '+10');
-    // Green tones: bbf7d0 (300) or 86efac (400) — JSDOM normalizes to rgb()
-    expect(style).toMatch(/bbf7d0|86efac|187,\s*247,\s*208|134,\s*239,\s*172/i);
+    expect(weightDiffColor(container, '+10')).toBe('ok');
   });
 
   it('colors weight diff amber (warn) when gain > 15 and <= 20', () => {
     const { container } = render(<PatientHeader {...baseProps} weightKg={65} weightDiffKg={18} />);
-    const style = weightDiffColor(container, '+18');
-    // Amber tones: fde68a (200) or fcd34d (300)
-    expect(style).toMatch(/fde68a|fcd34d|253,\s*230,\s*138|252,\s*211,\s*77/i);
+    expect(weightDiffColor(container, '+18')).toBe('warn');
   });
 
   it('colors weight diff red (alert) when gain > 20', () => {
     const { container } = render(<PatientHeader {...baseProps} weightKg={75} weightDiffKg={25} />);
-    const style = weightDiffColor(container, '+25');
-    // Red tones: fca5a5 (300) or fecaca (200)
-    expect(style).toMatch(/fca5a5|fecaca|252,\s*165,\s*165|254,\s*202,\s*202/i);
+    expect(weightDiffColor(container, '+25')).toBe('danger');
   });
 });

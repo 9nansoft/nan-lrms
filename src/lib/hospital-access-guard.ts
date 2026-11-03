@@ -32,6 +32,7 @@
 import type { DatabaseAdapter } from '@/db/adapter';
 import { UserRole } from '@/types/domain';
 import { logger } from '@/lib/logger';
+import { NON_REPORTING_HCODES } from '@/config/hospital-network';
 
 // `getDatabase` / `ensureInit` pull the full sync service graph (which uses
 // Node `crypto`) and cannot be statically imported here: this module is
@@ -56,7 +57,7 @@ function parseHcodeSet(
   return new Set([...builtin, ...fromEnv]);
 }
 
-export const EXEMPT_HCODES: ReadonlySet<string> = parseHcodeSet(undefined, ['00000', '99999']);
+export const EXEMPT_HCODES: ReadonlySet<string> = parseHcodeSet(undefined, NON_REPORTING_HCODES);
 
 export const READONLY_LOGIN_HCODES: ReadonlySet<string> = parseHcodeSet(
   process.env.READONLY_LOGIN_HCODES,

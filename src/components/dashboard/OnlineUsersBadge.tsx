@@ -8,6 +8,7 @@
 // a "+N more" footer appears.
 'use client';
 
+import { COLOR, MIN_TEXT_PX } from '@/config/design-tokens';
 import { useState } from 'react';
 import useSWR from 'swr';
 import { UsersRound } from 'lucide-react';
@@ -57,18 +58,20 @@ export function OnlineUsersBadge() {
       onBlur={() => setOpen(false)}
     >
       <span
-        className="inline-flex cursor-default items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[13px] tracking-[0.06em] tabular-nums"
+        className="inline-flex cursor-default items-center gap-1 rounded-sm border px-1.5 py-0.5 text-caption tabular-nums"
         style={{
           borderColor: 'var(--rule-strong)',
           color: 'var(--ink-navy)',
           background: 'var(--accent-navy-soft)',
         }}
         tabIndex={0}
-        aria-label={`${total} online users`}
+        aria-label={`ออนไลน์ ${total} คน`}
+        data-testid="online-users-badge"
       >
         <UsersRound className="h-3 w-3" />
+        <span className="text-[var(--ink-navy-muted)]">ออนไลน์</span>
         <span className="font-semibold">{total}</span>
-        <span className="text-[var(--ink-navy-muted)]">USERS</span>
+        <span className="text-[var(--ink-navy-muted)]">คน</span>
       </span>
 
       {open && total > 0 && (
@@ -93,27 +96,26 @@ export function OnlineUsersBadge() {
             className="mb-1.5 flex items-baseline justify-between"
             style={{
               fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-              fontSize: 9,
-              letterSpacing: '0.14em',
+              fontSize: MIN_TEXT_PX,
               color: 'rgba(230,236,245,0.7)',
             }}
           >
-            <span>ONLINE USERS · {total}</span>
-            <span>updated 15s</span>
+            <span>ผู้ใช้ออนไลน์ · {total} คน</span>
+            <span>อัปเดตทุก 15 วินาที</span>
           </div>
           <ul className="space-y-1">
             {visible.map((u) => (
               <li
                 key={u.userId}
                 className="flex items-baseline gap-2"
-                style={{ fontSize: 12, lineHeight: 1.3 }}
+                style={{ fontSize: MIN_TEXT_PX, lineHeight: 1.3 }}
               >
                 <span
                   className="inline-block flex-shrink-0 rounded-full"
                   style={{
                     width: 6,
                     height: 6,
-                    background: '#22c55e',
+                    background: COLOR.riskLow,
                     boxShadow: '0 0 0 1.5px rgba(34,197,94,0.25)',
                     transform: 'translateY(-1px)',
                   }}
@@ -126,7 +128,7 @@ export function OnlineUsersBadge() {
                       marginLeft: 6,
                       fontFamily:
                         'ui-monospace, Menlo, Consolas, monospace',
-                      fontSize: 10,
+                      fontSize: MIN_TEXT_PX,
                     }}
                   >
                     {u.hospitalCode}
@@ -134,7 +136,7 @@ export function OnlineUsersBadge() {
                   <div
                     style={{
                       color: 'rgba(230,236,245,0.55)',
-                      fontSize: 10,
+                      fontSize: MIN_TEXT_PX,
                       marginTop: 1,
                     }}
                   >
@@ -144,7 +146,7 @@ export function OnlineUsersBadge() {
                 <span
                   style={{
                     fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-                    fontSize: 10,
+                    fontSize: MIN_TEXT_PX,
                     color: 'rgba(230,236,245,0.6)',
                     flexShrink: 0,
                   }}
@@ -160,12 +162,12 @@ export function OnlineUsersBadge() {
               className="mt-2 border-t pt-1.5"
               style={{
                 borderColor: 'rgba(255,255,255,0.18)',
-                fontSize: 10,
+                fontSize: MIN_TEXT_PX,
                 color: 'rgba(230,236,245,0.6)',
                 fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
               }}
             >
-              +{overflow} more — see /admin · Online Users
+              และอีก {overflow} คน — ดูที่หน้าผู้ดูแลระบบ แท็บผู้ใช้ออนไลน์
             </div>
           )}
         </div>

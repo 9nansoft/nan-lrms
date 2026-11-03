@@ -1,7 +1,7 @@
 import type { Session } from 'next-auth';
 import { cacheGetJson, cacheKeys, cacheSetJson } from '@/lib/cache';
+import { PRESENCE_TTL_SECONDS } from '@/config/presence';
 
-const PRESENCE_TTL_SECONDS = 120;
 const PRESENCE_KEY_PREFIX = 'presence:users';
 
 export interface OnlineUserSnapshot {

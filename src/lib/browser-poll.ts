@@ -160,7 +160,8 @@ export interface BrowserPushBody {
      *  records no births. */
     withBirthDate?: number;
   };
-  anc?: { patients: BrowserAncPatient[] };
+  /** `activeCids`: see ancActiveCids — omitted when the pull may be truncated. */
+  anc?: { patients: BrowserAncPatient[]; activeCids?: string[] };
   partograph?: { observations: BrowserPartographObservation[] };
   /** Raw HOSxP delivery rows since the server-issued newborn cutoff. */
   newborns?: {
@@ -294,7 +295,11 @@ function ancActiveWhere(): string {
       ))`;
 }
 
-const ancMastersSql = (): string => `
+/** Row cap on the active-ANC masters pull. A result this long may be
+ *  truncated, so it cannot serve as the authoritative active set. */
+export const ANC_MASTERS_LIMIT = 500;
+
+export const ancMastersSql = (): string => `
   SELECT pa.person_anc_id, pa.preg_no, pa.lmp, pa.edc,
          pa.blood_vdrl1_result, pa.blood_vdrl2_result,
          pa.blood_hiv1_result, pa.blood_hiv2_result,
@@ -307,7 +312,24 @@ const ancMastersSql = (): string => `
     LEFT JOIN patient pt ON pt.cid = pe.cid AND LENGTH(pe.cid) = 13
    WHERE ${ancActiveWhere()}
    ORDER BY pa.person_anc_id DESC
-   LIMIT 500`;
+   LIMIT ${ANC_MASTERS_LIMIT}`;
+
+/**
+ * Authoritative active-ANC CID set for the server's absent-pregnancy
+ * reconciliation (anc.activeCids). Built from the RAW masters rows — before
+ * the name probe filters patients — so a still-listed woman is never missing
+ * from it. `undefined` when the pull hit ANC_MASTERS_LIMIT: a possibly
+ * truncated list must never be reconciled against.
+ */
+export function ancActiveCids(masters: Record<string, unknown>[]): string[] | undefined {
+  if (masters.length >= ANC_MASTERS_LIMIT) return undefined;
+  const cids = new Set<string>();
+  for (const m of masters) {
+    const cid = strOrNull(m.cid);
+    if (cid && /^\d{13}$/.test(cid)) cids.add(cid);
+  }
+  return [...cids];
+}
 
 const ancVisitsSql = (): string => `
   SELECT s.person_anc_id,
@@ -1079,6 +1101,9 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     const laborActiveAns = laborRows
       .map((r) => strOrNull(r.an))
       .filter((an): an is string => an !== null);
+    // Same guarantee for ANC: all queries succeeded, so this is complete
+    // unless the row limit was hit (then undefined → server skips).
+    const ancActive = ancActiveCids(ancMasters);
 
     // ─── Newborn deliveries (labour infants + ipt_pregnancy summaries) ────
     // Cutoff comes from the server (GET /api/sync/browser-push) — it self-
@@ -1192,7 +1217,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       laborPatients,
       laborActiveAns,
       hasPartograph: partographs.length > 0,
-      hasAnc: ancPatients.length > 0,
+      hasAnc: ancPatients.length > 0 || (ancActive?.length ?? 0) > 0,
       lastPushedActiveKey,
     });
 
@@ -1216,7 +1241,12 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // HOSxP actually returned for this ward.
     if (decision.labor) body.labor = { ...decision.labor, withBirthDate: laborWithBirthDate };
     if (partographs.length > 0) body.partograph = { observations: partographs };
-    if (ancPatients.length > 0) body.anc = { patients: ancPatients };
+    if (ancPatients.length > 0 || ancActive !== undefined) {
+      body.anc = {
+        patients: ancPatients,
+        ...(ancActive !== undefined ? { activeCids: ancActive } : {}),
+      };
+    }
     if (newbornsSection) body.newborns = newbornsSection;
     if (referralsSection) body.referrals = referralsSection;
 

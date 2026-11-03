@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
-import { Plus, Pencil, Trash2, Building2, Database, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Database, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -16,6 +16,13 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { LoadingState } from '@/components/shared/LoadingState';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { DataTable, type DataTableColumn } from '@/components/shared/DataTable';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
+import { actionFailure, type ActionFailure } from '@/lib/action-failure';
+import { cn } from '@/lib/utils';
+import { Field, SELECT_CLASS, StatusPill } from './admin-ui';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
 import { guessHospitalLevel } from '@/config/hospitals';
 import {
@@ -90,6 +97,7 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
   const [pickedLevel, setPickedLevel] = useState<string>(HospitalLevel.F2);
   const [addMessage, setAddMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<ActionFailure | null>(null);
 
   const provinceByCode = useMemo(() => {
     const map = new Map<string, string>();
@@ -120,24 +128,14 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
 
   if (error) {
     // Surface the real failure (e.g. "column X does not exist" after a schema
-    // mismatch) so the admin can tell the difference between "no hospitals
-    // registered yet" and "server failed to answer".
+    // mismatch) so "no hospitals yet" and "server failed" never look alike.
     return (
-      <div className="border-2 bg-white px-4 py-3" style={{ borderColor: 'var(--risk-high)' }}>
-        <div
-          className="mb-1 font-mono text-[11px] font-semibold uppercase tracking-[0.08em]"
-          style={{ color: 'var(--risk-high)' }}
-        >
-          โหลดรายการโรงพยาบาลไม่สำเร็จ
-        </div>
-        <div className="font-mono text-[12px] text-[var(--ink-navy-dim)]">
-          {(error as Error).message}
-        </div>
-        <div className="mt-2 font-mono text-[10px] text-[var(--ink-navy-muted)]">
-          มักเกิดเมื่อ schema DB ไม่ sync กับโค้ดล่าสุด — ลองรีสตาร์ท dev server เพื่อให้
-          schema-sync ALTER column ที่ขาด
-        </div>
-      </div>
+      <ErrorState
+        message="โหลดรายการโรงพยาบาลไม่สำเร็จ"
+        detail={(error as Error).message}
+        remedy="รีสตาร์ทเซิร์ฟเวอร์เพื่อให้ schema-sync เพิ่มคอลัมน์ที่ขาด แล้วกด ลองใหม่ หากยังไม่ได้ แจ้งผู้ดูแลระบบพร้อมข้อความด้านบน"
+        onRetry={() => void mutate()}
+      />
     );
   }
 
@@ -192,6 +190,7 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
       return;
     }
     setBusy(true);
+    setActionError(null);
     try {
       const res = await fetch(`/api/admin/hospitals/${h.hcode}`, {
         method: 'DELETE',
@@ -202,7 +201,7 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
       }
       await mutate();
     } catch (e) {
-      alert((e as Error).message);
+      setActionError(actionFailure(`ลบ ${h.name} (${h.hcode})`, (e as Error).message));
     } finally {
       setBusy(false);
     }
@@ -220,6 +219,7 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
       return;
     }
     setBusy(true);
+    setActionError(null);
     try {
       const res = await fetch(`/api/admin/hospitals/${h.hcode}/clear-purge`, {
         method: 'POST',
@@ -230,241 +230,167 @@ export function HospitalsTab({ autoEditHcode, onAutoEditConsumed }: HospitalsTab
       }
       await mutate();
     } catch (e) {
-      alert((e as Error).message);
+      setActionError(actionFailure(`เปิดใช้งานการซิงค์ของ ${h.name} (${h.hcode})`, (e as Error).message));
     } finally {
       setBusy(false);
     }
   };
 
+  const inactive = hospitals.filter((h) => !h.isActive).length;
+  const columns: DataTableColumn<AdminHospital>[] = [
+    {
+      key: 'name',
+      header: 'โรงพยาบาล',
+      cell: (h) => {
+        const failed = isHospitalAuthenticityFailure(h);
+        return (
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-body font-medium text-ink">{h.name}</span>
+              {failed && (
+                <StatusPill tone="danger" icon={AlertTriangle} title={describeAuthenticityFailure(h)}>ข้อมูลไม่ผ่านตรวจสอบ</StatusPill>
+              )}
+            </div>
+            <div className="font-mono text-caption text-ink-muted">{h.hcode} · {h.level}</div>
+            {failed && (
+              <button
+                type="button"
+                onClick={() => handleClearPurge(h)}
+                disabled={busy}
+                title="ล้างสถานะระงับการซิงค์ฝั่งเซิร์ฟเวอร์ — การซิงค์จริงจะเริ่มอีกครั้งเมื่อผู้ใช้จากโรงพยาบาลนี้เปิด NN-LRMS จาก HOSxP"
+                className="inline-flex min-h-9 items-center rounded-lg border border-ok/40 bg-ok-tint px-2.5 text-caption font-semibold text-ok-text hover:brightness-95 disabled:opacity-50"
+              >
+                เปิดใช้งานการซิงค์อีกครั้ง
+              </button>
+            )}
+          </div>
+        );
+      },
+    },
+    { key: 'service', header: 'ประเภทบริการ', cell: (h) => <span className="whitespace-nowrap text-label text-ink-muted">{SERVICE_TYPE_LABEL[h.serviceType ?? ''] ?? '—'}</span> },
+    {
+      key: 'province',
+      header: 'จังหวัด',
+      cell: (h) => (
+        <span className="text-label text-ink-muted">
+          {h.provinceCode ? `${provinceByCode.get(h.provinceCode) ?? '-'} · ${h.provinceCode}` : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'active',
+      header: 'สถานะ',
+      cell: (h) => (
+        <StatusPill tone={h.isActive ? 'ok' : 'neutral'} className="whitespace-nowrap" title={h.isActive ? undefined : 'โรงพยาบาลถูกปิดการใช้งาน — กด "แก้ไข" เพื่อเปิดใช้งานอีกครั้งหรือลบข้อมูล'}>
+          {h.isActive ? 'ใช้งาน' : 'ปิดใช้งาน'}
+        </StatusPill>
+      ),
+    },
+    {
+      key: 'data',
+      header: 'ข้อมูลในระบบ',
+      numeric: true,
+      cell: (h) => {
+        if (dataCountsData === undefined) return <span className="text-caption text-ink-muted">…</span>;
+        const total = dataCountsData.counts?.[h.hcode]?.totalRows;
+        const perTable = dataCountsData.counts?.[h.hcode]?.perTable;
+        const tooltip = perTable
+          ? Object.entries(perTable).filter(([, v]) => v > 0).map(([k, v]) => `${k}: ${v.toLocaleString('th-TH')}`).join('\n') || 'ไม่มีข้อมูล'
+          : 'ไม่มีข้อมูล';
+        return (
+          <button
+            type="button"
+            onClick={() => setEditHospital(h)}
+            title={`คลิกเพื่อจัดการข้อมูล\n${tooltip}`}
+            disabled={busy}
+            className={cn(
+              'inline-flex min-h-9 items-center gap-1 rounded-lg border border-border px-2 tabular-nums hover:bg-brand-soft',
+              total && total > 0 ? 'bg-surface-muted text-brand' : 'text-ink-muted',
+            )}
+          >
+            <Database aria-hidden="true" className="h-3.5 w-3.5" />
+            {(total ?? 0).toLocaleString('th-TH')}
+          </button>
+        );
+      },
+    },
+    {
+      key: 'actions',
+      header: 'จัดการ',
+      cell: (h) => (
+        <div className="flex justify-end gap-1">
+          <Button variant="outline" size="sm" onClick={() => setEditHospital(h)} disabled={busy} aria-label={`แก้ไข ${h.name}`} className="h-9 gap-1 text-label">
+            <Pencil aria-hidden="true" className="h-3.5 w-3.5" /> แก้ไข
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => handleDelete(h)} disabled={busy} aria-label={`ลบ ${h.name} (${h.hcode})`} className="h-9 gap-1 text-label text-danger-text hover:bg-danger-tint">
+            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" /> ลบ
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
-          REGISTERED HOSPITALS · {hospitals.length}
-          {(() => {
-            const inactive = hospitals.filter((h) => !h.isActive).length;
-            return inactive > 0 ? (
-              <span className="ml-2 normal-case tracking-normal text-[var(--ink-navy-dim)]">
-                ({hospitals.length - inactive} active · {inactive} ปิดใช้งาน)
-              </span>
-            ) : null;
-          })()}
-        </div>
-        <Button onClick={openAdd} className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          เพิ่มโรงพยาบาล
-        </Button>
-      </div>
+      {actionError && (
+        <ErrorState variant="banner" className="rounded-xl border" message={actionError.message} remedy={actionError.remedy} />
+      )}
+      <SectionCard
+        title="โรงพยาบาลในระบบ"
+        description={`${hospitals.length} แห่ง · ใช้งาน ${hospitals.length - inactive} · ปิดใช้งาน ${inactive}`}
+        actions={
+          <Button onClick={openAdd} className="h-10 gap-1.5 bg-brand text-white hover:bg-brand-strong">
+            <Plus aria-hidden="true" className="h-4 w-4" /> เพิ่มโรงพยาบาล
+          </Button>
+        }
+      >
+        <DataTable
+          caption="โรงพยาบาลในระบบ"
+          columns={columns}
+          rows={hospitals}
+          rowKey={(h) => h.hcode}
+          empty={<EmptyState illustration="generic" title="ยังไม่มีโรงพยาบาลในระบบ" description='กด "เพิ่มโรงพยาบาล" เพื่อเลือกจากทะเบียน MOPH' className="shadow-none" />}
+        />
+      </SectionCard>
 
-      <div className="border bg-white" style={{ borderColor: 'var(--rule-strong)' }}>
-        <div
-          className="grid grid-cols-[90px,1fr,70px,130px,120px,60px,90px,110px] items-center border-b px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          <span>HCODE</span>
-          <span>NAME</span>
-          <span>LEVEL</span>
-          <span>SERVICE</span>
-          <span>PROVINCE</span>
-          <span>ACTIVE</span>
-          <span className="text-right">DATA</span>
-          <span className="text-right">ACTIONS</span>
-        </div>
-        {hospitals.length === 0 ? (
-          <div className="px-3 py-6 text-center text-[13px] text-[var(--ink-navy-dim)]">
-            ยังไม่มีโรงพยาบาลในระบบ — กด &ldquo;เพิ่มโรงพยาบาล&rdquo;
-          </div>
-        ) : (
-          hospitals.map((h) => (
-            <div
-              key={h.hcode}
-              className="grid grid-cols-[90px,1fr,70px,130px,120px,60px,90px,110px] items-center border-b px-3 py-2 text-sm last:border-b-0"
-              style={{
-                borderColor: 'var(--rule-hair)',
-                color: 'var(--ink-navy)',
-                opacity: h.isActive ? 1 : 0.6,
-                background: h.isActive ? undefined : 'var(--surface-cool, #f8fafc)',
-              }}
-            >
-              <span className="font-mono text-[12px] text-[var(--ink-navy-dim)]">{h.hcode}</span>
-              <span className="flex items-center gap-2">
-                <Building2 className="h-3.5 w-3.5 text-[var(--ink-navy-muted)]" />
-                <span className="truncate">{h.name}</span>
-                {!h.isActive && (
-                  <span
-                    title='โรงพยาบาลถูกปิดการใช้งาน — กดปุ่ม "แก้" เพื่อเปิดใช้งานอีกครั้งหรือลบข้อมูล'
-                    className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-                    style={{
-                      borderColor: 'var(--rule-strong)',
-                      background: 'transparent',
-                      color: 'var(--ink-navy-muted)',
-                    }}
-                  >
-                    ปิดใช้งาน
-                  </span>
-                )}
-                {isHospitalAuthenticityFailure(h) && (
-                  <>
-                    <span
-                      title={describeAuthenticityFailure(h)}
-                      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-                      style={{
-                        borderColor: '#fecaca',
-                        background: '#fef2f2',
-                        color: '#b91c1c',
-                      }}
-                    >
-                      <AlertTriangle className="h-3 w-3" />
-                      ข้อมูลไม่ผ่านตรวจสอบ
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleClearPurge(h)}
-                      title="ล้างสถานะระงับ Sync ฝั่งเซิร์ฟเวอร์ — Sync จริงจะเริ่มอีกครั้งเมื่อผู้ใช้จากโรงพยาบาลนี้เปิด NN-LRMS จาก HOSxP"
-                      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide hover:bg-emerald-100"
-                      style={{
-                        borderColor: '#86efac',
-                        background: '#ecfdf5',
-                        color: '#065f46',
-                      }}
-                      disabled={busy}
-                    >
-                      เปิดใช้งาน Sync อีกครั้ง
-                    </button>
-                  </>
-                )}
-              </span>
-              <span className="font-mono text-[11px]">{h.level}</span>
-              <span className="font-mono text-[10px] text-[var(--ink-navy-dim)]">
-                {SERVICE_TYPE_LABEL[h.serviceType ?? ''] ?? '—'}
-              </span>
-              <span className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
-                {h.provinceCode
-                  ? `${provinceByCode.get(h.provinceCode) ?? '-'} · ${h.provinceCode}`
-                  : '—'}
-              </span>
-              <span
-                className="font-mono text-[11px]"
-                style={{ color: h.isActive ? 'var(--risk-low)' : 'var(--ink-navy-muted)' }}
-              >
-                {h.isActive ? 'YES' : 'NO'}
-              </span>
-              <span className="flex justify-end">
-                {(() => {
-                  const total = dataCountsData?.counts?.[h.hcode]?.totalRows;
-                  const perTable = dataCountsData?.counts?.[h.hcode]?.perTable;
-                  if (dataCountsData === undefined) {
-                    return (
-                      <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">…</span>
-                    );
-                  }
-                  const tooltip = perTable
-                    ? Object.entries(perTable)
-                        .filter(([, v]) => v > 0)
-                        .map(([k, v]) => `${k}: ${v.toLocaleString('th-TH')}`)
-                        .join('\n') || 'ไม่มีข้อมูล'
-                    : 'ไม่มีข้อมูล';
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => setEditHospital(h)}
-                      title={`คลิกเพื่อจัดการข้อมูล\n${tooltip}`}
-                      className="inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[11px] tabular-nums hover:bg-[var(--accent-navy-soft)]"
-                      style={{
-                        borderColor: 'var(--rule-strong)',
-                        color: total && total > 0 ? 'var(--accent-navy)' : 'var(--ink-navy-muted)',
-                        background: total && total > 0 ? 'var(--surface-cool)' : 'transparent',
-                      }}
-                      disabled={busy}
-                    >
-                      <Database className="h-3 w-3" />
-                      {(total ?? 0).toLocaleString('th-TH')}
-                    </button>
-                  );
-                })()}
-              </span>
-              <span className="flex justify-end gap-1">
-                <button
-                  onClick={() => setEditHospital(h)}
-                  className="inline-flex items-center gap-1 border px-2 py-1 font-mono text-[11px] hover:bg-[var(--accent-navy-soft)]"
-                  style={{ borderColor: 'var(--rule-strong)', color: 'var(--ink-navy-dim)' }}
-                  disabled={busy}
-                >
-                  <Pencil className="h-3 w-3" />
-                  แก้
-                </button>
-                <button
-                  onClick={() => handleDelete(h)}
-                  className="inline-flex items-center gap-1 border px-2 py-1 font-mono text-[11px] hover:bg-red-50"
-                  style={{ borderColor: 'var(--rule-strong)', color: '#b91c1c' }}
-                  disabled={busy}
-                >
-                  <Trash2 className="h-3 w-3" />
-                  ลบ
-                </button>
-              </span>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Add dialog (MOPH registry picker) */}
       <Dialog open={addOpen} onOpenChange={(o) => !o && setAddOpen(false)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>เพิ่มโรงพยาบาลจากทะเบียน MOPH</DialogTitle>
+            <DialogTitle className="text-title text-brand">เพิ่มโรงพยาบาลจากทะเบียน MOPH</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-[12px] text-[var(--ink-navy-dim)]">
-              ค้นหาในจังหวัดปัจจุบัน ({provinceByCode.get(activeProvince) ?? activeProvince}) — มี{' '}
-              {availableMoph.length} รายการที่ยังไม่ถูกเพิ่ม
+          <div className="space-y-4">
+            <p className="text-body text-ink-muted">
+              ค้นหาในจังหวัดปัจจุบัน ({provinceByCode.get(activeProvince) ?? activeProvince}) — มี {availableMoph.length} รายการที่ยังไม่ถูกเพิ่ม
             </p>
-            <select
-              value={pickedHcode}
-              onChange={(e) => {
-                setPickedHcode(e.target.value);
-                const moph = availableMoph.find((m) => m.hcode === e.target.value);
-                if (moph) setPickedLevel(guessHospitalLevel(moph.hospitalTypeId));
-              }}
-              className="h-9 w-full border bg-white px-2 font-mono text-sm"
-              style={{ borderColor: 'var(--rule-strong)' }}
-            >
-              <option value="">— เลือกโรงพยาบาล —</option>
-              {availableMoph.map((m) => (
-                <option key={m.hcode} value={m.hcode}>
-                  {m.hcode} · {m.name} {m.bedCount ? `(${m.bedCount} เตียง)` : ''}
-                </option>
-              ))}
-            </select>
-            <div>
-              <label className="mb-1 block font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
-                LEVEL
-              </label>
+            <Field label="โรงพยาบาล" htmlFor="add-hcode">
               <select
-                value={pickedLevel}
-                onChange={(e) => setPickedLevel(e.target.value)}
-                className="h-9 w-full border bg-white px-2 font-mono text-sm"
-                style={{ borderColor: 'var(--rule-strong)' }}
+                id="add-hcode"
+                value={pickedHcode}
+                onChange={(e) => {
+                  setPickedHcode(e.target.value);
+                  const moph = availableMoph.find((m) => m.hcode === e.target.value);
+                  if (moph) setPickedLevel(guessHospitalLevel(moph.hospitalTypeId));
+                }}
+                className={SELECT_CLASS}
               >
-                {LEVEL_OPTIONS.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
+                <option value="">— เลือกโรงพยาบาล —</option>
+                {availableMoph.map((m) => (
+                  <option key={m.hcode} value={m.hcode}>{m.hcode} · {m.name} {m.bedCount ? `(${m.bedCount} เตียง)` : ''}</option>
                 ))}
               </select>
-            </div>
-            {addMessage ? (
-              <div className="text-[12px]" style={{ color: '#b91c1c' }}>
-                {addMessage}
-              </div>
-            ) : null}
+            </Field>
+            <Field label="ระดับโรงพยาบาล" htmlFor="add-level">
+              <select id="add-level" value={pickedLevel} onChange={(e) => setPickedLevel(e.target.value)} className={SELECT_CLASS}>
+                {LEVEL_OPTIONS.map((l) => (<option key={l} value={l}>{l}</option>))}
+              </select>
+            </Field>
+            {addMessage ? <p role="alert" className="text-body text-danger-text">{addMessage}</p> : null}
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setAddOpen(false)} disabled={busy}>
-              ยกเลิก
-            </Button>
-            <Button onClick={handleAdd} disabled={busy || !pickedHcode} className="gap-1.5">
-              <Plus className="h-4 w-4" /> เพิ่ม
+            <Button variant="ghost" onClick={() => setAddOpen(false)} disabled={busy}>ยกเลิก</Button>
+            <Button onClick={handleAdd} disabled={busy || !pickedHcode} className="gap-1.5 bg-brand text-white hover:bg-brand-strong">
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              เพิ่ม
             </Button>
           </DialogFooter>
         </DialogContent>

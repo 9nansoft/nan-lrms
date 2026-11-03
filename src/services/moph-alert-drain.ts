@@ -14,6 +14,12 @@
 //   - 502/timeout (RETRYABLE_EXHAUSTED) → status back to 'pending', attempts++,
 //     last_error set (retried on the next drain)
 //   - 4xx (CLIENT_ERROR/AUTH/VALIDATION/INVALID_CID) → status='failed' (terminal)
+//   - session re-derive failure → same retry ceiling as 502s, so a hospital whose
+//     BMS session endpoint is down cannot loop the oldest rows forever and
+//     starve newer ones (2026-10-11: 5 rows retried 215× blocked 127 rows)
+// Pending rows from a prior Bangkok day are expired before claiming — the same
+// "current day only" rule the deferred event queue applies — so a recovered
+// hospital never receives days-old clinical alerts as if they were current.
 //
 // Rebuilds the Flex from the stored hospital_name + decrypted patient_name_enc
 // (staff scope only), so hospital staff receive the patient name (codex review
@@ -24,8 +30,9 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 import { sendMophPrompt } from '@/services/moph-prompt';
 import { resolveSessionIdForHospital } from '@/lib/bms-session';
-import { mophAlertsEnabled, mophAlertLimits } from '@/config/moph-alert-config';
+import { mophAlertsEnabled, mophAlertLimits, mophAlertLocalDate } from '@/config/moph-alert-config';
 import { decryptSafe } from '@/lib/encryption';
+import { materializeDeferredAlertEvents } from '@/services/risk-alert';
 import {
   buildAlertFlex,
   alertTitle,
@@ -44,6 +51,8 @@ export interface DrainSummary {
   retryable: number;
   failed: number;
   skipped: number;
+  /** Pending rows from a prior Bangkok day, expired instead of sent late. */
+  expired: number;
 }
 
 interface ClaimedRow {
@@ -73,7 +82,7 @@ export async function drainMophAlerts(
   hospitalId: string,
   opts: DrainOptions = {},
 ): Promise<DrainSummary> {
-  const summary: DrainSummary = { sent: 0, retryable: 0, failed: 0, skipped: 0 };
+  const summary: DrainSummary = { sent: 0, retryable: 0, failed: 0, skipped: 0, expired: 0 };
   if (!mophAlertsEnabled()) {
     logger.debug('moph_alert_drain_skipped_disabled', { hospitalId });
     return summary;
@@ -81,6 +90,23 @@ export async function drainMophAlerts(
   const limits = mophAlertLimits();
   const maxAlerts = opts.maxAlerts ?? limits.maxAlertsPerDrain;
   const budgetMs = opts.budgetMs ?? limits.drainBudgetMs;
+  const drainStartedAt = Date.now();
+
+  // A clinical event may have arrived before any recipient was configured.
+  // Retry recipient resolution before claiming deliveries. This is best-effort:
+  // a queue replay failure must never block ordinary pending alert delivery.
+  try {
+    const replayBudgetMs = Math.min(500, Math.max(0, Math.floor(budgetMs / 4)));
+    await materializeDeferredAlertEvents(db, hospitalId, {
+      maxEvents: maxAlerts,
+      deadlineMs: drainStartedAt + replayBudgetMs,
+    });
+  } catch (error) {
+    logger.warn('moph_alert_deferred_replay_failed', {
+      hospitalId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // Recover stale `processing` rows first — a previous drain crashed mid-send
   // (or its request was aborted) leaving rows claimed but never finalized.
@@ -94,6 +120,20 @@ export async function drainMophAlerts(
        AND claimed_at < NOW() - ($2 || ' milliseconds')::interval`,
     [hospitalId, String(staleMs)],
   );
+
+  // Expire prior-day pending rows BEFORE claiming, so they neither go out late
+  // nor occupy the oldest-first claim window ahead of today's alerts.
+  const expired = await db.query<{ id: string }>(
+    `UPDATE moph_alert_log
+     SET status = 'expired', claimed_at = NULL, updated_at = NOW()
+     WHERE hospital_id = $1 AND status = 'pending' AND local_date < $2
+     RETURNING id`,
+    [hospitalId, mophAlertLocalDate()],
+  );
+  summary.expired = expired.length;
+  if (expired.length > 0) {
+    logger.info('moph_alert_expired_stale', { hospitalId, expired: expired.length });
+  }
 
   // Atomically claim up to maxAlerts pending rows for THIS drain. The
   // UPDATE...RETURNING + status='processing' + claimed_at is the claim: a
@@ -136,18 +176,22 @@ export async function drainMophAlerts(
   } catch (err) {
     logger.warn('moph_alert_drain_no_session', { hospitalId, error: String(err) });
     const msg = `session re-derive failed: ${String((err as Error)?.message ?? err)}`;
-    await db.query(
+    // Same dead-letter ceiling as a retryable send failure (see sendOne).
+    const released = await db.query<{ status: string }>(
       `UPDATE moph_alert_log
-       SET status = 'pending', claimed_at = NULL, attempts = attempts + 1,
+       SET status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE 'pending' END,
+           claimed_at = NULL, attempts = attempts + 1,
            last_error = $1, updated_at = NOW()
-       WHERE id::text = ANY($2::text[]) AND status = 'processing'`,
-      [msg, claimed.map((r) => r.id)],
+       WHERE id::text = ANY($2::text[]) AND status = 'processing'
+       RETURNING status`,
+      [msg, claimed.map((r) => r.id), limits.max502Retries],
     );
-    summary.retryable = claimed.length; // all deferred to next drain
+    summary.failed = released.filter((r) => r.status === 'failed').length;
+    summary.retryable = released.length - summary.failed;
     return summary;
   }
 
-  const deadline = Date.now() + budgetMs;
+  const deadline = drainStartedAt + budgetMs;
   let sentIdx = 0;
   for (const row of claimed) {
     if (Date.now() >= deadline) {
@@ -165,14 +209,20 @@ export async function drainMophAlerts(
   return summary;
 }
 
-/** Delete terminal (sent/failed/skipped) rows older than `retentionDays`.
+/** Delete terminal (sent/failed/skipped/expired) rows older than `retentionDays`.
  *  0 = keep forever. Pending/processing rows are never purged. */
 async function purgeOldMophAlerts(db: DatabaseAdapter, retentionDays: number): Promise<void> {
   if (!retentionDays || retentionDays <= 0) return;
   await db.query(
     `DELETE FROM moph_alert_log
-     WHERE status IN ('sent', 'failed', 'skipped')
+     WHERE status IN ('sent', 'failed', 'skipped', 'expired')
        AND created_at < NOW() - ($1 || ' days')::interval`,
+    [String(retentionDays)],
+  );
+  await db.query(
+    `DELETE FROM moph_alert_event_queue
+     WHERE status IN ('materialized', 'expired')
+       AND updated_at < NOW() - ($1 || ' days')::interval`,
     [String(retentionDays)],
   );
 }

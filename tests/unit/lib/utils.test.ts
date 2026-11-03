@@ -13,6 +13,7 @@ import {
   formatRelativeTime,
 } from '@/lib/utils';
 import { RiskLevel, HospitalLevel } from '@/types/domain';
+import { COLOR, TYPE_SCALE } from '@/config/design-tokens';
 
 describe('utils', () => {
   describe('cn', () => {
@@ -39,6 +40,15 @@ describe('utils', () => {
 
     it('handles empty input', () => {
       expect(cn()).toBe('');
+    });
+
+    it.each(Object.keys(TYPE_SCALE))('keeps text-%s when a text colour follows', (token) => {
+      expect(cn(`text-${token}`, 'text-brand')).toBe(`text-${token} text-brand`);
+    });
+
+    it('treats the custom shadow-soft token as a shadow so shadow-none overrides it', () => {
+      expect(cn('shadow-soft', 'shadow-none')).toBe('shadow-none');
+      expect(cn('shadow-none', 'shadow-soft')).toBe('shadow-soft');
     });
   });
 
@@ -129,30 +139,30 @@ describe('utils', () => {
   });
 
   describe('riskLevelToColor', () => {
-    it('returns green (#22c55e) for LOW', () => {
-      expect(riskLevelToColor(RiskLevel.LOW)).toBe('#22c55e');
+    it('returns the low-risk token for LOW', () => {
+      expect(riskLevelToColor(RiskLevel.LOW)).toBe(COLOR.riskLow);
     });
 
-    it('returns yellow (#eab308) for MEDIUM', () => {
-      expect(riskLevelToColor(RiskLevel.MEDIUM)).toBe('#eab308');
+    it('returns the medium-risk token for MEDIUM', () => {
+      expect(riskLevelToColor(RiskLevel.MEDIUM)).toBe(COLOR.riskMedium);
     });
 
-    it('returns red (#ef4444) for HIGH', () => {
-      expect(riskLevelToColor(RiskLevel.HIGH)).toBe('#ef4444');
+    it('returns the high-risk token for HIGH', () => {
+      expect(riskLevelToColor(RiskLevel.HIGH)).toBe(COLOR.riskHigh);
     });
   });
 
   describe('riskLevelToBgColor', () => {
-    it('returns light green (#dcfce7) for LOW', () => {
-      expect(riskLevelToBgColor(RiskLevel.LOW)).toBe('#dcfce7');
+    it('returns the low-risk tint for LOW', () => {
+      expect(riskLevelToBgColor(RiskLevel.LOW)).toBe(COLOR.riskLowTint);
     });
 
-    it('returns light yellow (#fef9c3) for MEDIUM', () => {
-      expect(riskLevelToBgColor(RiskLevel.MEDIUM)).toBe('#fef9c3');
+    it('returns the medium-risk tint for MEDIUM', () => {
+      expect(riskLevelToBgColor(RiskLevel.MEDIUM)).toBe(COLOR.riskMediumTint);
     });
 
-    it('returns light red (#fee2e2) for HIGH', () => {
-      expect(riskLevelToBgColor(RiskLevel.HIGH)).toBe('#fee2e2');
+    it('returns the high-risk tint for HIGH', () => {
+      expect(riskLevelToBgColor(RiskLevel.HIGH)).toBe(COLOR.riskHighTint);
     });
   });
 
@@ -195,9 +205,13 @@ describe('utils', () => {
       expect(formatHospitalLevel(HospitalLevel.F3)).toBe('รพ.สต./F3');
     });
 
-    it('returns string representation for unknown level', () => {
+    it('labels an unclassified registry destination explicitly', () => {
+      expect(formatHospitalLevel(HospitalLevel.UNKNOWN)).toBe('ยังไม่ระบุระดับ');
+    });
+
+    it('returns string representation for an unrecognized level', () => {
       // Cast an unknown value to test the fallback
-      expect(formatHospitalLevel('UNKNOWN' as HospitalLevel)).toBe('UNKNOWN');
+      expect(formatHospitalLevel('UNRECOGNIZED' as HospitalLevel)).toBe('UNRECOGNIZED');
     });
   });
 

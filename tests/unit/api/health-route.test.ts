@@ -25,6 +25,13 @@ describe('GET /api/health outage fallback', () => {
     expect(body.status).toBe('unhealthy');
     expect(body.database).toBe('disconnected');
     expect(body.cache).toEqual({ backend: 'memory', degraded: false, degradedSince: null });
+    expect(body.hospitalConnections).toEqual({
+      total: 0,
+      online: 0,
+      offline: 0,
+      unknown: 0,
+      stale: 0,
+    });
     expect(Array.isArray(body.degradedReasons)).toBe(true);
     expect(body.degradedReasons.length).toBeGreaterThan(0);
   });

@@ -38,32 +38,32 @@ interface SeverityToken {
 
 const SEVERITY: Record<Severity, SeverityToken> = {
   critical: {
-    accent: 'bg-rose-500',
-    dot: 'bg-rose-500',
-    ring: 'focus:ring-rose-500',
+    accent: 'bg-danger',
+    dot: 'bg-danger',
+    ring: 'focus:ring-danger',
     label: 'เสี่ยงสูง',
-    bar: 'bg-rose-500',
+    bar: 'bg-danger',
   },
   warning: {
-    accent: 'bg-amber-500',
-    dot: 'bg-amber-500',
-    ring: 'focus:ring-amber-500',
+    accent: 'bg-warn',
+    dot: 'bg-warn',
+    ring: 'focus:ring-warn',
     label: 'เฝ้าระวัง',
-    bar: 'bg-amber-500',
+    bar: 'bg-warn',
   },
   normal: {
-    accent: 'bg-emerald-500',
-    dot: 'bg-emerald-500',
-    ring: 'focus:ring-emerald-500',
+    accent: 'bg-ok',
+    dot: 'bg-ok',
+    ring: 'focus:ring-ok',
     label: 'ปกติ',
-    bar: 'bg-emerald-500',
+    bar: 'bg-ok',
   },
   // "unknown" = no active partograph yet; keep the accent bar barely visible
   // so it doesn't compete with the clinical signals in the room.
   unknown: {
     accent: 'bg-slate-200',
     dot: 'bg-slate-300',
-    ring: 'focus:ring-emerald-500',
+    ring: 'focus:ring-ok',
     label: 'ยังไม่ประเมิน',
     bar: 'bg-slate-400',
   },
@@ -158,7 +158,7 @@ function CervixBar({ cm }: { cm: number | null }) {
   }
   const pct = Math.min(100, Math.max(0, (cm / 10) * 100));
   // 8+ cm = near-delivery → emphasize in emerald even if overall severity differs.
-  const barColor = cm >= 8 ? 'bg-emerald-500' : cm >= 4 ? 'bg-amber-500' : 'bg-sky-500';
+  const barColor = cm >= 8 ? 'bg-ok' : cm >= 4 ? 'bg-warn' : 'bg-sky-500';
   return (
     <div className="flex items-center gap-2" aria-label={`ปากมดลูก ${cm} เซนติเมตร`}>
       <div className="relative h-1.5 flex-1 rounded-full bg-slate-100">
@@ -240,7 +240,7 @@ export function BedTile({ bedno, bedLock, occupant, onClick, now }: BedTileProps
       <div className="flex flex-col gap-1.5 pl-4 pr-3 py-2.5">
         {/* Header: bed # · HN · severity dot */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-wide tabular-nums text-slate-500">
+          <div className="flex min-w-0 items-center gap-2 text-caption font-semibold uppercase tracking-wide tabular-nums text-slate-500">
             <span>{`เตียง ${bedno}`}</span>
             {hn && (
               <>
@@ -256,7 +256,7 @@ export function BedTile({ bedno, bedLock, occupant, onClick, now }: BedTileProps
 
         {/* Patient name — primary info */}
         <div className="min-w-0">
-          <div className="truncate text-[15px] font-semibold leading-tight text-slate-900">
+          <div className="truncate text-body font-semibold leading-tight text-slate-900">
             {name}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
@@ -270,7 +270,7 @@ export function BedTile({ bedno, bedLock, occupant, onClick, now }: BedTileProps
                 <span aria-hidden className="text-slate-300">
                   ·
                 </span>
-                <span className="font-mono text-[11px] tabular-nums text-slate-700">
+                <span className="font-mono text-caption tabular-nums text-slate-700">
                   {gravida !== null && <span>{`G${gravida}`}</span>}
                   {gravida !== null && ga !== null && (
                     <span aria-hidden className="mx-0.5 text-slate-300">
@@ -302,7 +302,7 @@ export function BedTile({ bedno, bedLock, occupant, onClick, now }: BedTileProps
         <CervixBar cm={cervix} />
 
         {/* Footer row: time-in-labor chip + in-charge doctor */}
-        <div className="mt-auto flex items-center justify-between gap-2 text-[11px] text-slate-500">
+        <div className="mt-auto flex items-center justify-between gap-2 text-caption text-slate-500">
           {hrsInLabor !== null ? (
             <span
               className="inline-flex items-center gap-1 rounded-md bg-slate-50 px-1.5 py-0.5 tabular-nums ring-1 ring-slate-200/60"
@@ -325,9 +325,9 @@ export function BedTile({ bedno, bedLock, occupant, onClick, now }: BedTileProps
 
         {/* Partograph freshness strip — always rendered so the row height is
             stable across tiles (prevents reflow during SWR revalidation). */}
-        <div className="flex items-center gap-1 border-t border-slate-100 pt-1.5 text-[10px]">
+        <div className="flex items-center gap-1 border-t border-slate-100 pt-1.5 text-caption">
           <Activity
-            className={cn('h-3 w-3', isActivelyCharted ? 'text-emerald-500' : 'text-slate-300')}
+            className={cn('h-3 w-3', isActivelyCharted ? 'text-ok' : 'text-slate-300')}
             aria-hidden
           />
           {occupant.last_observation_at ? (

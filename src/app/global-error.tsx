@@ -12,7 +12,7 @@ export default function GlobalError({
     <html lang="th">
       <body className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center space-y-4 p-8">
-          <h2 className="text-xl font-bold text-red-600">เกิดข้อผิดพลาดร้ายแรง</h2>
+          <h2 className="text-xl font-bold text-danger-text">เกิดข้อผิดพลาดร้ายแรง</h2>
           <p className="text-gray-600">
             {error.message || 'ระบบเกิดข้อผิดพลาด กรุณาลองใหม่'}
           </p>

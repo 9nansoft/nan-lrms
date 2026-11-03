@@ -203,4 +203,22 @@ describe('PartographForm (SVG port of PartographRenderUnit)', () => {
     const banner = screen.getByTestId('strip-cdss');
     expect(banner).toHaveTextContent(/ต้องประเมินด่วน/);
   });
+
+  it('two temperatures in the same hour are both readable on separate baselines', () => {
+    const { container } = render(
+      <PartographForm
+        header={header}
+        alerts={[]}
+        observations={[
+          makeObs({ id: 't1', hourNo: 2, temperature: 36.8 }),
+          makeObs({ id: 't2', hourNo: 2, temperature: 38.4, observeDatetime: '2026-04-19T09:30:00' }),
+        ]}
+      />,
+    );
+    const texts = Array.from(container.querySelectorAll('[data-testid="strip-temp"] text')).filter((t) =>
+      /^3\d\.\d$/.test(t.textContent ?? ''),
+    );
+    expect(texts.map((t) => t.textContent).sort()).toEqual(['36.8', '38.4']);
+    expect(new Set(texts.map((t) => t.getAttribute('y'))).size).toBe(2);
+  });
 });

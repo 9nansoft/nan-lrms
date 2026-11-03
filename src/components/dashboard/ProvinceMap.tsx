@@ -5,6 +5,7 @@
 
 import dynamic from 'next/dynamic';
 import type { DashboardHospital } from '@/types/api';
+import { isNonReportingHcode } from '@/config/hospital-network';
 
 export interface ProvinceMapProps {
   hospitals: DashboardHospital[];
@@ -17,12 +18,10 @@ export interface ProvinceMapProps {
 }
 
 // System-reserved hcodes never belong on the GIS map even after they get
-// auto-registered for onboarding/sandbox purposes (see
-// /api/onboarding/webhook-key + EXEMPT_HCODES in lib/hospital-access-guard).
-// Mirrors that set deliberately — keep in sync if it ever expands. Filtered
-// here at the wrapper so every map consumer (dashboard, admin, kiosk) gets
-// the exclusion automatically without each having to remember.
-const MAP_EXCLUDED_HCODES: ReadonlySet<string> = new Set(['00000', '99999']);
+// auto-registered for onboarding/sandbox purposes. Same set as the access
+// guard and the freshness counts (NON_REPORTING_HCODES), so the map, the
+// strip and the dashboard fraction can never disagree. Filtered here at the
+// wrapper so every map consumer (dashboard, admin, kiosk) gets it for free.
 
 const ProvinceMapLeaflet = dynamic(() => import('./ProvinceMapLeaflet'), {
   ssr: false,
@@ -31,7 +30,7 @@ const ProvinceMapLeaflet = dynamic(() => import('./ProvinceMapLeaflet'), {
       className="grid h-full w-full place-items-center"
       style={{ background: 'var(--surface-cool)' }}
     >
-      <span className="font-mono text-[12px] tracking-[0.18em] text-[var(--ink-navy-muted)]">
+      <span className="font-mono text-caption tracking-[0.18em] text-[var(--ink-navy-muted)]">
         LOADING MAP…
       </span>
     </div>
@@ -39,6 +38,6 @@ const ProvinceMapLeaflet = dynamic(() => import('./ProvinceMapLeaflet'), {
 });
 
 export function ProvinceMap(props: ProvinceMapProps) {
-  const hospitals = props.hospitals.filter((h) => !MAP_EXCLUDED_HCODES.has(h.hcode));
+  const hospitals = props.hospitals.filter((h) => !isNonReportingHcode(h.hcode));
   return <ProvinceMapLeaflet {...props} hospitals={hospitals} />;
 }

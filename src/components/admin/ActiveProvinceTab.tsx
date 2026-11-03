@@ -1,12 +1,12 @@
 // ActiveProvinceTab — single-select for the deployment's main focus province.
 // Switching the active province reshapes which hospitals/patients the
-// dashboard and sync jobs see. Designed to match BmsConfigTab's flat navy
-// aesthetic: mono-label header, single bordered panel, explicit save CTA.
+// dashboard and sync jobs see. SectionCards on the direction-C tokens with an
+// explicit save CTA.
 'use client';
 
 import { useEffect, useState } from 'react';
 import useSWR, { useSWRConfig } from 'swr';
-import { Globe, Save, CheckCircle2, ListPlus } from 'lucide-react';
+import { Save, CheckCircle2, ListPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
@@ -14,6 +14,9 @@ import {
   CONFIG_BROADCAST_CHANNEL,
   type ConfigBroadcastMessage,
 } from '@/lib/config-broadcast';
+import { InlineNotice } from '@/components/shared/InlineNotice';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { SELECT_CLASS, StatusPill } from './admin-ui';
 import { BulkAddHospitalsDialog } from './BulkAddHospitalsDialog';
 
 interface ProvinceRow {
@@ -108,96 +111,57 @@ export function ActiveProvinceTab() {
         />
       ) : null}
 
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
-        ACTIVE PROVINCE · {provinces.length} choices
-      </div>
-
-      <div className="border bg-white p-4" style={{ borderColor: 'var(--rule-strong)' }}>
-        <div className="flex items-start gap-3">
-          <Globe className="h-5 w-5" style={{ color: 'var(--accent-navy)' }} />
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--ink-navy)' }}>
-              จังหวัดหลักของระบบ
-            </h3>
-            <p className="mt-0.5 text-[12px] leading-snug text-[var(--ink-navy-dim)]">
-              เลือกจังหวัดที่ระบบจะโฟกัส — กระทบแดชบอร์ด แผนที่ และ sync หลังจากบันทึก
-              โรงพยาบาลในจังหวัดอื่นจะไม่แสดงจนกว่าจะเพิ่มเข้าระบบ
-            </p>
-
-            <div className="mt-3 grid grid-cols-[1fr,auto] gap-3">
-              <select
-                value={selectedCode}
-                onChange={(e) => setSelectedCode(e.target.value)}
-                className="h-9 border bg-white px-2 font-mono text-sm"
-                style={{
-                  borderColor: 'var(--rule-strong)',
-                  color: 'var(--ink-navy)',
-                }}
-              >
-                <option value="">— เลือกจังหวัด —</option>
-                {provinces.map((p) => (
-                  <option key={p.code} value={p.code}>
-                    {p.name} ({p.code})
-                  </option>
-                ))}
-              </select>
-              <Button
-                onClick={handleSave}
-                disabled={!changed || saving || !selectedCode}
-                className="gap-1.5"
-              >
-                <Save className="h-4 w-4" />
-                {saving ? 'กำลังบันทึก...' : 'บันทึก'}
-              </Button>
-            </div>
-
-            {currentProvince ? (
-              <div
-                className="mt-3 inline-flex items-center gap-1.5 border px-2 py-1 font-mono text-[11px]"
-                style={{
-                  borderColor: 'var(--rule-strong)',
-                  background: 'var(--accent-navy-soft)',
-                  color: 'var(--accent-navy)',
-                }}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                กำลังใช้งาน: {currentProvince.name} · {currentProvince.code}
-              </div>
-            ) : null}
-
-            {saveMessage ? (
-              <div className="mt-2 text-[12px]" style={{ color: 'var(--ink-navy-dim)' }}>
-                {saveMessage}
-              </div>
-            ) : null}
+      <SectionCard
+        title="จังหวัดหลักของระบบ"
+        description="เลือกจังหวัดที่ระบบจะโฟกัส — กระทบแดชบอร์ด แผนที่ และการซิงค์ หลังจากบันทึก โรงพยาบาลในจังหวัดอื่นจะไม่แสดงจนกว่าจะเพิ่มเข้าระบบ"
+      >
+        <div className="space-y-3">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+            <select
+              aria-label="จังหวัดหลัก"
+              value={selectedCode}
+              onChange={(e) => setSelectedCode(e.target.value)}
+              className={SELECT_CLASS}
+            >
+              <option value="">— เลือกจังหวัด —</option>
+              {provinces.map((p) => (
+                <option key={p.code} value={p.code}>
+                  {p.name} ({p.code})
+                </option>
+              ))}
+            </select>
+            <Button
+              onClick={handleSave}
+              disabled={!changed || saving || !selectedCode}
+              className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong"
+            >
+              <Save aria-hidden="true" className="h-4 w-4" />
+              {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+            </Button>
           </div>
+
+          {currentProvince ? (
+            <StatusPill tone="brand" icon={CheckCircle2}>
+              กำลังใช้งาน: {currentProvince.name} · {currentProvince.code}
+            </StatusPill>
+          ) : null}
+
+          {saveMessage ? <InlineNotice tone="info">{saveMessage}</InlineNotice> : null}
         </div>
-      </div>
+      </SectionCard>
 
       {/* Bulk-add shortcut — spares admins from opening the Hospitals tab and
           adding one-by-one when bringing a brand new province online. */}
       {currentProvince ? (
-        <div className="border bg-white p-4" style={{ borderColor: 'var(--rule-strong)' }}>
-          <div className="flex items-start gap-3">
-            <ListPlus className="h-5 w-5" style={{ color: 'var(--accent-navy)' }} />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--ink-navy)' }}>
-                เพิ่มหลายโรงพยาบาลพร้อมกัน
-              </h3>
-              <p className="mt-0.5 text-[12px] leading-snug text-[var(--ink-navy-dim)]">
-                เลือกโรงพยาบาลในจังหวัด{currentProvince.name}จากทะเบียน MOPH
-                แล้วเพิ่มเข้าระบบในครั้งเดียว — ระบบจะตั้งค่า LEVEL และ service_type
-                เริ่มต้นให้อัตโนมัติ
-              </p>
-              <div className="mt-3">
-                <Button onClick={() => setBulkOpen(true)} className="gap-1.5">
-                  <ListPlus className="h-4 w-4" />
-                  เลือกโรงพยาบาลจากทะเบียน MOPH
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <SectionCard
+          title="เพิ่มหลายโรงพยาบาลพร้อมกัน"
+          description={`เลือกโรงพยาบาลในจังหวัด${currentProvince.name}จากทะเบียน MOPH แล้วเพิ่มเข้าระบบในครั้งเดียว — ระบบจะตั้งค่าระดับและประเภทบริการเริ่มต้นให้อัตโนมัติ`}
+        >
+          <Button onClick={() => setBulkOpen(true)} className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong">
+            <ListPlus aria-hidden="true" className="h-4 w-4" />
+            เลือกโรงพยาบาลจากทะเบียน MOPH
+          </Button>
+        </SectionCard>
       ) : null}
 
       <BulkAddHospitalsDialog

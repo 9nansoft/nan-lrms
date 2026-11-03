@@ -3,6 +3,7 @@
 // for visual alignment.
 'use client';
 
+import { COLOR } from '@/config/design-tokens';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -111,7 +112,7 @@ export function PartogramChart({ observations, alerts, startTime }: PartogramCha
             <Tooltip />
             <Line
               dataKey="fhr"
-              stroke="#16a34a"
+              stroke={COLOR.riskLow}
               strokeWidth={1.5}
               dot={{ r: 3 }}
               connectNulls={false}
@@ -201,7 +202,7 @@ export function PartogramChart({ observations, alerts, startTime }: PartogramCha
             <Line
               yAxisId="bp"
               dataKey="sbp"
-              stroke="#ef4444"
+              stroke={COLOR.riskHigh}
               strokeWidth={1.5}
               dot={{ r: 3 }}
               connectNulls={false}
@@ -217,7 +218,7 @@ export function PartogramChart({ observations, alerts, startTime }: PartogramCha
             <Line
               yAxisId="bp"
               dataKey="pulse"
-              stroke="#f59e0b"
+              stroke={COLOR.riskMedium}
               strokeWidth={1.5}
               dot={{ r: 3 }}
               connectNulls={false}
@@ -225,7 +226,7 @@ export function PartogramChart({ observations, alerts, startTime }: PartogramCha
             <Line
               yAxisId="temp"
               dataKey="temp"
-              stroke="#dc2626"
+              stroke={COLOR.riskHigh}
               strokeWidth={1}
               dot={{ r: 2 }}
               strokeDasharray="3 3"

@@ -23,6 +23,7 @@ import { systemConfigTable } from './system-config';
 import { videoCallsTable } from './video-calls';
 import { videoCallParticipantsTable } from './video-call-participants';
 import { mophAlertLogTable } from './moph-alert-log';
+import { mophAlertEventQueueTable } from './moph-alert-event-queue';
 import { mophCenterMonitorsTable } from './moph-center-monitors';
 import { notificationPreferencesTable } from './notification-preferences';
 import { notificationEventSubscriptionsTable } from './notification-event-subscriptions';
@@ -52,6 +53,7 @@ export {
   videoCallsTable,
   videoCallParticipantsTable,
   mophAlertLogTable,
+  mophAlertEventQueueTable,
   mophCenterMonitorsTable,
   notificationPreferencesTable,
   notificationEventSubscriptionsTable,
@@ -74,6 +76,8 @@ export const ALL_TABLES: TableDefinition[] = [
   notificationPreferencesTable,
   // Per-event opt-in rows hanging off a preference; must follow it.
   notificationEventSubscriptionsTable,
+  // Recipient-independent events must precede the per-recipient delivery log.
+  mophAlertEventQueueTable,
   mophAlertLogTable,
   usersTable,
   maternalJourneysTable,

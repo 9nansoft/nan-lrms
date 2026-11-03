@@ -77,3 +77,16 @@ export function classifyEdcDue(
   if (t <= now.getTime() + ANC_OPS.dueSoonDays * DAY_MS) return 'dueSoon';
   return 'ok';
 }
+
+/** Patient-page ANC strip bands, moved verbatim from the page. They differ
+ *  from ANC_OPS.minVisits (5) / followupWarnDays (35); the clinical owner
+ *  rules on that (ward spec, Out of scope). */
+export const ANC_SUMMARY_DISPLAY = { visitsMinimum: 4, visitsTarget: 8, lastVisitAlertDays: 28 } as const;
+
+export type AncVisitBand = 'belowMinimum' | 'belowTarget' | 'met';
+
+export function classifyAncVisitCount(visits: number): AncVisitBand {
+  if (visits < ANC_SUMMARY_DISPLAY.visitsMinimum) return 'belowMinimum';
+  if (visits < ANC_SUMMARY_DISPLAY.visitsTarget) return 'belowTarget';
+  return 'met';
+}

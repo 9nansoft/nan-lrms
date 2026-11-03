@@ -1,6 +1,7 @@
 // VitalSignGauge — radial gauge for HR/FHR/BP/PPH with sparkline trend + Thai status
 'use client';
 
+import { COLOR } from '@/config/design-tokens';
 import {
   ResponsiveContainer,
   RadialBarChart,
@@ -20,9 +21,9 @@ interface VitalSignGaugeProps {
 }
 
 function getGaugeColor(value: number, normalMin: number, normalMax: number): string {
-  if (value >= normalMin && value <= normalMax) return '#22c55e'; // green
-  if (value < normalMin * 0.8 || value > normalMax * 1.2) return '#ef4444'; // red
-  return '#eab308'; // yellow
+  if (value >= normalMin && value <= normalMax) return COLOR.riskLow; // green
+  if (value < normalMin * 0.8 || value > normalMax * 1.2) return COLOR.riskHigh; // red
+  return COLOR.riskMedium; // yellow
 }
 
 function getStatusText(value: number, normalMin: number, normalMax: number): string {

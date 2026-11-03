@@ -9,9 +9,9 @@ interface ActiveHospitalCardProps {
 }
 
 function getAccentGradient(counts: DashboardHospital['counts']): string {
-  if (counts.high > 0) return 'bg-gradient-to-r from-red-400 to-red-500';
-  if (counts.medium > 0) return 'bg-gradient-to-r from-amber-400 to-amber-500';
-  if (counts.low > 0) return 'bg-gradient-to-r from-emerald-400 to-emerald-500';
+  if (counts.high > 0) return 'bg-danger';
+  if (counts.medium > 0) return 'bg-warn';
+  if (counts.low > 0) return 'bg-ok';
   return 'bg-slate-200';
 }
 
@@ -25,13 +25,13 @@ interface RiskDot {
 function getRiskDots(counts: DashboardHospital['counts']): RiskDot[] {
   const dots: RiskDot[] = [];
   if (counts.high > 0) {
-    dots.push({ key: 'high', count: counts.high, label: 'สูง', dotClass: 'bg-red-500' });
+    dots.push({ key: 'high', count: counts.high, label: 'สูง', dotClass: 'bg-danger' });
   }
   if (counts.medium > 0) {
-    dots.push({ key: 'medium', count: counts.medium, label: 'ปานกลาง', dotClass: 'bg-amber-500' });
+    dots.push({ key: 'medium', count: counts.medium, label: 'ปานกลาง', dotClass: 'bg-warn' });
   }
   if (counts.low > 0) {
-    dots.push({ key: 'low', count: counts.low, label: 'ต่ำ', dotClass: 'bg-emerald-500' });
+    dots.push({ key: 'low', count: counts.low, label: 'ต่ำ', dotClass: 'bg-ok' });
   }
   return dots;
 }
@@ -59,7 +59,7 @@ export function ActiveHospitalCard({ hospital }: ActiveHospitalCardProps) {
               {hospital.level}
             </span>
           </div>
-          <div className="font-mono text-[28px] font-bold text-slate-900">
+          <div className="font-mono text-page font-bold text-slate-900">
             {hospital.counts.total}
           </div>
         </div>

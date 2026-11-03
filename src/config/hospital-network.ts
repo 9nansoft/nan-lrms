@@ -14,6 +14,27 @@ export const SYNC_HEALTH = {
   criticalAfterHours: 24,
 } as const;
 
+/** Pseudo-hospitals that never sync: '00000' reserved system account, '99999'
+ *  provincial/admin testing account. They are exempt from the access guard and
+ *  excluded from every freshness count, map and roster. Client-safe: this file
+ *  must never read env or import server-only modules. */
+/** Status-strip polling of /api/sync/freshness. A cached snapshot is trusted
+ *  only while refreshes succeed and it is younger than maxSnapshotAgeMs — one
+ *  missed refresh is tolerated, two are not (SWR keeps the last good payload
+ *  when refreshes fail, which must never read as current). */
+export const SYNC_FRESHNESS_POLL = {
+  refreshMs: 30_000,
+  maxSnapshotAgeMs: 75_000,
+  /** How often the strip re-checks snapshot age without a new response. */
+  recheckMs: 15_000,
+} as const;
+
+export const NON_REPORTING_HCODES = ['00000', '99999'] as const;
+
+export function isNonReportingHcode(hcode: string | null | undefined): boolean {
+  return !!hcode && (NON_REPORTING_HCODES as readonly string[]).includes(hcode);
+}
+
 export type SyncHealthClass = 'ok' | 'stale' | 'critical' | 'never' | 'blocked';
 
 /** Classify one hospital's data freshness. BLOCKED (auth/purge) always wins;
@@ -114,3 +135,19 @@ export const ANC_WORKLOAD_WEIGHT = 0.1;
 export function combinedWorkload(labor: { total: number }, anc: { total: number }): number {
   return labor.total + anc.total * ANC_WORKLOAD_WEIGHT;
 }
+
+// ─── Hospital console (/hospitals/[hcode]) ──────────────────────────────────
+// Values the console hard-coded before UI sub-project 4, named so copy can
+// quote them. NOTE: ancOverdueAfterDays (14) differs from the province
+// board's ANC_OPS.followupWarnDays (35) — kept as-is pending a clinical
+// decision (spec L13); changing it changes what the tile counts.
+export const HOSPITAL_CONSOLE = {
+  /** ANC row/tile "ห่างนัด" flag: days since the last ANC visit. */
+  ancOverdueAfterDays: 14,
+  /** "ครบกำหนดคลอด" tile: EDC within this many days from now. */
+  ancDueWithinDays: 7,
+  /** Refer-in pipeline: GA threshold sent to /incoming-pregnancies. */
+  referInMinGaWeeks: 34,
+  /** Near second stage: cervix at or above this (cm), still ACTIVE. */
+  nearSecondStageCervixCm: 8,
+} as const;

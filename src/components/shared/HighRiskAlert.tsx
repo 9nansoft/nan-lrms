@@ -41,9 +41,9 @@ export function HighRiskAlert({ score, an, patientName, onDismiss }: HighRiskAle
         if (!isOpen) handleDismiss();
       }}
     >
-      <DialogContent className="border-2 border-red-500 sm:max-w-md">
+      <DialogContent className="border-2 border-danger sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-center text-lg text-red-600">
+          <DialogTitle className="text-center text-lg text-danger-text">
             แจ้งเตือนผู้คลอดเสี่ยงสูง
           </DialogTitle>
           <DialogDescription className="text-center">AN: {an}</DialogDescription>
@@ -51,7 +51,7 @@ export function HighRiskAlert({ score, an, patientName, onDismiss }: HighRiskAle
 
         <div className="flex flex-col items-center gap-4 py-4">
           <CpdBadge score={score} riskLevel={RiskLevel.HIGH} size="lg" />
-          <p className="text-center text-lg font-bold text-red-600">{HIGH_RISK_RECOMMENDATION}</p>
+          <p className="text-center text-lg font-bold text-danger-text">{HIGH_RISK_RECOMMENDATION}</p>
         </div>
 
         <DialogFooter>

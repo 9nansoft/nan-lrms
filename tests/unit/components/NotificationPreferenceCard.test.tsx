@@ -358,3 +358,56 @@ describe('NotificationPreferenceCard', () => {
     await waitFor(() => expect(screen.getByText(/โรงพยาบาลเวียงสา/)).toBeInTheDocument());
   });
 });
+
+describe('NotificationPreferenceCard — nurse legibility (sub-project 5)', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+  const okGet = () =>
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => GET_BODY }) as Response));
+
+  it('is a titled section card', async () => {
+    okGet();
+    render(<NotificationPreferenceCard />);
+    expect(await screen.findByRole('region', { name: 'การแจ้งเตือนทาง LINE (MOPH Prompt)' })).toBeInTheDocument();
+  });
+  it('groups events under a legend per tier', async () => {
+    okGet();
+    render(<NotificationPreferenceCard />);
+    expect(await screen.findByRole('group', { name: 'แจ้งทันที' })).toBeInTheDocument();
+  });
+  it('checkboxes are 20px tap targets in the brand accent', async () => {
+    okGet();
+    render(<NotificationPreferenceCard />);
+    const box = await screen.findByRole('checkbox', { name: /ANC HR3/ });
+    expect(box.className).toMatch(/\bh-5\b/);
+    expect(box.className).toMatch(/\bw-5\b/);
+    expect(box.className).toContain('accent-brand');
+  });
+  it('a save failure says what happened and what to do', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_u: string, init?: RequestInit) =>
+        !init || init.method === undefined
+          ? ({ ok: true, status: 200, json: async () => GET_BODY } as Response)
+          : ({ ok: false, status: 500, json: async () => ({}) } as Response),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<NotificationPreferenceCard />);
+    await user.click(await screen.findByRole('checkbox', { name: /ฉุกเฉินในห้องคลอด/ }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('บันทึกไม่สำเร็จ — การตั้งค่ากลับเป็นค่าเดิมแล้ว');
+    expect(alert).toHaveTextContent('วิธีแก้: ตรวจสอบการเชื่อมต่อ แล้วเลือกอีกครั้ง');
+  });
+  it('a load failure offers ลองใหม่, which reloads', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
+      .mockResolvedValue({ ok: true, status: 200, json: async () => GET_BODY });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<NotificationPreferenceCard />);
+    await user.click(await screen.findByRole('button', { name: /ลองใหม่/ }));
+    expect(await screen.findByRole('checkbox', { name: /ANC HR3/ })).toBeInTheDocument();
+  });
+});

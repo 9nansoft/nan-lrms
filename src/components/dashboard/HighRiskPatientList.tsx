@@ -6,6 +6,12 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { COLOR, MIN_TEXT_PX } from '@/config/design-tokens';
+import { RISK_LEVELS, classifyRiskLevel } from '@/config/risk-levels';
+import { ANC_OPS } from '@/config/anc-ops';
+import { RiskLevel } from '@/types/domain';
+import { RiskChip as SharedRiskChip } from '@/components/shared/RiskChip';
+import { EmptyState } from '@/components/shared/EmptyState';
 import { cn, formatRelativeTime, buildPatientId } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import type { CdssSeverity } from '@/types/api';
@@ -56,9 +62,19 @@ export interface HighRiskPatientListProps {
    *  summary, per-hospital counts) pass them here. */
   totalActive?: number | null;
   totalHigh?: number | null;
+  /** Inside a SectionCard that already titles the list: omit the legacy
+   *  SectionLabel header. Kiosk and HospitalDetailDialog leave it false. */
+  embedded?: boolean;
 }
 
-function RiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' | 'kiosk' }) {
+/** Kiosk CPD colour: kiosk palette, but the tier boundaries are the shared
+ *  RISK_LEVELS rule (classifyRiskLevel) so a score reads the same on every screen. */
+function kioskCpdColor(score: number): string {
+  const level = classifyRiskLevel(score);
+  return level === RiskLevel.HIGH ? 'var(--kiosk-high)' : level === RiskLevel.MEDIUM ? 'var(--kiosk-med)' : 'var(--kiosk-low)';
+}
+
+function KioskRiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' | 'kiosk' }) {
   const isKiosk = variant === 'kiosk';
   const color =
     riskLevel === 'HIGH'
@@ -77,7 +93,7 @@ function RiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' 
     <span
       data-risk={riskLevel}
       className={cn(
-        'inline-block border px-1.5 py-0.5 text-center font-mono text-[13px] font-semibold tracking-[0.04em]',
+        'inline-block border px-1.5 py-0.5 text-center font-mono text-caption font-semibold tracking-[0.04em]',
         isKiosk && riskLevel === 'HIGH' && 'shadow-[0_0_8px_var(--kiosk-high)]',
       )}
       style={{
@@ -88,6 +104,18 @@ function RiskChip({ riskLevel, variant }: { riskLevel: string; variant: 'light' 
     >
       {riskLevel}
     </span>
+  );
+}
+
+/** Light variant: the shared RiskChip, so colour and Thai naming match every
+ *  other screen. Unknown values render as plain text rather than looking safe. */
+function LightRiskChip({ riskLevel }: { riskLevel: string }) {
+  const level = Object.hasOwn(RISK_LEVELS, riskLevel) ? (riskLevel as RiskLevel) : null;
+  if (!level) return <span className="text-caption text-ink-muted">{riskLevel || '—'}</span>;
+  return (
+    <SharedRiskChip level={level} size="sm" data-risk={riskLevel}>
+      {RISK_LEVELS[level].shortLabelTh}
+    </SharedRiskChip>
   );
 }
 
@@ -117,7 +145,7 @@ function LaborStageCell({
   const ruleStrong = isKiosk ? 'var(--kiosk-rule)' : 'var(--rule-strong)';
   const ruleHair = isKiosk ? 'var(--kiosk-rule)' : 'var(--rule-hair)';
   return (
-    <div style={{ fontSize: isKiosk ? 13 : 11, lineHeight: 1.25 }}>
+    <div style={{ fontSize: isKiosk ? 13 : MIN_TEXT_PX, lineHeight: 1.25 }}>
       <span
         className="inline-block border px-1.5 py-0.5 font-mono tracking-[0.04em] whitespace-nowrap"
         style={{
@@ -129,7 +157,7 @@ function LaborStageCell({
         {delivered ? 'คลอดแล้ว' : 'รอคลอด'}
       </span>
       {delivered && (
-        <div className="font-mono" style={{ color: inkMuted, fontSize: 10 }}>
+        <div className="font-mono" style={{ color: inkMuted, fontSize: MIN_TEXT_PX }}>
           {admitTime(deliveredAt)}
         </div>
       )}
@@ -180,24 +208,30 @@ function admitElapsed(iso: string | null): string | null {
 }
 
 function vitalFreshness(iso: string | null): { text: string; stale: boolean } {
-  if (!iso) return { text: 'no data', stale: true };
+  if (!iso) return { text: 'ไม่มีข้อมูล', stale: true };
   return { text: formatRelativeTime(iso) ?? '—', stale: false };
 }
 
-function SkeletonRow({ variant }: { variant: 'light' | 'kiosk' }) {
-  const barBg = variant === 'kiosk' ? 'bg-white/10' : 'bg-slate-200';
+function SkeletonRow({
+  variant,
+  gridCols,
+  count,
+}: {
+  variant: 'light' | 'kiosk';
+  /** The same template the rows use — one source, no hand-kept copy. */
+  gridCols: string;
+  count: number;
+}) {
+  const barBg = variant === 'kiosk' ? 'bg-white/10' : 'bg-surface-muted';
   return (
     <div
       className="grid items-center gap-2 border-b px-2 py-2"
       style={{
-        // Must stay in lockstep with the non-kiosk `columns` list above — this
-        // is a second, hand-maintained copy of the same layout, so a column
-        // added there and not here misaligns the whole loading state.
-        gridTemplateColumns: '62px 130px 1fr 44px 44px 150px 78px 88px 80px 110px 140px 220px',
+        gridTemplateColumns: gridCols,
         borderColor: variant === 'kiosk' ? 'var(--kiosk-rule)' : 'var(--rule-hair)',
       }}
     >
-      {Array.from({ length: 12 }).map((_, i) => (
+      {Array.from({ length: count }).map((_, i) => (
         <div key={i} className={cn('h-3 animate-pulse rounded', barBg)} />
       ))}
     </div>
@@ -212,6 +246,7 @@ export function HighRiskPatientList({
   ancFallback,
   totalActive,
   totalHigh,
+  embedded = false,
 }: HighRiskPatientListProps) {
   const router = useRouter();
   const [tab, setTab] = useState<'high' | 'all'>('high');
@@ -255,18 +290,18 @@ export function HighRiskPatientList({
         { key: 'screen', label: 'คัดกรอง (เงา)', w: 130 },
       ]
     : [
-        { key: 'risk', label: 'RISK', w: 62 },
+        { key: 'risk', label: 'ความเสี่ยง', w: 76 },
         { key: 'anhn', label: 'AN / HN', w: 130 },
-        { key: 'patient', label: 'PATIENT', w: 0 }, // flex 1
+        { key: 'patient', label: 'ผู้คลอด', w: 0 }, // flex 1
         { key: 'ga', label: 'GA', w: 44 },
         { key: 'cpd', label: 'CPD', w: 44 },
-        { key: 'hospital', label: 'HOSPITAL', w: 150 },
-        { key: 'admit', label: 'ADMIT / นาน', w: 78 },
+        { key: 'hospital', label: 'โรงพยาบาล', w: 150 },
+        { key: 'admit', label: 'รับเข้า / นาน', w: 84 },
         { key: 'labor', label: 'สถานะ', w: 88 },
-        { key: 'vital', label: 'LAST VITAL', w: 80 },
-        { key: 'partograph', label: 'PARTOGRAPH', w: 110 },
+        { key: 'vital', label: 'สัญญาณชีพล่าสุด', w: 96 },
+        { key: 'partograph', label: 'พาร์โทกราฟ', w: 110 },
         { key: 'screen', label: 'คัดกรอง (เงา)', w: 140 },
-        { key: 'note', label: 'NOTE', w: 220 },
+        { key: 'note', label: 'หมายเหตุ', w: 220 },
       ];
 
   // `minmax(180px, 1fr)` — not plain `1fr` — so a flex column shrinks below
@@ -279,22 +314,26 @@ export function HighRiskPatientList({
 
   return (
     <div>
-      <SectionLabel idx={1} right={<span>AUTO-SORT · HIGH → MED · {counts.total} ACTIVE</span>}>
-        High-risk &amp; Active labor
-      </SectionLabel>
+      {!embedded && (
+        <SectionLabel idx={1} right={<span>AUTO-SORT · HIGH → MED · {counts.total} ACTIVE</span>}>
+          High-risk &amp; Active labor
+        </SectionLabel>
+      )}
 
       {/* Tabs */}
       {!isKiosk && (
         <div className="mt-2.5 mb-2.5 flex gap-0 border-b" style={{ borderColor: ruleHair }}>
           {[
-            { k: 'high', l: 'HIGH-RISK ONLY', n: counts.high },
-            { k: 'all', l: 'ALL ACTIVE', n: counts.total },
+            { k: 'high', l: 'เฉพาะเสี่ยงสูง', n: counts.high },
+            { k: 'all', l: 'ทั้งหมดในห้องคลอด', n: counts.total },
           ].map((x) => (
             <button
               key={x.k}
+              type="button"
+              aria-pressed={tab === x.k}
               onClick={() => setTab(x.k as 'high' | 'all')}
               className={cn(
-                'border-b-2 bg-transparent px-3.5 py-2 font-mono text-[13px] tracking-[0.08em]',
+                'border-b-2 bg-transparent px-3.5 py-2 text-label',
                 tab === x.k ? 'font-semibold' : 'font-normal',
               )}
               style={{
@@ -312,7 +351,10 @@ export function HighRiskPatientList({
       <div className="overflow-x-auto">
         {/* Header */}
         <div
-          className="grid gap-2 border-t border-b px-2 py-2 font-mono text-[12px] tracking-[0.1em]"
+          className={cn(
+            'grid gap-2 border-t border-b px-2 py-2 text-caption',
+            isKiosk ? 'font-mono tracking-[0.1em]' : 'font-semibold',
+          )}
           style={{
             gridTemplateColumns: gridCols,
             color: inkMuted,
@@ -328,35 +370,62 @@ export function HighRiskPatientList({
         {isLoading ? (
           <>
             {Array.from({ length: 5 }).map((_, i) => (
-              <SkeletonRow key={i} variant={variant} />
+              <SkeletonRow key={i} variant={variant} gridCols={gridCols} count={columns.length} />
             ))}
           </>
         ) : shown.length === 0 ? (
-          <div
-            className="border-b px-2 py-8 text-center font-mono text-[13px]"
-            style={{ color: inkMuted, borderColor: ruleHair }}
-          >
-            <div>ไม่มีผู้คลอดเสี่ยงสูงในห้องคลอดขณะนี้</div>
-            {ancFallback && (ancFallback.hr3 > 0 || ancFallback.dueSoon > 0) && (
-              <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
-                <span>เฝ้าระวังล่วงหน้า:</span>
-                <Link
-                  href="/pregnancies?risk=HR3"
-                  className="underline decoration-dotted underline-offset-2"
-                  style={{ color: 'var(--risk-high)' }}
-                >
-                  ครรภ์เสี่ยงสูง HR3 {ancFallback.hr3} ราย
-                </Link>
-                <Link
-                  href="/pregnancies?cohort=due_soon"
-                  className="underline decoration-dotted underline-offset-2"
-                  style={{ color: 'var(--risk-medium)' }}
-                >
-                  ใกล้คลอด ≤14 วัน {ancFallback.dueSoon} ราย
-                </Link>
-              </div>
-            )}
-          </div>
+          isKiosk ? (
+            <div
+              className="border-b px-2 py-8 text-center font-mono text-caption"
+              style={{ color: inkMuted, borderColor: ruleHair }}
+            >
+              <div>ไม่มีผู้คลอดเสี่ยงสูงในห้องคลอดขณะนี้</div>
+              {ancFallback && (ancFallback.hr3 > 0 || ancFallback.dueSoon > 0) && (
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                  <span>เฝ้าระวังล่วงหน้า:</span>
+                  <Link
+                    href="/pregnancies?risk=HR3"
+                    className="underline decoration-dotted underline-offset-2"
+                    style={{ color: 'var(--risk-high)' }}
+                  >
+                    ครรภ์เสี่ยงสูง HR3 {ancFallback.hr3} ราย
+                  </Link>
+                  <Link
+                    href="/pregnancies?cohort=due_soon"
+                    className="underline decoration-dotted underline-offset-2"
+                    style={{ color: 'var(--risk-medium)' }}
+                  >
+                    ใกล้คลอด ≤14 วัน {ancFallback.dueSoon} ราย
+                  </Link>
+                </div>
+              )}
+            </div>
+          ) : (
+            <EmptyState
+              illustration="ward"
+              className="mt-3 shadow-none"
+              title={tab === 'high' ? 'ไม่มีผู้คลอดเสี่ยงสูงในห้องคลอดขณะนี้' : 'ไม่มีผู้คลอดในห้องคลอดขณะนี้'}
+              description={
+                ancFallback && (ancFallback.hr3 > 0 || ancFallback.dueSoon > 0) ? (
+                  <span className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                    <span>เฝ้าระวังล่วงหน้า:</span>
+                    <Link
+                      href="/pregnancies?risk=HR3"
+                      className="text-danger-text underline decoration-dotted underline-offset-2"
+                    >
+                      ครรภ์เสี่ยงสูง HR3 {ancFallback.hr3} ราย
+                    </Link>
+                    <Link
+                      href="/pregnancies?cohort=due_soon"
+                      className="text-warn-text underline decoration-dotted underline-offset-2"
+                    >
+                      ใกล้คลอด ≤{ANC_OPS.dueSoonDays} วัน {ancFallback.dueSoon} ราย
+                    </Link>
+                  </span>
+                ) : undefined
+              }
+            />
+          )
         ) : (
           shown.map((p, i) => {
             const isHigh = p.riskLevel === 'HIGH';
@@ -377,7 +446,7 @@ export function HighRiskPatientList({
                 role="button"
                 className={cn(
                   'grid cursor-pointer items-center gap-2 border-b px-2 text-sm transition-colors',
-                  !isKiosk && 'hover:bg-slate-50',
+                  !isKiosk && 'hover:bg-surface-muted',
                   isKiosk && 'hover:bg-white/5',
                 )}
                 style={{
@@ -388,18 +457,18 @@ export function HighRiskPatientList({
                     i === 0 && isCritical
                       ? isKiosk
                         ? 'linear-gradient(to right, rgba(224,92,92,0.18), transparent 60%)'
-                        : 'linear-gradient(to right, rgba(239,68,68,0.08), transparent 40%)'
+                        : `linear-gradient(to right, ${COLOR.riskHighTint}, transparent 40%)`
                       : 'transparent',
                 }}
               >
                 <div>
-                  <RiskChip riskLevel={p.riskLevel} variant={variant} />
+                  {isKiosk ? <KioskRiskChip riskLevel={p.riskLevel} variant={variant} /> : <LightRiskChip riskLevel={p.riskLevel} />}
                 </div>
-                <div className="font-mono" style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}>
+                <div className="font-mono" style={{ color: ink, fontSize: isKiosk ? 14 : MIN_TEXT_PX }}>
                   <div className="font-semibold">{p.an}</div>
                   <div
                     className="font-normal"
-                    style={{ color: inkMuted, fontSize: isKiosk ? 11 : 10 }}
+                    style={{ color: inkMuted, fontSize: isKiosk ? 11 : MIN_TEXT_PX }}
                   >
                     HN {p.hn}
                   </div>
@@ -409,7 +478,7 @@ export function HighRiskPatientList({
                     <div className="truncate">
                       {p.name ? maskName(p.name) : <span style={{ color: inkMuted }}>ไม่ระบุ</span>}
                     </div>
-                    <div className="font-mono" style={{ color: inkMuted, fontSize: 11 }}>
+                    <div className="font-mono" style={{ color: inkMuted, fontSize: MIN_TEXT_PX }}>
                       {p.age != null ? `อายุ ${p.age}` : '—'}
                     </div>
                   </div>
@@ -421,7 +490,7 @@ export function HighRiskPatientList({
                   {p.gaWeeks != null ? (
                     <>
                       {p.gaWeeks}
-                      <span style={{ color: inkMuted, fontSize: isKiosk ? 11 : 10 }}>w</span>
+                      <span style={{ color: inkMuted, fontSize: isKiosk ? 11 : MIN_TEXT_PX }}>w</span>
                     </>
                   ) : (
                     '—'
@@ -430,31 +499,20 @@ export function HighRiskPatientList({
                 <div
                   className="font-mono font-semibold tabular-nums"
                   style={{
-                    color:
-                      p.cpdScore >= 6
-                        ? isKiosk
-                          ? 'var(--kiosk-high)'
-                          : 'var(--risk-high)'
-                        : p.cpdScore >= 4
-                          ? isKiosk
-                            ? 'var(--kiosk-med)'
-                            : 'var(--risk-medium)'
-                          : isKiosk
-                            ? 'var(--kiosk-low)'
-                            : 'var(--risk-low)',
+                    color: isKiosk ? kioskCpdColor(p.cpdScore) : RISK_LEVELS[classifyRiskLevel(p.cpdScore)].textColor,
                     fontSize: isKiosk ? 20 : 13,
                     textShadow:
-                      isKiosk && p.cpdScore >= 4
-                        ? `0 0 8px ${p.cpdScore >= 6 ? 'var(--kiosk-high)' : 'var(--kiosk-med)'}`
+                      isKiosk && classifyRiskLevel(p.cpdScore) !== RiskLevel.LOW
+                        ? `0 0 8px ${kioskCpdColor(p.cpdScore)}`
                         : 'none',
                   }}
                 >
                   {p.cpdScore}
                 </div>
-                <div className="truncate" style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}>
+                <div className="truncate" style={{ color: ink, fontSize: isKiosk ? 14 : MIN_TEXT_PX }}>
                   {p.hospital}
                 </div>
-                <div className="font-mono" style={{ color: ink, fontSize: isKiosk ? 14 : 12 }}>
+                <div className="font-mono" style={{ color: ink, fontSize: isKiosk ? 14 : MIN_TEXT_PX }}>
                   {admitTime(p.admitDate)}
                   {(() => {
                     const elapsed = admitElapsed(p.admitDate);
@@ -462,7 +520,7 @@ export function HighRiskPatientList({
                       <div
                         style={{
                           color: inkMuted,
-                          fontSize: isKiosk ? 11 : 10,
+                          fontSize: isKiosk ? 11 : MIN_TEXT_PX,
                           fontWeight: 400,
                         }}
                       >
@@ -477,7 +535,7 @@ export function HighRiskPatientList({
                     className="font-mono"
                     style={{
                       color: freshness.stale ? inkMuted : inkDim,
-                      fontSize: 11,
+                      fontSize: MIN_TEXT_PX,
                     }}
                   >
                     {freshness.text}
@@ -502,7 +560,7 @@ export function HighRiskPatientList({
                 {!isKiosk && (
                   <div
                     className="truncate font-mono"
-                    style={{ color: inkDim, fontSize: 11 }}
+                    style={{ color: inkDim, fontSize: MIN_TEXT_PX }}
                     title={p.note ?? undefined}
                   >
                     {p.note ?? ''}

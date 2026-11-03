@@ -1,6 +1,7 @@
 // T109: Health check service — centralized health status logic
 
 import type { DatabaseAdapter } from '@/db/adapter';
+import { classifySyncHealth, isNonReportingHcode } from '@/config/hospital-network';
 import { cacheStatus } from '@/lib/cache';
 
 export interface HealthStatus {
@@ -14,6 +15,7 @@ export interface HealthStatus {
     online: number;
     offline: number;
     unknown: number;
+    stale: number;
   };
   degradedReasons: string[];
 }
@@ -22,7 +24,7 @@ const startTime = Date.now();
 
 export async function getHealthStatus(db: DatabaseAdapter): Promise<HealthStatus> {
   let dbStatus: 'connected' | 'disconnected' = 'disconnected';
-  let hospitalConnections = { total: 0, online: 0, offline: 0, unknown: 0 };
+  const hospitalConnections = { total: 0, online: 0, offline: 0, unknown: 0, stale: 0 };
 
   try {
     // Test DB connection with a simple query
@@ -30,19 +32,33 @@ export async function getHealthStatus(db: DatabaseAdapter): Promise<HealthStatus
     dbStatus = 'connected';
 
     // Get hospital connection stats
-    const stats = await db.query<{ connection_status: string; count: number }>(
-      'SELECT connection_status, COUNT(*) as count FROM hospitals WHERE is_active = true GROUP BY connection_status',
-    );
+    const hospitals = (
+      await db.query<{
+        hcode: string;
+        connection_status: string;
+        last_sync_at: string | Date | null;
+      }>('SELECT hcode, connection_status, last_sync_at FROM hospitals WHERE is_active = true')
+    ).filter((h) => !isNonReportingHcode(h.hcode)); // pseudo-hospitals never sync
+    const now = new Date();
+    hospitalConnections.total = hospitals.length;
 
-    const total = await db.query<{ count: number }>(
-      'SELECT COUNT(*) as count FROM hospitals WHERE is_active = true',
-    );
-    hospitalConnections.total = total[0]?.count ?? 0;
-
-    for (const row of stats) {
-      if (row.connection_status === 'ONLINE') hospitalConnections.online = row.count;
-      else if (row.connection_status === 'OFFLINE') hospitalConnections.offline = row.count;
-      else hospitalConnections.unknown += row.count;
+    for (const hospital of hospitals) {
+      if (hospital.connection_status === 'ONLINE') {
+        hospitalConnections.online += 1;
+        const lastSyncAt =
+          hospital.last_sync_at instanceof Date
+            ? hospital.last_sync_at.toISOString()
+            : hospital.last_sync_at;
+        const syncTime = lastSyncAt ? new Date(lastSyncAt).getTime() : NaN;
+        const hasValidPastSync = Number.isFinite(syncTime) && syncTime <= now.getTime();
+        if (
+          !hasValidPastSync ||
+          classifySyncHealth(hospital.connection_status, lastSyncAt, now) !== 'ok'
+        ) {
+          hospitalConnections.stale += 1;
+        }
+      } else if (hospital.connection_status === 'OFFLINE') hospitalConnections.offline += 1;
+      else hospitalConnections.unknown += 1;
     }
   } catch {
     dbStatus = 'disconnected';
@@ -51,6 +67,7 @@ export async function getHealthStatus(db: DatabaseAdapter): Promise<HealthStatus
   const cache = await cacheStatus();
   const degradedReasons: string[] = [];
   if (hospitalConnections.offline > 0) degradedReasons.push('hospitals_offline');
+  if (hospitalConnections.stale > 0) degradedReasons.push('hospital_sync_stale');
   if (cache.degraded) degradedReasons.push('redis_unavailable');
   if (hospitalConnections.total > 0 && hospitalConnections.online === 0) {
     // Grace-state: nothing has synced (yet) — never present this as healthy.

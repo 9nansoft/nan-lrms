@@ -37,27 +37,22 @@ export function BedMoveReasonModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="bed-move-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
     >
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-        <h2
-          id="bed-move-title"
-          className="text-lg font-semibold text-slate-900"
-        >
+      <div className="w-full max-w-md rounded-2xl bg-surface-card p-6 shadow-soft">
+        <h2 id="bed-move-title" className="text-title text-ink">
           ย้ายเตียง
         </h2>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-body text-ink-muted">
           จาก เตียง {fromBedno} ไป เตียง {toBedno}
         </p>
 
-        <label className="mt-4 block text-sm font-medium text-slate-700">
-          เหตุผลการย้าย
-        </label>
+        <label className="mt-4 block text-label text-ink">เหตุผลการย้าย</label>
         <select
           aria-label="เหตุผลการย้าย"
           value={selected}
           onChange={(e) => setChosen(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          className="mt-1 h-10 w-full rounded-lg border border-border bg-surface-card px-3 text-body text-ink focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand"
         >
           {reasons.map((r) => (
             <option key={r} value={r}>
@@ -65,12 +60,17 @@ export function BedMoveReasonModal({
             </option>
           ))}
         </select>
+        {reasons.length === 0 && (
+          <p role="status" className="mt-2 text-caption text-warn-text">
+            ยังโหลดเหตุผลการย้ายจาก HOSxP ไม่ได้ — ปิดหน้าต่างแล้วกด รีเฟรช หากยังไม่ได้ แจ้งผู้ดูแลระบบ
+          </p>
+        )}
 
         <div className="mt-6 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-slate-300"
+            className="h-10 rounded-lg border border-border bg-surface-card px-4 text-label text-ink hover:bg-surface-muted"
           >
             ยกเลิก
           </button>
@@ -78,7 +78,7 @@ export function BedMoveReasonModal({
             type="button"
             onClick={() => onConfirm(selected)}
             disabled={selected === ''}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+            className="h-10 rounded-lg bg-brand px-4 text-label text-white hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-muted"
           >
             ยืนยัน
           </button>

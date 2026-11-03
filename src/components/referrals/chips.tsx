@@ -4,45 +4,38 @@
 
 import { formatRelativeAge } from '@/lib/relative-time';
 import type { ReferralAgeClass } from '@/config/referral-sla';
+import { FlagChip, type FlagTone } from '@/components/shared/FlagChip';
 
 // Risk chip moved to shared — re-exported so existing imports keep working.
 export { AncRiskChip as RiskChip } from '@/components/shared/AncRiskChip';
 
 export interface StatusMeta {
-  color: string;
+  tone: FlagTone;
   label: string;
 }
 
 export const STATUS_META: Record<string, StatusMeta> = {
-  INITIATED: { color: 'var(--ink-navy-dim)', label: 'รอดำเนินการ' },
-  ACCEPTED: { color: 'var(--risk-low)', label: 'ตอบรับ' },
-  IN_TRANSIT: { color: 'var(--risk-medium)', label: 'กำลังเดินทาง' },
-  ARRIVED: { color: 'var(--accent-navy)', label: 'ถึงแล้ว' },
-  REJECTED: { color: 'var(--risk-high)', label: 'ปฏิเสธ' },
-  EXPIRED: { color: 'var(--ink-navy-muted)', label: 'หมดอายุ' },
+  INITIATED: { tone: 'neutral', label: 'รอดำเนินการ' },
+  ACCEPTED: { tone: 'ok', label: 'ตอบรับ' },
+  IN_TRANSIT: { tone: 'warn', label: 'กำลังเดินทาง' },
+  ARRIVED: { tone: 'brand', label: 'ถึงแล้ว' },
+  REJECTED: { tone: 'danger', label: 'ปฏิเสธ' },
+  EXPIRED: { tone: 'neutral', label: 'หมดอายุ' },
 };
 
 export const URGENCY_META: Record<string, StatusMeta> = {
-  ROUTINE: { color: 'var(--ink-navy-muted)', label: 'ปกติ' },
-  URGENT: { color: 'var(--risk-medium)', label: 'เร่งด่วน' },
-  EMERGENCY: { color: 'var(--risk-high)', label: 'ฉุกเฉิน' },
+  ROUTINE: { tone: 'neutral', label: 'ปกติ' },
+  URGENT: { tone: 'warn', label: 'เร่งด่วน' },
+  EMERGENCY: { tone: 'danger', label: 'ฉุกเฉิน' },
 };
 
 export const AGE_META: Record<Exclude<ReferralAgeClass, 'fresh'>, StatusMeta> = {
-  overdue: { color: 'var(--risk-medium)', label: 'ค้าง' },
-  critical: { color: 'var(--risk-high)', label: 'ค้าง' },
+  overdue: { tone: 'warn', label: 'ค้าง' },
+  critical: { tone: 'danger', label: 'ค้าง' },
 };
 
 export function Pill({ meta, fallback }: { meta: StatusMeta | undefined; fallback: string }) {
-  const m = meta ?? { color: 'var(--ink-navy-muted)', label: fallback };
-  return (
-    <span
-      className="inline-block border px-1.5 py-0.5 text-center font-mono text-[12px] font-semibold tracking-[0.06em]"
-      style={{ color: m.color, borderColor: m.color, background: 'transparent' }}
-    >
-      {m.label}
-    </span>
-  );
+  return <FlagChip tone={meta?.tone ?? 'neutral'}>{meta?.label ?? fallback}</FlagChip>;
 }
 
 /** Aging chip for INITIATED rows past SLA — "ค้าง 3 วัน" in amber/red. */
@@ -50,11 +43,8 @@ export function AgeChip({ age, initiatedAt }: { age: ReferralAgeClass; initiated
   if (age === 'fresh') return null;
   const m = AGE_META[age];
   return (
-    <span
-      className="inline-block border px-1 py-px font-mono text-[12px] font-semibold tracking-[0.04em]"
-      style={{ color: m.color, borderColor: m.color }}
-    >
+    <FlagChip tone={m.tone}>
       {m.label} {formatRelativeAge(initiatedAt, 'th')}
-    </span>
+    </FlagChip>
   );
 }
