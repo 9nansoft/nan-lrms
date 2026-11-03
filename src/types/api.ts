@@ -734,6 +734,8 @@ export interface NewbornKPIsResponse {
   /** Percentage 0–100 of births under 2,500 g. */
   lbwRate: number;
   lowApgarCount: number;
+  /** Percentage 0–100 of births with 5-minute Apgar below the threshold (same denominator as lbwRate). */
+  lowApgarRate: number;
   avgBirthWeightG: number;
 }
 

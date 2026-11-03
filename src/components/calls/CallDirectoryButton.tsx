@@ -11,7 +11,7 @@ export function CallDirectoryButton() {
   return (
     <button
       onClick={calls.openDirectory}
-      className="cursor-pointer rounded-sm p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      className="cursor-pointer rounded-sm p-1.5 text-ink-muted transition-colors hover:bg-brand-soft hover:text-brand"
       aria-label="โทรวิดีโอ"
       title="โทรวิดีโอระหว่างโรงพยาบาล"
     >

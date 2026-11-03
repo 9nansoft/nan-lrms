@@ -1,28 +1,29 @@
-// BedTileFull — clinical-density bed tile (Direction A v5, "Information
-// Architect · Clinical Hospital"). Each card is a self-contained patient
-// dossier showing identity / vitals / labour progress / contractions /
-// FHR · EFM / interventions / chronology, with semantic categorical colour
-// per data domain.
-//
-// Color token rationale (clinical hospital palette):
-//   * red                 = critical / alarm — RESERVED for crit bed
-//   * blue (system)       = patient identity, brand
-//   * cyan (vitals)       = nurse-note observations
-//   * indigo (labour)     = partograph progress (Cx/Eff/Stn/Memb)
-//   * violet (contr)      = contractions
-//   * rose (FHR/heart)    = fetal heart rate + EFM
-//   * emerald (interv)    = IV / Oxytocin / Epidural
-//   * sky (PP) / amber (infant) / teal (care) — postpartum tile only
-//
-// Severity logic mirrors classifyOccupantSeverity (kept inline to keep this
-// component self-contained until the rule of three triggers extraction).
+// BedTileFull — one bed on the ward board (direction C, sub-project 3 spec).
+// A self-contained patient summary: identity, admission context, nurse-note
+// vitals, labour progress, contractions/FHR, fluids and chronology. Colour
+// marks only the labour stage and alarms (spec D3/D4). The stage rule is
+// classifyLabourStage (src/services/ward-board.ts), shared with the KPI
+// masthead. Sources: BP/T/P/R/SpO2/pain = ipd_nurse_note; Cx/Stn/FHR/
+// contractions/oxytocin/IV/membranes = ipt_labour_partograph (latest rows).
 'use client';
 
+import type { ReactNode } from 'react';
+import { Lock } from 'lucide-react';
 import type { BedOccupancyFull } from '@/types/maternity-ward';
 import type { ConnectionConfig } from '@/types/bms-browser';
 import type { MaternalScreenSummaryItem } from '@/types/api';
 import { maskName } from '@/lib/pii-mask';
+import { cn } from '@/lib/utils';
 import { PatientPhoto } from '@/components/shared/PatientPhoto';
+import { classifyLabourStage, LABOUR_STAGE_CM } from '@/services/ward-board';
+import {
+  BED_TILE_SECTION_EMPTY_TH,
+  BED_TILE_SECTION_TITLE,
+  allergyStatus,
+  isBedTileSectionEmpty,
+  labourStageDisplay,
+  type BedTileSection,
+} from '@/config/ward-display';
 import {
   MATERNAL_SCREEN_TIER_LABEL_TH,
   MATERNAL_SCREEN_TIER_COLOR,
@@ -33,6 +34,11 @@ import {
 
 export interface BedTileFullProps {
   bedno: string;
+  /** Tile head text in place of "เตียง {bedno}" — used for patients without a
+   *  usable bed (I2), e.g. "ยังไม่ได้จัดเตียง". */
+  bedLabel?: string;
+  /** data-testid of the tile; defaults to `bed-{bedno}`. */
+  testId?: string;
   bedLock: 'Y' | 'N' | null;
   occupant: BedOccupancyFull | null;
   /** Live "now" (ms since epoch) — drives hours-since-admit + crit
@@ -58,46 +64,7 @@ export interface BedTileFullProps {
   maternalScreenSummary?: MaternalScreenSummaryItem | null;
 }
 
-// Categorical clinical colors — kept as constants so the JSX inline `style`
-// blocks read declaratively. Tailwind classes can't easily express these
-// custom hues + tinted backgrounds without a config extension, so inline is
-// the pragmatic choice for v1.
-const C = {
-  // Neutrals
-  ink: '#0F172A',
-  inkSoft: '#1E293B',
-  paperCard: '#FFFFFF',
-  paperSoft: '#F1F5F9',
-  rule: '#E2E8F0',
-  ruleSoft: '#EEF2F6',
-  mute: '#64748B',
-  // Status / accent
-  accent: '#1565C0',
-  ok: '#059669',
-  warn: '#D97706',
-  crit: '#DC2626',
-  // Categorical
-  cVitals: '#0891B2',
-  cVitalsBg: '#ECFEFF',
-  cLabour: '#4338CA',
-  cLabourBg: '#EEF2FF',
-  cCont: '#7C3AED',
-  cContBg: '#F5F3FF',
-  cFhr: '#E11D48',
-  cFhrBg: '#FFF1F2',
-  cInterv: '#059669',
-  cIntervBg: '#ECFDF5',
-  // Status pill fill
-  pActive: '#059669',
-  pLatent: '#2563EB',
-  pTrans: '#D97706',
-  pCrit: '#DC2626',
-} as const;
-
-const FONT_SANS = "'Sarabun', system-ui, -apple-system, sans-serif";
-const FONT_MONO = "'IBM Plex Mono', 'SF Mono', Consolas, monospace";
-
-// ─── helpers ──────────────────────────────────────────────────────────────
+// ─── formatting (old output, Thai units) ────────────────────────────────────
 
 function fmt(v: unknown, suffix = ''): string {
   if (v === null || v === undefined || v === '') return '—';
@@ -130,26 +97,21 @@ function fmtBodyMetrics(o: BedOccupancyFull): string {
   return items.length > 0 ? items.join(' · ') : '—';
 }
 
-// Short relative age ("5m" / "2h" / "3d") for the maternal-screen pill
-// tooltip, driven by the tile's `now` prop rather than src/lib/relative-time.ts's
-// formatRelativeAge (which calls Date.now() internally) — the tile's
-// render-purity contract (see the `now` prop doc above) forbids that.
+/** Age of the maternal-screen assessment, from the tile's `now`
+ *  (render purity: no Date.now() in render). */
 function fmtScreenAge(assessedAt: string | null, now: number): string | null {
   if (!assessedAt) return null;
   const ms = Date.parse(assessedAt);
   if (!Number.isFinite(ms)) return null;
   const diffMin = Math.floor(Math.max(0, now - ms) / 60_000);
-  if (diffMin < 60) return `${Math.max(1, diffMin)}m`;
+  if (diffMin < 60) return `${Math.max(1, diffMin)} นาที`;
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h`;
-  return `${Math.floor(diffHr / 24)}d`;
+  if (diffHr < 24) return `${diffHr} ชม.`;
+  return `${Math.floor(diffHr / 24)} วัน`;
 }
 
-// Hours-since-admit, formatted HH:MM. Used both for severity and the tile
-// chronology footer.
 function fmtHours(regdate: string, regtime: string | null, now: number): string {
-  const ts = `${regdate}T${regtime ?? '00:00:00'}`;
-  const ms = Date.parse(ts);
+  const ms = Date.parse(`${regdate}T${regtime ?? '00:00:00'}`);
   if (!Number.isFinite(ms)) return '—';
   const diff = Math.max(0, now - ms);
   const h = Math.floor(diff / 3_600_000);
@@ -157,32 +119,14 @@ function fmtHours(regdate: string, regtime: string | null, now: number): string 
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-// Stage / severity classification — drives the status pill text + color.
-// Mirrors page-level classifyOccupantSeverity exactly so the dashboard KPI
-// "high-risk" count and the tile pill never disagree.
-type Stage =
-  | { kind: 'crit'; label: string }
-  | { kind: 'transition'; label: string }
-  | { kind: 'active'; label: string }
-  | { kind: 'latent'; label: string };
-
-function classify(o: BedOccupancyFull, now: number): Stage {
-  const cx = o.last_cervix_cm;
-  const ts = Date.parse(`${o.regdate}T${o.regtime ?? '00:00:00'}`);
-  const hrs = Number.isFinite(ts) ? (now - ts) / 3_600_000 : 0;
-  // Prolonged latent (Friedman-curve-ish) — 12+h with cervix unknown or <4cm
-  if (hrs >= 12 && (cx === null || cx < 4)) {
-    return { kind: 'crit', label: 'Action · Partogram +2h' };
-  }
-  if (cx !== null && cx >= 7) return { kind: 'transition', label: 'Stage I · Transition' };
-  if (cx !== null && cx >= 4) return { kind: 'active', label: 'Stage I · Active' };
-  return { kind: 'latent', label: 'Stage I · Latent' };
+function fmtAssessTime(date: string | null, time: string | null): string {
+  if (!date && !time) return '—';
+  return time ? time.slice(0, 5) : '—';
 }
 
 function thaiName(o: BedOccupancyFull): string {
   const raw = [o.pname, o.fname, o.lname].filter(Boolean).join(' ').trim();
-  if (!raw) return 'ไม่ระบุชื่อ';
-  return maskName(raw);
+  return raw ? maskName(raw) : 'ไม่ระบุชื่อ';
 }
 
 function calcAge(birthday: string | null, now: number): number | null {
@@ -194,243 +138,141 @@ function calcAge(birthday: string | null, now: number): number | null {
   return Math.floor(ageMs / (365.25 * 24 * 3_600_000));
 }
 
-function fmtAssessTime(date: string | null, time: string | null): string {
-  if (!date && !time) return '—';
-  const t = time ? time.slice(0, 5) : '—';
-  return t;
+function contractionText(o: BedOccupancyFull): string {
+  if (o.last_contr_freq === null && o.last_contr_duration === null && o.last_contr_strength === null) return '—';
+  return [
+    o.last_contr_freq !== null ? `${o.last_contr_freq}/10 นาที` : '—',
+    o.last_contr_duration !== null ? `${o.last_contr_duration} วินาที` : '—',
+    o.last_contr_strength ?? '—',
+  ].join(' · ');
 }
+
+/** Cervix bar colour, unchanged: < 4 cm red, ≥ 7 cm amber, otherwise brand
+ *  (the same cut-offs as the stage rule). */
+type CxTone = 'danger' | 'warn' | 'brand';
+function cervixTone(cx: number | null): CxTone {
+  if (cx === null) return 'brand';
+  if (cx >= LABOUR_STAGE_CM.transitionFrom) return 'warn';
+  if (cx < LABOUR_STAGE_CM.activeFrom) return 'danger';
+  return 'brand';
+}
+const CX_BAR: Record<CxTone, string> = { danger: 'bg-danger', warn: 'bg-warn', brand: 'bg-brand' };
+const CX_TEXT: Record<CxTone, string> = { danger: 'text-danger-text', warn: 'text-warn-text', brand: 'text-ink' };
 
 function cervixFillPercent(cx: number | null): number {
   if (cx === null) return 0;
   return Math.min(100, Math.max(0, (cx / 10) * 100));
 }
 
-function cervixFillColor(cx: number | null): string {
-  if (cx === null) return C.cLabour;
-  if (cx >= 7) return C.warn;
-  if (cx < 4) return C.crit;
-  return C.cLabour;
+// ─── building blocks ────────────────────────────────────────────────────────
+
+const TILE = 'flex min-w-0 flex-col overflow-hidden rounded-2xl border';
+const PILL = 'inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-caption font-semibold';
+const ALLERGY_PILL: Record<ReturnType<typeof allergyStatus>['kind'], string> = {
+  allergy: 'border-danger bg-danger text-white',
+  none: 'border-ok/40 text-ok-text',
+  unknown: 'border-warn/40 bg-warn-tint text-warn-text',
+};
+
+function TileHead({ label, pill, className }: { label: string; pill: ReactNode; className?: string }) {
+  return (
+    <div className={cn('flex items-center justify-between gap-2 border-b border-border px-4 py-2', className)}>
+      <span className="text-title tabular-nums text-ink">{label}</span>
+      {pill}
+    </div>
+  );
 }
 
-// ─── empty / locked variants ──────────────────────────────────────────────
+const SECTION_TITLE = 'mb-1 text-caption font-semibold text-brand';
 
-function EmptyTile({ bedno }: { bedno: string }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="border-b border-border px-4 py-2">
+      <div className={SECTION_TITLE}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * One clinical block of the tile. When EVERY field of the block is blank it
+ * collapses to its heading plus one muted line; any recorded value renders
+ * the block exactly as before (`children`), so nothing recorded is hidden.
+ */
+function TileSection({
+  section,
+  occupant,
+  children,
+}: {
+  section: BedTileSection;
+  occupant: BedOccupancyFull;
+  children: ReactNode;
+}) {
+  const empty = isBedTileSectionEmpty(occupant, section);
+  return (
+    <div data-section={section} data-empty={empty ? 'true' : 'false'}>
+      {empty ? (
+        <div className="border-b border-border px-4 py-2">
+          <div className={SECTION_TITLE}>{BED_TILE_SECTION_TITLE[section]}</div>
+          <p className="text-label text-ink-muted">{BED_TILE_SECTION_EMPTY_TH}</p>
+        </div>
+      ) : (
+        children
+      )}
+    </div>
+  );
+}
+
+function Field({ k, v, className }: { k: string; v: string; className?: string }) {
+  return (
+    <div className={cn('min-w-0', className)}>
+      <div className="text-caption text-ink-muted">{k}</div>
+      <div title={v} className="truncate text-body font-semibold tabular-nums text-ink">
+        {v}
+      </div>
+    </div>
+  );
+}
+
+/** Vacant/locked bed: a short card (content height) — the grid slot keeps it
+ *  from stretching to the occupied tiles beside it (WardLayoutViewFull). */
+function VacantTile({ bedno, locked }: { bedno: string; locked: boolean }) {
   return (
     <article
       data-testid={`bed-${bedno}`}
-      style={{
-        background: '#F4F7FB',
-        backgroundImage:
-          'repeating-linear-gradient(45deg, transparent 0 8px, ' + C.paperSoft + ' 8px 9px)',
-        border: `1.5px dashed #CBD5E1`,
-        borderRadius: 6,
-        minHeight: 280,
-        display: 'flex',
-        flexDirection: 'column',
-        fontFamily: FONT_SANS,
-        cursor: 'default',
-      }}
+      data-stage={locked ? 'locked' : 'empty'}
+      className={cn(TILE, 'border-dashed border-border bg-surface-page', locked ? 'cursor-not-allowed' : 'cursor-default')}
     >
-      <div style={tileHeadStyle('#F8FAFC')}>
-        <div style={bedNoStyle}>
-          <span style={bedNoPreStyle}>BED</span>
-          {bedno}
-        </div>
-        <div style={statusPillOutlineStyle}>Available</div>
-      </div>
-      <div style={emptyBodyStyle}>
-        <div style={emptyBodyBigStyle('var(--c-labour, ' + C.cLabour + ')')}>ว่าง</div>
-        <div>Ready for admission</div>
+      <TileHead
+        label={`เตียง ${bedno}`}
+        className="bg-surface-muted"
+        pill={<span className={cn(PILL, 'border-border text-ink-muted')}>{locked ? 'ปิดใช้งาน' : 'เตียงว่าง'}</span>}
+      />
+      <div className="flex items-baseline gap-2 px-4 py-3">
+        {locked && <Lock aria-hidden="true" className="h-4 w-4 shrink-0 self-center text-ink-muted" />}
+        <span className={cn('text-body-lg', locked ? 'text-ink-muted' : 'text-brand')}>{locked ? 'ปิดบำรุง' : 'ว่าง'}</span>
+        <span className="text-label text-ink-muted">{locked ? 'ล็อกใน HOSxP' : 'พร้อมรับผู้คลอด'}</span>
       </div>
     </article>
   );
 }
 
-function LockedTile({ bedno }: { bedno: string }) {
+/** Maternal-screen pill. Its colour comes from the display config (GC-H3)
+ *  and never changes the tile border/background, which is reserved for the stage alarm. */
+function ScreenPill({ testId, color, children }: { testId: string; color: string; children: ReactNode }) {
   return (
-    <article
-      data-testid={`bed-${bedno}`}
-      style={{
-        background: '#F4F7FB',
-        backgroundImage:
-          'repeating-linear-gradient(-45deg, transparent 0 6px, rgba(15, 23, 42, 0.05) 6px 7px)',
-        border: '1.5px dashed #CBD5E1',
-        borderRadius: 6,
-        minHeight: 280,
-        display: 'flex',
-        flexDirection: 'column',
-        fontFamily: FONT_SANS,
-        cursor: 'not-allowed',
-      }}
-    >
-      <div style={tileHeadStyle('#F8FAFC')}>
-        <div style={bedNoStyle}>
-          <span style={bedNoPreStyle}>BED</span>
-          {bedno}
-        </div>
-        <div style={statusPillOutlineStyle}>Locked · Maintenance</div>
-      </div>
-      <div style={emptyBodyStyle}>
-        <div style={emptyBodyBigStyle(C.mute)}>ปิดบำรุง</div>
-        <div>Maintenance</div>
-      </div>
-    </article>
+    <span data-testid={testId} className={PILL} style={{ color, borderColor: color }}>
+      {children}
+    </span>
   );
 }
 
-// ─── shared inline-style helpers ──────────────────────────────────────────
-
-const bedNoStyle: React.CSSProperties = {
-  fontFamily: FONT_MONO,
-  fontSize: 19,
-  fontWeight: 800,
-  letterSpacing: '-0.01em',
-  color: C.ink,
-  lineHeight: 1,
-};
-
-const bedNoPreStyle: React.CSSProperties = {
-  fontSize: 9,
-  letterSpacing: '0.24em',
-  color: C.mute,
-  textTransform: 'uppercase',
-  fontWeight: 700,
-  marginRight: 6,
-  verticalAlign: 4,
-};
-
-const statusPillOutlineStyle: React.CSSProperties = {
-  fontFamily: FONT_MONO,
-  fontSize: 10,
-  letterSpacing: '0.18em',
-  textTransform: 'uppercase',
-  fontWeight: 700,
-  color: C.mute,
-  border: `1.5px dashed ${C.mute}`,
-  padding: '4px 9px',
-  borderRadius: 2,
-  whiteSpace: 'nowrap',
-};
-
-function tileHeadStyle(bg: string): React.CSSProperties {
-  return {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '8px 14px 7px',
-    background: bg,
-    borderBottom: `1.5px solid ${C.rule}`,
-  };
-}
-
-const emptyBodyStyle: React.CSSProperties = {
-  flex: 1,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 10,
-  fontFamily: FONT_MONO,
-  fontSize: 11,
-  letterSpacing: '0.24em',
-  textTransform: 'uppercase',
-  color: C.mute,
-  fontWeight: 700,
-  padding: '32px 16px',
-  textAlign: 'center',
-};
-
-function emptyBodyBigStyle(color: string): React.CSSProperties {
-  return {
-    fontSize: 22,
-    letterSpacing: '0.32em',
-    fontWeight: 800,
-    color,
-    fontFamily: FONT_SANS,
-  };
-}
-
-const sectionLabelStyle: React.CSSProperties = {
-  fontFamily: FONT_MONO,
-  fontSize: 8.5,
-  letterSpacing: '0.22em',
-  textTransform: 'uppercase',
-  fontWeight: 800,
-  marginBottom: 3,
-};
-
-function sectionStyle(bg: string, accent: string): React.CSSProperties {
-  return {
-    padding: '7px 14px 8px',
-    borderBottom: `1px solid ${C.ruleSoft}`,
-    position: 'relative',
-    background: bg,
-    borderLeft: `3px solid ${accent}`,
-  };
-}
-
-const dataKeyStyle: React.CSSProperties = {
-  fontFamily: FONT_MONO,
-  fontSize: 9,
-  letterSpacing: '0.18em',
-  textTransform: 'uppercase',
-  fontWeight: 700,
-};
-
-const dataValueStyle: React.CSSProperties = {
-  fontFamily: FONT_MONO,
-  fontSize: 13,
-  fontWeight: 700,
-  color: C.ink,
-  fontVariantNumeric: 'tabular-nums',
-};
-
-const compactKeyStyle: React.CSSProperties = {
-  fontFamily: FONT_MONO,
-  fontSize: 8.5,
-  letterSpacing: '0.16em',
-  textTransform: 'uppercase',
-  fontWeight: 800,
-  color: C.mute,
-  marginBottom: 1,
-};
-
-// Maternal-screen pill — same outlined-pill recipe as the blood_grp identity
-// pill above (mono, 9px, 700 weight, 0.16em tracking, 2px 6px padding,
-// uppercase, 1px radius, colored text + matching 1px border, no fill), but
-// colored from the maternal-screen-display LIGHT tokens instead of a fixed
-// C.* constant (GC-H3: this file's crit red stays reserved for the tile-level
-// alarm; a pill may reuse that same red value for its own text/border only).
-function screenPillStyle(color: string): React.CSSProperties {
-  return {
-    fontFamily: FONT_MONO,
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '0.16em',
-    padding: '2px 6px',
-    textTransform: 'uppercase',
-    borderRadius: 1,
-    color,
-    border: `1px solid ${color}`,
-    whiteSpace: 'nowrap',
-  };
-}
-
-const compactValueStyle: React.CSSProperties = {
-  fontFamily: FONT_SANS,
-  fontSize: 11,
-  fontWeight: 700,
-  lineHeight: 1.2,
-  color: C.ink,
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-};
-
-// ─── main component ───────────────────────────────────────────────────────
+// ─── tile ───────────────────────────────────────────────────────────────────
 
 export function BedTileFull({
   bedno,
+  bedLabel,
+  testId,
   bedLock,
   occupant,
   now,
@@ -439,544 +281,225 @@ export function BedTileFull({
   marketplaceToken,
   maternalScreenSummary,
 }: BedTileFullProps) {
-  if (bedLock === 'Y') return <LockedTile bedno={bedno} />;
-  if (!occupant) return <EmptyTile bedno={bedno} />;
+  // B1: an admitted patient always wins over the lock flag.
+  if (!occupant) return <VacantTile bedno={bedno} locked={bedLock === 'Y'} />;
 
-  const stage = classify(occupant, now);
-  const isCrit = stage.kind === 'crit';
+  const stage = classifyLabourStage(occupant, now);
+  const cx = occupant.last_cervix_cm;
+  const display = labourStageDisplay(stage, cx);
+  const alarm = stage === 'prolongedLatent';
+  const name = thaiName(occupant);
   const age = calcAge(occupant.birthday, now);
+  const cxTone = cervixTone(cx);
+  const allergy = allergyStatus(occupant.allergy_count);
 
-  // Cross-source maternal-screen pills (Task H4) — zero DOM unless at least
-  // one axis is present (GC-H4: absent/both-null summary ⇒ tile renders
-  // exactly as today).
+  // Cross-source maternal-screen pills (Task H4): zero DOM unless one axis is present (GC-H4).
   const screenTier = maternalScreenSummary?.localTier ?? null;
   const screenAcuity = maternalScreenSummary?.emergencyAcuity ?? null;
   const showScreenPills = screenTier !== null || screenAcuity !== null;
-  const screenAgeLabel = showScreenPills
-    ? fmtScreenAge(maternalScreenSummary?.assessedAt ?? null, now)
-    : null;
+  const screenAgeLabel = showScreenPills ? fmtScreenAge(maternalScreenSummary?.assessedAt ?? null, now) : null;
 
-  // Status pill background per stage
-  const pillBg = isCrit
-    ? C.pCrit
-    : stage.kind === 'transition'
-      ? C.pTrans
-      : stage.kind === 'active'
-        ? C.pActive
-        : C.pLatent;
+  const demographics = [
+    age !== null ? `อายุ ${age} ปี` : null,
+    occupant.gravida !== null ? `G${occupant.gravida}` : null,
+    occupant.ga !== null ? `GA ${occupant.ga} สัปดาห์` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
-  // Card border + outer shadow (crit gets the alarm treatment)
-  const cardBorder = isCrit ? `3px solid ${C.crit}` : '1.5px solid #CBD5E1';
-  const cardShadow = isCrit
-    ? '0 0 0 1px rgba(220, 38, 38, 0.15), 0 4px 16px rgba(220, 38, 38, 0.18)'
-    : '0 1px 3px rgba(15, 23, 42, 0.06)';
-  const cardBg = isCrit
-    ? `linear-gradient(to right, rgba(220,38,38,0.08), ${C.paperCard} 60%)`
-    : C.paperCard;
-
-  const headBg = isCrit ? '#FEF2F2' : '#F8FAFC';
-  const footBg = isCrit ? '#FECACA' : '#E2E8F0';
-  const footColor = isCrit ? '#7F1D1D' : C.ink;
-  const footKeyColor = isCrit ? '#B91C1C' : C.mute;
+  const headLabel = bedLabel ?? `เตียง ${bedno}`;
+  const open = () => onClick?.(occupant.an);
 
   return (
+    // A keyboard-operable button (Enter/Space). Keys stop here so the dnd-kit
+    // drag handle on the wrapper (Space/Enter = pick up) does not also fire.
     <article
-      data-testid={`bed-${bedno}`}
-      onClick={() => onClick?.(occupant.an)}
-      style={{
-        background: cardBg,
-        border: cardBorder,
-        borderRadius: 6,
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        boxShadow: cardShadow,
-        fontFamily: FONT_SANS,
-        transition: 'all 120ms ease',
+      data-testid={testId ?? `bed-${bedno}`}
+      data-stage={stage}
+      role="button"
+      tabIndex={0}
+      aria-label={`${headLabel} · ${name} — เปิดรายละเอียดผู้คลอด`}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        e.stopPropagation();
+        open();
       }}
+      className={cn(
+        TILE,
+        'cursor-pointer bg-surface-card shadow-soft transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2',
+        alarm ? 'border-2 border-danger' : 'border-border',
+      )}
     >
-      {/* Head */}
-      <div style={tileHeadStyle(headBg)}>
-        <div style={bedNoStyle}>
-          <span style={bedNoPreStyle}>BED</span>
-          {bedno}
-        </div>
-        <div
-          style={{
-            fontFamily: FONT_MONO,
-            fontSize: 10,
-            letterSpacing: '0.18em',
-            textTransform: 'uppercase',
-            padding: '5px 10px',
-            fontWeight: 700,
-            whiteSpace: 'nowrap',
-            color: 'white',
-            background: pillBg,
-            borderRadius: 2,
-          }}
-        >
-          {stage.label}
-        </div>
-      </div>
+      <TileHead
+        label={headLabel}
+        className={alarm ? 'bg-danger-tint' : 'bg-surface-muted'}
+        pill={
+          <span title={display.hint} className={cn('whitespace-nowrap rounded-full px-3 py-1 text-label', display.className)}>
+            {display.labelTh}
+          </span>
+        }
+      />
 
-      {/* Identity */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr auto',
-          gap: 10,
-          padding: '6px 14px',
-          fontFamily: FONT_MONO,
-          fontSize: 10.5,
-          fontWeight: 600,
-          letterSpacing: '0.04em',
-          color: C.mute,
-          alignItems: 'center',
-          borderBottom: `1px solid ${C.ruleSoft}`,
-        }}
-      >
-        <div>
-          <span
-            style={{
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              fontWeight: 700,
-              marginRight: 6,
-            }}
-          >
-            AN
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2 text-label text-ink-muted">
+        <span>
+          AN <b className="font-semibold text-ink">{occupant.an}</b>
+        </span>
+        <span>
+          HN <b className="font-semibold text-ink">{occupant.hn}</b>
+        </span>
+        <span className="flex flex-wrap items-center gap-1">
+          <span title={allergy.titleTh} className={cn(PILL, ALLERGY_PILL[allergy.kind])}>
+            {allergy.labelTh}
           </span>
-          <span style={{ color: C.ink, fontWeight: 700 }}>{occupant.an}</span>
-        </div>
-        <div>
-          <span
-            style={{
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              fontWeight: 700,
-              marginRight: 6,
-            }}
-          >
-            HN
-          </span>
-          <span style={{ color: C.ink, fontWeight: 700 }}>{occupant.hn}</span>
-        </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {/* Allergy flag — red filled when ≥1 opd_allergy row, green outlined NKDA otherwise.
-              null allergy_count (query failed) is treated like NKDA visually but distinct in tooling. */}
-          {(occupant.allergy_count ?? 0) > 0 ? (
-            <span
-              style={{
-                fontFamily: FONT_MONO,
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: '0.16em',
-                padding: '2px 6px',
-                textTransform: 'uppercase',
-                borderRadius: 1,
-                color: 'white',
-                background: C.crit,
-                border: `1px solid ${C.crit}`,
-              }}
-              title={`${occupant.allergy_count} known allergy record${occupant.allergy_count === 1 ? '' : 's'} on file`}
-            >
-              Allergy
-            </span>
-          ) : (
-            <span
-              style={{
-                fontFamily: FONT_MONO,
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: '0.16em',
-                padding: '2px 6px',
-                textTransform: 'uppercase',
-                borderRadius: 1,
-                color: C.ok,
-                border: `1px solid ${C.ok}`,
-              }}
-              title="No known drug allergies on file"
-            >
-              NKDA
-            </span>
-          )}
-          {/* Blood group — outlined pill, only when on file. */}
           {occupant.blood_grp && (
-            <span
-              style={{
-                fontFamily: FONT_MONO,
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: '0.16em',
-                padding: '2px 6px',
-                textTransform: 'uppercase',
-                borderRadius: 1,
-                color: C.crit,
-                border: `1px solid ${C.crit}`,
-              }}
-            >
+            <span title={`หมู่เลือด ${occupant.blood_grp}`} className={cn(PILL, 'border-border text-ink')}>
               {occupant.blood_grp}
             </span>
           )}
-          {/* Cross-source maternal-screen pills (Task H4, GC-H3/GC-H4) — shadow-mode,
-              provisional/unapproved rule set. Zero DOM when no summary or both axes
-              are null; NEVER alters tile-level border/shadow/background (that stays
-              reserved for the crit bed alarm above). */}
+          {bedLock === 'Y' && (
+            <span data-testid="bed-locked-occupied" className={cn(PILL, 'border-warn/40 bg-warn-tint text-warn-text')}>
+              เตียงถูกล็อกใน HOSxP
+            </span>
+          )}
           {showScreenPills && (
             <span
               data-testid="bed-maternal-screen"
               title="การคัดกรองท้องถิ่น (โหมดเงา — ยังไม่ได้รับการรับรอง)"
-              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+              className="flex items-center gap-1"
             >
               {screenTier && (
-                <span
-                  data-testid="bed-maternal-screen-tier"
-                  style={screenPillStyle(
-                    MATERNAL_SCREEN_TIER_COLOR[screenTier] ?? MATERNAL_SCREEN_FALLBACK_COLOR,
-                  )}
+                <ScreenPill
+                  testId="bed-maternal-screen-tier"
+                  color={MATERNAL_SCREEN_TIER_COLOR[screenTier] ?? MATERNAL_SCREEN_FALLBACK_COLOR}
                 >
                   {MATERNAL_SCREEN_TIER_LABEL_TH[screenTier]}
-                </span>
+                </ScreenPill>
               )}
               {screenAcuity && (
-                <span
-                  data-testid="bed-maternal-screen-acuity"
-                  style={screenPillStyle(
-                    EMERGENCY_ACUITY_COLOR[screenAcuity] ?? MATERNAL_SCREEN_FALLBACK_COLOR,
-                  )}
+                <ScreenPill
+                  testId="bed-maternal-screen-acuity"
+                  color={EMERGENCY_ACUITY_COLOR[screenAcuity] ?? MATERNAL_SCREEN_FALLBACK_COLOR}
                 >
                   {EMERGENCY_ACUITY_LABEL_TH[screenAcuity]}
-                </span>
+                </ScreenPill>
               )}
               {screenAgeLabel && (
-                <span
-                  data-testid="bed-maternal-screen-age"
-                  style={{ fontSize: 8.5, color: C.mute }}
-                >
+                <span data-testid="bed-maternal-screen-age" className="text-caption text-ink-muted">
                   {screenAgeLabel}
                 </span>
               )}
             </span>
           )}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-3 border-b border-border px-4 py-2">
+        <PatientPhoto hn={occupant.hn} config={config} marketplaceToken={marketplaceToken} name={name} size={46} />
+        <div className="min-w-0">
+          <div className="truncate text-body-lg font-semibold text-ink">{name}</div>
+          {demographics && <div className="text-label text-ink-muted">{demographics}</div>}
         </div>
       </div>
 
-      {/* Name */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 10,
-          alignItems: 'center',
-          padding: '7px 14px 6px',
-          borderBottom: `1px solid ${C.ruleSoft}`,
-        }}
-      >
-        <PatientPhoto
-          hn={occupant.hn}
-          config={config}
-          marketplaceToken={marketplaceToken}
-          name={thaiName(occupant)}
-          size={46}
-        />
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 15,
-              fontWeight: 800,
-              lineHeight: 1.2,
-              color: C.ink,
-              marginBottom: 2,
-            }}
-          >
-            {thaiName(occupant)}
-          </div>
-          <div
-            style={{
-              fontFamily: FONT_MONO,
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: '0.04em',
-              color: C.mute,
-            }}
-          >
-            {age !== null && <b style={{ color: C.inkSoft, fontWeight: 700 }}>{age}Y</b>}
-            {age !== null && occupant.gravida !== null && <> · </>}
-            {occupant.gravida !== null && <>G{occupant.gravida}</>}
-            {occupant.ga !== null && (
-              <>
-                {' '}
-                · GA <b style={{ color: C.inkSoft, fontWeight: 700 }}>{occupant.ga}</b>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ADMIT CONTEXT — mirrors HOSxP's IPD admit header fields. */}
-      <div
-        style={{
-          padding: '6px 14px 7px',
-          borderBottom: `1px solid ${C.ruleSoft}`,
-          background: '#FAFBFC',
-        }}
-      >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.1fr', gap: 8 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={compactKeyStyle}>Doctor</div>
-            <div style={compactValueStyle}>{fmt(occupant.incharge_doctor_name)}</div>
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={compactKeyStyle}>Coverage</div>
-            <div style={compactValueStyle}>{fmt(occupant.pttype_name)}</div>
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={compactKeyStyle}>Body</div>
-            <div style={{ ...compactValueStyle, fontFamily: FONT_MONO, fontSize: 10.5 }}>
-              {fmtBodyMetrics(occupant)}
-            </div>
-          </div>
-        </div>
-        {occupant.prediag && (
-          <div
-            title={occupant.prediag}
-            style={{
-              marginTop: 5,
-              paddingTop: 5,
-              borderTop: `1px solid ${C.ruleSoft}`,
-              display: 'grid',
-              gridTemplateColumns: '72px minmax(0, 1fr)',
-              gap: 8,
-              alignItems: 'baseline',
-            }}
-          >
-            <div style={{ ...compactKeyStyle, marginBottom: 0, color: C.warn }}>Prediag</div>
-            <div style={compactValueStyle}>{occupant.prediag}</div>
-          </div>
-        )}
-      </div>
-
-      {/* VITALS — from ipd_nurse_note latest */}
-      <div style={sectionStyle(C.cVitalsBg, C.cVitals)}>
-        <div style={{ ...sectionLabelStyle, color: C.cVitals }}>Vitals</div>
-        <div
-          style={{ display: 'grid', gridTemplateColumns: '1.35fr repeat(5, 1fr)', gap: '4px 8px' }}
-        >
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cVitals }}>BP</div>
-            <div style={dataValueStyle}>{fmtBp(occupant.last_bp_sys, occupant.last_bp_dia)}</div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cVitals }}>T</div>
-            <div style={dataValueStyle}>{fmtTemp(occupant.last_temp)}</div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cVitals }}>P</div>
-            <div style={dataValueStyle}>{fmt(occupant.last_pulse)}</div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cVitals }}>R</div>
-            <div style={dataValueStyle}>{fmt(occupant.last_rr)}</div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cVitals }}>SpO₂ RA</div>
-            <div style={dataValueStyle}>{fmt(occupant.last_spo2)}</div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cVitals }}>O₂</div>
-            <div style={dataValueStyle}>{fmt(occupant.last_spo2_o2)}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* LABOUR PROGRESS — from ipt_labour_partograph latest */}
-      <div style={sectionStyle(C.cLabourBg, C.cLabour)}>
-        <div style={{ ...sectionLabelStyle, color: C.cLabour }}>Labour Progress</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px 8px' }}>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cLabour }}>Cx</div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-              <div
-                style={{
-                  width: 60,
-                  height: 5,
-                  background: 'rgba(15, 23, 42, 0.1)',
-                  position: 'relative',
-                  borderRadius: 1,
-                  overflow: 'hidden',
-                }}
-              >
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: '0 auto 0 0',
-                    width: `${cervixFillPercent(occupant.last_cervix_cm)}%`,
-                    background: cervixFillColor(occupant.last_cervix_cm),
-                    borderRadius: 1,
-                  }}
-                />
+      <TileSection section="admission" occupant={occupant}>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-border bg-surface-page px-4 py-2">
+          <Field k="แพทย์" v={fmt(occupant.incharge_doctor_name)} />
+          <Field k="สิทธิ" v={fmt(occupant.pttype_name)} />
+          <Field k="ร่างกาย" v={fmtBodyMetrics(occupant)} className="col-span-2" />
+          {occupant.prediag && (
+            <div className="col-span-2 min-w-0">
+              <div className="text-caption font-semibold text-warn-text">อาการแรกรับ</div>
+              <div title={occupant.prediag} className="truncate text-body text-ink">
+                {occupant.prediag}
               </div>
-              <span
-                style={{
-                  fontFamily: FONT_MONO,
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color:
-                    cervixFillColor(occupant.last_cervix_cm) === C.cLabour
-                      ? C.ink
-                      : cervixFillColor(occupant.last_cervix_cm),
-                }}
-              >
-                {occupant.last_cervix_cm !== null
-                  ? String(occupant.last_cervix_cm).padStart(2, '0')
-                  : '—'}
-              </span>
             </div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cLabour }}>Stn</div>
-            <div style={dataValueStyle}>{fmt(occupant.last_station)}</div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cLabour }}>Memb</div>
-            <div style={dataValueStyle}>{fmt(occupant.last_amniotic)}</div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cLabour }}>Pain</div>
-            <div style={dataValueStyle}>
-              {occupant.last_pain !== null ? `${occupant.last_pain}/10` : '—'}
-            </div>
-          </div>
+          )}
         </div>
-      </div>
+      </TileSection>
 
-      {/* CONTRACTIONS + FHR — split */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr' }}>
-        <div style={sectionStyle(C.cContBg, C.cCont)}>
-          <div style={{ ...sectionLabelStyle, color: C.cCont }}>Contractions</div>
-          <div style={{ ...dataValueStyle }}>
-            {occupant.last_contr_freq !== null ||
-            occupant.last_contr_duration !== null ||
-            occupant.last_contr_strength !== null
-              ? `${occupant.last_contr_freq !== null ? `${occupant.last_contr_freq}:10` : '—'} / ${
-                  occupant.last_contr_duration !== null ? `${occupant.last_contr_duration}s` : '—'
-                } / ${occupant.last_contr_strength ?? '—'}`
-              : '—'}
+      <TileSection section="vitals" occupant={occupant}>
+        <Section title={BED_TILE_SECTION_TITLE.vitals}>
+          <div className="grid grid-cols-3 gap-x-3 gap-y-1">
+            <Field k="BP" v={fmtBp(occupant.last_bp_sys, occupant.last_bp_dia)} />
+            <Field k="T (°C)" v={fmtTemp(occupant.last_temp)} />
+            <Field k="P" v={fmt(occupant.last_pulse)} />
+            <Field k="R" v={fmt(occupant.last_rr)} />
+            <Field k="SpO₂ RA" v={fmt(occupant.last_spo2)} />
+            <Field k="O₂" v={fmt(occupant.last_spo2_o2)} />
           </div>
-        </div>
-        <div style={sectionStyle(C.cFhrBg, C.cFhr)}>
-          <div style={{ ...sectionLabelStyle, color: C.cFhr, textAlign: 'right' }}>FHR · EFM</div>
-          <div
-            style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}
-          >
-            <span
-              style={{
-                fontFamily: FONT_MONO,
-                fontSize: 22,
-                fontWeight: 800,
-                color: C.cFhr,
-                letterSpacing: '-0.02em',
-                lineHeight: 1,
-              }}
-            >
-              {fmt(occupant.last_fhr)}
-            </span>
-            <span
-              style={{
-                width: 9,
-                height: 9,
-                borderRadius: '50%',
-                background: C.cFhr,
-                animation: 'kk-heartbeat 0.85s ease-in-out infinite',
-              }}
-            />
-          </div>
-        </div>
-      </div>
+        </Section>
+      </TileSection>
 
-      {/* INTERVENTIONS */}
-      <div style={sectionStyle(C.cIntervBg, C.cInterv)}>
-        <div style={{ ...sectionLabelStyle, color: C.cInterv }}>Interventions</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px 8px' }}>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cInterv }}>IV</div>
-            <div style={{ ...dataValueStyle, fontSize: 12 }}>{fmt(occupant.last_iv_fluids)}</div>
-          </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cInterv }}>Oxytocin</div>
-            <div style={{ ...dataValueStyle, fontSize: 12 }}>
-              {occupant.last_oxytocin_uml !== null ? `${occupant.last_oxytocin_uml} mU/min` : '—'}
+      <TileSection section="progress" occupant={occupant}>
+        <Section title={BED_TILE_SECTION_TITLE.progress}>
+          <div className="grid grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))] gap-x-3 gap-y-1">
+            <div className="min-w-0">
+              <div className="text-caption text-ink-muted">ปากมดลูก</div>
+              <div className={cn('text-body font-semibold tabular-nums', CX_TEXT[cxTone])}>
+                {cx !== null ? `${cx} ซม.` : '—'}
+              </div>
+              <div aria-hidden="true" className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
+                <div className={cn('h-full rounded-full', CX_BAR[cxTone])} style={{ width: `${cervixFillPercent(cx)}%` }} />
+              </div>
             </div>
+            <Field k="ส่วนนำ" v={fmt(occupant.last_station)} />
+            <Field k="ถุงน้ำ" v={fmt(occupant.last_amniotic)} />
+            <Field k="ปวด" v={occupant.last_pain !== null ? `${occupant.last_pain}/10` : '—'} />
           </div>
-          <div>
-            <div style={{ ...dataKeyStyle, color: C.cInterv }}>Drops</div>
-            <div style={{ ...dataValueStyle, fontSize: 12 }}>
-              {fmt(occupant.last_oxytocin_drops, '/min')}
+        </Section>
+      </TileSection>
+
+      <TileSection section="contractionFhr" occupant={occupant}>
+        <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] border-b border-border">
+          <div className="min-w-0 px-4 py-2">
+            <div className="mb-1 text-caption font-semibold text-brand">การหดรัดตัว</div>
+            <div className="text-body font-semibold tabular-nums text-ink">{contractionText(occupant)}</div>
+          </div>
+          <div className="min-w-0 border-l border-border px-4 py-2 text-right">
+            <div className="mb-1 text-caption font-semibold text-brand">FHR (ครั้ง/นาที)</div>
+            <div className="flex items-center justify-end gap-2">
+              <span className="text-title tabular-nums text-ink">{fmt(occupant.last_fhr)}</span>
+              {occupant.last_fhr !== null && (
+                <span
+                  data-testid="fhr-pulse"
+                  aria-hidden="true"
+                  className="h-2.5 w-2.5 rounded-full bg-brand motion-safe:animate-[kk-heartbeat_0.85s_ease-in-out_infinite]"
+                />
+              )}
             </div>
           </div>
         </div>
-      </div>
+      </TileSection>
 
-      {/* Footer chronology */}
+      <TileSection section="fluids" occupant={occupant}>
+        <Section title={BED_TILE_SECTION_TITLE.fluids}>
+          <div className="grid grid-cols-3 gap-x-3 gap-y-1">
+            <Field k="IV" v={fmt(occupant.last_iv_fluids)} />
+            <Field k="Oxytocin" v={occupant.last_oxytocin_uml !== null ? `${occupant.last_oxytocin_uml} mU/นาที` : '—'} />
+            <Field k="หยด" v={fmt(occupant.last_oxytocin_drops, ' หยด/นาที')} />
+          </div>
+        </Section>
+      </TileSection>
+
       <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginTop: 'auto',
-          padding: '6px 14px',
-          background: footBg,
-          color: footColor,
-          borderTop: `1px solid ${isCrit ? 'rgba(220, 38, 38, 0.4)' : '#CBD5E1'}`,
-          fontFamily: FONT_MONO,
-          fontSize: 10,
-          letterSpacing: '0.06em',
-          fontWeight: 700,
-        }}
+        className={cn(
+          'mt-auto flex flex-wrap justify-between gap-x-3 gap-y-1 px-4 py-2 text-label tabular-nums',
+          alarm ? 'bg-danger-tint text-danger-text' : 'bg-surface-muted text-ink',
+        )}
       >
-        <div>
-          <span
-            style={{
-              color: footKeyColor,
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              marginRight: 4,
-              fontWeight: 600,
-            }}
-          >
-            Admit
-          </span>
-          {(occupant.regtime ?? '').slice(0, 5) || '—'}
-        </div>
-        <div>
-          <span
-            style={{
-              color: footKeyColor,
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              marginRight: 4,
-              fontWeight: 600,
-            }}
-          >
-            Hrs
-          </span>
-          {fmtHours(occupant.regdate, occupant.regtime, now)}
-        </div>
-        <div>
-          <span
-            style={{
-              color: footKeyColor,
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              marginRight: 4,
-              fontWeight: 600,
-            }}
-          >
-            Last
-          </span>
+        <span>
+          <span className="text-ink-muted">รับเข้า</span> {(occupant.regtime ?? '').slice(0, 5) || '—'}
+        </span>
+        <span>
+          <span className="text-ink-muted">นาน</span> {fmtHours(occupant.regdate, occupant.regtime, now)} ชม.
+        </span>
+        <span>
+          <span className="text-ink-muted">บันทึกล่าสุด</span>{' '}
           {fmtAssessTime(occupant.last_assess_date, occupant.last_assess_time)}
-          {occupant.last_assess_staff && ` · ${occupant.last_assess_staff}`}
-        </div>
+          {occupant.last_assess_staff ? ` · ${occupant.last_assess_staff}` : ''}
+        </span>
       </div>
     </article>
   );

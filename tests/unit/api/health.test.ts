@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
+import { SYNC_HEALTH } from '@/config/hospital-network';
 
 describe('Health Check', () => {
   let db: DatabaseAdapter;
@@ -37,14 +38,66 @@ describe('Health Check', () => {
     expect(status.hospitalConnections.unknown).toBe(40);
   });
 
-  it('should return healthy status once at least one hospital is online', async () => {
+  it('should return healthy status once at least one hospital is online with fresh data', async () => {
     await db.execute(
-      "UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode = (SELECT hcode FROM hospitals LIMIT 1)",
+      "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE hcode = (SELECT hcode FROM hospitals LIMIT 1)",
+      [new Date().toISOString()],
     );
     const { getHealthStatus } = await import('@/services/health');
     const status = await getHealthStatus(db);
     expect(status.status).toBe('healthy');
     expect(status.hospitalConnections.online).toBe(1);
+    expect(status.hospitalConnections.stale).toBe(0);
     expect(status.degradedReasons).toEqual([]);
+  });
+
+  it('should degrade when an online hospital has stale sync data', async () => {
+    const staleSync = new Date(
+      Date.now() - (SYNC_HEALTH.staleAfterMinutes + 1) * 60 * 1000,
+    ).toISOString();
+    await db.execute(
+      "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE hcode = (SELECT hcode FROM hospitals LIMIT 1)",
+      [staleSync],
+    );
+
+    const { getHealthStatus } = await import('@/services/health');
+    const status = await getHealthStatus(db);
+
+    expect(status.hospitalConnections.online).toBe(1);
+    expect(status.hospitalConnections.stale).toBe(1);
+    expect(status.status).toBe('degraded');
+    expect(status.degradedReasons).toContain('hospital_sync_stale');
+  });
+
+  it('should accept a fresh Date returned by a PostgreSQL adapter', async () => {
+    const postgresDb = {
+      query: async <T>(sql: string): Promise<T[]> => {
+        if (sql.startsWith('SELECT 1')) return [{ ok: 1 }] as T[];
+        return [{ connection_status: 'ONLINE', last_sync_at: new Date() }] as T[];
+      },
+    } as unknown as DatabaseAdapter;
+
+    const { getHealthStatus } = await import('@/services/health');
+    const status = await getHealthStatus(postgresDb);
+
+    expect(status.hospitalConnections).toMatchObject({ online: 1, stale: 0 });
+    expect(status.status).toBe('healthy');
+  });
+
+  it.each([
+    ['missing', null],
+    ['future-dated', new Date(Date.now() + 60 * 60 * 1000).toISOString()],
+  ])('should degrade when an online hospital has %s sync data', async (_label, lastSyncAt) => {
+    await db.execute(
+      "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE hcode = (SELECT hcode FROM hospitals LIMIT 1)",
+      [lastSyncAt],
+    );
+
+    const { getHealthStatus } = await import('@/services/health');
+    const status = await getHealthStatus(db);
+
+    expect(status.hospitalConnections).toMatchObject({ online: 1, stale: 1 });
+    expect(status.status).toBe('degraded');
+    expect(status.degradedReasons).toContain('hospital_sync_stale');
   });
 });

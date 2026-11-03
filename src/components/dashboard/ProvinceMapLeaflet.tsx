@@ -8,6 +8,17 @@
 // imports this with `ssr: false` to satisfy Next.js SSR boundaries.
 'use client';
 
+import { COLOR, MIN_TEXT_PX } from '@/config/design-tokens';
+import {
+  classifyHospitalLink,
+  HOSPITAL_LINK_STATUS,
+  hospitalLinkText,
+  kioskLinkText,
+  type HospitalLinkStatus,
+  type HospitalStatusTone,
+} from '@/config/hospital-status';
+import { MapStatusLegend } from './MapStatusLegend';
+import { mapBackground, mapPalette, type MapPalette } from '@/config/map-palette';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
@@ -85,6 +96,20 @@ const HOSPITAL_CROSS_SVG =
   '<path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6z" fill="currentColor"/>' +
   '</svg>';
 
+const PIN_STATUS_CLASS: Record<HospitalLinkStatus, string> = {
+  online: 'kk-pin__status--online',
+  blocked: 'kk-pin__status--blocked',
+  offline: 'kk-pin__status--offline',
+  noSync: 'kk-pin__status--unknown',
+  unknown: 'kk-pin__status--unknown',
+};
+
+const TONE_DOT: Partial<Record<HospitalStatusTone, string>> = {
+  ok: COLOR.riskLow,
+  warn: COLOR.riskMedium,
+  danger: COLOR.riskHigh,
+};
+
 function buildHospitalIcon(params: {
   color: string;
   sizePx: number;
@@ -93,9 +118,18 @@ function buildHospitalIcon(params: {
   connectionStatus: 'ONLINE' | 'OFFLINE' | 'UNKNOWN';
   syncStatus: 'OK' | 'BLOCKED' | 'NEVER_SYNCED';
   syncBlockedReason: string | null;
+  mode: 'light' | 'kiosk';
 }): DivIcon {
-  const { color, sizePx, isHigh, isSelected, connectionStatus, syncStatus, syncBlockedReason } =
-    params;
+  const {
+    color,
+    sizePx,
+    isHigh,
+    isSelected,
+    connectionStatus,
+    syncStatus,
+    syncBlockedReason,
+    mode,
+  } = params;
   const isOffline = connectionStatus === 'OFFLINE';
   const classes = [
     'kk-pin',
@@ -115,23 +149,12 @@ function buildHospitalIcon(params: {
   // BLOCKED takes priority over ONLINE so the operator doesn't read a
   // healthy tunnel as a healthy sync. NEVER_SYNCED falls under UNKNOWN
   // visually since it's a similar "no data flowing" message.
-  const isBlocked = syncStatus === 'BLOCKED';
-  const statusClass = isBlocked
-    ? 'kk-pin__status--blocked'
-    : connectionStatus === 'ONLINE' && syncStatus !== 'NEVER_SYNCED'
-      ? 'kk-pin__status--online'
-      : connectionStatus === 'OFFLINE'
-        ? 'kk-pin__status--offline'
-        : 'kk-pin__status--unknown';
-  const statusTitle = isBlocked
-    ? `Sync ถูกระงับ — ${syncBlockedReason ?? 'unknown'}`
-    : syncStatus === 'NEVER_SYNCED'
-      ? 'ยังไม่เคยมีการเชื่อมต่อ Sync'
-      : connectionStatus === 'ONLINE'
-        ? 'Online'
-        : connectionStatus === 'OFFLINE'
-          ? 'Offline'
-          : 'Unknown';
+  const link = classifyHospitalLink(connectionStatus, syncStatus);
+  const statusClass = PIN_STATUS_CLASS[link];
+  const statusTitle =
+    mode === 'kiosk'
+      ? kioskLinkText(connectionStatus, syncStatus, syncBlockedReason).pinTitle
+      : (({ label, detail }) => `${label} — ${detail}`)(hospitalLinkText(link, syncBlockedReason));
   const html =
     `<div class="${classes}" style="--kk-pin-color:${color};--kk-pin-size:${sizePx}px">` +
     '<div class="kk-pin__halo"></div>' +
@@ -190,10 +213,7 @@ function activeCountRadiusBoost(workload: number): number {
   return 5;
 }
 
-function riskColor(
-  live: DashboardHospital | undefined,
-  palette: ReturnType<typeof buildPalette>,
-): string {
+function riskColor(live: DashboardHospital | undefined, palette: MapPalette): string {
   if (!live) return palette.idle;
   // Acute labor risk owns red/amber outright.
   if (live.counts.high > 0) return palette.high;
@@ -205,35 +225,6 @@ function riskColor(
   if (live.ancCounts.hr3 > 0) return palette.med;
   if (live.ancCounts.total > 0) return palette.low;
   return palette.idle;
-}
-
-function buildPalette(mode: 'light' | 'kiosk') {
-  if (mode === 'kiosk') {
-    return {
-      boundaryStroke: '#6ba7e5',
-      boundaryFill: 'rgba(107, 167, 229, 0.08)',
-      amphoeStroke: 'rgba(107, 167, 229, 0.18)',
-      high: '#e05c5c',
-      med: '#e0a03a',
-      low: '#4fb58a',
-      idle: '#7f8fad',
-      pinStroke: '#06121f',
-      tooltipBg: '#0b1b2e',
-      tooltipInk: '#e6ecf5',
-    };
-  }
-  return {
-    boundaryStroke: '#2b3a8c',
-    boundaryFill: 'rgba(43, 58, 140, 0.06)',
-    amphoeStroke: 'rgba(43, 58, 140, 0.18)',
-    high: '#ef4444',
-    med: '#eab308',
-    low: '#22c55e',
-    idle: '#94a3b8',
-    pinStroke: '#ffffff',
-    tooltipBg: '#ffffff',
-    tooltipInk: '#0c1530',
-  };
 }
 
 interface PinEntry {
@@ -271,7 +262,7 @@ export default function ProvinceMapLeaflet({
   size = 'mini',
 }: ProvinceMapLeafletProps) {
   const router = useRouter();
-  const palette = buildPalette(mode);
+  const palette = mapPalette(mode);
   const w = WEIGHTS[size];
 
   // Active province drives which shapes + pin list are rendered. A missing
@@ -391,6 +382,7 @@ export default function ProvinceMapLeaflet({
         connectionStatus,
         syncStatus,
         syncBlockedReason,
+        mode,
       });
       return {
         hcode,
@@ -437,18 +429,18 @@ export default function ProvinceMapLeaflet({
       pins.push(buildPin(h.hcode, h.name, h.level, coord));
     }
     return pins;
-  }, [activeMap, hospitals, liveByHcode, centroidByDistrict, selected, palette, w]);
+  }, [activeMap, hospitals, liveByHcode, centroidByDistrict, selected, palette, w, mode]);
 
   if (!activeMap) {
     return (
       <div
         className="grid h-full w-full place-items-center"
         style={{
-          background: mode === 'kiosk' ? '#06121f' : 'var(--surface-cool)',
+          background: mapBackground(mode),
           isolation: 'isolate',
         }}
       >
-        <span className="font-mono text-[12px] tracking-[0.18em] text-[var(--ink-navy-muted)]">
+        <span className="font-mono text-caption tracking-[0.18em] text-[var(--ink-navy-muted)]">
           LOADING {activeProvince === KK_PROVINCE_CODE ? 'MAP' : `PROVINCE ${activeProvince}`}…
         </span>
       </div>
@@ -456,71 +448,79 @@ export default function ProvinceMapLeaflet({
   }
 
   return (
-    <div
-      className="relative h-full w-full overflow-hidden"
-      style={{
-        background: mode === 'kiosk' ? '#06121f' : '#eef1f6',
-        // Contain Leaflet's internal pane z-indexes (200–700) so they
-        // can't render on top of modal dialogs or page chrome.
-        isolation: 'isolate',
-      }}
-    >
-      <MapContainer
-        key={activeProvince}
-        bounds={activeMap.bounds}
-        center={activeMap.center}
-        style={{ height: '100%', width: '100%', background: 'transparent' }}
-        scrollWheelZoom
-        zoomControl={false}
-        attributionControl
-        minZoom={7}
-        maxZoom={13}
+    <div className="flex h-full w-full flex-col">
+      <div
+        className="relative min-h-0 w-full flex-1 overflow-hidden"
+        style={{
+          background: mapBackground(mode),
+          // Contain Leaflet's internal pane z-indexes (200–700) so they
+          // can't render on top of modal dialogs or page chrome.
+          isolation: 'isolate',
+        }}
       >
-        <TileLayer
-          attribution={tileAttribution}
-          url={tileUrl}
-          opacity={mode === 'kiosk' ? 0.85 : 0.95}
-        />
+        <MapContainer
+          key={activeProvince}
+          bounds={activeMap.bounds}
+          center={activeMap.center}
+          style={{ height: '100%', width: '100%', background: 'transparent' }}
+          scrollWheelZoom
+          zoomControl={false}
+          attributionControl
+          minZoom={7}
+          maxZoom={13}
+        >
+          <TileLayer
+            attribution={tileAttribution}
+            url={tileUrl}
+            opacity={mode === 'kiosk' ? 0.85 : 0.95}
+          />
 
-        {/* Amphoe outlines (subtle, interior hairlines) */}
-        <GeoJSON
-          data={activeMap.districtsFC}
-          style={{
-            color: palette.amphoeStroke,
-            weight: w.amphoeWeight,
-            fillColor: palette.boundaryFill,
-            fillOpacity: 1,
-          }}
-        />
+          {/* Amphoe outlines (subtle, interior hairlines) */}
+          <GeoJSON
+            data={activeMap.districtsFC}
+            style={{
+              color: palette.amphoeStroke,
+              weight: w.amphoeWeight,
+              fillColor: palette.boundaryFill,
+              fillOpacity: 1,
+            }}
+          />
 
-        {/* Province-wide outline — drawn thicker, no fill, on top of tiles */}
-        <GeoJSON
-          data={activeMap.provinceFC}
-          style={{
-            color: palette.boundaryStroke,
-            weight: w.boundaryWeight,
-            fill: false,
-            dashArray: mode === 'kiosk' ? '4 3' : undefined,
-          }}
-          pane="overlayPane"
-          interactive={false}
-        />
+          {/* Province-wide outline — drawn thicker, no fill, on top of tiles */}
+          <GeoJSON
+            data={activeMap.provinceFC}
+            style={{
+              color: palette.boundaryStroke,
+              weight: w.boundaryWeight,
+              fill: false,
+              dashArray: mode === 'kiosk' ? '4 3' : undefined,
+            }}
+            pane="overlayPane"
+            interactive={false}
+          />
 
-        {/* Hospital markers — rendered as hospital-sign divIcons (risk-colored
+          {/* Hospital markers — rendered as hospital-sign divIcons (risk-colored
              square with a medical cross). Pulse halo on HIGH risk via CSS.
              Tooltip direction is picked dynamically per pin so the popup
              never gets clipped by the map div edge — see HospitalMarker. */}
-        {hospitalPins.map((pin) => (
-          <HospitalMarker key={pin.hcode} pin={pin} onClick={handleMarkerClick} />
-        ))}
+          {hospitalPins.map((pin) => (
+            <HospitalMarker
+              key={pin.hcode}
+              pin={pin}
+              onClick={handleMarkerClick}
+              kiosk={mode === 'kiosk'}
+            />
+          ))}
 
-        <ZoomControl position="bottomright" />
-      </MapContainer>
+          <ZoomControl position="bottomright" />
+        </MapContainer>
 
-      {/* Status legend — top-left overlay, dense single column. Sits above
-          the Leaflet pane via z-index so it stays interactive even though
-          the map captures pointer events. Theme adapts to light vs kiosk. */}
-      <MapStatusLegend mode={mode} />
+        {/* Kiosk keeps its top-left overlay (frozen look); it sits above the
+          Leaflet pane via z-index. */}
+        {mode === 'kiosk' && <MapStatusLegend mode={mode} />}
+      </div>
+      {/* Light mode: legend below the map pane so it never covers markers. */}
+      {mode !== 'kiosk' && <MapStatusLegend mode={mode} />}
     </div>
   );
 }
@@ -530,7 +530,15 @@ export default function ProvinceMapLeaflet({
 // tooltip is ~280 × ~150 px, so we estimate the half-extents below and
 // re-pick a direction whenever the pointer enters the marker. Re-picking
 // on hover (not on every map move) keeps the cost trivial.
-function HospitalMarker({ pin, onClick }: { pin: PinEntry; onClick: (hcode: string) => void }) {
+function HospitalMarker({
+  pin,
+  onClick,
+  kiosk,
+}: {
+  pin: PinEntry;
+  onClick: (hcode: string) => void;
+  kiosk: boolean;
+}) {
   const map = useMap();
   const [direction, setDirection] = useState<'top' | 'bottom' | 'left' | 'right'>('top');
 
@@ -590,7 +598,7 @@ function HospitalMarker({ pin, onClick }: { pin: PinEntry; onClick: (hcode: stri
       }}
     >
       <Tooltip direction={direction} offset={offset} sticky className="kk-map-tooltip">
-        <HospitalTooltip pin={pin} />
+        <HospitalTooltip pin={pin} kiosk={kiosk} />
       </Tooltip>
     </Marker>
   );
@@ -601,45 +609,29 @@ function HospitalMarker({ pin, onClick }: { pin: PinEntry; onClick: (hcode: stri
 // verdict, labor floor breakdown, ANC registry, last-sync freshness.
 // Keeps Thai-first copy for the floor staff while leaving structural
 // labels (LABOR / ANC / SYNC) in mono caps for at-a-glance scanning.
-function HospitalTooltip({ pin }: { pin: PinEntry }) {
+function HospitalTooltip({ pin, kiosk }: { pin: PinEntry; kiosk: boolean }) {
   const { live, name, level, hcode } = pin;
   // Tooltip backdrop is forced dark via .kk-map-tooltip CSS so the same
   // white-on-navy palette works in both light and kiosk app modes.
-  const ink = '#e6ecf5';
+  const ink = mapPalette('kiosk').tooltipInk;
   const muted = 'rgba(255,255,255,0.65)';
   const ruleColor = 'rgba(255,255,255,0.18)';
+  // The tooltip surface is dark in BOTH modes (.kk-map-tooltip), so the light
+  // palette's riskHigh (~3.2:1 on it) fails AA everywhere; use the kiosk
+  // palette's lighter high red for the H / HR3 counts.
+  const highInk = mapPalette('kiosk').high;
 
   // Connection + sync state — same precedence as the corner dot so the
   // tooltip and the dot tell a consistent story.
   const conn = live?.connectionStatus ?? 'UNKNOWN';
   const syncStatus = live?.syncStatus ?? 'NEVER_SYNCED';
-  const isBlocked = syncStatus === 'BLOCKED';
-  const isNeverSynced = syncStatus === 'NEVER_SYNCED';
-  const statusLabel = isBlocked
-    ? 'BLOCKED'
-    : conn === 'ONLINE' && !isNeverSynced
-      ? 'ONLINE'
-      : conn === 'OFFLINE'
-        ? 'OFFLINE'
-        : isNeverSynced
-          ? 'NO SYNC'
-          : 'UNKNOWN';
-  const statusColor = isBlocked
-    ? '#eab308'
-    : conn === 'ONLINE' && !isNeverSynced
-      ? '#22c55e'
-      : conn === 'OFFLINE'
-        ? '#ef4444'
-        : muted;
-  const statusDetail = isBlocked
-    ? `Sync ถูกระงับ — ${live?.syncBlockedReason ?? 'unknown'}`
-    : isNeverSynced
-      ? 'ยังไม่เคยเชื่อม sync'
-      : conn === 'OFFLINE'
-        ? 'ติดต่อตู้ BMS ไม่ได้'
-        : conn === 'ONLINE'
-          ? 'sync ปกติ'
-          : 'ยังไม่ทราบสถานะ';
+  const link = classifyHospitalLink(conn, syncStatus);
+  const text = kiosk
+    ? kioskLinkText(conn, syncStatus, live?.syncBlockedReason)
+    : hospitalLinkText(link, live?.syncBlockedReason);
+  const statusLabel = text.label;
+  const statusDetail = text.detail;
+  const statusColor = TONE_DOT[HOSPITAL_LINK_STATUS[link].tone] ?? muted;
 
   // Labor + ANC breakdown — fall back to "—" cells when no data so the
   // grid layout doesn't shift between hospitals with vs without data.
@@ -653,7 +645,7 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
     <div
       style={{
         color: ink,
-        fontSize: 12,
+        fontSize: kiosk ? 12 : MIN_TEXT_PX,
         lineHeight: 1.35,
         minWidth: 220,
         maxWidth: 280,
@@ -664,7 +656,7 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
         <strong style={{ fontSize: 13 }}>{name}</strong>
       </div>
-      <div style={{ color: muted, fontSize: 10, marginTop: 1 }}>
+      <div style={{ color: muted, fontSize: kiosk ? 10 : MIN_TEXT_PX, marginTop: 1 }}>
         <span
           style={{
             border: `1px solid ${ruleColor}`,
@@ -699,10 +691,16 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
             flexShrink: 0,
           }}
         />
-        <span style={{ fontWeight: 600, fontSize: 11, letterSpacing: '0.04em' }}>
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: kiosk ? 11 : MIN_TEXT_PX,
+            letterSpacing: kiosk ? '0.04em' : undefined,
+          }}
+        >
           {statusLabel}
         </span>
-        <span style={{ color: muted, fontSize: 11 }}>· {statusDetail}</span>
+        <span style={{ color: muted, fontSize: kiosk ? 11 : MIN_TEXT_PX }}>· {statusDetail}</span>
       </div>
 
       {/* LABOR + ANC two-column grid */}
@@ -719,7 +717,7 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
         <div>
           <div
             style={{
-              fontSize: 9,
+              fontSize: kiosk ? 9 : MIN_TEXT_PX,
               color: muted,
               letterSpacing: '0.12em',
               fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
@@ -729,26 +727,28 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
           </div>
           <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.1 }}>
             {labor.total}
-            <span style={{ fontSize: 10, color: muted, marginLeft: 3 }}>ราย</span>
+            <span style={{ fontSize: kiosk ? 10 : MIN_TEXT_PX, color: muted, marginLeft: 3 }}>
+              ราย
+            </span>
           </div>
           <div
             style={{
-              fontSize: 10,
+              fontSize: kiosk ? 10 : MIN_TEXT_PX,
               fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
               marginTop: 2,
             }}
           >
-            <span style={{ color: '#ef4444' }}>H {labor.high}</span>
+            <span style={{ color: highInk }}>H {labor.high}</span>
             <span style={{ color: muted }}> · </span>
-            <span style={{ color: '#eab308' }}>M {labor.medium}</span>
+            <span style={{ color: COLOR.riskMedium }}>M {labor.medium}</span>
             <span style={{ color: muted }}> · </span>
-            <span style={{ color: '#22c55e' }}>L {labor.low}</span>
+            <span style={{ color: COLOR.riskLow }}>L {labor.low}</span>
           </div>
         </div>
         <div>
           <div
             style={{
-              fontSize: 9,
+              fontSize: kiosk ? 9 : MIN_TEXT_PX,
               color: muted,
               letterSpacing: '0.12em',
               fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
@@ -758,22 +758,24 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
           </div>
           <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.1 }}>
             {anc.total}
-            <span style={{ fontSize: 10, color: muted, marginLeft: 3 }}>ราย</span>
+            <span style={{ fontSize: kiosk ? 10 : MIN_TEXT_PX, color: muted, marginLeft: 3 }}>
+              ราย
+            </span>
           </div>
           {anc.hr3 > 0 ? (
             <div
               style={{
-                fontSize: 10,
+                fontSize: kiosk ? 10 : MIN_TEXT_PX,
                 fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
                 marginTop: 2,
-                color: '#ef4444',
+                color: highInk,
                 fontWeight: 700,
               }}
             >
               HR3 {anc.hr3}
             </div>
           ) : (
-            <div style={{ fontSize: 10, color: muted, marginTop: 2 }}>—</div>
+            <div style={{ fontSize: kiosk ? 10 : MIN_TEXT_PX, color: muted, marginTop: 2 }}>—</div>
           )}
         </div>
       </div>
@@ -787,20 +789,22 @@ function HospitalTooltip({ pin }: { pin: PinEntry }) {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'baseline',
-          fontSize: 10,
+          fontSize: kiosk ? 10 : MIN_TEXT_PX,
           color: muted,
           fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
         }}
       >
         <span>SYNC · {lastSyncRel}</span>
-        {lastSyncAbs && <span style={{ fontSize: 9, opacity: 0.8 }}>{lastSyncAbs}</span>}
+        {lastSyncAbs && (
+          <span style={{ fontSize: kiosk ? 9 : MIN_TEXT_PX, opacity: 0.8 }}>{lastSyncAbs}</span>
+        )}
       </div>
 
       {/* Click hint */}
       <div
         style={{
           marginTop: 4,
-          fontSize: 9,
+          fontSize: kiosk ? 9 : MIN_TEXT_PX,
           color: muted,
           fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
           letterSpacing: '0.08em',
@@ -821,67 +825,4 @@ function formatRelativeAgeShort(iso: string | null): string {
   if (mins < 60) return `${Math.max(1, mins)} นาทีที่แล้ว`;
   if (hrs < 24) return `${hrs} ชม.ที่แล้ว`;
   return `${days} วันที่แล้ว`;
-}
-
-function MapStatusLegend({ mode }: { mode: 'light' | 'kiosk' }) {
-  const isKiosk = mode === 'kiosk';
-  const bg = isKiosk ? 'rgba(11, 27, 46, 0.85)' : 'rgba(255, 255, 255, 0.92)';
-  const ink = isKiosk ? '#e6ecf5' : '#0b1b2e';
-  const inkMuted = isKiosk ? 'rgba(230,236,245,0.7)' : 'rgba(11,27,46,0.65)';
-  const border = isKiosk ? 'rgba(107,167,229,0.3)' : 'rgba(43,58,140,0.22)';
-  const items: Array<{ color: string; label: string; sub: string }> = [
-    { color: '#22c55e', label: 'ONLINE', sub: 'sync ปกติ' },
-    { color: '#eab308', label: 'BLOCKED', sub: 'sync ถูกระงับ' },
-    { color: '#ef4444', label: 'OFFLINE', sub: 'ติดต่อไม่ได้' },
-    { color: '#94a3b8', label: 'UNKNOWN', sub: 'ยังไม่ sync' },
-  ];
-  return (
-    <div
-      className="absolute"
-      style={{
-        top: 8,
-        left: 8,
-        zIndex: 500,
-        background: bg,
-        color: ink,
-        border: `1px solid ${border}`,
-        borderRadius: 4,
-        padding: '6px 8px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
-        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-        pointerEvents: 'none',
-      }}
-      aria-label="Map dot color legend"
-    >
-      <div
-        style={{
-          fontSize: 9,
-          letterSpacing: '0.14em',
-          color: inkMuted,
-          marginBottom: 4,
-        }}
-      >
-        STATUS DOT
-      </div>
-      <div className="flex flex-col gap-[2px]">
-        {items.map((it) => (
-          <div key={it.label} className="flex items-center gap-2">
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: it.color,
-                border: `1.5px solid ${isKiosk ? '#06121f' : '#ffffff'}`,
-                boxShadow: '0 0 0 0.5px rgba(0,0,0,0.15)',
-                flexShrink: 0,
-              }}
-            />
-            <span style={{ fontSize: 10, fontWeight: 600 }}>{it.label}</span>
-            <span style={{ fontSize: 10, color: inkMuted }}>·&nbsp;{it.sub}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }

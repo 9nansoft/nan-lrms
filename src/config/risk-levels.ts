@@ -1,6 +1,7 @@
 // T014: CPD risk level configuration per SPEC.md section 4.1.2-4.1.3
 
 import { RiskLevel } from '@/types/domain';
+import { COLOR } from '@/config/design-tokens';
 
 export interface RiskLevelConfig {
   level: RiskLevel;
@@ -8,7 +9,10 @@ export interface RiskLevelConfig {
   maxScore: number;
   color: string;
   bgColor: string;
+  textColor: string;
   labelTh: string;
+  /** Compact Thai label for dense chips (accessible name stays labelTh). */
+  shortLabelTh: string;
   labelEn: string;
   action: string;
 }
@@ -18,9 +22,11 @@ export const RISK_LEVELS: Record<RiskLevel, RiskLevelConfig> = {
     level: RiskLevel.LOW,
     minScore: 0,
     maxScore: 4.99,
-    color: '#22c55e',
-    bgColor: '#dcfce7',
+    color: COLOR.riskLow,
+    bgColor: COLOR.riskLowTint,
+    textColor: COLOR.riskLowText,
     labelTh: 'เสี่ยงต่ำ',
+    shortLabelTh: 'ต่ำ',
     labelEn: 'Low Risk',
     action: 'ติดตามปกติ',
   },
@@ -28,9 +34,11 @@ export const RISK_LEVELS: Record<RiskLevel, RiskLevelConfig> = {
     level: RiskLevel.MEDIUM,
     minScore: 5,
     maxScore: 9.99,
-    color: '#eab308',
-    bgColor: '#fef9c3',
+    color: COLOR.riskMedium,
+    bgColor: COLOR.riskMediumTint,
+    textColor: COLOR.riskMediumText,
     labelTh: 'เสี่ยงปานกลาง',
+    shortLabelTh: 'ปานกลาง',
     labelEn: 'Medium Risk',
     action: 'เฝ้าระวังใกล้ชิด, เตรียมพร้อมส่งต่อ',
   },
@@ -38,9 +46,11 @@ export const RISK_LEVELS: Record<RiskLevel, RiskLevelConfig> = {
     level: RiskLevel.HIGH,
     minScore: 10,
     maxScore: Infinity,
-    color: '#ef4444',
-    bgColor: '#fee2e2',
+    color: COLOR.riskHigh,
+    bgColor: COLOR.riskHighTint,
+    textColor: COLOR.riskHighText,
     labelTh: 'เสี่ยงสูง',
+    shortLabelTh: 'สูง',
     labelEn: 'High Risk',
     action: 'ควรประสานส่งต่อทันที!',
   },
@@ -117,3 +127,19 @@ export function getRiskConfig(level: RiskLevel): RiskLevelConfig {
 export function isHighRisk(score: number): boolean {
   return classifyRiskLevel(score) === RiskLevel.HIGH;
 }
+
+/** Maximum contribution of each CPD factor, i.e. the top band of its
+ *  `evaluate()` in CPD_FACTOR_WEIGHTS. Test-pinned against evaluate(). */
+export const CPD_FACTOR_MAX_SCORES = {
+  gravida: 2,
+  ancCount: 1.5,
+  gaWeeks: 1.5,
+  heightCm: 2,
+  weightDiffKg: 2,
+  fundalHeightCm: 2,
+  usWeightG: 2,
+  hematocritPct: 1.5,
+} as const;
+
+/** Highest possible CPD score (shown as "/ 14.5" next to a patient's score). */
+export const CPD_MAX_SCORE = Object.values(CPD_FACTOR_MAX_SCORES).reduce((s, v) => s + v, 0);

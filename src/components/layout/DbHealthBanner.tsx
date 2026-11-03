@@ -91,12 +91,7 @@ export function DbHealthBanner() {
   return (
     <div
       role="alert"
-      className="flex items-center gap-3 border-b px-4 py-2 font-mono text-[12px]"
-      style={{
-        background: 'linear-gradient(90deg, #fee2e2 0%, #fecaca 100%)',
-        borderColor: '#ef4444',
-        color: '#7f1d1d',
-      }}
+      className="flex items-center gap-3 border-b border-danger bg-danger-tint px-4 py-2 text-caption text-danger-text"
     >
       <AlertTriangle className="h-4 w-4 shrink-0" />
       <div className="flex-1">
@@ -110,14 +105,14 @@ export function DbHealthBanner() {
           ครั้งล่าสุดที่ใช้งานได้: <span className="font-semibold">{lastOk}</span>
         </span>
         <span className="mx-2 opacity-60">·</span>
-        <span className="text-[11px] opacity-80">
-          retry {state.failureStreak}
-        </span>
+        <span className="opacity-80">retry {state.failureStreak}</span>
+        <span className="mx-2 opacity-60">·</span>
+        <span>วิธีแก้: กด &quot;ลองอีกครั้ง&quot; หากยังไม่หายให้แจ้งผู้ดูแลระบบ</span>
       </div>
       <button
         type="button"
         onClick={probe}
-        className="inline-flex items-center gap-1 rounded-sm border border-red-400 bg-white/60 px-2 py-0.5 text-[11px] font-semibold hover:bg-white"
+        className="inline-flex items-center gap-1 rounded-sm border border-danger bg-white/60 px-2 py-0.5 text-caption font-semibold hover:bg-white"
       >
         <RefreshCw className="h-3 w-3" />
         ลองอีกครั้ง

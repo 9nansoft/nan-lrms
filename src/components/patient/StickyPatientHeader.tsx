@@ -1,4 +1,4 @@
-// T010: StickyPatientHeader — sticky bar when main header scrolls out of view
+// T010: StickyPatientHeader — compact bar once the main header scrolls out of view
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -55,33 +55,29 @@ export function StickyPatientHeader({
     };
   }, [mainHeaderRef]);
 
-  if (!isVisible) return null;
-
   const laborLabel = LABOR_STATUS_LABELS[laborStatus] ?? laborStatus;
 
+  // B2: a zero-height sticky anchor inside the content column. It always sits
+  // under the shell header (--app-header-h, published by AppHeader) and never
+  // shifts layout when the bar appears, which would re-trigger the observer.
+  // A div, not header.sticky, so kiosk CSS never targets it.
   return (
-    <div
-      className="fixed top-14 right-0 left-0 z-40 border-b border-slate-200/60 bg-white/95 backdrop-blur-md shadow-[0_4px_12px_rgba(0,0,0,0.05)] print:hidden md:left-60"
-      role="banner"
-      aria-label="Sticky patient header"
-    >
-      <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-2">
-        <span className="font-mono text-sm font-bold text-slate-800 truncate">AN {an}</span>
-        <span className="text-xs text-slate-500 shrink-0">HN: {hn}</span>
-        <Badge variant={laborStatus === 'ACTIVE' ? 'default' : 'secondary'}>
-          {laborLabel}
-        </Badge>
-        <Badge variant="outline" className="shrink-0">
-          {hospitalName}
-        </Badge>
-        {cpdScore && (
-          <CpdBadge
-            score={cpdScore.score}
-            riskLevel={cpdScore.riskLevel}
-            size="sm"
-          />
-        )}
-      </div>
+    <div className="sticky top-[var(--app-header-h,0px)] z-30 h-0 print:hidden">
+      {isVisible && (
+        <div
+          role="region"
+          aria-label="แถบข้อมูลผู้คลอดย่อ"
+          className="absolute inset-x-0 top-0 flex items-center gap-3 border-b border-border bg-surface-card/95 px-4 py-2 shadow-soft backdrop-blur-md md:px-6"
+        >
+          <span className="truncate text-body font-semibold text-ink">AN {an}</span>
+          <span className="shrink-0 text-label text-ink-muted">HN {hn}</span>
+          <Badge variant={laborStatus === 'ACTIVE' ? 'default' : 'secondary'}>{laborLabel}</Badge>
+          <Badge variant="outline" className="shrink-0">
+            {hospitalName}
+          </Badge>
+          {cpdScore && <CpdBadge score={cpdScore.score} riskLevel={cpdScore.riskLevel} size="sm" />}
+        </div>
+      )}
     </div>
   );
 }

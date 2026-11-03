@@ -1,14 +1,17 @@
 // CpdFactorBreakdown — per-factor contribution to the CPD risk score.
-// Redesigned 2026-04-21 (v3): semi-circular gauge for the total score,
-// color-coded factor rows with an inline value, and a dashed missing-data
-// pattern that's visually distinct from "present but 0 contribution". The
+// Half-circle gauge for the total score, tone-coloured factor rows (token
+// classes from STATUS_TONE) with an inline value, and a dashed missing-data
+// pattern that is visually distinct from "present but 0 contribution". The
 // goal is to let a clinician glance at this panel and identify which
-// specific factor(s) are driving the risk.
+// specific factor(s) are driving the risk. Maxima come from config.
 'use client';
 
 import { CheckCircle2, AlertTriangle, HelpCircle, Gauge } from 'lucide-react';
-import { formatRelativeTime } from '@/lib/utils';
-import { CPD_FACTOR_WEIGHTS } from '@/config/risk-levels';
+import { cn, formatRelativeTime } from '@/lib/utils';
+import { CPD_FACTOR_MAX_SCORES, CPD_FACTOR_WEIGHTS, CPD_MAX_SCORE, RISK_LEVELS } from '@/config/risk-levels';
+import { COLOR, MIN_TEXT_PX } from '@/config/design-tokens';
+import { STATUS_TONE, type StatusTone } from '@/config/status-tone';
+import { RiskLevel } from '@/types/domain';
 
 interface CpdFactorBreakdownProps {
   score: number;
@@ -27,17 +30,6 @@ interface CpdFactorBreakdownProps {
   calculatedAt: string;
 }
 
-const FACTOR_MAX_SCORES: Record<string, number> = {
-  gravida: 2,
-  ancCount: 1.5,
-  gaWeeks: 1.5,
-  heightCm: 2,
-  weightDiffKg: 2,
-  fundalHeightCm: 2,
-  usWeightG: 2,
-  hematocritPct: 1.5,
-};
-
 const FACTOR_ORDER: (keyof CpdFactorBreakdownProps['factors'])[] = [
   'gravida',
   'ancCount',
@@ -48,8 +40,6 @@ const FACTOR_ORDER: (keyof CpdFactorBreakdownProps['factors'])[] = [
   'usWeightG',
   'hematocritPct',
 ];
-
-const TOTAL_MAX_SCORE = Object.values(FACTOR_MAX_SCORES).reduce((sum, v) => sum + v, 0);
 
 type FactorSeverity = 'normal' | 'partial' | 'abnormal' | 'missing';
 
@@ -64,28 +54,15 @@ function factorSeverity(
   return 'abnormal';
 }
 
-function severityColor(s: FactorSeverity): string {
-  switch (s) {
-    case 'abnormal': return 'var(--risk-high)';
-    case 'partial':  return 'var(--risk-medium)';
-    case 'missing':  return 'var(--ink-navy-muted)';
-    default:         return 'var(--risk-low)';
-  }
-}
+const FACTOR_TONE: Record<FactorSeverity, StatusTone> = {
+  abnormal: 'danger',
+  partial: 'warn',
+  missing: 'neutral',
+  normal: 'ok',
+};
 
-function severityBg(s: FactorSeverity): string {
-  switch (s) {
-    case 'abnormal': return 'color-mix(in srgb, #ef4444 10%, white)';
-    case 'partial':  return 'color-mix(in srgb, #eab308 12%, white)';
-    case 'missing':  return 'color-mix(in srgb, #6b7693 5%, white)';
-    default:         return 'color-mix(in srgb, #22c55e 8%, white)';
-  }
-}
-
-function riskTone(riskLevel: string): { color: string; label: string } {
-  if (riskLevel === 'HIGH')   return { color: 'var(--risk-high)',   label: 'เสี่ยงสูง' };
-  if (riskLevel === 'MEDIUM') return { color: 'var(--risk-medium)', label: 'เฝ้าระวัง' };
-  return { color: 'var(--risk-low)', label: 'ปกติ' };
+function riskConfig(riskLevel: string) {
+  return RISK_LEVELS[riskLevel as RiskLevel] ?? RISK_LEVELS[RiskLevel.LOW];
 }
 
 // Semi-circular gauge for total score. Renders a 180° arc with the risk-tone
@@ -101,7 +78,7 @@ function ScoreGauge({
 }) {
   // PGlite NUMERIC → string coercion guard.
   const scoreNum = typeof score === 'number' ? score : Number(score);
-  const tone = riskTone(riskLevel);
+  const cfg = riskConfig(riskLevel);
   const pct = Math.min((Number.isFinite(scoreNum) ? scoreNum : 0) / maxScore, 1);
 
   // Arc parameters
@@ -142,7 +119,7 @@ function ScoreGauge({
         <path
           d={trackPath}
           fill="none"
-          stroke="var(--rule-hair)"
+          stroke={COLOR.border}
           strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
@@ -150,7 +127,7 @@ function ScoreGauge({
         <path
           d={buildArcPath(pct)}
           fill="none"
-          stroke={tone.color}
+          stroke={cfg.color}
           strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
@@ -159,10 +136,9 @@ function ScoreGauge({
           x={cx}
           y={cy - 4}
           textAnchor="middle"
-          fontFamily="monospace"
           fontSize={30}
           fontWeight={700}
-          fill="var(--ink-navy)"
+          fill={COLOR.ink}
           style={{ letterSpacing: '-0.03em' }}
         >
           {Number.isFinite(scoreNum) ? scoreNum.toFixed(scoreNum % 1 === 0 ? 0 : 2) : '—'}
@@ -171,20 +147,19 @@ function ScoreGauge({
           x={cx}
           y={cy + 14}
           textAnchor="middle"
-          fontFamily="monospace"
-          fontSize={10}
-          fill="var(--ink-navy-muted)"
+          fontSize={MIN_TEXT_PX}
+          fill={COLOR.inkMuted}
           letterSpacing="0.1em"
         >
           / {maxScore}
         </text>
       </svg>
       <div
-        className="mt-1 inline-flex items-center gap-1 rounded-sm px-2 py-0.5 font-mono text-[10px] font-bold tracking-[0.12em] text-white"
-        style={{ background: tone.color }}
+        className="mt-1 inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-label font-semibold text-white"
+        style={{ backgroundColor: cfg.textColor }}
       >
-        <AlertTriangle className="h-2.5 w-2.5" />
-        {tone.label.toUpperCase()} · {riskLevel}
+        <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+        {cfg.labelTh}
       </div>
     </div>
   );
@@ -202,47 +177,36 @@ function FactorRow({
   missing: boolean;
 }) {
   const sev = factorSeverity(contribution, maxScore, missing);
-  const color = severityColor(sev);
-  const bg = severityBg(sev);
+  const t = STATUS_TONE[FACTOR_TONE[sev]];
 
   const icon =
-    sev === 'abnormal' ? <AlertTriangle className="h-3 w-3" />
-    : sev === 'missing' ? <HelpCircle className="h-3 w-3" />
-    : sev === 'normal' ? <CheckCircle2 className="h-3 w-3" />
-    : <AlertTriangle className="h-3 w-3" />;
+    sev === 'abnormal' ? <AlertTriangle className="h-3.5 w-3.5" />
+    : sev === 'missing' ? <HelpCircle className="h-3.5 w-3.5" />
+    : sev === 'normal' ? <CheckCircle2 className="h-3.5 w-3.5" />
+    : <AlertTriangle className="h-3.5 w-3.5" />;
 
   const pct = maxScore > 0 ? Math.min(contribution / maxScore, 1) * 100 : 0;
+  const solid = sev !== 'normal' && sev !== 'missing';
 
   return (
-    <div
-      className="flex items-center gap-2 px-2.5 py-1.5"
-      style={{
-        background: bg,
-        borderLeft: `3px solid ${color}`,
-      }}
-    >
-      <span style={{ color }}>{icon}</span>
-      <span className="flex-1 text-[12px] text-[var(--ink-navy-dim)]">{nameTh}</span>
+    <div className={cn('flex items-center gap-2 border-l-4 px-2.5 py-1.5', t.accent, t.tint)}>
+      <span aria-hidden="true" className={t.text}>
+        {icon}
+      </span>
+      <span className="flex-1 text-caption text-ink">{nameTh}</span>
       {/* Contribution bar — visually encodes how much this factor pushed the
           score toward its maximum contribution (which maps to abnormal). */}
-      <div
-        className="relative h-2 w-24 shrink-0 overflow-hidden rounded-full"
-        style={{ background: 'var(--rule-hair)' }}
-      >
+      <div className="relative h-2 w-24 shrink-0 overflow-hidden rounded-full bg-border">
         <div
-          className="absolute left-0 top-0 h-full transition-all"
-          style={{
-            width: missing ? 0 : `${pct}%`,
-            background: color,
-          }}
+          className={cn('absolute left-0 top-0 h-full transition-all', t.solid)}
+          style={{ width: missing ? 0 : `${pct}%` }}
         />
       </div>
       <span
-        className="inline-flex w-16 shrink-0 items-center justify-end rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums"
-        style={{
-          color: sev === 'normal' || sev === 'missing' ? color : 'white',
-          background: sev === 'normal' || sev === 'missing' ? 'transparent' : color,
-        }}
+        className={cn(
+          'inline-flex w-16 shrink-0 items-center justify-end rounded-full px-1.5 py-0.5 text-caption font-semibold tabular-nums',
+          solid ? cn(t.solid, 'text-white') : t.text,
+        )}
       >
         {missing ? '—' : `+${contribution}/${maxScore}`}
       </span>
@@ -260,53 +224,32 @@ export function CpdFactorBreakdown({
   const missingCount = missingFactors.length;
 
   return (
-    <div
-      className="rounded-sm border"
-      style={{ borderColor: 'var(--rule-strong)' }}
-    >
+    <div className="rounded-2xl border border-border bg-surface-card">
       {/* Header strip with gauge on the right */}
-      <div
-        className="flex items-center gap-3 border-b px-3 py-2"
-        style={{
-          borderColor: 'var(--rule-strong)',
-          background: 'linear-gradient(135deg, var(--accent-navy-soft) 0%, white 60%)',
-        }}
-      >
-        <Gauge className="h-4 w-4" style={{ color: 'var(--accent-navy)' }} />
+      <div className="flex items-center gap-3 border-b border-border bg-brand-soft/40 px-3 py-2">
+        <Gauge aria-hidden="true" className="h-4 w-4 text-brand" />
         <div className="flex-1">
-          <h3 className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[var(--ink-navy)]">
-            วิเคราะห์ปัจจัยเสี่ยง CPD
-          </h3>
-          <p className="font-mono text-[10px] text-[var(--ink-navy-muted)]">
-            Cephalopelvic Disproportion · คะแนนรวม {Number(score)} / {TOTAL_MAX_SCORE}
+          <h3 className="text-body-lg text-ink">วิเคราะห์ปัจจัยเสี่ยง CPD</h3>
+          <p className="text-caption text-ink-muted">
+            คะแนนรวม {Number(score)} / {CPD_MAX_SCORE}
           </p>
         </div>
         {missingCount > 0 && (
-          <span
-            className="inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.06em]"
-            style={{
-              color: 'var(--ink-navy-muted)',
-              borderColor: 'var(--ink-navy-muted)',
-              background: 'white',
-            }}
-          >
-            <HelpCircle className="h-2.5 w-2.5" />
+          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-caption font-semibold text-ink-muted">
+            <HelpCircle aria-hidden="true" className="h-3 w-3" />
             {missingCount} ไม่มีข้อมูล
           </span>
         )}
       </div>
 
       {/* Gauge + legend row */}
-      <div
-        className="flex flex-wrap items-center justify-between gap-4 border-b px-3 py-3"
-        style={{ borderColor: 'var(--rule-strong)' }}
-      >
-        <ScoreGauge score={score} riskLevel={riskLevel} maxScore={TOTAL_MAX_SCORE} />
-        <div className="flex flex-1 flex-wrap gap-3 text-[11px]">
-          <LegendSwatch color="var(--risk-low)" label="ปกติ · 0 คะแนน" />
-          <LegendSwatch color="var(--risk-medium)" label="บางส่วน · 0 < คะแนน < max" />
-          <LegendSwatch color="var(--risk-high)" label="ผิดปกติเต็ม · max คะแนน" />
-          <LegendSwatch color="var(--ink-navy-muted)" label="ไม่มีข้อมูล" dashed />
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-3 py-3">
+        <ScoreGauge score={score} riskLevel={riskLevel} maxScore={CPD_MAX_SCORE} />
+        <div className="flex flex-1 flex-wrap gap-3 text-caption">
+          <LegendSwatch color={COLOR.riskLow} label="ปกติ · 0 คะแนน" />
+          <LegendSwatch color={COLOR.riskMedium} label="บางส่วน · 0 < คะแนน < max" />
+          <LegendSwatch color={COLOR.riskHigh} label="ผิดปกติเต็ม · max คะแนน" />
+          <LegendSwatch color={COLOR.inkSubtle} label="ไม่มีข้อมูล" dashed />
         </div>
       </div>
 
@@ -314,7 +257,7 @@ export function CpdFactorBreakdown({
       <div className="flex flex-col gap-0.5 p-2">
         {FACTOR_ORDER.map((key) => {
           const factorConfig = CPD_FACTOR_WEIGHTS[key];
-          const maxScore = FACTOR_MAX_SCORES[key];
+          const maxScore = CPD_FACTOR_MAX_SCORES[key];
           const isMissing = missingFactors.includes(key);
           // The API returns the CONTRIBUTION (post-evaluate), not the raw
           // clinical value, in `factors[key]`. See services/sync/cpd-persist.ts
@@ -334,12 +277,9 @@ export function CpdFactorBreakdown({
         })}
       </div>
 
-      <div
-        className="flex items-center justify-between border-t px-3 py-1.5 font-mono text-[10px] text-[var(--ink-navy-muted)]"
-        style={{ borderColor: 'var(--rule-hair)' }}
-      >
+      <div className="flex items-center justify-between border-t border-border px-3 py-1.5 text-caption text-ink-muted">
         <span>คำนวณเมื่อ {formatRelativeTime(calculatedAt)}</span>
-        <span>CPD score · Nan province</span>
+        <span>คะแนน CPD · จังหวัดน่าน</span>
       </div>
     </div>
   );
@@ -355,7 +295,7 @@ function LegendSwatch({
   dashed?: boolean;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-[var(--ink-navy-muted)]">
+    <span className="inline-flex items-center gap-1.5 text-caption text-ink-muted">
       <span
         className="inline-block h-2.5 w-4"
         style={{

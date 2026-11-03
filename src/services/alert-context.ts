@@ -9,6 +9,7 @@
 import type { DatabaseAdapter } from '@/db/adapter';
 import { decrypt, getEncryptionKey } from '@/lib/encryption';
 import { logger } from '@/lib/logger';
+import { mophAlertLocalDate } from '@/config/moph-alert-config';
 
 export interface AlertOrigin {
   hospitalName: string;
@@ -38,7 +39,7 @@ export async function resolveAlertOrigin(
   return {
     hospitalName: rows[0]?.name ?? fallbackName,
     province: rows[0]?.province_code ?? '',
-    localDate: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' }),
+    localDate: mophAlertLocalDate(),
   };
 }
 

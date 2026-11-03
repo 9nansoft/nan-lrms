@@ -1,12 +1,12 @@
 # Multi-stage Dockerfile for KK-LRMS
 # Stage 1: Install ALL dependencies (dev included for build)
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
 # Stage 2: Build
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -19,7 +19,7 @@ ENV DOCKER_BUILD=true
 RUN npm run build
 
 # Stage 3: Production (minimal image)
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

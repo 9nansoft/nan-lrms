@@ -1,13 +1,15 @@
-// QuickStatsBar — 6-tile horizontal snapshot for a labor patient.
-// Redesigned 2026-04-21 (v3): each tile has a tinted background + top accent
-// band in its semantic color, so the eye can scan severity at a glance
-// (e.g. LAST VITAL missing → full red tile, CERVIX in transition → navy
-// accent, normal demographics → soft slate).
+// QuickStatsBar — six-tile snapshot for a labor patient, on the shared KpiGrid
+// (sub-project 3). Each tile has a status-coloured left marker so severity
+// scans at a glance; tones come from STATUS_TONE, cut-offs are unchanged.
 'use client';
 
 import { useMemo } from 'react';
 import { Baby, Calendar, Clock, Activity, Timer, HeartPulse } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { KpiGrid } from '@/components/shared/KpiGrid';
+import { STATUS_TONE, type StatusTone } from '@/config/status-tone';
+import { GA_TERM_LABEL_TH, GA_TERM_TONE, LABOUR_PHASE_LABEL_TH, classifyGaTerm } from '@/config/obstetric-display';
+import { cn } from '@/lib/utils';
 
 interface QuickStatsBarProps {
   age: number;
@@ -64,108 +66,70 @@ function formatLaborDuration(admitDate: string): string {
 
 function getVitalRelativeInfo(latestVitalAt: string | null): {
   text: string;
-  color: string;
+  tone: StatusTone;
   severity: Severity;
 } {
-  if (!latestVitalAt) return { text: 'ไม่มีข้อมูล', color: 'var(--risk-high)', severity: 'abnormal' };
+  if (!latestVitalAt) return { text: 'ไม่มีข้อมูล', tone: 'danger', severity: 'abnormal' };
   const now = new Date();
   const vitalTime = new Date(latestVitalAt);
   const diffMs = now.getTime() - vitalTime.getTime();
-  if (diffMs < 0) return { text: 'เมื่อสักครู่', color: 'var(--risk-low)', severity: 'normal' };
+  if (diffMs < 0) return { text: 'เมื่อสักครู่', tone: 'ok', severity: 'normal' };
   const diffMinutes = Math.floor(diffMs / (1000 * 60));
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
   if (diffMinutes < 15)
     return {
       text: diffMinutes < 1 ? 'เมื่อสักครู่' : `${diffMinutes}น ที่แล้ว`,
-      color: 'var(--risk-low)',
+      tone: 'ok',
       severity: 'normal',
     };
-  if (diffMinutes < 60)
-    return { text: `${diffMinutes}น ที่แล้ว`, color: 'var(--risk-medium)', severity: 'borderline' };
-  if (diffHours < 24)
-    return { text: `${diffHours}ชม ที่แล้ว`, color: 'var(--risk-high)', severity: 'abnormal' };
+  if (diffMinutes < 60) return { text: `${diffMinutes}น ที่แล้ว`, tone: 'warn', severity: 'borderline' };
+  if (diffHours < 24) return { text: `${diffHours}ชม ที่แล้ว`, tone: 'danger', severity: 'abnormal' };
   const diffDays = Math.floor(diffHours / 24);
-  return { text: `${diffDays}ว ที่แล้ว`, color: 'var(--risk-high)', severity: 'abnormal' };
+  return { text: `${diffDays}ว ที่แล้ว`, tone: 'danger', severity: 'abnormal' };
 }
 
 type Severity = 'normal' | 'borderline' | 'abnormal';
 
-function getDilation(cm: number | null): { color: string; phase: string; severity: Severity } {
-  if (cm === null) return { color: 'var(--ink-navy-muted)', phase: 'รอประเมิน', severity: 'normal' };
-  if (cm < 4) return { color: 'var(--accent-navy)', phase: 'Latent', severity: 'normal' };
-  if (cm <= 7) return { color: '#14b8a6', phase: 'Active', severity: 'borderline' };
-  return { color: 'var(--risk-medium)', phase: 'Transition', severity: 'borderline' };
-}
-
-// Color helpers — `color-mix` gives us a consistent "tinted" background at a
-// controlled saturation without manually specifying rgba for every palette.
-function tintBg(color: string, pct = 10): string {
-  return `color-mix(in srgb, ${color} ${pct}%, white)`;
+function getDilation(cm: number | null): { tone: StatusTone; phase: string } {
+  if (cm === null) return { tone: 'neutral', phase: 'รอประเมิน' };
+  if (cm < 4) return { tone: 'brand', phase: LABOUR_PHASE_LABEL_TH.latent };
+  if (cm <= 7) return { tone: 'brand', phase: LABOUR_PHASE_LABEL_TH.active };
+  return { tone: 'warn', phase: LABOUR_PHASE_LABEL_TH.transition };
 }
 
 interface StatItemProps {
   icon: ReactNode;
   labelTh: string;
-  labelEn: string;
   value: ReactNode;
   unit?: string;
-  color?: string;
+  tone: StatusTone;
   sub?: string;
-  tintPct?: number;
-  isLast?: boolean;
 }
 
-function StatItem({
-  icon,
-  labelTh,
-  labelEn,
-  value,
-  unit,
-  color = 'var(--accent-navy)',
-  sub,
-  tintPct = 8,
-  isLast,
-}: StatItemProps) {
+function StatItem({ icon, labelTh, value, unit, tone, sub }: StatItemProps) {
+  const valueClass = STATUS_TONE[tone].text;
   return (
     <div
-      className="relative flex flex-col gap-1 px-4 py-3"
-      style={{
-        background: tintBg(color, tintPct),
-        borderRight: isLast ? undefined : '1px solid var(--rule-strong)',
-      }}
+      className={cn(
+        'relative flex min-w-0 flex-col gap-1 rounded-2xl border border-border border-l-4 bg-surface-card px-4 py-3',
+        STATUS_TONE[tone].accent,
+      )}
     >
-      {/* Top accent band */}
-      <span
-        aria-hidden="true"
-        className="absolute top-0 left-0 h-[3px]"
-        style={{ width: '100%', background: color, opacity: 0.8 }}
-      />
-      <div
-        className="flex items-center gap-1.5"
-        style={{ color }}
-      >
-        <span className="flex h-3.5 w-3.5 items-center justify-center">{icon}</span>
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
-          {labelEn}
+      <div className="flex items-center gap-1.5 text-label text-ink-muted">
+        <span aria-hidden="true" className="flex h-4 w-4 items-center justify-center">
+          {icon}
         </span>
+        {labelTh}
       </div>
       <div className="flex items-baseline gap-1.5">
-        <span
-          className="font-mono text-[24px] font-bold leading-none tabular-nums"
-          style={{ color, letterSpacing: '-0.025em' }}
-        >
-          {value}
-        </span>
-        {unit && (
-          <span className="font-mono text-[11px]" style={{ color: 'var(--ink-navy-muted)' }}>
-            {unit}
-          </span>
-        )}
+        <span className={cn('whitespace-nowrap text-title tabular-nums', valueClass)}>{value}</span>
+        {unit && <span className="text-caption text-ink-muted">{unit}</span>}
       </div>
-      <div className="font-mono text-[10px]" style={{ color: 'var(--ink-navy-dim)' }}>
-        {labelTh}
-        {sub && <span className="ml-1.5 text-[var(--ink-navy-muted)]">· {sub}</span>}
-      </div>
+      {sub && (
+        <div className="text-caption text-ink-muted">
+          <span>· {sub}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -186,82 +150,48 @@ export function QuickStatsBar({
   const vitalInfo = useMemo(() => getVitalRelativeInfo(latestVitalAt), [latestVitalAt]);
   const dilation = useMemo(() => getDilation(currentDilationCm), [currentDilationCm]);
 
-  // GA color band: term (≥37) = green, preterm = amber, <34 = red, post-term >41 = red.
-  const gaColor =
-    gaWeeks == null
-      ? 'var(--ink-navy-muted)'
-      : gaWeeks < 34 || gaWeeks > 41
-        ? 'var(--risk-high)'
-        : gaWeeks < 37
-          ? 'var(--risk-medium)'
-          : 'var(--risk-low)';
+  // GA band and its tone both come from classifyGaTerm (one set of cut-offs).
+  const gaTerm = classifyGaTerm(gaWeeks);
+  const gaTone: StatusTone = gaTerm ? GA_TERM_TONE[gaTerm] : 'neutral';
 
   return (
-    <div
-      className="grid"
-      style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}
-    >
-      <StatItem
-        icon={<Baby className="h-3.5 w-3.5" />}
-        labelTh="อายุ"
-        labelEn="AGE"
-        value={age}
-        unit="ปี"
-        color="var(--accent-navy)"
-      />
+    <KpiGrid min="md">
+      <StatItem icon={<Baby className="h-3.5 w-3.5" />} labelTh="อายุ" value={age} unit="ปี" tone="brand" />
       <StatItem
         icon={<Activity className="h-3.5 w-3.5" />}
-        labelTh="G_P_A_L"
-        labelEn="OB FORMULA"
+        labelTh="G P A L"
         value={formatGpal(gravida, para, abortion, livingChildren)}
-        color="var(--accent-navy)"
+        tone="brand"
       />
       <StatItem
         icon={<Calendar className="h-3.5 w-3.5" />}
         labelTh="อายุครรภ์"
-        labelEn="GA"
         value={formatGa(gaWeeks, gaDay)}
-        unit="wk"
-        color={gaColor}
-        sub={
-          gaWeeks == null
-            ? undefined
-            : gaWeeks < 34
-              ? 'Very Preterm'
-              : gaWeeks < 37
-                ? 'Preterm'
-                : gaWeeks > 41
-                  ? 'Post-term'
-                  : 'Term'
-        }
+        unit="สัปดาห์"
+        tone={gaTone}
+        sub={gaTerm ? GA_TERM_LABEL_TH[gaTerm] : undefined}
       />
       <StatItem
         icon={<Timer className="h-3.5 w-3.5" />}
         labelTh="ระยะเวลาในห้องคลอด"
-        labelEn="LABOR TIME"
         value={laborDuration}
-        color="var(--accent-navy)"
+        tone="brand"
       />
       <StatItem
         icon={<Clock className="h-3.5 w-3.5" />}
         labelTh="ปากมดลูก"
-        labelEn="CERVIX"
         value={currentDilationCm !== null ? currentDilationCm : '—'}
         unit="ซม."
-        color={dilation.color}
+        tone={dilation.tone}
         sub={dilation.phase}
-        tintPct={currentDilationCm !== null ? 12 : 6}
       />
       <StatItem
         icon={<HeartPulse className="h-3.5 w-3.5" />}
-        labelTh="Vital ล่าสุด"
-        labelEn="LAST VITAL"
+        labelTh="สัญญาณชีพล่าสุด"
         value={vitalInfo.text}
-        color={vitalInfo.color}
-        tintPct={vitalInfo.severity === 'abnormal' ? 18 : vitalInfo.severity === 'borderline' ? 12 : 8}
-        sub={vitalInfo.severity === 'abnormal' ? 'STALE' : undefined}
-        isLast
+        tone={vitalInfo.tone}
+        sub={vitalInfo.severity === 'abnormal' ? 'ข้อมูลเก่า' : undefined}
       />
-    </div>
+    </KpiGrid>
   );
 }

@@ -13,6 +13,7 @@ import { addSecurityHeaders } from '@/lib/security-headers';
 import { isRequestOriginTrusted } from '@/lib/request-origin';
 import { apiError } from '@/lib/api-errors';
 import { logger } from '@/lib/logger';
+import { isStaticPath, isPublicPath } from '@/lib/public-paths';
 import { NextResponse } from 'next/server';
 
 const { auth } = NextAuth(authConfig);
@@ -20,21 +21,6 @@ const { auth } = NextAuth(authConfig);
 // /hospital-maternity-ward is gated by NextAuth (existing redirect) +
 // BmsSessionContext at the page level (no middleware-level userType check).
 
-// Public paths that don't require authentication.
-// /deck is the MOPH executive briefing deck (no PHI, presentation assets only).
-// Public so the briefing room laptop can open it directly via URL without
-// requiring a BMS session.
-const PUBLIC_PATHS = [
-  '/login',
-  '/provider/complete',
-  '/about',
-  '/deck',
-  '/api/auth',
-  '/api/health',
-  '/api/webhooks',
-  '/api/referrals/check',
-];
-const STATIC_PATHS = ['/_next', '/favicon.ico'];
 const READONLY_BLOCKED_API_PREFIXES = [
   '/api/admin',
   '/api/onboarding',
@@ -55,11 +41,11 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
 
   // Allow static assets and public paths
-  if (STATIC_PATHS.some((p) => pathname.startsWith(p))) {
+  if (isStaticPath(pathname)) {
     return addSecurityHeaders(NextResponse.next());
   }
 
-  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+  if (isPublicPath(pathname)) {
     return addSecurityHeaders(NextResponse.next());
   }
 

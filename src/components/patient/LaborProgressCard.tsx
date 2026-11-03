@@ -1,8 +1,10 @@
 // LaborProgressCard — visual summary of labor progress with cervix dilation and phases
 'use client';
 
+import { COLOR, withAlpha } from '@/config/design-tokens';
+import { LABOUR_PHASE_LABEL_TH } from '@/config/obstetric-display';
 import { useMemo } from 'react';
-import { Activity } from 'lucide-react';
+import { Activity, AlertTriangle } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,18 +36,9 @@ interface LaborProgressCardProps {
 // ---------------------------------------------------------------------------
 
 const PHASE_CONFIG = {
-  LATENT: {
-    label: 'Latent Phase (ระยะแฝง)',
-    color: '#94a3b8',
-  },
-  ACTIVE: {
-    label: 'Active Phase (ระยะเร่ง)',
-    color: '#14b8a6',
-  },
-  TRANSITION: {
-    label: 'Transition (ระยะเปลี่ยนผ่าน)',
-    color: '#f59e0b',
-  },
+  LATENT: { label: LABOUR_PHASE_LABEL_TH.latent, color: COLOR.inkSubtle },
+  ACTIVE: { label: LABOUR_PHASE_LABEL_TH.active, color: COLOR.brand },
+  TRANSITION: { label: LABOUR_PHASE_LABEL_TH.transition, color: COLOR.riskMedium },
 } as const;
 
 type Phase = keyof typeof PHASE_CONFIG;
@@ -57,9 +50,9 @@ const INTENSITY_LABELS: Record<string, string> = {
 };
 
 const INTENSITY_STYLES: Record<string, string> = {
-  MILD: 'bg-slate-100 text-slate-600',
-  MODERATE: 'bg-amber-50 text-amber-700',
-  STRONG: 'bg-red-50 text-red-700',
+  MILD: 'bg-surface-muted text-ink-muted',
+  MODERATE: 'bg-warn-tint text-warn-text',
+  STRONG: 'bg-danger-tint text-danger-text',
 };
 
 // ---------------------------------------------------------------------------
@@ -180,17 +173,17 @@ function DilationProgressBar({ dilationCm }: { dilationCm: number }) {
       <div className="flex items-end justify-between mb-2">
         <div className="flex items-baseline gap-2">
           <span
-            className="font-mono text-3xl font-bold"
+            className="text-kpi-sm font-bold"
             style={{ color: config.color }}
           >
             {dilationCm}
           </span>
-          <span className="text-sm text-slate-500">ซม.</span>
+          <span className="text-body text-ink-muted">ซม.</span>
         </div>
         <span
-          className="text-xs font-medium px-2 py-0.5 rounded-full"
+          className="text-caption font-medium px-2 py-0.5 rounded-full"
           style={{
-            backgroundColor: `${config.color}18`,
+            backgroundColor: withAlpha(config.color, 0.1),
             color: config.color,
           }}
         >
@@ -200,7 +193,7 @@ function DilationProgressBar({ dilationCm }: { dilationCm: number }) {
 
       {/* Progress bar */}
       <div className="relative">
-        <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
+        <div className="h-3 rounded-full bg-surface-muted overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-500"
             style={{
@@ -214,8 +207,8 @@ function DilationProgressBar({ dilationCm }: { dilationCm: number }) {
         <div className="flex justify-between mt-1">
           {ticks.map((t) => (
             <div key={t} className="flex flex-col items-center" style={{ width: '1px' }}>
-              <div className="w-px h-1.5 bg-slate-300" />
-              <span className="text-xs font-mono text-slate-400 mt-0.5">{t}</span>
+              <div className="w-px h-1.5 bg-border" />
+              <span className="text-caption text-ink-muted mt-0.5">{t}</span>
             </div>
           ))}
         </div>
@@ -236,12 +229,12 @@ function MetricCell({
   valueColor?: string;
 }) {
   return (
-    <div className="bg-slate-50 rounded-xl p-3 text-center">
-      <div className="text-xs text-slate-400 mb-1">{label}</div>
-      <div className={`font-mono text-sm font-semibold ${valueColor ?? 'text-slate-800'}`}>
+    <div className="bg-surface-muted rounded-xl p-3 text-center">
+      <div className="text-caption text-ink-muted mb-1">{label}</div>
+      <div className={`text-body font-semibold ${valueColor ?? 'text-ink'}`}>
         {value}
       </div>
-      {unit && <div className="text-xs text-slate-400 mt-0.5">{unit}</div>}
+      {unit && <div className="text-caption text-ink-muted mt-0.5">{unit}</div>}
     </div>
   );
 }
@@ -279,13 +272,13 @@ export function LaborProgressCard({
 
   // Determine dilation rate color
   const rateColor = useMemo(() => {
-    if (dilationRate === null) return 'text-slate-800';
+    if (dilationRate === null) return 'text-ink';
     const currentPhase = latest ? getPhase(latest.dilationCm) : 'LATENT';
     // In active phase (>=4 cm), rate >= 1 cm/hr is good, < 1 is slow
     if (currentPhase !== 'LATENT') {
-      return dilationRate >= 1 ? 'text-emerald-600' : 'text-amber-600';
+      return dilationRate >= 1 ? 'text-ok-text' : 'text-warn-text';
     }
-    return 'text-slate-800';
+    return 'text-ink';
   }, [dilationRate, latest]);
 
   // Alert indicators
@@ -293,35 +286,17 @@ export function LaborProgressCard({
   const exceedsActionLine = latest !== null && latest.actionLineCm !== null && latest.dilationCm > latest.actionLineCm;
 
   return (
-    <div
-      className="rounded-sm border"
-      style={{ borderColor: 'var(--rule-strong)' }}
-    >
+    <div className="rounded-2xl border border-border bg-surface-card">
       {/* Card header — match the other card headers on this page */}
-      <div
-        className="flex items-center gap-2 border-b px-3 py-2"
-        style={{
-          borderColor: 'var(--rule-strong)',
-          background: 'linear-gradient(135deg, var(--accent-navy-soft) 0%, white 60%)',
-        }}
-      >
-        <Activity className="h-4 w-4" style={{ color: 'var(--accent-navy)' }} />
-        <h3 className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[var(--ink-navy)]">
-          ความคืบหน้าการคลอด
-        </h3>
+      <div className="flex items-center gap-2 border-b border-border bg-brand-soft/40 px-3 py-2">
+        <Activity aria-hidden="true" className="h-4 w-4 text-brand" />
+        <h3 className="text-body-lg text-ink">ความคืบหน้าการคลอด</h3>
       </div>
 
       <div className="p-3">
       {/* Empty state */}
       {!hasEntries && (
-        <div
-          className="flex h-28 items-center justify-center border border-dashed font-mono text-[12px]"
-          style={{
-            borderColor: 'var(--rule-strong)',
-            color: 'var(--ink-navy-muted)',
-            background: 'color-mix(in srgb, #6b7693 3%, white)',
-          }}
-        >
+        <div className="flex h-28 items-center justify-center rounded-xl border border-dashed border-border bg-surface-muted text-body text-ink-muted">
           ยังไม่มีข้อมูลการขยายปากมดลูก
         </div>
       )}
@@ -354,8 +329,8 @@ export function LaborProgressCard({
                 latestContraction
                   ? (INTENSITY_STYLES[latestContraction.intensity]
                       ? undefined
-                      : 'text-slate-800')
-                  : 'text-slate-400'
+                      : 'text-ink')
+                  : 'text-ink-muted'
               }
             />
           </div>
@@ -364,14 +339,14 @@ export function LaborProgressCard({
           {(exceedsActionLine || exceedsAlertLine) && (
             <div className="mt-4 space-y-2">
               {exceedsActionLine && (
-                <div className="flex items-start gap-2 rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
-                  <span className="shrink-0">{'🔴'}</span>
+                <div className="flex items-start gap-2 rounded-xl bg-danger-tint border border-danger/40 px-3 py-2 text-body text-danger-text">
+                  <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0" />
                   <span>เกินเส้นปฏิบัติ — ควรพิจารณาดำเนินการ</span>
                 </div>
               )}
               {exceedsAlertLine && !exceedsActionLine && (
-                <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-700">
-                  <span className="shrink-0">{'⚠'}</span>
+                <div className="flex items-start gap-2 rounded-xl bg-warn-tint border border-warn/40 px-3 py-2 text-body text-warn-text">
+                  <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0" />
                   <span>เกินเส้นเตือน — พิจารณาเฝ้าระวังใกล้ชิด</span>
                 </div>
               )}

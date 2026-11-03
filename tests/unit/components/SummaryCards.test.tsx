@@ -33,7 +33,7 @@ describe('SummaryCards', () => {
       (card) => card.textContent?.includes('เสี่ยงสูง'),
     );
     expect(redCard).toBeTruthy();
-    expect(redCard!.className).toContain('ring-red-100');
+    expect(redCard!.className).toContain('ring-danger/40');
   });
 
   it('shows medium-risk count with amber ring', () => {
@@ -44,7 +44,7 @@ describe('SummaryCards', () => {
       (card) => card.textContent?.includes('เสี่ยงปานกลาง'),
     );
     expect(amberCard).toBeTruthy();
-    expect(amberCard!.className).toContain('ring-amber-100');
+    expect(amberCard!.className).toContain('ring-warn/40');
   });
 
   it('shows low-risk count with emerald ring', () => {
@@ -55,7 +55,7 @@ describe('SummaryCards', () => {
       (card) => card.textContent?.includes('เสี่ยงต่ำ'),
     );
     expect(greenCard).toBeTruthy();
-    expect(greenCard!.className).toContain('ring-emerald-100');
+    expect(greenCard!.className).toContain('ring-ok/40');
   });
 
   it('displays all card titles', () => {

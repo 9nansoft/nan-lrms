@@ -3,6 +3,8 @@
 // duplicated inline in pregnancies/page.tsx and pregnancies/[journeyId]/page.tsx
 // (with drifting label copy); referrals/page.tsx is the third consumer, so per
 // constitution III this now lives in config.
+import { RiskLevel } from '@/types/domain';
+
 export const ANC_RISK_COLOR: Record<string, string> = {
   LOW: 'var(--risk-low)',
   HR1: 'var(--risk-medium)',
@@ -19,3 +21,11 @@ export const ANC_RISK_LABEL_TH: Record<string, string> = {
 
 /** Fallback chip color for unknown/legacy risk codes. */
 export const ANC_RISK_FALLBACK_COLOR = 'var(--ink-navy-muted)';
+
+/** ANC codes → the shared risk language (HR1/HR2 share medium). */
+export const ANC_TO_RISK_LEVEL: Record<string, RiskLevel> = {
+  LOW: RiskLevel.LOW,
+  HR1: RiskLevel.MEDIUM,
+  HR2: RiskLevel.MEDIUM,
+  HR3: RiskLevel.HIGH,
+};

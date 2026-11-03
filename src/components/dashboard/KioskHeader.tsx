@@ -94,7 +94,7 @@ export function KioskHeader({
 
         {/* Center — date + clock */}
         <div className="text-center">
-          <div className="font-mono text-sm tracking-[0.2em]" style={{ color: 'var(--kiosk-dim)' }}>
+          <div className="font-mono text-sm tracking-normal" style={{ color: 'var(--kiosk-dim)' }}>
             {dateStr}
           </div>
           <div

@@ -72,7 +72,7 @@ function TierChip({ tier }: { tier: MaternalScreenLocalTier }) {
     <span
       data-testid="maternal-screen-tier-chip"
       data-tier={tier}
-      className="inline-block border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-[0.04em]"
+      className="inline-block border px-1.5 py-0.5 font-mono text-caption font-semibold tracking-[0.04em]"
       style={{ color, borderColor: color, background: 'transparent' }}
     >
       {MATERNAL_SCREEN_TIER_LABEL_TH[tier] ?? tier}
@@ -86,7 +86,7 @@ function AcuityChip({ acuity }: { acuity: MaternalEmergencyAcuity }) {
     <span
       data-testid="maternal-screen-acuity-chip"
       data-acuity={acuity}
-      className="inline-block border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-[0.04em]"
+      className="inline-block border px-1.5 py-0.5 font-mono text-caption font-semibold tracking-[0.04em]"
       style={{ color, borderColor: color, background: 'transparent' }}
     >
       {EMERGENCY_ACUITY_LABEL_TH[acuity] ?? acuity}
@@ -102,7 +102,7 @@ function SuspectedConditionChip({ condition }: { condition: SuspectedMaternalCon
     <span
       data-testid="maternal-screen-suspected-chip"
       data-condition={condition}
-      className="inline-block border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-[0.04em]"
+      className="inline-block border px-1.5 py-0.5 font-mono text-caption font-semibold tracking-[0.04em]"
       style={{ color, borderColor: color, background: 'transparent' }}
     >
       {SUSPECTED_CONDITION_LABEL_TH[condition] ?? condition}
@@ -118,7 +118,7 @@ function ShadowBanner({ ruleSetVersion }: { ruleSetVersion: string }) {
   return (
     <div
       data-testid="maternal-screen-shadow-banner"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 font-mono text-[11px]"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 font-mono text-caption"
       style={{
         borderColor: 'var(--risk-medium)',
         background: 'color-mix(in srgb, var(--risk-medium) 10%, white)',
@@ -134,7 +134,7 @@ function ShadowBanner({ ruleSetVersion }: { ruleSetVersion: string }) {
 
 function EvidenceRow({ field, value }: { field: string; value: unknown }) {
   return (
-    <div className="font-mono text-[10px]" style={{ color: 'var(--ink-navy-dim)' }}>
+    <div className="font-mono text-caption" style={{ color: 'var(--ink-navy-dim)' }}>
       {field}: {String(value)}
     </div>
   );
@@ -171,7 +171,7 @@ function AssessmentSummary({ assessment }: { assessment: MaternalScreenAssessmen
               style={{ borderColor: 'var(--rule-strong)' }}
             >
               <div
-                className="font-mono text-[10px] font-semibold"
+                className="font-mono text-caption font-semibold"
                 style={{ color: 'var(--ink-navy)' }}
               >
                 RULE {match.ruleId}
@@ -191,7 +191,7 @@ function AssessmentSummary({ assessment }: { assessment: MaternalScreenAssessmen
       {assessment.missingRequiredFields.length > 0 && (
         <div
           data-testid="maternal-screen-missing-fields"
-          className="font-mono text-[10px]"
+          className="font-mono text-caption"
           style={{ color: 'var(--ink-navy-muted)' }}
         >
           ขาดข้อมูล: {assessment.missingRequiredFields.join(', ')}
@@ -199,7 +199,7 @@ function AssessmentSummary({ assessment }: { assessment: MaternalScreenAssessmen
       )}
 
       <div
-        className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10px]"
+        className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-caption"
         style={{ color: 'var(--ink-navy-muted)' }}
       >
         <span>{formatRelativeAge(assessment.assessedAt)}ที่แล้ว</span>
@@ -216,7 +216,7 @@ function HistoryRow({ row }: { row: MaternalScreenAssessmentDto }) {
   return (
     <div
       data-testid="maternal-screen-history-row"
-      className="flex flex-wrap items-center gap-1.5 border-t px-3 py-1.5 font-mono text-[10px]"
+      className="flex flex-wrap items-center gap-1.5 border-t px-3 py-1.5 font-mono text-caption"
       style={{ borderColor: 'var(--rule-strong)' }}
     >
       <span style={{ color: 'var(--ink-navy-muted)' }}>
@@ -271,7 +271,7 @@ export function MaternalScreeningCard({
           background: 'linear-gradient(135deg, var(--accent-navy-soft) 0%, white 60%)',
         }}
       >
-        <h3 className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[var(--ink-navy)]">
+        <h3 className="font-mono text-caption font-bold uppercase tracking-[0.12em] text-[var(--ink-navy)]">
           การคัดกรองความเสี่ยงมารดา
         </h3>
       </div>
@@ -295,7 +295,7 @@ export function MaternalScreeningCard({
       {!isLoading && error == null && !hasData && (
         <div
           data-testid="maternal-screen-empty"
-          className="px-3 py-4 text-center font-mono text-[11px]"
+          className="px-3 py-4 text-center font-mono text-caption"
           style={{ color: 'var(--ink-navy-muted)' }}
         >
           {EMPTY_TEXT}
@@ -311,7 +311,7 @@ export function MaternalScreeningCard({
             {data.history.length > 0 && (
               <div className="mt-3">
                 <div
-                  className="px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.1em]"
+                  className="px-3 font-mono text-caption font-semibold uppercase tracking-[0.1em]"
                   style={{ color: 'var(--ink-navy-muted)' }}
                 >
                   ประวัติการประเมิน
@@ -322,7 +322,7 @@ export function MaternalScreeningCard({
                 {data.nextCursor !== null && (
                   <div
                     data-testid="maternal-screen-more-history-note"
-                    className="px-3 py-1.5 font-mono text-[10px]"
+                    className="px-3 py-1.5 font-mono text-caption"
                     style={{ color: 'var(--ink-navy-muted)' }}
                   >
                     {MORE_HISTORY_TEXT}

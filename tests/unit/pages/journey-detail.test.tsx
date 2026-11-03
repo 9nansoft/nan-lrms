@@ -341,3 +341,39 @@ describe('JourneyDetailPage — assessment-completeness marker (WHO containment 
     expect(screen.queryByText(/การประเมินความเสี่ยงไม่สมบูรณ์/)).toBeNull();
   });
 });
+
+describe('JourneyDetailPage — sub-project 4 chrome', () => {
+  it('no zoom; one h1 with the masked name; Thai back button', async () => {
+    await renderPage();
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(document.querySelector('[style*="zoom"]')).toBeNull();
+    expect(screen.getByRole('button', { name: /ย้อนกลับ/ })).toBeInTheDocument();
+    expect(screen.queryByText('BACK')).toBeNull();
+  });
+
+  it('main sections are Thai SectionCards, not SectionLabels', async () => {
+    await renderPage();
+    for (const name of ['แนวโน้มสัญญาณชีพ', 'ประวัติการฝากครรภ์', 'ผลตรวจทางห้องปฏิบัติการ คัดกรอง และโรคประจำตัว', 'วัคซีน', 'อัลตราซาวด์และสุขภาพทารกในครรภ์']) {
+      expect(await screen.findByRole('region', { name })).toBeInTheDocument();
+    }
+    for (const en of ['PROVINCIAL REGISTRY', 'JOURNEY DETAIL', 'Vital trends', 'ANC visit timeline', 'Immunization', 'JOURNEY ID', 'REFRESHING EVERY', 'Risk ·']) {
+      expect(screen.queryByText(new RegExp(en))).toBeNull();
+    }
+    expect(screen.getByText(/รีเฟรชอัตโนมัติทุก/)).toBeInTheDocument();
+  });
+
+  it('the clinical summary rail always renders (it was hidden below the lg viewport)', async () => {
+    await renderPage();
+    const rail = await screen.findByTestId('journey-rail');
+    expect(rail.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(rail.className).toContain('@min-[1160px]:');
+  });
+
+  it('summary tiles are Thai', async () => {
+    await renderPage();
+    expect(await screen.findByText('อายุครรภ์ (GA)')).toBeInTheDocument();
+    expect(screen.getByText('กำหนดคลอด (EDC)')).toBeInTheDocument();
+    expect(screen.getByText('นัดถัดไป')).toBeInTheDocument();
+  });
+});

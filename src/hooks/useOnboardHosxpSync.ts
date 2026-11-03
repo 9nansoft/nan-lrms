@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useBmsSession } from '@/contexts/BmsSessionContext';
+import { MISSING_MARKETPLACE_TOKEN } from '@/lib/hosxp-sync-status';
 
 export interface OnboardHosxpSyncState {
   ran: boolean;
@@ -96,7 +97,14 @@ export function useOnboardHosxpSync(): {
     // /api/sql + /api/function rely on for READWRITE, and silently failing
     // half-way through onboarding is worse than not starting. Mirrors the
     // existing precondition in useOnboardHosxpWebhook.
-    if (!marketplaceToken) return;
+    //
+    // Say so instead of staying silent: the chip used to read "กำลังเริ่ม"
+    // forever while this tab sent nothing (รพ.พล, 2026-10-22). Not a latch —
+    // ranRef stays false, so a token that arrives later still starts sync.
+    if (!marketplaceToken) {
+      queueMicrotask(() => setState({ ran: false, error: MISSING_MARKETPLACE_TOKEN }));
+      return;
+    }
     if (!userInfo.hospcode) {
       ranRef.current = true;
       queueMicrotask(() => {

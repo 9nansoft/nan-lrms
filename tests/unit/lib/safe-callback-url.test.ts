@@ -44,6 +44,15 @@ describe('sanitizeCallbackUrl', () => {
     expect(sanitizeCallbackUrl('data:text/html,<script>')).toBe('/');
   });
 
+  // Browsers strip tab/newline/CR from URLs while parsing, so "/\t/evil.com"
+  // collapses to "//evil.com" — any control character is rejected outright.
+  it.each(['/\t/evil.com', '/\n/evil.com', '/\r/evil.com', '/\x00/evil.com', '/\t\\evil.com', '/patients/x\n'])(
+    'rejects control characters (%j)',
+    (url) => {
+      expect(sanitizeCallbackUrl(url)).toBe('/');
+    },
+  );
+
   it('preserves the leading root path itself', () => {
     expect(sanitizeCallbackUrl('/')).toBe('/');
   });

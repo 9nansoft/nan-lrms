@@ -240,6 +240,132 @@ describe('Sync Journey Extension', () => {
       expect(visits).toHaveLength(2);
     });
 
+    it('updates a corrected LMP on the same pregnancy without rolling over the journey', async () => {
+      const patient: HosxpPersonAncRow = {
+        person_anc_id: 1010,
+        person_id: 510,
+        hn: 'HN-ANC-LMP-CORR',
+        pname: 'นาง',
+        fname: 'แก้ไข',
+        lname: 'วันประจำเดือน',
+        cid: '1234567890121',
+        birthday: '1990-01-01',
+        preg_no: 2,
+        lmp: '2025-05-01',
+        edc: '2026-02-05',
+        anc_register_date: '2025-07-01',
+      };
+
+      const initialVisits: HosxpAncServiceRow[] = [
+        {
+          person_anc_service_id: 4010,
+          person_anc_id: patient.person_anc_id,
+          service_date: '2025-08-01',
+          anc_service_number: 1,
+          pa_week: 12,
+          pa_day: 0,
+          fundal_height: 10,
+          bw: 55,
+          bps: 120,
+          bpd: 80,
+          height: 158,
+          fetal_heart_rate: 140,
+          baby_position: null,
+          baby_lead: null,
+          pass_quality: null,
+          doctor_code: null,
+        },
+      ];
+      await syncAncData(db, hospitalId, [patient], initialVisits, [], [], ENCRYPTION_KEY);
+      await syncAncData(
+        db,
+        hospitalId,
+        [{ ...patient, lmp: '2025-05-08' }],
+        initialVisits,
+        [],
+        [],
+        ENCRYPTION_KEY,
+      );
+
+      const journeys = await db.query<{
+        care_stage: string;
+        gravida: number;
+        lmp: string | Date | null;
+        anc_risk_level: string;
+      }>(
+        'SELECT care_stage, gravida, lmp, anc_risk_level FROM maternal_journeys WHERE hospital_id = ? AND hn = ?',
+        [hospitalId, patient.hn],
+      );
+      expect(journeys).toHaveLength(1);
+      expect(journeys[0].care_stage).toBe(CareStage.PREGNANCY);
+      expect(journeys[0].gravida).toBe(2);
+      expect(toIsoDate(journeys[0].lmp)).toBe('2025-05-08');
+
+      // A stale lower pregnancy number is an update, never a rollback of the
+      // journey identity. A later explicit increase still starts a new journey.
+      await syncAncData(
+        db,
+        hospitalId,
+        [{ ...patient, preg_no: 1, lmp: '2024-01-01', edc: '2024-10-08' }],
+        [
+          {
+            ...initialVisits[0],
+            person_anc_service_id: 4011,
+            service_date: '2024-02-01',
+            anc_service_number: 9,
+            pa_week: 30,
+          },
+        ],
+        [{ person_anc_risk_id: 8010, person_anc_id: patient.person_anc_id, anc_risk_id: 16 }],
+        [],
+        ENCRYPTION_KEY,
+      );
+      const afterStale = await db.query<{
+        id: string;
+        care_stage: string;
+        gravida: number;
+        lmp: string | Date | null;
+        edc: string | Date | null;
+        anc_risk_level: string;
+      }>(
+        'SELECT id, care_stage, gravida, lmp, edc, anc_risk_level FROM maternal_journeys WHERE hospital_id = ? AND hn = ?',
+        [hospitalId, patient.hn],
+      );
+      expect(afterStale).toHaveLength(1);
+      expect(afterStale[0].care_stage).toBe(CareStage.PREGNANCY);
+      expect(afterStale[0].gravida).toBe(2);
+      expect(toIsoDate(afterStale[0].lmp)).toBe('2025-05-08');
+      expect(toIsoDate(afterStale[0].edc)).toBe('2026-02-05');
+      expect(afterStale[0].anc_risk_level).toBe(journeys[0].anc_risk_level);
+      const afterStaleVisits = await db.query<{
+        visit_date: string | Date;
+        visit_number: number;
+      }>('SELECT visit_date, visit_number FROM cached_anc_visits WHERE journey_id = ?', [
+        afterStale[0].id,
+      ]);
+      expect(afterStaleVisits).toHaveLength(1);
+      expect(toIsoDate(afterStaleVisits[0].visit_date)).toBe('2025-08-01');
+      expect(afterStaleVisits[0].visit_number).toBe(1);
+
+      await syncAncData(
+        db,
+        hospitalId,
+        [{ ...patient, preg_no: 3, lmp: '2026-05-01' }],
+        [],
+        [],
+        [],
+        ENCRYPTION_KEY,
+      );
+      const afterHigher = await db.query<{ care_stage: string; gravida: number }>(
+        'SELECT care_stage, gravida FROM maternal_journeys WHERE hospital_id = ? AND hn = ? ORDER BY gravida',
+        [hospitalId, patient.hn],
+      );
+      expect(afterHigher).toEqual([
+        { care_stage: CareStage.DELIVERED, gravida: 2 },
+        { care_stage: CareStage.PREGNANCY, gravida: 3 },
+      ]);
+    });
+
     it('does not modify or reassign a visit owned by another hospital; roll-up counts all rows (WHO T5)', async () => {
       const hospB = await db.query<{ id: string }>(
         "SELECT id FROM hospitals WHERE hcode = '10995'",

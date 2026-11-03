@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ProfilePage } from '@/app/(hospital)/profile/page';
 
@@ -65,5 +65,17 @@ describe('profile notification page', () => {
     expect(anc).not.toBeChecked();
     await userEvent.click(anc);
     await waitFor(() => expect(anc).toBeChecked());
+  });
+});
+
+describe('profile page layout (sub-project 5)', () => {
+  it('uses the shared page header; identity is masked inside a section card; no nested main', async () => {
+    const { container } = render(await ProfilePage());
+    expect(screen.getByRole('heading', { level: 1, name: 'โปรไฟล์และการแจ้งเตือน' })).toBeInTheDocument();
+    const card = screen.getByRole('region', { name: 'ข้อมูลผู้ใช้' });
+    expect(within(card).getByText('นาย ชัยพร ส.')).toBeInTheDocument();
+    expect(within(card).getByText(/3X{8}2121/)).toBeInTheDocument();
+    expect(within(card).queryByText('3320500282121')).toBeNull();
+    expect(container.querySelector('main')).toBeNull();
   });
 });

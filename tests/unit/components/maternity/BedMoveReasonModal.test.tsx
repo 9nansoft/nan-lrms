@@ -96,4 +96,14 @@ describe('BedMoveReasonModal', () => {
     );
     expect(container.firstChild).toBeNull();
   });
+
+  it('with no reasons it explains why confirm is disabled and what to do', () => {
+    render(
+      <BedMoveReasonModal open reasons={[]} fromBedno="01" toBedno="05" onConfirm={() => {}} onCancel={() => {}} />,
+    );
+    expect(screen.getByRole('button', { name: 'ยืนยัน' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'ยังโหลดเหตุผลการย้ายจาก HOSxP ไม่ได้ — ปิดหน้าต่างแล้วกด รีเฟรช หากยังไม่ได้ แจ้งผู้ดูแลระบบ',
+    );
+  });
 });

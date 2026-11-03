@@ -96,6 +96,10 @@ export const maternalJourneysTable: TableDefinition = {
     { name: 'gdm_risk_factors_json', type: 'json', nullable: true },
     { name: 'registered_at', type: 'datetime' },
     { name: 'stage_changed_at', type: 'datetime' },
+    // Why a journey left PREGNANCY without a recorded delivery — e.g.
+    // 'hosxp_anc_absent' (src/config/anc-freshness.ts). NULL for every
+    // ordinary stage transition.
+    { name: 'closed_reason', type: 'string', maxLength: 40, nullable: true },
     { name: 'synced_at', type: 'datetime' },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },

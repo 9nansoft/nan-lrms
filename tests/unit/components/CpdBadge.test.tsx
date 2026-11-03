@@ -3,6 +3,8 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { CpdBadge } from '@/components/shared/CpdBadge';
 import { RiskLevel } from '@/types/domain';
+import { COLOR } from '@/config/design-tokens';
+import { hexToRgb } from '../../helpers/color';
 
 describe('CpdBadge', () => {
   it('renders score text for LOW risk with green background', () => {
@@ -11,7 +13,7 @@ describe('CpdBadge', () => {
     );
     expect(screen.getByText('3')).toBeTruthy();
     const badge = container.firstElementChild as HTMLElement;
-    expect(badge.style.backgroundColor).toBe('rgb(220, 252, 231)'); // #dcfce7
+    expect(badge.style.backgroundColor).toBe(hexToRgb(COLOR.riskLowTint));
   });
 
   it('renders score text for MEDIUM risk with yellow background', () => {
@@ -20,7 +22,7 @@ describe('CpdBadge', () => {
     );
     expect(screen.getByText('7')).toBeTruthy();
     const badge = container.firstElementChild as HTMLElement;
-    expect(badge.style.backgroundColor).toBe('rgb(254, 249, 195)'); // #fef9c3
+    expect(badge.style.backgroundColor).toBe(hexToRgb(COLOR.riskMediumTint));
   });
 
   it('renders score text for HIGH risk with red background', () => {
@@ -29,7 +31,7 @@ describe('CpdBadge', () => {
     );
     expect(screen.getByText('12')).toBeTruthy();
     const badge = container.firstElementChild as HTMLElement;
-    expect(badge.style.backgroundColor).toBe('rgb(254, 226, 226)'); // #fee2e2
+    expect(badge.style.backgroundColor).toBe(hexToRgb(COLOR.riskHighTint));
   });
 
   it('shows tooltip with referral recommendation for HIGH risk only', () => {
@@ -54,7 +56,7 @@ describe('CpdBadge', () => {
       <CpdBadge score={5} riskLevel={RiskLevel.MEDIUM} size="sm" />,
     );
     const badge = container.firstElementChild as HTMLElement;
-    expect(badge.classList.contains('text-xs') || badge.className.includes('text-xs')).toBe(true);
+    expect(badge.classList.contains('text-caption') || badge.className.includes('text-caption')).toBe(true);
   });
 
   it('renders large size variant', () => {
@@ -62,6 +64,6 @@ describe('CpdBadge', () => {
       <CpdBadge score={10} riskLevel={RiskLevel.HIGH} size="lg" />,
     );
     const badge = container.firstElementChild as HTMLElement;
-    expect(badge.classList.contains('text-lg') || badge.className.includes('text-lg')).toBe(true);
+    expect(badge.classList.contains('text-title') || badge.className.includes('text-title')).toBe(true);
   });
 });

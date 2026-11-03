@@ -1,59 +1,24 @@
-// T089: Login page — BMS Session ID authentication (Dark Authority design)
+// Login — direction-C hero (sub-project 5; approved mockup
+// .superpowers/brainstorm/1437805-1791700719/content/assets-in-context.html).
+// The auth flow — preflight → signIn → session cookie → callbackUrl — is
+// unchanged and pinned by tests/unit/pages/login.test.tsx.
 'use client';
 
+import { sanitizeCallbackUrl } from '@/lib/safe-callback-url';
 import { useState, useEffect, useRef, Suspense } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn } from 'next-auth/react';
-import { Building2, Activity, BarChart3, Shield, Clock, AlertTriangle } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { BrandMark } from '@/components/shared/BrandMark';
+import { LoginHero } from '@/components/auth/LoginHero';
+import { AccessDeniedNotice, type AccessDeniedInfo } from '@/components/auth/AccessDeniedNotice';
+import { HosxpVersionDialog, type VersionRejection } from '@/components/auth/HosxpVersionDialog';
 import { MIN_BMS_API_VERSION } from '@/lib/bms-version';
+import { mapProviderError, providerLoginStartUrl } from '@/lib/provider-login';
 import { setSessionCookie, setMarketplaceToken } from '@/utils/bms-session-storage';
-
-interface AccessDeniedInfo {
-  reason: 'not_registered' | 'deactivated';
-  hospitalCode: string;
-  hospitalName: string;
-  message: string;
-}
-
-interface VersionRejection {
-  hospitalCode: string;
-  hospitalName: string;
-  currentVersion: string | null;
-  minVersion: string;
-  message: string;
-}
-
-// The `providerError` query param carries whatever text the ProviderID OAuth
-// callback/pending flow put on the redirect (see
-// src/app/api/auth/provider/callback/route.ts and provider/complete/page.tsx).
-// Some of it is IdP-controlled, so it must never be rendered verbatim as the
-// headline. Known codes map to friendly Thai; unknown ones fall back to a safe
-// headline with the raw code shown only as small diagnostic detail.
-const PROVIDER_ERROR_MESSAGES: Record<string, string> = {
-  missing_provider_token: 'ไม่พบข้อมูลการเข้าสู่ระบบ ProviderID กรุณาเริ่มเข้าสู่ระบบใหม่อีกครั้ง',
-  'ProviderID login state is invalid or expired':
-    'เซสชันการเข้าสู่ระบบ ProviderID หมดอายุหรือไม่ถูกต้อง กรุณาลองเข้าสู่ระบบใหม่อีกครั้ง',
-  'ProviderID login failed': 'เข้าสู่ระบบด้วย ProviderID ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
-  access_denied: 'ท่านไม่ได้อนุญาตให้ระบบเข้าถึงข้อมูล ProviderID กรุณาลองใหม่แล้วกด "อนุญาต"',
-};
-
-const PROVIDER_ERROR_FALLBACK = 'เข้าสู่ระบบด้วย ProviderID ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
-
-function mapProviderError(code: string): { message: string; detail?: string } {
-  const known = PROVIDER_ERROR_MESSAGES[code];
-  if (known) return { message: known };
-  return { message: PROVIDER_ERROR_FALLBACK, detail: code };
-}
 
 function LoginForm() {
   const router = useRouter();
@@ -65,12 +30,13 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const autoLoginAttempted = useRef(false);
 
-  const callbackUrl = searchParams.get('callbackUrl') || '/';
+  const callbackUrl = sanitizeCallbackUrl(searchParams.get('callbackUrl'));
   const bmsSessionId = searchParams.get('bms-session-id');
   const providerError = searchParams.get('providerError');
   const mappedProviderError = providerError ? mapProviderError(providerError) : null;
   const marketplaceToken =
     searchParams.get('marketplace_token') ?? searchParams.get('marketplace-token');
+
 
   // Auto-login when bms-session-id is in the URL
   useEffect(() => {
@@ -190,97 +156,40 @@ function LoginForm() {
   };
 
   const handleProviderLogin = () => {
-    window.location.href = `/api/auth/provider/start?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+    window.location.href = providerLoginStartUrl(callbackUrl);
   };
 
+  const autoLoggingIn = Boolean(bmsSessionId) && loading;
+
   return (
-    <div className="flex min-h-screen">
-      {/* Left Panel — hidden on mobile */}
-      <div className="hidden md:flex md:w-1/2 lg:w-[45%] relative flex-col justify-between bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-10 text-white overflow-hidden">
-        {/* Subtle pattern overlay */}
-        <div
-          className="absolute inset-0 opacity-5"
-          style={{
-            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.8) 1px, transparent 1px)',
-            backgroundSize: '24px 24px',
-          }}
-        />
-
-        {/* Content (above overlay) */}
-        <div className="relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="bg-white/10 rounded-xl p-3">
-              <Building2 className="h-7 w-7 text-white" />
+    <div className="grid min-h-screen bg-surface-page md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+      <div className="flex flex-col justify-center px-6 py-10 md:px-10">
+        <div className="mx-auto w-full max-w-md space-y-6">
+          <header className="space-y-3">
+            <div className="flex items-center gap-2.5">
+              <BrandMark />
+              <span className="text-body-lg font-bold text-brand">NN-LRMS</span>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white">NN-LRMS</h1>
-              <p className="text-sm text-slate-400">Nan Labor Room Monitoring System</p>
-            </div>
-          </div>
-        </div>
+            <h1 className="text-page text-brand">
+              ระบบติดตามการคลอด
+              <br />
+              จังหวัดน่าน
+            </h1>
+            <p className="text-body text-ink-muted">
+              เห็นผู้คลอดทุกโรงพยาบาลในจังหวัดแบบเรียลไทม์ ประเมินความเสี่ยง CPD และประสานส่งต่อได้ทันที
+            </p>
+          </header>
 
-        <div className="relative z-10 space-y-8">
-          <h2 className="text-3xl font-bold text-white leading-tight">
-            ระบบติดตาม
-            <br />
-            การคลอด
-            <br />
-            จังหวัดน่าน
-          </h2>
+          {autoLoggingIn && (
+            <p role="status" className="flex items-center gap-2 rounded-xl bg-brand-soft px-4 py-3 text-body text-brand">
+              <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+              กำลังเข้าสู่ระบบจาก HOSxP…
+            </p>
+          )}
 
-          <div className="space-y-3">
-            <div className="flex items-center gap-4 bg-white/5 rounded-xl p-4">
-              <Building2 className="h-5 w-5 shrink-0 text-emerald-400" />
-              <span className="text-sm text-slate-300">15 โรงพยาบาลในเครือข่าย</span>
-            </div>
-            <div className="flex items-center gap-4 bg-white/5 rounded-xl p-4">
-              <Activity className="h-5 w-5 shrink-0 text-emerald-400" />
-              <span className="text-sm text-slate-300">CPD Score คำนวณอัตโนมัติ</span>
-            </div>
-            <div className="flex items-center gap-4 bg-white/5 rounded-xl p-4">
-              <BarChart3 className="h-5 w-5 shrink-0 text-emerald-400" />
-              <span className="text-sm text-slate-300">Partogram ติดตามความก้าวหน้าการคลอด</span>
-            </div>
-            <div className="flex items-center gap-4 bg-white/5 rounded-xl p-4">
-              <Clock className="h-5 w-5 shrink-0 text-emerald-400" />
-              <span className="text-sm text-slate-300">Real-time Dashboard ทุกโรงพยาบาล</span>
-            </div>
-          </div>
-        </div>
-
-        <p className="relative z-10 text-xs text-slate-500">
-          v1.0.2 — โรงพยาบาลน่าน จ.น่าน
-        </p>
-      </div>
-
-      {/* Right Panel — login form */}
-      <div className="flex flex-1 flex-col items-center justify-center bg-slate-50 md:bg-white px-6 py-12">
-        <div className="w-full max-w-sm space-y-8">
-          {/* Mobile header — shown only on small screens */}
-          <div className="md:hidden">
-            <div className="bg-slate-900 rounded-2xl p-6 mb-8 text-center">
-              <div className="flex justify-center mb-3">
-                <div className="bg-white/10 rounded-xl p-3">
-                  <Building2 className="h-6 w-6 text-white" />
-                </div>
-              </div>
-              <h1 className="text-lg font-bold text-white">NN-LRMS</h1>
-              <p className="text-sm text-slate-400">ระบบติดตามการคลอดจังหวัดน่าน</p>
-            </div>
-          </div>
-
-          {/* Desktop header — hidden on mobile */}
-          <div className="hidden md:block">
-            <h2 className="text-3xl font-bold text-slate-900">เข้าสู่ระบบ</h2>
-            <p className="mt-2 text-sm text-slate-400">ลงชื่อเข้าใช้ด้วย BMS Session ID</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <label
-                htmlFor="sessionId"
-                className="text-xs font-semibold uppercase tracking-wider text-slate-400"
-              >
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <div className="space-y-1.5">
+              <label htmlFor="sessionId" className="text-label text-ink">
                 BMS Session ID
               </label>
               <Input
@@ -291,51 +200,25 @@ function LoginForm() {
                 placeholder="กรอก Session ID จาก BMS"
                 disabled={loading}
                 autoFocus
-                className="h-12 rounded-xl border-slate-200 focus-visible:ring-emerald-500 focus-visible:border-emerald-500 bg-slate-50 font-mono"
+                aria-describedby="sessionId-help"
+                className="h-12 rounded-xl border-border bg-surface-card font-mono focus-visible:border-brand focus-visible:ring-brand"
               />
+              <p id="sessionId-help" className="text-caption text-ink-muted">
+                เปิด NN-LRMS จากเมนูใน HOSxP ระบบจะกรอกให้อัตโนมัติ
+              </p>
             </div>
 
-            {accessDenied && (
-              <div className="rounded-xl border-2 border-red-300 bg-red-50 p-4 text-sm">
-                <div className="flex items-start gap-2 mb-2">
-                  <Shield className="h-5 w-5 shrink-0 text-red-600 mt-0.5" />
-                  <div className="text-red-800 font-semibold">
-                    {accessDenied.reason === 'deactivated'
-                      ? 'โรงพยาบาลถูกปิดการใช้งาน'
-                      : 'ไม่ได้รับสิทธิ์ใช้งานระบบ'}
-                  </div>
-                </div>
-                <div className="text-red-700 text-xs mb-2">
-                  <div>
-                    โรงพยาบาล:{' '}
-                    <span className="font-semibold">{accessDenied.hospitalName || '—'}</span>
-                  </div>
-                  <div>
-                    รหัสโรงพยาบาล:{' '}
-                    <span className="font-mono font-semibold">
-                      {accessDenied.hospitalCode || '—'}
-                    </span>
-                  </div>
-                </div>
-                <div className="text-red-700 text-xs leading-relaxed border-t border-red-200 pt-2">
-                  {accessDenied.reason === 'deactivated'
-                    ? 'โรงพยาบาลของท่านถูกปิดการใช้งานในระบบ NN-LRMS หากท่านคิดว่าเป็นความผิดพลาด กรุณาติดต่อผู้ดูแลระบบ (สสจ.น่าน) เพื่อขอเปิดใช้งานอีกครั้ง'
-                    : 'โรงพยาบาลของท่านยังไม่ได้รับการลงทะเบียนในระบบ NN-LRMS หากท่านคิดว่าเป็นความผิดพลาด หรือต้องการเข้าร่วมเครือข่าย กรุณาติดต่อผู้ดูแลระบบ (สสจ.น่าน) เพื่อขอลงทะเบียนโรงพยาบาลของท่านในระบบ'}
-                </div>
-              </div>
-            )}
+            {accessDenied && <AccessDeniedNotice info={accessDenied} />}
 
             {!accessDenied && (error || mappedProviderError) && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+              <div role="alert" className="rounded-xl border border-danger/40 bg-danger-tint p-3 text-body text-danger-text">
                 {error ? (
                   error
                 ) : mappedProviderError ? (
                   <>
                     <div>{mappedProviderError.message}</div>
                     {mappedProviderError.detail && (
-                      <div className="mt-1 text-xs break-words text-red-500">
-                        {mappedProviderError.detail}
-                      </div>
+                      <div className="mt-1 break-words text-caption">{mappedProviderError.detail}</div>
                     )}
                   </>
                 ) : null}
@@ -344,167 +227,57 @@ function LoginForm() {
 
             <Button
               type="submit"
-              className="w-full h-12 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold"
               disabled={loading}
+              className="h-12 w-full rounded-xl bg-brand text-body font-semibold text-white hover:bg-brand-strong"
             >
               {loading ? (
                 <span className="flex items-center gap-2">
-                  <svg
-                    className="h-4 w-4 animate-spin"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  กำลังตรวจสอบ...
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                  กำลังตรวจสอบ…
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
-                  <Shield className="h-4 w-4" />
-                  เข้าสู่ระบบ
+                  <ShieldCheck aria-hidden="true" className="h-4 w-4" />
+                  เข้าสู่ระบบด้วย BMS (HOSxP)
                 </span>
               )}
             </Button>
+          </form>
 
-            <div className="relative py-1">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-200" />
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-white px-3 text-slate-400">หรือ</span>
-              </div>
-            </div>
+          <div aria-hidden="true" className="flex items-center gap-3 text-caption text-ink-muted">
+            <span className="h-px flex-1 bg-border" />
+            หรือ
+            <span className="h-px flex-1 bg-border" />
+          </div>
 
+          <div className="space-y-1.5">
             <Button
               type="button"
               variant="outline"
-              className="w-full h-12 rounded-xl border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold"
               disabled={loading}
               onClick={handleProviderLogin}
+              className="h-12 w-full rounded-xl border-brand/30 bg-surface-card text-body font-semibold text-brand hover:bg-brand-soft"
             >
-              <span className="flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                ProviderID (อ่านอย่างเดียว)
-              </span>
+              เข้าสู่ระบบด้วย ProviderID
             </Button>
-          </form>
-
-          <div className="text-center space-y-2">
-            <p className="text-xs text-slate-400">
-              ระบบตรวจสอบสิทธิ์ผ่าน BMS Session ของ สสจ.น่าน
-            </p>
-            <a
-              href="/about"
-              className="inline-block text-sm text-slate-400 hover:text-teal-600 transition-colors"
-            >
-              เกี่ยวกับระบบ NN-LRMS
-            </a>
+            <p className="text-center text-caption text-ink-muted">สิทธิ์อ่านอย่างเดียว — ดูข้อมูลได้ แก้ไขไม่ได้</p>
           </div>
+
+          <p className="flex items-start gap-2 text-caption text-ink-muted">
+            <ShieldCheck aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+            ชื่อและเลขบัตรประชาชนผู้ป่วยถูกเข้ารหัสและแสดงแบบปิดบังบางส่วน ตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล
+          </p>
+          <p className="text-caption text-ink-muted">
+            <Link href="/about" className="font-medium text-brand underline-offset-4 hover:underline">
+              เกี่ยวกับระบบ NN-LRMS
+            </Link>{' '}
+            · สำนักงานสาธารณสุขจังหวัดน่าน
+          </p>
         </div>
       </div>
 
-      <Dialog
-        open={versionRejection !== null}
-        onOpenChange={(open) => {
-          if (!open) setVersionRejection(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-md p-0 overflow-hidden" showCloseButton={false}>
-          <div className="bg-gradient-to-br from-red-50 to-orange-50 px-6 pt-6 pb-5 border-b border-red-100">
-            <div className="flex items-start gap-4">
-              <div className="shrink-0 rounded-full bg-red-100 p-2.5 ring-4 ring-red-50">
-                <AlertTriangle className="h-6 w-6 text-red-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <DialogHeader>
-                  <DialogTitle className="text-base font-semibold text-red-900">
-                    ต้องอัปเดต HOSxP ก่อนใช้งาน
-                  </DialogTitle>
-                  <DialogDescription className="text-xs text-red-700/80 mt-1">
-                    เวอร์ชัน HOSxP API ของโรงพยาบาลเก่ากว่าที่ระบบ NN-LRMS รองรับ
-                  </DialogDescription>
-                </DialogHeader>
-              </div>
-            </div>
-          </div>
-
-          {versionRejection && (
-            <div className="px-6 py-5 space-y-4">
-              {(versionRejection.hospitalName || versionRejection.hospitalCode) && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    โรงพยาบาล
-                  </div>
-                  <div className="mt-0.5 text-sm font-medium text-slate-800 truncate">
-                    {versionRejection.hospitalName || '—'}
-                  </div>
-                  {versionRejection.hospitalCode && (
-                    <div className="mt-0.5 font-mono text-[11px] text-slate-500">
-                      รหัส {versionRejection.hospitalCode}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-red-200 bg-red-50/60 px-3 py-2.5">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-red-500">
-                    เวอร์ชันปัจจุบัน
-                  </div>
-                  <div className="mt-0.5 font-mono text-sm font-semibold text-red-700">
-                    {versionRejection.currentVersion ?? '—'}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600">
-                    ต้องการอย่างน้อย
-                  </div>
-                  <div className="mt-0.5 font-mono text-sm font-semibold text-emerald-700">
-                    {versionRejection.minVersion}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
-                กรุณาติดต่อผู้ดูแลระบบ HOSxP ของโรงพยาบาลเพื่ออัปเดต HOSxP เป็นเวอร์ชัน{' '}
-                <span className="font-mono font-semibold">{versionRejection.minVersion}</span>{' '}
-                ขึ้นไป จากนั้นจึงเข้าใช้งาน NN-LRMS อีกครั้ง
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="px-4 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-lg"
-              onClick={() => setVersionRejection(null)}
-            >
-              ปิด
-            </Button>
-            <Button
-              type="button"
-              className="rounded-lg bg-slate-900 hover:bg-slate-800 text-white"
-              onClick={() => setVersionRejection(null)}
-            >
-              รับทราบ
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <LoginHero />
+      <HosxpVersionDialog rejection={versionRejection} onClose={() => setVersionRejection(null)} />
     </div>
   );
 }

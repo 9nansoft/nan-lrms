@@ -72,6 +72,16 @@ const COUNT_QUERIES: Array<{ key: string; sql: string; placeholders: 1 | 2 | 3 }
     sql: 'SELECT COUNT(*) AS cnt FROM cached_referrals WHERE from_hospital_id = ? OR to_hospital_id = ?',
   },
   {
+    key: 'moph_alert_log',
+    placeholders: 1,
+    sql: 'SELECT COUNT(*) AS cnt FROM moph_alert_log WHERE hospital_id = ?',
+  },
+  {
+    key: 'moph_alert_event_queue',
+    placeholders: 1,
+    sql: 'SELECT COUNT(*) AS cnt FROM moph_alert_event_queue WHERE hospital_id = ?',
+  },
+  {
     key: 'cached_patients',
     placeholders: 1,
     sql: 'SELECT COUNT(*) AS cnt FROM cached_patients WHERE hospital_id = ?',
@@ -207,6 +217,11 @@ export async function DELETE(
       'DELETE FROM cached_referrals WHERE from_hospital_id = ? OR to_hospital_id = ?',
       [hospitalId, hospitalId],
     );
+    // Alerts contain identifiers/clinical context derived from the purged
+    // patient data. Remove both delivery attempts and deferred events so a
+    // later drain cannot send an alert for a case the admin has erased.
+    await db.execute('DELETE FROM moph_alert_log WHERE hospital_id = ?', [hospitalId]);
+    await db.execute('DELETE FROM moph_alert_event_queue WHERE hospital_id = ?', [hospitalId]);
     // cached_patients references maternal_journeys.id, so it must go before
     // maternal_journeys to satisfy the FK.
     await db.execute('DELETE FROM cached_patients WHERE hospital_id = ?', [hospitalId]);

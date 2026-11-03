@@ -1,16 +1,21 @@
 // Pregnancies board page — behavior tests for the redesigned provincial view.
 // KPI strips must come from the API's DB-wide counts, EDC/due and follow-up
 // aging must render per anc-ops config, and patient identity stays masked.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SWRConfig } from 'swr';
+import { failNextRefresh } from '../../helpers/swr-stale';
 import type { JourneyListResponse } from '@/types/api';
 import PregnanciesPage from '@/app/(provincial)/pregnancies/page';
+import { ANC_LAST_VISIT_MAX_AGE_DAYS } from '@/config/anc-freshness';
+import { ANC_OPS } from '@/config/anc-ops';
 
+const nav = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: nav.push, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
   useParams: () => ({}),
+  usePathname: () => '/pregnancies',
 }));
 
 // jsdom has no EventSource; the page only uses SSE to trigger refreshes.
@@ -107,6 +112,10 @@ function renderPage(data: JourneyListResponse = makeFixture()) {
   return { fetcher, ...utils };
 }
 
+/** KPI toggles are stretched aria-pressed buttons inside the tile (the
+ *  tile root carries the test id). */
+const toggleIn = (tile: HTMLElement) => within(tile).getByRole('button', { pressed: false });
+
 describe('PregnanciesPage — KPI strips', () => {
   it('renders ops cohorts from opsCounts with counts, not from visible rows', async () => {
     renderPage();
@@ -123,7 +132,7 @@ describe('PregnanciesPage — KPI strips', () => {
   it('clicking a cohort KPI applies the cohort filter', async () => {
     const { fetcher } = renderPage();
 
-    fireEvent.click(await screen.findByTestId('kpi-due-soon'));
+    fireEvent.click(toggleIn(await screen.findByTestId('kpi-due-soon')));
 
     await waitFor(() => {
       const urls = fetcher.mock.calls.map((c) => String(c[0]));
@@ -134,7 +143,7 @@ describe('PregnanciesPage — KPI strips', () => {
   it('clicking the LTFU cell requests the lost-to-follow-up worklist', async () => {
     const { fetcher } = renderPage();
 
-    fireEvent.click(await screen.findByTestId('kpi-ltfu'));
+    fireEvent.click(toggleIn(await screen.findByTestId('kpi-ltfu')));
 
     await waitFor(() => {
       const urls = fetcher.mock.calls.map((c) => String(c[0]));
@@ -148,7 +157,7 @@ describe('PregnanciesPage — KPI strips', () => {
     const hr3 = await screen.findByTestId('risk-HR3');
     expect(within(hr3).getByText('106')).toBeInTheDocument();
 
-    fireEvent.click(hr3);
+    fireEvent.click(toggleIn(hr3));
     await waitFor(() => {
       const urls = fetcher.mock.calls.map((c) => String(c[0]));
       expect(urls.some((u) => u.includes('risk_level=HR3'))).toBe(true);
@@ -157,7 +166,7 @@ describe('PregnanciesPage — KPI strips', () => {
 
   it('shows a last-updated stamp and the gating footnote', async () => {
     renderPage();
-    expect(await screen.findByText(/อัปเดตล่าสุด/)).toBeInTheDocument();
+    expect(await screen.findByText(/ข้อมูลหน้านี้ ณ/)).toBeInTheDocument();
     expect(screen.getByText(/ไม่รวมราย/)).toBeInTheDocument();
   });
 });
@@ -238,5 +247,65 @@ describe('PregnanciesPage — empty state', () => {
     });
 
     expect((await screen.findAllByText(/ไม่พบข้อมูลฝากครรภ์/)).length).toBeGreaterThan(0);
+  });
+});
+
+describe('PregnanciesPage — list-page pattern (sub-project 4)', () => {
+  it('Thai header and sections; no English mono labels', async () => {
+    renderPage();
+    expect(await screen.findByRole('heading', { level: 1, name: 'ฝากครรภ์ (ANC)' })).toBeInTheDocument();
+    for (const name of ['ระดับความเสี่ยงทั้งจังหวัด', 'กลุ่มที่ต้องติดตาม', 'รายชื่อหญิงตั้งครรภ์']) {
+      expect(screen.getByRole('region', { name })).toBeInTheDocument();
+    }
+    for (const en of ['PROVINCIAL REGISTRY', 'PROVINCE-WIDE', 'OVERDUE EDC', 'MISSED ANC', 'ANC Registry', 'SHOWING', 'HOSPITAL:', 'SORT:', /^PREV$/, /^NEXT$/]) {
+      expect(screen.queryByText(en instanceof RegExp ? en : new RegExp(en))).toBeNull();
+    }
+  });
+
+  it('cohort labels quote config thresholds', async () => {
+    renderPage();
+    const ltfu = await screen.findByTestId('kpi-ltfu');
+    expect(ltfu).toHaveTextContent(`หลุดการติดตาม (${ANC_LAST_VISIT_MAX_AGE_DAYS}–${ANC_OPS.ltfuWindowDays} วัน)`);
+    expect(screen.getByTestId('kpi-anc-stale')).toHaveTextContent(`ห่างนัด ANC เกิน ${ANC_OPS.followupWarnDays} วัน`);
+  });
+
+  it('list totals and the pager come from pagination.total, not the 3 visible rows', async () => {
+    renderPage();
+    const list = await screen.findByRole('region', { name: 'รายชื่อหญิงตั้งครรภ์' });
+    expect(within(list).getByText('ทั้งหมด 1,169 ราย')).toBeInTheDocument();
+    expect(within(list).getByRole('navigation', { name: 'เปลี่ยนหน้า' })).toHaveTextContent('แสดง 1–20 จาก 1,169 ราย');
+  });
+
+  it('a row opens the journey; the masked-name link does not double-navigate', async () => {
+    nav.push.mockClear();
+    renderPage();
+    const row = await screen.findByTestId('journey-row-j-ok');
+    fireEvent.click(row);
+    expect(nav.push).toHaveBeenCalledWith('/pregnancies/j-ok');
+    nav.push.mockClear();
+    fireEvent.click(within(row).getByRole('link'));
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(row).toHaveAttribute('aria-label', expect.stringContaining('HN888002'));
+    expect(row.getAttribute('aria-label')).not.toContain('ดีงาม');
+  });
+
+  it('empty list renders one EmptyState with an actionable Thai description', async () => {
+    renderPage({ ...makeFixture(), journeys: [], pagination: { total: 0, page: 1, perPage: 20, totalPages: 1 } });
+    // findByText throws on more than one match: the empty state renders once,
+    // not inside both the table and the card views.
+    expect(await screen.findByText('ไม่พบข้อมูลฝากครรภ์')).toBeInTheDocument();
+    expect(screen.getByText(/ยังไม่มีข้อมูลฝากครรภ์ในทะเบียน/)).toBeInTheDocument();
+  });
+});
+
+describe('PregnanciesPage — stale data', () => {
+  afterEach(() => vi.useRealTimers());
+  it('keeps the cached rows and shows the stale banner when a refresh fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { fetcher } = renderPage();
+    expect(await screen.findByTestId('journey-row-j-overdue')).toBeInTheDocument();
+    await failNextRefresh(fetcher);
+    expect(await screen.findByText(/การเชื่อมต่อล้มเหลว/)).toBeInTheDocument();
+    expect(screen.getByTestId('journey-row-j-overdue')).toBeInTheDocument();
   });
 });

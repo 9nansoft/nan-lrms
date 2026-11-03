@@ -3,6 +3,7 @@
 
 import type { DashboardHospital } from '@/types/api';
 import { ConnectionStatus as ConnectionStatusEnum } from '@/types/domain';
+import { CONNECTION_LABEL_TH } from '@/config/hospital-status';
 
 interface ConnectionSummaryProps {
   hospitals: DashboardHospital[];
@@ -17,17 +18,17 @@ interface StatusRow {
 const STATUS_ROWS: StatusRow[] = [
   {
     key: ConnectionStatusEnum.ONLINE,
-    label: 'ออนไลน์',
-    dotClass: 'bg-green-500',
+    label: CONNECTION_LABEL_TH[ConnectionStatusEnum.ONLINE],
+    dotClass: 'bg-ok',
   },
   {
     key: ConnectionStatusEnum.OFFLINE,
-    label: 'ออฟไลน์',
-    dotClass: 'bg-red-500',
+    label: CONNECTION_LABEL_TH[ConnectionStatusEnum.OFFLINE],
+    dotClass: 'bg-danger',
   },
   {
     key: ConnectionStatusEnum.UNKNOWN,
-    label: 'ไม่ทราบ',
+    label: CONNECTION_LABEL_TH[ConnectionStatusEnum.UNKNOWN],
     dotClass: 'bg-gray-400',
   },
 ];

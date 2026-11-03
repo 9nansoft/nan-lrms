@@ -33,6 +33,7 @@ import { logger } from '@/lib/logger';
 import { enqueueReferralIncomingAlert } from '@/services/risk-alert';
 import { resolveAlertOrigin, decryptPatientName, type AlertOrigin } from '@/services/alert-context';
 import { referralCaseRef } from '@/services/referral-alerts';
+import { resolveReferralDestination } from '@/services/referral-destination';
 
 export interface BrowserReferoutRow {
   refer_number?: string | null;
@@ -189,7 +190,7 @@ export async function processBrowserReferouts(
         result.skippedUnknownHospital++;
         continue;
       }
-      const toHospitalId = await hospitalIdByHcode(db, toHcode);
+      const toHospitalId = (await resolveReferralDestination(db, toHcode))?.id;
       if (!toHospitalId) {
         result.skippedUnknownHospital++;
         continue;

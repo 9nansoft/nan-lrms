@@ -3,6 +3,8 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ReferralBanner } from '@/components/patient/ReferralBanner';
 import { RiskLevel } from '@/types/domain';
+import { COLOR } from '@/config/design-tokens';
+import { hexToRgb } from '../../helpers/color';
 
 describe('ReferralBanner', () => {
   it('renders nothing for LOW risk', () => {
@@ -12,19 +14,16 @@ describe('ReferralBanner', () => {
     expect(container.firstElementChild).toBeNull();
   });
 
-  // 2026-04-21 redesign moved color from Tailwind class tokens
-  // (bg-amber-50 / bg-red-50) to risk-palette inline gradients. The tests
-  // now pin the semantic risk via the palette hex that drives the accent
-  // stripe + color-mix gradient.
+  // Sub-project 3: the banner takes its tint and accent from RISK_LEVELS (design
+  // tokens). The tests pin the semantic risk via those token colours.
   it('renders amber gradient for MEDIUM risk', () => {
     render(
       <ReferralBanner score={7} riskLevel={RiskLevel.MEDIUM} recommendation="เฝ้าระวังใกล้ชิด, เตรียมพร้อมส่งต่อ" />,
     );
     const banner = screen.getByRole('alert');
     expect(banner).toBeTruthy();
-    const style = banner.getAttribute('style') ?? '';
-    // JSDOM normalizes hex #eab308 to rgb(234, 179, 8) in computed styles.
-    expect(style).toMatch(/eab308|234,\s*179,\s*8/i);
+    expect(banner.style.backgroundColor).toBe(hexToRgb(COLOR.riskMediumTint));
+    expect(banner.style.borderLeftColor).toBe(hexToRgb(COLOR.riskMedium));
   });
 
   it('renders red gradient for HIGH risk', () => {
@@ -33,9 +32,8 @@ describe('ReferralBanner', () => {
     );
     const banner = screen.getByRole('alert');
     expect(banner).toBeTruthy();
-    const style = banner.getAttribute('style') ?? '';
-    // JSDOM normalizes #ef4444 → rgb(239, 68, 68) and #dc2626 → rgb(220, 38, 38).
-    expect(style).toMatch(/ef4444|dc2626|239,\s*68,\s*68|220,\s*38,\s*38/i);
+    expect(banner.style.backgroundColor).toBe(hexToRgb(COLOR.riskHighTint));
+    expect(banner.style.borderLeftColor).toBe(hexToRgb(COLOR.riskHigh));
   });
 
   it('displays the CPD score in the badge', () => {
@@ -73,7 +71,7 @@ describe('ReferralBanner', () => {
     const { container } = render(
       <ReferralBanner score={12} riskLevel={RiskLevel.HIGH} recommendation="ควรประสานส่งต่อทันที!" />,
     );
-    const pulsingElement = container.querySelector('.animate-ping');
+    const pulsingElement = container.querySelector('[class*="animate-ping"]');
     expect(pulsingElement).toBeTruthy();
   });
 
@@ -81,7 +79,7 @@ describe('ReferralBanner', () => {
     const { container } = render(
       <ReferralBanner score={7} riskLevel={RiskLevel.MEDIUM} recommendation="เฝ้าระวังใกล้ชิด, เตรียมพร้อมส่งต่อ" />,
     );
-    const pulsingElement = container.querySelector('.animate-ping');
+    const pulsingElement = container.querySelector('[class*="animate-ping"]');
     expect(pulsingElement).toBeNull();
   });
 

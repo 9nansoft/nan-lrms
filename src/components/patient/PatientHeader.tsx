@@ -1,24 +1,18 @@
-// PatientHeader — patient identity band. Redesigned 2026-04-21 (v3): navy
-// gradient canvas with white-on-navy primary identifier, color-tinted chips
-// for status/admission/weight, and a risk-colored CPD tile on the right that
-// promotes the single most-important number to page-level prominence.
+// src/components/patient/PatientHeader.tsx
+// Patient identity band (direction C): brand-strong band with the masked name,
+// labour status, identifier chips and the CPD score tile. Colours come from
+// tokens. The weight-gain tone reuses the CPD weight-gain bands
+// (CPD_FACTOR_WEIGHTS.weightDiffKg) instead of restating them.
 'use client';
 
+import type { ReactNode } from 'react';
+import { Activity, AlertTriangle, Calendar, Hospital, Scale, ShieldCheck, User } from 'lucide-react';
 import { ConnectionStatus } from '@/components/shared/ConnectionStatus';
-import { formatThaiDate } from '@/lib/utils';
+import { formatThaiDate, cn } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
+import { CPD_FACTOR_WEIGHTS, CPD_MAX_SCORE, RISK_LEVELS } from '@/config/risk-levels';
 import { RiskLevel } from '@/types/domain';
 import type { ConnectionStatus as ConnectionStatusEnum } from '@/types/domain';
-import {
-  User,
-  Calendar,
-  Scale,
-  Hospital,
-  Activity,
-  AlertTriangle,
-  ShieldCheck,
-} from 'lucide-react';
-import type { ReactNode } from 'react';
 
 interface PatientHeaderProps {
   hn: string;
@@ -29,102 +23,46 @@ interface PatientHeaderProps {
   laborStatus: string;
   weightKg?: number | null;
   weightDiffKg?: number | null;
-  hospital: {
-    name: string;
-    level: string;
-    connectionStatus?: ConnectionStatusEnum;
-    lastSyncAt?: string | null;
-  };
-  cpdScore?: {
-    score: number;
-    riskLevel: RiskLevel;
-  } | null;
+  hospital: { name: string; level: string; connectionStatus?: ConnectionStatusEnum; lastSyncAt?: string | null };
+  cpdScore?: { score: number; riskLevel: RiskLevel } | null;
 }
 
-function weightDiffTone(diff: number): { color: string; label: string } {
-  if (diff > 20) return { color: '#fca5a5', label: 'เกินเกณฑ์' };
-  if (diff > 15) return { color: '#fde68a', label: 'ขอบเขต' };
-  return { color: '#86efac', label: 'ปกติ' };
-}
+type WeightTone = 'ok' | 'warn' | 'danger';
+const WEIGHT_TONE_BY_POINTS: Record<number, WeightTone> = { 0: 'ok', 1: 'warn', 2: 'danger' };
+// Light tints read clearly on the dark band (contrast > 7:1 against brand-strong).
+const WEIGHT_TEXT: Record<WeightTone, string> = { ok: 'text-ok-tint', warn: 'text-warn-tint', danger: 'text-danger-tint' };
 
-function Chip({
-  icon,
-  label,
-  value,
-  tone = 'default',
-  highlight,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: ReactNode;
-  tone?: 'default' | 'accent' | 'warn' | 'ok';
-  highlight?: string;
-}) {
-  const palette = {
-    default: { bg: 'rgba(255,255,255,0.08)', fg: 'rgba(255,255,255,0.85)', label: 'rgba(255,255,255,0.55)' },
-    accent:  { bg: 'rgba(255,232,154,0.14)', fg: '#ffe89a', label: 'rgba(255,232,154,0.75)' },
-    warn:    { bg: 'rgba(252,165,165,0.14)', fg: '#fecaca', label: 'rgba(254,202,202,0.8)' },
-    ok:      { bg: 'rgba(134,239,172,0.14)', fg: '#bbf7d0', label: 'rgba(187,247,208,0.8)' },
-  }[tone];
+function Chip({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-mono text-[11px]"
-      style={{ background: palette.bg, color: palette.fg }}
-    >
-      <span className="flex h-3 w-3 items-center justify-center" style={{ color: palette.label }}>
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-label text-white">
+      <span aria-hidden="true" className="flex h-4 w-4 items-center justify-center text-white/70">
         {icon}
       </span>
-      <span style={{ color: palette.label }}>{label}</span>
-      <span className="font-semibold tabular-nums" style={{ color: highlight ?? palette.fg }}>
-        {value}
-      </span>
+      <span className="text-white/70">{label}</span>
+      <span className="font-semibold tabular-nums">{value}</span>
     </span>
   );
 }
 
 function CpdTile({ score, riskLevel }: { score: number; riskLevel: RiskLevel }) {
-  // PGlite returns NUMERIC columns as strings in some code paths — coerce to
-  // a real number so toFixed() can format the score.
+  // PGlite returns NUMERIC columns as strings on some paths; coerce first.
   const scoreNum = typeof score === 'number' ? score : Number(score);
-  const tone =
-    riskLevel === RiskLevel.HIGH
-      ? { bg: '#7f1d1d', accent: '#fecaca', label: 'เสี่ยงสูง', icon: <AlertTriangle className="h-4 w-4" /> }
-      : riskLevel === RiskLevel.MEDIUM
-        ? { bg: '#78350f', accent: '#fde68a', label: 'เฝ้าระวัง', icon: <AlertTriangle className="h-4 w-4" /> }
-        : { bg: '#14532d', accent: '#bbf7d0', label: 'ปกติ', icon: <ShieldCheck className="h-4 w-4" /> };
+  const cfg = RISK_LEVELS[riskLevel];
+  const Icon = riskLevel === RiskLevel.LOW ? ShieldCheck : AlertTriangle;
   return (
     <div
-      className="relative flex shrink-0 flex-col items-end justify-between gap-1 rounded-sm px-4 py-3"
-      style={{
-        background: `linear-gradient(135deg, ${tone.bg}, rgba(0,0,0,0.25))`,
-        minWidth: 160,
-        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.12)',
-      }}
+      className="flex shrink-0 flex-col items-end gap-1 rounded-2xl px-4 py-3 text-white"
+      style={{ backgroundColor: cfg.textColor }}
     >
-      <div
-        className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]"
-        style={{ color: tone.accent }}
-      >
-        {tone.icon}
-        CPD Score
+      <div className="flex items-center gap-1.5 text-label">
+        <Icon aria-hidden="true" className="h-4 w-4" />
+        คะแนน CPD
       </div>
-      <div className="flex items-baseline gap-1.5 tabular-nums" style={{ color: 'white' }}>
-        <span
-          className="font-mono text-[34px] font-bold leading-none"
-          style={{ letterSpacing: '-0.03em' }}
-        >
-          {Number.isFinite(scoreNum) ? scoreNum.toFixed(scoreNum % 1 === 0 ? 0 : 2) : '—'}
-        </span>
-        <span className="font-mono text-[11px]" style={{ color: tone.accent }}>
-          / 14.5
-        </span>
+      <div className="flex items-baseline gap-1.5 tabular-nums">
+        <span className="text-kpi">{Number.isFinite(scoreNum) ? scoreNum.toFixed(scoreNum % 1 === 0 ? 0 : 2) : '—'}</span>
+        <span className="text-label text-white/80">/ {CPD_MAX_SCORE}</span>
       </div>
-      <div
-        className="font-mono text-[10px] font-semibold tracking-[0.12em]"
-        style={{ color: tone.accent }}
-      >
-        {tone.label.toUpperCase()} · {riskLevel}
-      </div>
+      <div className="text-label font-semibold">{cfg.labelTh}</div>
     </div>
   );
 }
@@ -143,135 +81,63 @@ export function PatientHeader({
 }: PatientHeaderProps) {
   const showWeight = weightKg != null && weightDiffKg != null && weightKg > 0 && weightDiffKg > 0;
   const preWeight = showWeight ? weightKg - weightDiffKg : null;
-  const weightTone = weightDiffKg != null && weightDiffKg > 15 ? weightDiffTone(weightDiffKg) : null;
-
-  const statusMeta =
-    laborStatus === 'ACTIVE'
-      ? { bg: 'rgba(134,239,172,0.18)', fg: '#bbf7d0', label: 'คลอดอยู่', dot: '#4ade80' }
-      : { bg: 'rgba(255,255,255,0.08)', fg: 'rgba(255,255,255,0.75)', label: 'คลอดแล้ว', dot: 'rgba(255,255,255,0.5)' };
+  const weightTone: WeightTone =
+    weightDiffKg != null ? (WEIGHT_TONE_BY_POINTS[CPD_FACTOR_WEIGHTS.weightDiffKg.evaluate(weightDiffKg)] ?? 'ok') : 'ok';
+  const active = laborStatus === 'ACTIVE';
 
   return (
-    <div
-      className="relative overflow-hidden px-6 py-4"
-      style={{
-        background:
-          'linear-gradient(135deg, #0c1530 0%, #1e2a6a 55%, #2b3a8c 100%)',
-        color: 'white',
-      }}
-    >
-      {/* Decorative radial accent — provincial network signature */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage:
-            'radial-gradient(circle at 95% 8%, rgba(255,232,154,0.18), transparent 45%), radial-gradient(circle at 3% 110%, rgba(87,196,255,0.14), transparent 55%)',
-        }}
-      />
-
-      <div className="relative flex items-start justify-between gap-6">
+    <div data-testid="patient-header" className="bg-brand-strong px-4 py-4 text-white md:px-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          {/* Primary identity row — name + status + AN/HN */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1
-              className="truncate text-[24px] font-bold leading-tight"
-              style={{ letterSpacing: '-0.015em', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}
-            >
-              {name ? maskName(name) : 'ไม่ทราบชื่อ'}
-            </h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="truncate text-page">{name ? maskName(name) : 'ไม่ทราบชื่อ'}</h1>
             <span
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.08em]"
-              style={{ background: statusMeta.bg, color: statusMeta.fg }}
+              className={cn(
+                'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-label',
+                active ? 'bg-ok-tint text-ok-text' : 'bg-white/10 text-white',
+              )}
             >
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{
-                  background: statusMeta.dot,
-                  boxShadow: laborStatus === 'ACTIVE' ? `0 0 0 3px ${statusMeta.dot}33` : undefined,
-                }}
-              />
-              {statusMeta.label}
+              <span aria-hidden="true" className={cn('h-2 w-2 rounded-full', active ? 'bg-ok' : 'bg-white/60')} />
+              {active ? 'คลอดอยู่' : 'คลอดแล้ว'}
             </span>
           </div>
-
-          {/* Identifier chips */}
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <Chip
-              icon={<User className="h-3 w-3" />}
-              label="AN"
-              value={an}
-              tone="accent"
-            />
-            <Chip
-              icon={<User className="h-3 w-3" />}
-              label="HN"
-              value={hn}
-            />
-            <Chip
-              icon={<Calendar className="h-3 w-3" />}
-              label="อายุ"
-              value={<>{age}<span className="ml-0.5 font-normal opacity-70">ปี</span></>}
-            />
-            <Chip
-              icon={<Activity className="h-3 w-3" />}
-              label="Admit"
-              value={formatThaiDate(new Date(admitDate))}
-            />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Chip icon={<User className="h-3.5 w-3.5" />} label="AN" value={an} />
+            <Chip icon={<User className="h-3.5 w-3.5" />} label="HN" value={hn} />
+            <Chip icon={<Calendar className="h-3.5 w-3.5" />} label="อายุ" value={<><span>{age}</span> ปี</>} />
+            <Chip icon={<Activity className="h-3.5 w-3.5" />} label="รับเข้า" value={formatThaiDate(new Date(admitDate))} />
             {showWeight && preWeight !== null && weightDiffKg !== null && (
               <Chip
-                icon={<Scale className="h-3 w-3" />}
+                icon={<Scale className="h-3.5 w-3.5" />}
                 label="น.น."
-                tone={weightTone ? 'warn' : 'default'}
                 value={
                   <>
-                    <span className="opacity-75">{preWeight}</span>
-                    <span className="mx-0.5 opacity-50">→</span>
+                    <span>{preWeight}</span>
+                    <span className="mx-1 text-white/60">→</span>
                     <span>{weightKg}</span>
-                    <span className="mx-0.5 opacity-50">=</span>
-                    <span
-                      style={{ color: weightTone?.color ?? '#bbf7d0' }}
-                    >
+                    <span className="mx-1 text-white/60">=</span>
+                    <span data-tone={weightTone} className={WEIGHT_TEXT[weightTone]}>
                       +{weightDiffKg}
                     </span>
-                    <span className="ml-0.5 text-[10px] opacity-60">กก.</span>
+                    <span className="ml-1 text-white/70">กก.</span>
                   </>
                 }
               />
             )}
           </div>
-
-          {/* Hospital row — shown as a distinct bar under the chips */}
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span
-              className="inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-mono text-[10px] tracking-[0.04em]"
-              style={{
-                background: 'rgba(255,255,255,0.09)',
-                color: 'rgba(255,255,255,0.88)',
-                boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.12)',
-              }}
-            >
-              <Hospital className="h-3 w-3 opacity-70" />
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-label text-white">
+              <Hospital aria-hidden="true" className="h-3.5 w-3.5 text-white/70" />
               <span className="font-semibold">{hospital.name}</span>
-              <span className="opacity-60">·{hospital.level}</span>
+              <span className="text-white/70">·{hospital.level}</span>
             </span>
             {hospital.connectionStatus && (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-mono text-[10px]"
-                style={{
-                  background: 'rgba(255,255,255,0.06)',
-                  color: 'rgba(255,255,255,0.78)',
-                }}
-              >
-                <ConnectionStatus
-                  status={hospital.connectionStatus}
-                  lastSyncAt={hospital.lastSyncAt ?? null}
-                  className="text-[10px]"
-                />
+              <span className="inline-flex items-center rounded-full bg-surface-card px-3 py-1">
+                <ConnectionStatus status={hospital.connectionStatus} lastSyncAt={hospital.lastSyncAt ?? null} className="text-label" />
               </span>
             )}
           </div>
         </div>
-
         {cpdScore && <CpdTile score={cpdScore.score} riskLevel={cpdScore.riskLevel} />}
       </div>
     </div>

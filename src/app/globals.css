@@ -7,33 +7,54 @@
 
 :root {
 
-  /* Primary — Teal Medical */
-  --primary-teal: #0d9488;
-  --primary-teal-dark: #0f766e;
-  --primary-teal-light: #ccfbf1;
-  --primary-teal-50: #f0fdfa;
-
-  /* NN-LRMS Risk Colors */
-  --risk-low: #22c55e;
-  --risk-medium: #eab308;
-  --risk-high: #ef4444;
-
-  /* Connection Status */
-  --status-online: #22c55e;
-  --status-offline: #ef4444;
-  --status-unknown: #9ca3af;
-
-  /* Dashboard — institutional navy accent (Air-traffic-control aesthetic) */
-  --accent-navy: #2b3a8c;
-  --accent-navy-strong: #1e2a6a;
-  --accent-navy-soft: #e7eaf5;
-  --ink-navy: #0c1530;
-  --ink-navy-dim: #3a4566;
-  --ink-navy-muted: #6b7693;
-  --surface-cool: #eef1f6;
-  --surface-sunken: #e3e8f0;
-  --rule-strong: #d4dae6;
-  --rule-hair: #e3e8f0;
+  /* ── Direction C tokens — mirror of src/config/design-tokens.ts ──
+     (parity-tested in tests/unit/config/design-tokens.test.ts) */
+  --surface-page: #FBF8F3;
+  --surface-card: #FFFFFF;
+  --surface-muted: #F3EFE6;
+  --ink: #22223B;
+  --ink-muted: #5C5C7A;
+  --ink-subtle: #6B6B85;
+  --brand: #2E3A87;
+  --brand-strong: #232D6B;
+  --brand-soft: #E4E6F4;
+  --risk-high: #C0392B;
+  --risk-high-text: #A1271B;
+  --risk-high-tint: #FDECEA;
+  --risk-medium: #D08A00;
+  --risk-medium-text: #8A5A00;
+  --risk-medium-tint: #FFF6E0;
+  --risk-low: #3F8F4F;
+  --risk-low-text: #2F6B3A;
+  --risk-low-tint: #EEF7EE;
+  /* Status language = risk language */
+  --ok: var(--risk-low);
+  --ok-text: var(--risk-low-text);
+  --ok-tint: var(--risk-low-tint);
+  --warn: var(--risk-medium);
+  --warn-text: var(--risk-medium-text);
+  --warn-tint: var(--risk-medium-tint);
+  --danger: var(--risk-high);
+  --danger-text: var(--risk-high-text);
+  --danger-tint: var(--risk-high-tint);
+  --status-online: var(--ok);
+  --status-offline: var(--danger);
+  --status-unknown: var(--ink-subtle);
+  /* Legacy palettes — aliases only; delete once eslint-rules/design-allowlist.json is empty */
+  --primary-teal: var(--brand);
+  --primary-teal-dark: var(--brand-strong);
+  --primary-teal-light: var(--brand-soft);
+  --primary-teal-50: var(--surface-muted);
+  --accent-navy: var(--brand);
+  --accent-navy-strong: var(--brand-strong);
+  --accent-navy-soft: var(--brand-soft);
+  --ink-navy: var(--ink);
+  --ink-navy-dim: var(--ink-muted);
+  --ink-navy-muted: var(--ink-subtle);
+  --surface-cool: var(--surface-muted);
+  --surface-sunken: var(--surface-muted);
+  --rule-strong: var(--border);
+  --rule-hair: var(--border);
 
   /* Kiosk — deep-navy hospital-ops palette */
   --kiosk-bg: #06121f;
@@ -43,33 +64,33 @@
   --kiosk-dim: #7f8fad;
   --kiosk-rule: #15273f;
   --kiosk-accent: #6ba7e5;
-  --kiosk-high: #e05c5c;
-  --kiosk-med: #e0a03a;
-  --kiosk-low: #4fb58a;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --kiosk-high: #E0675C;
+  --kiosk-med: #E0A43A;
+  --kiosk-low: #5FAE6E;
+  --background: var(--surface-page);
+  --foreground: var(--ink);
+  --card: var(--surface-card);
+  --card-foreground: var(--ink);
+  --popover: var(--surface-card);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: #FFFFFF;
+  --secondary: var(--brand-soft);
+  --secondary-foreground: var(--brand-strong);
+  --muted: var(--surface-muted);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--brand-soft);
+  --accent-foreground: var(--brand-strong);
+  --destructive: var(--risk-high);
+  --border: #E8E1D2;
+  --input: var(--border);
+  --ring: var(--brand);
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
   --chart-4: oklch(0.488 0.243 264.376);
   --chart-5: oklch(0.424 0.199 265.638);
-  --radius: 0.625rem;
+  --radius: 1rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -81,6 +102,28 @@
 }
 
 @theme inline {
+  --text-caption: 13px;
+  --text-caption--line-height: 1.5;
+  --text-label: 14px;
+  --text-label--line-height: 1.5;
+  --text-label--font-weight: 500;
+  --text-body: 15px;
+  --text-body--line-height: 1.65;
+  --text-body-lg: 17px;
+  --text-body-lg--line-height: 1.6;
+  --text-body-lg--font-weight: 500;
+  --text-title: 22px;
+  --text-title--line-height: 1.35;
+  --text-title--font-weight: 600;
+  --text-page: 26px;
+  --text-page--line-height: 1.3;
+  --text-page--font-weight: 700;
+  --text-kpi-sm: 26px;
+  --text-kpi-sm--line-height: 1.15;
+  --text-kpi-sm--font-weight: 700;
+  --text-kpi: 34px;
+  --text-kpi--line-height: 1.15;
+  --text-kpi--font-weight: 700;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-risk-low: var(--risk-low);
@@ -151,6 +194,31 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --color-surface-page: var(--surface-page);
+  --color-surface-card: var(--surface-card);
+  --color-surface-muted: var(--surface-muted);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-risk-high-text: var(--risk-high-text);
+  --color-risk-high-tint: var(--risk-high-tint);
+  --color-risk-medium-text: var(--risk-medium-text);
+  --color-risk-medium-tint: var(--risk-medium-tint);
+  --color-risk-low-text: var(--risk-low-text);
+  --color-risk-low-tint: var(--risk-low-tint);
+  --color-ok: var(--ok);
+  --color-ok-text: var(--ok-text);
+  --color-ok-tint: var(--ok-tint);
+  --color-warn: var(--warn);
+  --color-warn-text: var(--warn-text);
+  --color-warn-tint: var(--warn-tint);
+  --color-danger: var(--danger);
+  --color-danger-text: var(--danger-text);
+  --color-danger-tint: var(--danger-tint);
+  --shadow-soft: 0 2px 8px rgb(46 58 135 / 0.07);
 }
 
 .dark {
@@ -187,12 +255,23 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Locked-bed swatch/segment on the ward capacity bar: neutral diagonal
+   hatch from the ink/surface tokens, so "closed" reads apart from "free". */
+@utility bg-hatch-neutral {
+  background-color: var(--surface-muted);
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ink-subtle) 45%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground text-body;
   }
   html {
     font-size: 18px;

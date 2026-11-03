@@ -16,6 +16,7 @@
 // pending — see hospitals.development_condition for the specific
 // requirements).
 export enum HospitalLevel {
+  UNKNOWN = 'UNKNOWN',
   // Legacy
   A_S = 'A_S',
   M1 = 'M1',

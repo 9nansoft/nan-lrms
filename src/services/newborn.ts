@@ -143,6 +143,8 @@ export interface NewbornKPIs {
   /** Percentage 0–100 of births under 2,500 g. */
   lbwRate: number;
   lowApgarCount: number;
+  /** Percentage 0–100 of births with 5-minute Apgar below the threshold (same denominator as lbwRate). */
+  lowApgarRate: number;
   avgBirthWeightG: number;
 }
 
@@ -210,12 +212,14 @@ export async function getNewbornKPIs(
   const row = rows[0];
   const total = Number(row.total) || 0;
   const lbw = Number(row.lbw) || 0;
+  const lowApgar = Number(row.low_apgar) || 0;
 
   return {
     totalBirths: total,
     lbwCount: lbw,
     lbwRate: total > 0 ? (lbw / total) * 100 : 0,
-    lowApgarCount: Number(row.low_apgar) || 0,
+    lowApgarCount: lowApgar,
+    lowApgarRate: total > 0 ? (lowApgar / total) * 100 : 0,
     avgBirthWeightG: Math.round(Number(row.avg_weight) || 0),
   };
 }

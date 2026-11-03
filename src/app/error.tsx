@@ -13,7 +13,7 @@ export default function ErrorPage({
   return (
     <div className="flex min-h-[400px] items-center justify-center p-4">
       <div className="text-center space-y-4">
-        <h2 className="text-xl font-bold text-red-600">เกิดข้อผิดพลาด</h2>
+        <h2 className="text-xl font-bold text-danger-text">เกิดข้อผิดพลาด</h2>
         <p className="text-muted-foreground">
           {error.message || 'ระบบพบข้อผิดพลาดที่ไม่คาดคิด กรุณาลองใหม่อีกครั้ง'}
         </p>

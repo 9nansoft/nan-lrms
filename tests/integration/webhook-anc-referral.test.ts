@@ -673,6 +673,107 @@ describe('ANC/Referral Webhook Integration', () => {
       expect(journeys).toHaveLength(1);
     });
 
+    it('same CID + same pregNo + corrected LMP updates the active journey without rollover', async () => {
+      const cid = '4001000555561';
+      const initial: WebhookAncPayload = {
+        type: 'anc_data',
+        hospitalCode: '99902',
+        patients: [
+          {
+            hn: 'OVR-LMP',
+            name: 'นาง แก้ไข วันประจำเดือน',
+            cid,
+            birthday: '1995-01-01',
+            pregNo: 2,
+            lmp: '2025-08-01',
+            edc: '2026-05-08',
+            riskLevel: 'HR2',
+            visits: [{ date: '2025-09-01', visitNumber: 1, gaWeeks: 8 }],
+          },
+        ],
+      };
+      await processAncWebhook(db, webhookHospitalId, initial, asSse(sseManager));
+      sseManager.clearEvents();
+
+      const corrected: WebhookAncPayload = {
+        ...initial,
+        patients: [{ ...initial.patients[0], lmp: '2025-08-08' }],
+      };
+      const result = await processAncWebhook(
+        db,
+        webhookHospitalId,
+        corrected,
+        asSse(sseManager),
+      );
+
+      expect(result.created).toBe(0);
+      expect(result.updated).toBe(1);
+
+      const cidHash = createHash('sha256').update(cid).digest('hex');
+      const journeys = await db.query<{
+        care_stage: string;
+        gravida: number;
+        lmp: string | Date | null;
+      }>('SELECT care_stage, gravida, lmp FROM maternal_journeys WHERE cid_hash = ?', [cidHash]);
+      expect(journeys).toHaveLength(1);
+      expect(journeys[0].care_stage).toBe('PREGNANCY');
+      expect(journeys[0].gravida).toBe(2);
+      expect(toIsoDate(journeys[0].lmp)).toBe('2025-08-08');
+      expect(
+        sseManager.events.filter(
+          (event) =>
+            (event.data as Record<string, unknown>)?.type === 'pregnancy_overlap_warning',
+        ),
+      ).toHaveLength(0);
+
+      const stale: WebhookAncPayload = {
+        ...initial,
+        patients: [
+          {
+            ...initial.patients[0],
+            pregNo: 1,
+            lmp: '2024-01-01',
+            edc: '2024-10-08',
+            riskLevel: 'HR3',
+            riskItemIds: [16],
+            visits: [{ date: '2024-02-01', visitNumber: 9, gaWeeks: 30 }],
+          },
+        ],
+      };
+      const staleResult = await processAncWebhook(
+        db,
+        webhookHospitalId,
+        stale,
+        asSse(sseManager),
+      );
+      expect(staleResult.created).toBe(0);
+      expect(staleResult.updated).toBe(0);
+
+      const afterStale = await db.query<{
+        care_stage: string;
+        gravida: number;
+        lmp: string | Date | null;
+        edc: string | Date | null;
+        anc_risk_level: string;
+      }>(
+        'SELECT care_stage, gravida, lmp, edc, anc_risk_level FROM maternal_journeys WHERE cid_hash = ?',
+        [cidHash],
+      );
+      expect(afterStale).toHaveLength(1);
+      expect(afterStale[0].care_stage).toBe('PREGNANCY');
+      expect(afterStale[0].gravida).toBe(2);
+      expect(toIsoDate(afterStale[0].lmp)).toBe('2025-08-08');
+      expect(toIsoDate(afterStale[0].edc)).toBe('2026-05-08');
+      expect(afterStale[0].anc_risk_level).toBe('HR2');
+      const visits = await db.query<{ visit_date: string | Date; visit_number: number }>(
+        'SELECT visit_date, visit_number FROM cached_anc_visits WHERE journey_id = (SELECT id FROM maternal_journeys WHERE cid_hash = ?)',
+        [cidHash],
+      );
+      expect(visits).toHaveLength(1);
+      expect(toIsoDate(visits[0].visit_date)).toBe('2025-09-01');
+      expect(visits[0].visit_number).toBe(1);
+    });
+
     it('same CID + higher pregNo creates new journey with overlap warning', async () => {
       const cid2 = '4001000666665';
       const p1: WebhookAncPayload = {

@@ -29,9 +29,9 @@ interface CallView {
 }
 
 const STATUS_CHIP: Record<string, { label: string; className: string }> = {
-  ringing: { label: 'กำลังเรียก…', className: 'bg-amber-500/20 text-amber-200' },
-  joined: { label: 'เข้าร่วมแล้ว', className: 'bg-emerald-500/20 text-emerald-200' },
-  declined: { label: 'ปฏิเสธ', className: 'bg-red-500/20 text-red-200' },
+  ringing: { label: 'กำลังเรียก…', className: 'bg-warn/20 text-warn' },
+  joined: { label: 'เข้าร่วมแล้ว', className: 'bg-ok/20 text-ok' },
+  declined: { label: 'ปฏิเสธ', className: 'bg-danger/20 text-danger' },
   missed: { label: 'ไม่รับสาย', className: 'bg-slate-500/30 text-slate-300' },
   cancelled: { label: 'ยกเลิก', className: 'bg-slate-500/30 text-slate-300' },
   left: { label: 'ออกแล้ว', className: 'bg-slate-500/30 text-slate-300' },
@@ -168,10 +168,10 @@ export function CallRoomClient({ callId }: { callId: string }) {
     return (
       <div className="grid min-h-screen place-items-center p-6 text-center">
         <div>
-          <p className="text-[15px] font-semibold text-white">{error}</p>
+          <p className="text-body font-semibold text-white">{error}</p>
           <button
             onClick={() => router.back()}
-            className="mt-4 cursor-pointer rounded-md border border-white/30 px-4 py-2 text-[13px] font-semibold text-white hover:bg-white/10"
+            className="mt-4 cursor-pointer rounded-md border border-white/30 px-4 py-2 text-caption font-semibold text-white hover:bg-white/10"
           >
             กลับ
           </button>
@@ -183,7 +183,7 @@ export function CallRoomClient({ callId }: { callId: string }) {
   if (!call) {
     return (
       <div className="grid min-h-screen place-items-center">
-        <div className="flex items-center gap-2 text-[14px] text-white/80">
+        <div className="flex items-center gap-2 text-label text-white/80">
           <Loader2 className="h-5 w-5 animate-spin" /> กำลังเชื่อมต่อห้องสนทนา…
         </div>
       </div>
@@ -194,10 +194,10 @@ export function CallRoomClient({ callId }: { callId: string }) {
     return (
       <div className="grid min-h-screen place-items-center p-6 text-center">
         <div>
-          <p className="text-[15px] font-semibold text-white">สายนี้สิ้นสุดแล้ว</p>
+          <p className="text-body font-semibold text-white">สายนี้สิ้นสุดแล้ว</p>
           <button
             onClick={() => router.back()}
-            className="mt-4 cursor-pointer rounded-md border border-white/30 px-4 py-2 text-[13px] font-semibold text-white hover:bg-white/10"
+            className="mt-4 cursor-pointer rounded-md border border-white/30 px-4 py-2 text-caption font-semibold text-white hover:bg-white/10"
           >
             กลับ
           </button>
@@ -224,12 +224,12 @@ export function CallRoomClient({ callId }: { callId: string }) {
             return (
               <span
                 key={participant.userId}
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/5 py-1 pr-1.5 pl-2.5 text-[12px] text-white/90"
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/5 py-1 pr-1.5 pl-2.5 text-caption text-white/90"
                 title={`${participant.name} · ${participant.hospitalName}`}
               >
                 <span className="truncate">{participant.name}</span>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${chip.className}`}
+                  className={`rounded-full px-2 py-0.5 text-caption font-semibold ${chip.className}`}
                 >
                   {chip.label}
                 </span>
@@ -239,13 +239,13 @@ export function CallRoomClient({ callId }: { callId: string }) {
         </div>
         <button
           onClick={() => setInviteOpen(true)}
-          className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-white/25 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-white/10"
+          className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-white/25 px-3 py-1.5 text-caption font-semibold text-white hover:bg-white/10"
         >
           <UserPlus className="h-3.5 w-3.5" /> เพิ่มผู้เข้าร่วม
         </button>
         <button
           onClick={leave}
-          className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-red-700"
+          className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-danger px-3 py-1.5 text-caption font-semibold text-white hover:bg-danger/90"
         >
           <PhoneOff className="h-3.5 w-3.5" /> วางสาย
         </button>

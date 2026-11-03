@@ -64,38 +64,27 @@ describe('PatientDrawer', () => {
     expect(screen.getByText(/G2/)).toBeInTheDocument();
     expect(screen.getByText(/GA 38/)).toBeInTheDocument();
     expect(screen.getByText(/เตียง 01|bedno 01|01/)).toBeInTheDocument();
-    expect(screen.getByText('Doctor')).toBeInTheDocument();
+    expect(screen.getByText('แพทย์')).toBeInTheDocument();
     expect(screen.getByText('ดร.X')).toBeInTheDocument();
-    expect(screen.getByText(/Allergy 1/i)).toBeInTheDocument();
-    expect(screen.getByText(/Blood O/i)).toBeInTheDocument();
+    expect(screen.getByText(/แพ้ยา 1 รายการ/)).toBeInTheDocument();
+    expect(screen.getByText(/หมู่เลือด O/)).toBeInTheDocument();
     expect(screen.getByText(/ประกันสุขภาพถ้วนหน้า/)).toBeInTheDocument();
     expect(screen.getByText(/เจ็บครรภ์คลอด/)).toBeInTheDocument();
     expect(screen.getByText('120/80')).toBeInTheDocument();
     expect(screen.getByText('37.2 °C')).toBeInTheDocument();
-    expect(screen.getByText('4 cm')).toBeInTheDocument();
+    expect(screen.getByText('4 ซม.')).toBeInTheDocument();
   });
 
   it('renders all 10 tab buttons', () => {
     render(<PatientDrawer open occupant={occupant} onClose={() => {}} />);
-    for (const label of [
-      'Partograph',
-      'Vital Signs',
-      'Pre-labour',
-      'Stage',
-      'Medications',
-      'DR Med',
-      'Complications',
-      'Infant',
-      'Bed',
-      'Discharge',
-    ]) {
+    for (const label of ['พาร์โทกราฟ', 'สัญญาณชีพ', 'ก่อนคลอด', 'ระยะคลอด', 'ยา', 'ยาห้องคลอด', 'ภาวะแทรกซ้อน', 'ทารก', 'เตียง', 'จำหน่าย']) {
       expect(screen.getByRole('tab', { name: label })).toBeInTheDocument();
     }
   });
 
   it('switches active tab on click', () => {
     render(<PatientDrawer open occupant={occupant} onClose={() => {}} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Vital Signs' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'สัญญาณชีพ' }));
     // VitalsTab (Task 31) renders its no-config branch when useBmsSession()
     // returns a null config — see the vi.mock at the top of this file.
     expect(screen.getByText(/ไม่พร้อมใช้งาน/)).toBeInTheDocument();
@@ -111,5 +100,18 @@ describe('PatientDrawer', () => {
   it('shows loading state when open + null occupant', () => {
     render(<PatientDrawer open occupant={null} onClose={() => {}} />);
     expect(screen.getByText(/Loading|กำลังโหลด/)).toBeInTheDocument();
+  });
+});
+
+describe('PatientDrawer — allergy status (fix wave minor 9)', () => {
+  it('a missing allergy count reads "unknown", never "no allergy history"', () => {
+    render(<PatientDrawer open occupant={{ ...occupant, allergy_count: null }} onClose={() => {}} />);
+    expect(screen.getByText('ไม่ทราบประวัติแพ้ยา')).toBeInTheDocument();
+    expect(screen.queryByText('ไม่มีประวัติแพ้ยา')).toBeNull();
+  });
+
+  it('zero recorded allergies still reads "no allergy history"', () => {
+    render(<PatientDrawer open occupant={{ ...occupant, allergy_count: 0 }} onClose={() => {}} />);
+    expect(screen.getByText('ไม่มีประวัติแพ้ยา')).toBeInTheDocument();
   });
 });

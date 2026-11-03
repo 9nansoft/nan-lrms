@@ -20,7 +20,7 @@ export async function GET() {
         cache: { backend: 'memory', degraded: false, degradedSince: null },
         uptime: 0,
         timestamp: new Date().toISOString(),
-        hospitalConnections: { total: 0, online: 0, offline: 0, unknown: 0 },
+        hospitalConnections: { total: 0, online: 0, offline: 0, unknown: 0, stale: 0 },
         degradedReasons: ['health_check_failed'],
       },
       { status: 503 },

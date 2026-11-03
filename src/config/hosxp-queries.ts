@@ -635,7 +635,7 @@ export const WARD_BEDS_INVENTORY: SqlQueryTemplate = {
 // Bed occupancy snapshot for a ward (active admissions joined to bed assignment +
 // patient demographics + most-recent partograph observation)
 export const WARD_BEDS_OCCUPANCY: SqlQueryTemplate = {
-  postgresql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward,
+  postgresql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward, i.ipt_admit_type_id,
        iptadm.bedno, iptadm.roomno, iptadm.bedtype,
        roomno.name AS roomname,
        p.pname, p.fname, p.lname, p.birthday, p.bloodgrp AS blood_grp,
@@ -658,7 +658,7 @@ export const WARD_BEDS_OCCUPANCY: SqlQueryTemplate = {
   LEFT JOIN roomno ON roomno.roomno = iptadm.roomno
  WHERE i.ward = :ward AND i.confirm_discharge = 'N'
  ORDER BY iptadm.bedno`,
-  mysql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward,
+  mysql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward, i.ipt_admit_type_id,
        iptadm.bedno, iptadm.roomno, iptadm.bedtype,
        roomno.name AS roomname,
        p.pname, p.fname, p.lname, p.birthday, p.bloodgrp AS blood_grp,
@@ -718,7 +718,7 @@ export const WARD_BEDS_OCCUPANCY: SqlQueryTemplate = {
 // COUNT subquery (returns int) rather than EXISTS so the result type is
 // dialect-portable without CASE/BOOL conversions.
 export const WARD_BEDS_OCCUPANCY_FULL: SqlQueryTemplate = {
-  postgresql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward,
+  postgresql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward, i.ipt_admit_type_id,
        iptadm.bedno, iptadm.roomno, iptadm.bedtype,
        roomno.name AS roomname,
        p.pname, p.fname, p.lname, p.birthday, p.bloodgrp AS blood_grp,
@@ -774,7 +774,7 @@ export const WARD_BEDS_OCCUPANCY_FULL: SqlQueryTemplate = {
        LIMIT 1)
  WHERE i.ward = :ward AND i.confirm_discharge = 'N'
  ORDER BY iptadm.bedno`,
-  mysql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward,
+  mysql: `SELECT i.an, i.hn, i.regdate, i.regtime, i.ward, i.ipt_admit_type_id,
        iptadm.bedno, iptadm.roomno, iptadm.bedtype,
        roomno.name AS roomname,
        p.pname, p.fname, p.lname, p.birthday, p.bloodgrp AS blood_grp,

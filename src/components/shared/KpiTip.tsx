@@ -30,7 +30,7 @@ export function KpiTip({
       <TooltipContent side={side} className="max-w-sm whitespace-normal text-left leading-snug">
         <div className="space-y-1">
           <div className="text-sm font-semibold">{title}</div>
-          <div className="text-[13px] opacity-90">{body}</div>
+          <div className="text-caption opacity-90">{body}</div>
         </div>
       </TooltipContent>
     </Tooltip>

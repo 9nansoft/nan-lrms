@@ -1,6 +1,6 @@
 // ContentFrameSlot — client wrapper that applies the provincial page-frame
 // (centered 1400px max-width + padding) to every route EXCEPT those that
-// render their own full-bleed chrome. Mirrors TopNavBarSlot's logic so the
+// render their own full-bleed chrome. Treats provincial routes consistently so the
 // same routes are treated consistently.
 'use client';
 

@@ -120,7 +120,7 @@ function ComplicationPicker({
         onFocus={() => setOpen(true)}
         placeholder="พิมพ์เพื่อค้นหา หรือคลิกเลือก…"
         aria-label="complication_search"
-        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
       />
       <AnchoredDropdown
         open={open && filtered.length > 0}
@@ -138,8 +138,8 @@ function ComplicationPicker({
             }}
             className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-cyan-50/60"
           >
-            <span className="text-[14px] font-semibold text-slate-900">{o.name}</span>
-            <span className="font-mono text-[11px] text-slate-500">
+            <span className="text-label font-semibold text-slate-900">{o.name}</span>
+            <span className="font-mono text-caption text-slate-500">
               #{o.labour_complication_id}
             </span>
           </button>
@@ -167,7 +167,7 @@ function EditRow({ config, draft, setDraft, saving, onCancel, onSave }: EditRowP
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_0.7fr_2fr]">
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-semibold text-slate-700">ภาวะแทรกซ้อน</label>
+              <label className="text-caption font-semibold text-slate-700">ภาวะแทรกซ้อน</label>
               <ComplicationPicker
                 config={config}
                 selectedId={draft.labour_complication_id}
@@ -189,16 +189,16 @@ function EditRow({ config, draft, setDraft, saving, onCancel, onSave }: EditRowP
                   setDraft((d) => ({ ...d, labour_complication_id: e.target.value }))
                 }
                 placeholder="ID (เลือกจากรายการ หรือพิมพ์เอง)"
-                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-[12px] text-slate-700 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 font-mono text-caption text-slate-700 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-semibold text-slate-700">ระยะ</label>
+              <label className="text-caption font-semibold text-slate-700">ระยะ</label>
               <select
                 aria-label="labour_stage_id"
                 value={draft.labour_stage_id}
                 onChange={(e) => setDraft((d) => ({ ...d, labour_stage_id: e.target.value }))}
-                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               >
                 {STAGE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -208,14 +208,14 @@ function EditRow({ config, draft, setDraft, saving, onCancel, onSave }: EditRowP
               </select>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-semibold text-slate-700">หมายเหตุ</label>
+              <label className="text-caption font-semibold text-slate-700">หมายเหตุ</label>
               <input
                 type="text"
                 aria-label="complication_note"
                 value={draft.complication_note}
                 onChange={(e) => setDraft((d) => ({ ...d, complication_note: e.target.value }))}
                 placeholder="รายละเอียดที่ต้องบันทึก"
-                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
               />
             </div>
           </div>
@@ -224,7 +224,7 @@ function EditRow({ config, draft, setDraft, saving, onCancel, onSave }: EditRowP
               type="button"
               onClick={onCancel}
               disabled={saving}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-caption font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
             >
               ยกเลิก
             </button>
@@ -232,7 +232,7 @@ function EditRow({ config, draft, setDraft, saving, onCancel, onSave }: EditRowP
               type="button"
               onClick={onSave}
               disabled={saving || !draft.labour_complication_id.trim()}
-              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-5 py-2 text-[13px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+              className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-5 py-2 text-caption font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
               title={!draft.labour_complication_id.trim() ? 'ต้องเลือกภาวะแทรกซ้อนก่อน' : undefined}
             >
               {saving ? 'กำลังบันทึก…' : 'บันทึก'}
@@ -279,7 +279,7 @@ export function ComplicationsTab({ an }: { an: string }) {
   }
   const err = labour.error ?? comps.error;
   if (err) {
-    return <div className="p-4 text-red-600">โหลดไม่สำเร็จ: {(err as Error).message}</div>;
+    return <div className="p-4 text-danger-text">โหลดไม่สำเร็จ: {(err as Error).message}</div>;
   }
 
   const hcode = userInfo?.hospcode ?? '';
@@ -379,9 +379,9 @@ export function ComplicationsTab({ an }: { an: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 pb-3">
         <div className="flex items-center gap-3">
           <span aria-hidden className="block h-1.5 w-8 bg-cyan-600" />
-          <h2 className="text-[18px] font-bold tracking-tight text-slate-900">ภาวะแทรกซ้อน</h2>
+          <h2 className="text-title font-bold tracking-tight text-slate-900">ภาวะแทรกซ้อน</h2>
           {rows.length > 0 && (
-            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-700">
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-caption font-semibold text-slate-700">
               {rows.length} รายการ
             </span>
           )}
@@ -391,7 +391,7 @@ export function ComplicationsTab({ an }: { an: string }) {
           onClick={startAdd}
           disabled={editingId !== null || noLabour}
           title={noLabour ? 'ต้องสร้าง ipt_labour record ก่อน — กรอกแท็บ ก่อนคลอด หรือ Stage' : ''}
-          className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-4 py-2 text-[14px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+          className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-4 py-2 text-label font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
         >
           + เพิ่มภาวะแทรกซ้อน
         </button>
@@ -400,7 +400,7 @@ export function ComplicationsTab({ an }: { an: string }) {
       {saveError && (
         <div
           role="alert"
-          className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-[13px] font-semibold text-rose-700 shadow-sm"
+          className="rounded-md border border-danger/40 bg-danger-tint px-3 py-2 text-caption font-semibold text-danger-text shadow-sm"
         >
           {saveError}
         </div>
@@ -409,24 +409,24 @@ export function ComplicationsTab({ an }: { an: string }) {
       {/* Empty state — distinguishes "no labour record" from "no complications". */}
       {isEmpty ? (
         <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white p-8 text-center">
-          <div className="text-[14px] font-medium text-slate-600">ไม่พบข้อมูล</div>
+          <div className="text-label font-medium text-slate-600">ไม่พบข้อมูล</div>
           {noLabour ? (
-            <div className="mt-1 text-[12px] text-slate-500">
+            <div className="mt-1 text-caption text-slate-500">
               ยังไม่มีข้อมูล <code className="font-mono">ipt_labour</code> สำหรับ AN{' '}
               <span className="font-mono font-semibold">{an}</span> — ไปที่แท็บ{' '}
               <strong>ก่อนคลอด</strong> หรือ <strong>Stage</strong> เพื่อสร้างข้อมูลก่อน
             </div>
           ) : (
-            <div className="mt-1 text-[12px] text-slate-500">
+            <div className="mt-1 text-caption text-slate-500">
               กดปุ่ม <strong>+ เพิ่มภาวะแทรกซ้อน</strong> ด้านบนเพื่อบันทึกใหม่
             </div>
           )}
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
-          <table className="w-full text-[14px]">
+          <table className="w-full text-label">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-[12px] font-bold uppercase tracking-wide text-slate-600">
+              <tr className="border-b border-slate-200 bg-slate-50 text-left text-caption font-bold uppercase tracking-wide text-slate-600">
                 <th className="px-4 py-3">ภาวะแทรกซ้อน</th>
                 <th className="px-4 py-3">หมายเหตุ</th>
                 <th className="px-4 py-3 text-right">ระยะ</th>
@@ -465,7 +465,7 @@ export function ComplicationsTab({ an }: { an: string }) {
                         <span className="font-semibold text-slate-900">
                           {row.complication_name ?? '—'}
                         </span>
-                        <span className="font-mono text-[11px] text-slate-500">
+                        <span className="font-mono text-caption text-slate-500">
                           #{row.labour_complication_id ?? '—'}
                         </span>
                       </div>
@@ -480,7 +480,7 @@ export function ComplicationsTab({ an }: { an: string }) {
                           type="button"
                           onClick={() => startEdit(row)}
                           disabled={editingId !== null}
-                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
+                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-caption font-semibold text-slate-700 transition-colors hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
                         >
                           แก้ไข
                         </button>
@@ -488,7 +488,7 @@ export function ComplicationsTab({ an }: { an: string }) {
                           type="button"
                           onClick={() => remove(row.ipt_labour_complication_id)}
                           disabled={editingId !== null || saving}
-                          className="rounded-md border border-rose-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-40"
+                          className="rounded-md border border-danger/40 bg-white px-3 py-1.5 text-caption font-semibold text-danger-text transition-colors hover:bg-danger-tint disabled:opacity-40"
                         >
                           ลบ
                         </button>

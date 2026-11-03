@@ -8,6 +8,8 @@
 // monospace pill in the bottom-right that doesn't compete with content.
 'use client';
 
+import { MIN_TEXT_PX } from '@/config/design-tokens';
+
 const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID ?? 'dev';
 const BUILD_TIME = process.env.NEXT_PUBLIC_BUILD_TIME ?? '';
 
@@ -30,7 +32,7 @@ export function BuildBadge() {
         bottom: 8,
         zIndex: 9999,
         fontFamily: "'JetBrains Mono', 'SF Mono', Consolas, monospace",
-        fontSize: 10,
+        fontSize: MIN_TEXT_PX,
         lineHeight: 1,
         padding: '3px 7px',
         borderRadius: 4,

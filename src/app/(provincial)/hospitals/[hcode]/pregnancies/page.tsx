@@ -97,7 +97,7 @@ export default function HospitalPregnanciesPage({
       {/* Back button */}
       <button
         onClick={() => router.push(`/hospitals/${hcode}`)}
-        className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-teal-600"
+        className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-brand"
       >
         <ArrowLeft size={16} /> กลับโรงพยาบาล
       </button>
@@ -123,7 +123,7 @@ export default function HospitalPregnanciesPage({
         <select
           value={riskFilter}
           onChange={(e) => setRiskFilter(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand"
         >
           {RISK_FILTER_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -162,12 +162,12 @@ export default function HospitalPregnanciesPage({
               {filtered.map((j) => (
                 <TableRow key={j.id} className="cursor-pointer hover:bg-muted/50">
                   <TableCell className="font-mono text-xs">
-                    <Link href={`/pregnancies/${j.id}`} className="text-teal-700 hover:underline">
+                    <Link href={`/pregnancies/${j.id}`} className="text-brand hover:underline">
                       {j.hn}
                     </Link>
                   </TableCell>
                   <TableCell className="font-medium">
-                    <Link href={`/pregnancies/${j.id}`} className="hover:text-teal-600">
+                    <Link href={`/pregnancies/${j.id}`} className="hover:text-brand">
                       {maskName(j.name)}
                     </Link>
                   </TableCell>

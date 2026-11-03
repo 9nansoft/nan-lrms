@@ -1,13 +1,14 @@
 // CurrentVitalsPanel — latest vital signs with status badges and mini
-// sparklines. Redesigned 2026-04-21 (v3): tinted severity backgrounds so
-// abnormal vitals jump off the page; sparkline renders with a normal-band
-// green overlay so you can see at a glance whether a trend is drifting out
-// of range. Empty tiles render as muted slate (not just grey "—"), so the
-// absence of data is itself a visual signal.
+// sparklines. Severity tints come from STATUS_TONE (token classes) so
+// abnormal vitals jump off the page; the sparkline draws a normal-band overlay
+// so a drifting trend is visible at a glance. Empty tiles are dashed and muted,
+// so the absence of data is itself a visual signal. Thresholds are unchanged.
 'use client';
 
+import { COLOR } from '@/config/design-tokens';
 import { HeartPulse, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { formatRelativeTime } from '@/lib/utils';
+import { cn, formatRelativeTime } from '@/lib/utils';
+import { STATUS_TONE, type StatusTone } from '@/config/status-tone';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,34 +65,10 @@ function evaluateBpStatus(sbp: number, dbp: number): VitalStatus {
 // Style helpers
 // ---------------------------------------------------------------------------
 
-const STATUS_META: Record<VitalStatus, {
-  color: string;
-  bg: string;
-  stroke: string;
-  label: string;
-  icon: typeof CheckCircle2;
-}> = {
-  normal: {
-    color: 'var(--risk-low)',
-    bg: 'color-mix(in srgb, #22c55e 8%, white)',
-    stroke: '#16a34a',
-    label: 'ปกติ',
-    icon: CheckCircle2,
-  },
-  warning: {
-    color: 'var(--risk-medium)',
-    bg: 'color-mix(in srgb, #eab308 14%, white)',
-    stroke: '#ca8a04',
-    label: 'เฝ้าระวัง',
-    icon: AlertTriangle,
-  },
-  critical: {
-    color: 'var(--risk-high)',
-    bg: 'color-mix(in srgb, #ef4444 16%, white)',
-    stroke: '#dc2626',
-    label: 'ผิดปกติ',
-    icon: AlertTriangle,
-  },
+const STATUS_META: Record<VitalStatus, { tone: StatusTone; stroke: string; label: string; icon: typeof CheckCircle2 }> = {
+  normal: { tone: 'ok', stroke: COLOR.riskLow, label: 'ปกติ', icon: CheckCircle2 },
+  warning: { tone: 'warn', stroke: COLOR.riskMedium, label: 'เฝ้าระวัง', icon: AlertTriangle },
+  critical: { tone: 'danger', stroke: COLOR.riskHigh, label: 'ผิดปกติ', icon: AlertTriangle },
 };
 
 // ---------------------------------------------------------------------------
@@ -153,7 +130,7 @@ function MiniSparkline({
           y={toY(normalMax)}
           width={width}
           height={toY(normalMin) - toY(normalMax)}
-          fill="#22c55e"
+          fill={COLOR.riskLow}
           fillOpacity={0.14}
         />
       )}
@@ -170,7 +147,7 @@ function MiniSparkline({
         cy={lastY}
         r={lastAbnormal ? 2.75 : 1.75}
         fill={color}
-        stroke="white"
+        stroke={COLOR.surfaceCard}
         strokeWidth={lastAbnormal ? 1 : 0.5}
       />
     </svg>
@@ -206,42 +183,28 @@ function VitalItem({
 }: VitalItemProps) {
   const meta = STATUS_META[status];
   const Icon = meta.icon;
+  const t = STATUS_TONE[meta.tone];
 
   return (
     <div
-      className="relative flex flex-col gap-1 border px-3 py-2"
-      style={{
-        borderColor: 'var(--rule-strong)',
-        borderLeft: `3px solid ${meta.color}`,
-        background: meta.bg,
-      }}
+      data-vital-tile
+      className={cn('relative flex flex-col gap-1 rounded-xl border border-border border-l-4 px-3 py-2', t.accent, t.tint)}
     >
       <div className="flex items-start justify-between gap-2">
+        <div className="text-label text-ink">{label}</div>
         <div
-          className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]"
-          style={{ color: 'var(--ink-navy-dim)' }}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption font-semibold',
+            status === 'critical' ? 'bg-danger text-white' : cn('bg-surface-card', t.text),
+          )}
         >
-          {label}
-        </div>
-        <div
-          className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-[0.08em]"
-          style={{
-            background: status === 'normal' ? 'rgba(34,197,94,0.15)' : meta.color,
-            color: status === 'normal' ? meta.color : 'white',
-          }}
-        >
-          <Icon className="h-2.5 w-2.5" />
+          <Icon aria-hidden="true" className="h-3 w-3" />
           {meta.label}
         </div>
       </div>
       <div className="flex items-baseline gap-1.5">
-        <span
-          className="font-mono text-[28px] font-bold leading-none tabular-nums"
-          style={{ color: meta.color, letterSpacing: '-0.025em' }}
-        >
-          {displayValue}
-        </span>
-        <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">{unit}</span>
+        <span className={cn('text-kpi-sm tabular-nums', t.text)}>{displayValue}</span>
+        <span className="text-caption text-ink-muted">{unit}</span>
         <div className="ml-auto">
           <MiniSparkline
             values={sparklineValues}
@@ -251,11 +214,9 @@ function VitalItem({
           />
         </div>
       </div>
-      <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
-        <span style={{ color: 'var(--ink-navy-muted)' }}>{normalRangeText}</span>
-        <span style={{ color: 'var(--ink-navy-dim)' }}>
-          {lastMeasuredAt ? formatRelativeTime(lastMeasuredAt) : '—'}
-        </span>
+      <div className="flex items-center justify-between gap-2 text-caption text-ink-muted">
+        <span>{normalRangeText}</span>
+        <span>{lastMeasuredAt ? formatRelativeTime(lastMeasuredAt) : '—'}</span>
       </div>
     </div>
   );
@@ -264,29 +225,15 @@ function VitalItem({
 function VitalItemEmpty({ label, unit }: { label: string; unit: string }) {
   return (
     <div
-      className="flex flex-col gap-1 border px-3 py-2"
-      style={{
-        borderColor: 'var(--rule-strong)',
-        borderLeft: '3px dashed var(--ink-navy-muted)',
-        background: 'color-mix(in srgb, #6b7693 4%, white)',
-      }}
+      data-vital-tile
+      className="flex flex-col gap-1 rounded-xl border border-dashed border-border bg-surface-muted px-3 py-2"
     >
-      <div
-        className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]"
-        style={{ color: 'var(--ink-navy-muted)' }}
-      >
-        {label}
-      </div>
+      <div className="text-label text-ink-muted">{label}</div>
       <div className="flex items-baseline gap-1.5">
-        <span
-          className="font-mono text-[28px] font-bold leading-none text-[var(--ink-navy-muted)]"
-          style={{ letterSpacing: '-0.025em' }}
-        >
-          —
-        </span>
-        <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">{unit}</span>
+        <span className="text-kpi-sm text-ink-muted">—</span>
+        <span className="text-caption text-ink-muted">{unit}</span>
       </div>
-      <div className="font-mono text-[10px] italic text-[var(--ink-navy-muted)]">ไม่มีข้อมูล</div>
+      <div className="text-caption text-ink-muted">ไม่มีข้อมูล</div>
     </div>
   );
 }
@@ -364,22 +311,18 @@ export function CurrentVitalsPanel({ vitals }: CurrentVitalsPanelProps) {
   return (
     <div>
       <div className="mb-2 flex items-center gap-2">
-        <HeartPulse className="h-4 w-4" style={{ color: 'var(--risk-high)' }} />
-        <h3 className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-navy)]">
-          สัญญาณชีพปัจจุบัน
-        </h3>
+        <HeartPulse aria-hidden="true" className="h-4 w-4 text-danger" />
+        <h3 className="text-body-lg text-ink">สัญญาณชีพปัจจุบัน</h3>
         {criticalCount > 0 && (
-          <span
-            className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.06em] text-white"
-            style={{ background: 'var(--risk-high)' }}
-          >
-            <AlertTriangle className="h-2.5 w-2.5" />
-            {criticalCount} CRITICAL
+          <span className="inline-flex items-center gap-1 rounded-full bg-danger px-2 py-0.5 text-caption font-semibold text-white">
+            <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+            ผิดปกติ {criticalCount} รายการ
           </span>
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="@container">
+        <div className="grid grid-cols-1 gap-2 @min-[520px]:grid-cols-2">
         {/* Maternal HR */}
         {mhrValue !== null ? (
           <VitalItem
@@ -447,6 +390,7 @@ export function CurrentVitalsPanel({ vitals }: CurrentVitalsPanelProps) {
         ) : (
           <VitalItemEmpty label="เลือดออกหลังคลอด" unit="ml" />
         )}
+        </div>
       </div>
     </div>
   );

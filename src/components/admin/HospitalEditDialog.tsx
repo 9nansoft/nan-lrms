@@ -1,10 +1,12 @@
 // HospitalEditDialog — comprehensive hospital settings modal used by the
-// admin page. Four tabs:
-//   1. General       — name, level, province, lat/lon, active
-//   2. Consult Docs  — referral consult doctor contacts for this hospital
-//   3. BMS Tunnel    — per-hospital tunnel URL + live test-connection
-//   4. Webhook Keys  — create / list / revoke API keys for this hospital
-// Each tab persists independently via its own endpoint so partial saves
+// admin page. Six sections:
+//   1. ข้อมูลทั่วไป      — name, level, province, lat/lon, active
+//   2. แพทย์ที่ปรึกษา    — referral consult doctor contacts for this hospital
+//   3. การเชื่อมต่อ BMS  — per-hospital tunnel URL + live test-connection
+//   4. บันทึกการซิงค์    — per-run progress trail and errors
+//   5. คีย์ Webhook      — create / list / revoke API keys for this hospital
+//   6. ลบข้อมูล          — typed-hcode purge of cached clinical data
+// Each section persists independently via its own endpoint so partial saves
 // don't clobber unrelated fields.
 'use client';
 
@@ -45,7 +47,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { cn } from '@/lib/utils';
+import { ErrorState } from '@/components/shared/ErrorState';
+import { InlineNotice } from '@/components/shared/InlineNotice';
+import { SYNC_LOG_POLL_MS, SYNC_OUTCOME_META, SYNC_STEP_TONE, formatSyncDuration, syncTriggerLabel } from '@/config/sync-run-status';
+import type { StatusTone } from '@/config/status-tone';
+import { DEFAULT_ACTION_REMEDY } from '@/lib/action-failure';
+import { cn, formatRelativeTime } from '@/lib/utils';
+import { Field, SELECT_CLASS, StatusPill, TONE_CLASSES } from './admin-ui';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
 
 const LEVEL_OPTIONS = Object.values(HospitalLevel);
@@ -190,7 +198,6 @@ type SectionKey =
   | 'sync-log'
   | 'webhooks'
   | 'danger';
-type Tone = 'low' | 'medium' | 'high' | 'muted' | 'navy';
 
 interface Props {
   hospital: AdminHospital | null;
@@ -247,18 +254,10 @@ function coordinatesLabel(hospital: AdminHospital) {
   return `${hospital.lat.toFixed(4)}, ${hospital.lon.toFixed(4)}`;
 }
 
-function connectionTone(status: string): Tone {
-  if (status === 'CONNECTED') return 'low';
-  if (status === 'ERROR' || status === 'FAILED') return 'high';
-  return 'muted';
-}
-
-function toneColor(tone: Tone) {
-  if (tone === 'low') return 'var(--risk-low)';
-  if (tone === 'medium') return 'var(--risk-medium)';
-  if (tone === 'high') return 'var(--risk-high)';
-  if (tone === 'navy') return 'var(--accent-navy)';
-  return 'var(--ink-navy-muted)';
+function connectionTone(status: string): StatusTone {
+  if (status === 'CONNECTED') return 'ok';
+  if (status === 'ERROR' || status === 'FAILED') return 'danger';
+  return 'neutral';
 }
 
 function DialogInner({
@@ -282,10 +281,10 @@ function DialogInner({
   );
   const hasCoords = typeof hospital.lat === 'number' && typeof hospital.lon === 'number';
   const bmsStatus = hospital.bmsConfig?.hasSession
-    ? 'Session active'
+    ? 'มี BMS session'
     : hospital.bmsConfig?.tunnelUrl
-      ? 'URL saved'
-      : 'Not configured';
+      ? 'บันทึก URL แล้ว'
+      : 'ยังไม่ตั้งค่า';
   const tabs: Array<{
     k: SectionKey;
     label: string;
@@ -300,26 +299,26 @@ function DialogInner({
     },
     {
       k: 'consult',
-      label: 'Consult Doctors',
-      detail: doctorCount === undefined ? 'contacts' : `${doctorCount} contacts`,
+      label: 'แพทย์ที่ปรึกษา',
+      detail: doctorCount === undefined ? 'ผู้ติดต่อ' : `${doctorCount} คน`,
       icon: Users,
     },
-    { k: 'tunnel', label: 'BMS Tunnel', detail: bmsStatus, icon: Cable },
+    { k: 'tunnel', label: 'การเชื่อมต่อ BMS', detail: bmsStatus, icon: Cable },
     {
       k: 'sync-log',
-      label: 'Sync Log',
-      detail: 'progress + errors',
+      label: 'บันทึกการซิงค์',
+      detail: 'ความคืบหน้าและข้อผิดพลาด',
       icon: Activity,
     },
     {
       k: 'webhooks',
-      label: 'Webhook Keys',
-      detail: webhookCount === 1 ? '1 active key' : `${webhookCount} active keys`,
+      label: 'คีย์ Webhook',
+      detail: `ใช้งาน ${webhookCount} คีย์`,
       icon: KeyRound,
     },
     {
       k: 'danger',
-      label: 'Danger Zone',
+      label: 'ลบข้อมูล',
       detail: 'ลบข้อมูลคลินิก',
       icon: ShieldAlert,
     },
@@ -327,80 +326,60 @@ function DialogInner({
 
   return (
     <>
-      <DialogHeader className="border-b bg-white px-5 pt-4 pb-4"
-        style={{ borderColor: 'var(--rule-strong)' }}
-      >
+      <DialogHeader className="border-b border-border bg-surface-card px-5 pt-4 pb-4">
         <DialogTitle className="space-y-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
-                  <Building2 className="h-3.5 w-3.5" />
-                  Hospital Operations Profile
+                <span className="inline-flex items-center gap-1.5 text-label text-ink-muted">
+                  <Building2 aria-hidden="true" className="h-4 w-4" />
+                  ข้อมูลการทำงานของโรงพยาบาล
                 </span>
-                <span
-                  className="border px-2 py-0.5 font-mono text-[12px]"
-                  style={{
-                    borderColor: 'var(--rule-strong)',
-                    color: 'var(--ink-navy-dim)',
-                    background: 'var(--surface-cool)',
-                  }}
-                >
-                  HCODE {hospital.hcode}
+                <span className="rounded border border-border bg-surface-muted px-2 py-0.5 font-mono text-caption text-ink-muted">
+                  hcode {hospital.hcode}
                 </span>
               </div>
-              <div
-                className="mt-1 truncate text-[20px] font-semibold leading-tight"
-                style={{ color: 'var(--ink-navy)' }}
-              >
-                {hospital.name}
-              </div>
+              <div className="mt-1 truncate text-title text-ink">{hospital.name}</div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <StatusPill
-                  tone={hospital.isActive ? 'low' : 'muted'}
-                  Icon={hospital.isActive ? CheckCircle2 : AlertTriangle}
-                  label={hospital.isActive ? 'ACTIVE' : 'INACTIVE'}
-                />
+                  tone={hospital.isActive ? 'ok' : 'neutral'}
+                  icon={hospital.isActive ? CheckCircle2 : AlertTriangle}
+                >
+                  {hospital.isActive ? 'ใช้งาน' : 'ปิดใช้งาน'}
+                </StatusPill>
+                <StatusPill tone={connectionTone(hospital.connectionStatus)} icon={Activity}>
+                  {`ซิงค์ ${hospital.connectionStatus || 'UNKNOWN'}`}
+                </StatusPill>
                 <StatusPill
-                  tone={connectionTone(hospital.connectionStatus)}
-                  Icon={Activity}
-                  label={`SYNC ${hospital.connectionStatus || 'UNKNOWN'}`}
-                />
-                <StatusPill
-                  tone={hospital.bmsConfig?.hasSession ? 'low' : hospital.bmsConfig?.tunnelUrl ? 'medium' : 'muted'}
-                  Icon={Database}
-                  label={bmsStatus}
-                />
+                  tone={hospital.bmsConfig?.hasSession ? 'ok' : hospital.bmsConfig?.tunnelUrl ? 'warn' : 'neutral'}
+                  icon={Database}
+                >
+                  {bmsStatus}
+                </StatusPill>
               </div>
             </div>
 
-            <div
-              className="grid grid-cols-2 gap-2 text-left md:w-[360px]"
-              style={{ color: 'var(--ink-navy)' }}
-            >
-              <ProfileMetric label="LEVEL" value={hospital.level} Icon={ShieldCheck} tone="navy" />
+            <div className="grid grid-cols-2 gap-2 text-left text-ink md:w-[360px]">
+              <ProfileMetric label="ระดับ" value={hospital.level} Icon={ShieldCheck} tone="brand" />
               <ProfileMetric
-                label="LAST SYNC"
+                label="ซิงค์ล่าสุด"
                 value={formatDateTime(hospital.lastSyncAt)}
                 Icon={CalendarClock}
-                tone={hospital.lastSyncAt ? 'navy' : 'muted'}
+                tone={hospital.lastSyncAt ? 'brand' : 'neutral'}
               />
             </div>
           </div>
 
-          <div
-            className="grid gap-2 border px-3 py-2 text-[12px] md:grid-cols-[1.2fr_1fr_1fr]"
-            style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-cool)' }}
-          >
-            <HeaderFact label="SERVICE" value={service?.labelTh ?? 'ยังไม่ระบุประเภท'} />
+          <div className="grid gap-2 rounded-xl border border-border bg-surface-muted px-3 py-2 text-caption md:grid-cols-[1.2fr_1fr_1fr]">
+            <HeaderFact label="ประเภทบริการ" value={service?.labelTh ?? 'ยังไม่ระบุประเภท'} />
             <HeaderFact
-              label="COORDINATES"
+              label="พิกัด"
               value={coordinatesLabel(hospital)}
               Icon={MapPin}
               muted={!hasCoords}
             />
             <HeaderFact
-              label="DATABASE"
+              label="ฐานข้อมูล"
               value={hospital.bmsConfig?.databaseType ?? 'ยังไม่ทราบชนิดฐานข้อมูล'}
               Icon={Database}
               muted={!hospital.bmsConfig?.databaseType}
@@ -409,48 +388,35 @@ function DialogInner({
         </DialogTitle>
       </DialogHeader>
 
-        {/* Section tabs */}
-        <div
-          className="flex overflow-x-auto border-b bg-white px-5"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          {tabs.map((t) => {
-            const active = section === t.k;
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.k}
-                onClick={() => setSection(t.k)}
-                className={cn(
-                  'relative -mb-px inline-flex min-w-[160px] items-center gap-2 px-3 py-2.5 text-left transition-colors',
-                  active ? 'font-semibold' : 'font-normal hover:text-[var(--accent-navy)]',
-                )}
-                style={{
-                  color: active ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
-                  borderBottom: active
-                    ? '2px solid var(--accent-navy)'
-                    : '2px solid transparent',
-                }}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                <span className="min-w-0">
-                  <span className="block truncate font-mono text-[13px] tracking-[0.03em]">
-                    {t.label}
-                  </span>
-                  <span className="block truncate font-mono text-[12px] font-normal text-[var(--ink-navy-muted)]">
-                    {t.detail}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+      {/* Section tabs */}
+      <div className="flex overflow-x-auto border-b border-border bg-surface-card px-5">
+        {tabs.map((t) => {
+          const active = section === t.k;
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.k}
+              onClick={() => setSection(t.k)}
+              aria-pressed={active}
+              className={cn(
+                'relative -mb-px inline-flex min-w-[160px] items-center gap-2 border-b-2 px-3 py-2.5 text-left transition-colors',
+                active
+                  ? 'border-brand font-semibold text-brand'
+                  : 'border-transparent text-ink-muted hover:text-brand',
+              )}
+            >
+              <Icon aria-hidden="true" className="h-4 w-4" />
+              <span className="min-w-0">
+                <span className="block truncate text-label">{t.label}</span>
+                <span className="block truncate text-caption font-normal text-ink-muted">{t.detail}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Section content — fixed-ish height so switching tabs doesn't jitter */}
-        <div
-          className="max-h-[calc(94vh-230px)] min-h-[340px] overflow-y-auto px-5 py-4"
-          style={{ background: 'var(--surface-cool)' }}
-        >
+      {/* Section content — fixed-ish height so switching tabs doesn't jitter */}
+      <div className="max-h-[calc(94vh-230px)] min-h-[340px] overflow-y-auto bg-surface-muted px-5 py-4">
         {section === 'general' ? (
           <GeneralSection hospital={hospital} onSaved={onSaved} />
         ) : section === 'consult' ? (
@@ -544,20 +510,18 @@ function GeneralSection({
   return (
     <div className="space-y-4">
       <SectionIntro
-        eyebrow="Hospital identity"
+        eyebrow="ข้อมูลระบุตัวโรงพยาบาล"
         title="ข้อมูลหลักของโรงพยาบาล"
         detail="ข้อมูลนี้ใช้กำหนดบทบาทบริการ สถานะการใช้งาน และตำแหน่งบนแผนที่ของระบบ"
         Icon={Settings2}
-        meta={`Status: ${isActive ? 'ACTIVE' : 'INACTIVE'}`}
+        meta={`สถานะ: ${isActive ? 'ใช้งาน' : 'ปิดใช้งาน'}`}
       />
 
       {/* Service-type picker — three radio-card tiles so the ops team sees the
           consequence blurb before committing. Drives sync eligibility and
           dashboard filters, so worth surfacing above the MOPH level. */}
       <div>
-        <div className="mb-1 font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--ink-navy-muted)]">
-          SERVICE TYPE · ประเภทการให้บริการ
-        </div>
+        <div className="mb-1 text-label text-ink">ประเภทการให้บริการ</div>
         <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
           {SERVICE_TYPE_META.map((m) => {
             const active = serviceType === m.value;
@@ -566,18 +530,16 @@ function GeneralSection({
                 type="button"
                 key={m.value}
                 onClick={() => setServiceType(m.value)}
-                className="flex flex-col gap-0.5 border px-3 py-2 text-left transition-colors"
-                style={{
-                  borderColor: active ? 'var(--accent-navy)' : 'var(--rule-strong)',
-                  background: active ? 'var(--accent-navy-soft)' : 'white',
-                  color: active ? 'var(--accent-navy)' : 'var(--ink-navy-dim)',
-                  boxShadow: active ? 'inset 0 0 0 1px var(--accent-navy)' : undefined,
-                }}
+                aria-pressed={active}
+                className={cn(
+                  'flex flex-col gap-0.5 rounded-xl border px-3 py-2 text-left transition-colors',
+                  active
+                    ? 'border-brand bg-brand-soft text-brand ring-1 ring-brand'
+                    : 'border-border bg-surface-card text-ink hover:bg-surface-muted',
+                )}
               >
-                <div className="text-[13px] font-semibold leading-tight">{m.labelTh}</div>
-                <div className="font-mono text-[12px] leading-snug text-[var(--ink-navy-muted)]">
-                  {m.blurb}
-                </div>
+                <div className="text-label font-semibold leading-tight">{m.labelTh}</div>
+                <div className="text-caption text-ink-muted">{m.blurb}</div>
               </button>
             );
           })}
@@ -586,15 +548,10 @@ function GeneralSection({
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Field label="ชื่อโรงพยาบาล">
-          <Input value={name} onChange={(e) => setName(e.target.value)} className="h-9" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} className="h-11 text-body" />
         </Field>
         <Field label="ระดับ MOPH">
-          <select
-            value={level}
-            onChange={(e) => setLevel(e.target.value)}
-            className="h-9 w-full border bg-white px-2 font-mono text-sm"
-            style={{ borderColor: 'var(--rule-strong)' }}
-          >
+          <select value={level} onChange={(e) => setLevel(e.target.value)} className={SELECT_CLASS}>
             {LEVEL_OPTIONS.map((l) => (
               <option key={l} value={l}>
                 {l}
@@ -603,12 +560,7 @@ function GeneralSection({
           </select>
         </Field>
         <Field label="จังหวัด">
-          <select
-            value={provinceCode}
-            onChange={(e) => setProvinceCode(e.target.value)}
-            className="h-9 w-full border bg-white px-2 font-mono text-sm"
-            style={{ borderColor: 'var(--rule-strong)' }}
-          >
+          <select value={provinceCode} onChange={(e) => setProvinceCode(e.target.value)} className={SELECT_CLASS}>
             <option value="">—</option>
             {(provincesData?.provinces ?? []).map((p) => (
               <option key={p.code} value={p.code}>
@@ -618,61 +570,57 @@ function GeneralSection({
           </select>
         </Field>
         <Field label="สถานะ">
-          <label className="inline-flex h-9 items-center gap-2 text-[13px]">
+          <label className="inline-flex min-h-11 items-center gap-2 text-body text-ink">
             <input
               type="checkbox"
               checked={isActive}
               onChange={(e) => setIsActive(e.target.checked)}
+              className="h-5 w-5 accent-brand"
             />
-            เปิดใช้งาน (ส่งผลต่อการ sync และแสดงบน dashboard)
+            เปิดใช้งาน (ส่งผลต่อการซิงค์และการแสดงบนแดชบอร์ด)
           </label>
         </Field>
       </div>
 
       <div>
-        <div className="mb-1 flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--ink-navy-muted)]">
-          <MapPin className="h-3 w-3" />
-          GEO COORDINATES · ใช้สำหรับปักหมุดบนแผนที่
+        <div className="mb-1 flex items-center gap-1.5 text-label text-ink">
+          <MapPin aria-hidden="true" className="h-4 w-4" />
+          พิกัดภูมิศาสตร์ · ใช้สำหรับปักหมุดบนแผนที่
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Latitude">
+          <Field label="ละติจูด">
             <Input
               value={lat}
               onChange={(e) => setLat(e.target.value)}
               placeholder="16.4419"
-              className="h-9 font-mono"
+              className="h-11 font-mono text-body"
             />
           </Field>
-          <Field label="Longitude">
+          <Field label="ลองจิจูด">
             <Input
               value={lon}
               onChange={(e) => setLon(e.target.value)}
               placeholder="102.8358"
-              className="h-9 font-mono"
+              className="h-11 font-mono text-body"
             />
           </Field>
         </div>
-        <p className="mt-1 font-mono text-[12px] leading-snug text-[var(--ink-navy-muted)]">
+        <p className="mt-1 text-caption text-ink-muted">
           ถ้าไม่ใส่พิกัด ระบบจะใช้ centroid ของอำเภอแทน
         </p>
       </div>
 
       {message ? (
-        <div
-          className="border px-3 py-2 font-mono text-[11px]"
-          style={{
-            borderColor: message === 'บันทึกสำเร็จ' ? 'var(--risk-low)' : 'var(--risk-high)',
-            color: message === 'บันทึกสำเร็จ' ? 'var(--risk-low)' : 'var(--risk-high)',
-            background: 'white',
-          }}
-        >
-          {message}
-        </div>
+        message === 'บันทึกสำเร็จ' ? (
+          <InlineNotice tone="ok">{message}</InlineNotice>
+        ) : (
+          <ErrorState variant="banner" className="rounded-xl border" message={message} remedy={DEFAULT_ACTION_REMEDY} />
+        )
       ) : null}
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={busy || !name.trim()} className="gap-1.5">
-          <Save className="h-4 w-4" />
+        <Button onClick={handleSave} disabled={busy || !name.trim()} className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong">
+          <Save aria-hidden="true" className="h-4 w-4" />
           {busy ? 'กำลังบันทึก...' : 'บันทึก'}
         </Button>
       </div>
@@ -806,20 +754,18 @@ function ConsultDoctorsSection({ hospital }: { hospital: AdminHospital }) {
   return (
     <div className="space-y-4">
       <SectionIntro
-        eyebrow="Referral contacts"
+        eyebrow="ผู้ติดต่อเคสส่งต่อ"
         title="แพทย์ Consult ประจำโรงพยาบาล"
         detail="รายชื่อแพทย์ที่ใช้สำหรับประสานงานเคสส่งต่อและการปรึกษาทางคลินิก"
         Icon={Users}
-        meta={`${doctors.length} doctors · ${phoneCount} phone numbers`}
+        meta={`${doctors.length} คน · มีเบอร์โทร ${phoneCount} คน`}
       />
 
-      <div className="border bg-white p-4" style={{ borderColor: 'var(--rule-strong)' }}>
-        <div className="mb-3 flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em]">
-          <Users className="h-3 w-3" style={{ color: 'var(--accent-navy)' }} />
-          <span style={{ color: 'var(--accent-navy)' }}>
-            {editing ? 'แก้ไขแพทย์ Consult' : 'เพิ่มแพทย์ Consult'}
-          </span>
-          <span className="text-[var(--ink-navy-muted)]">· {hospital.hcode}</span>
+      <div className="rounded-xl border border-border bg-surface-card p-4">
+        <div className="mb-3 flex items-center gap-1.5 text-label">
+          <Users aria-hidden="true" className="h-4 w-4 text-brand" />
+          <span className="text-brand">{editing ? 'แก้ไขแพทย์ Consult' : 'เพิ่มแพทย์ Consult'}</span>
+          <span className="text-ink-muted">· {hospital.hcode}</span>
         </div>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -828,7 +774,7 @@ function ConsultDoctorsSection({ hospital }: { hospital: AdminHospital }) {
               value={form.cid}
               onChange={(e) => setField('cid', e.target.value.replace(/\D/g, '').slice(0, 13))}
               placeholder="1234567890123"
-              className="h-9 font-mono"
+              className="h-11 font-mono text-body"
               inputMode="numeric"
               maxLength={13}
             />
@@ -838,114 +784,99 @@ function ConsultDoctorsSection({ hospital }: { hospital: AdminHospital }) {
               value={form.name}
               onChange={(e) => setField('name', e.target.value)}
               placeholder="ชื่อ-สกุล"
-              className="h-9"
+              className="h-11 text-body"
             />
           </Field>
           <Field label="ตำแหน่ง">
             <div className="relative">
-              <Briefcase className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-[var(--ink-navy-muted)]" />
+              <Briefcase aria-hidden="true" className="pointer-events-none absolute left-2 top-3.5 h-4 w-4 text-ink-muted" />
               <Input
                 value={form.position}
                 onChange={(e) => setField('position', e.target.value)}
                 placeholder="เช่น สูติแพทย์"
-                className="h-9 pl-8"
+                className="h-11 pl-8 text-body"
               />
             </div>
           </Field>
           <Field label="เบอร์โทรศัพท์">
             <div className="relative">
-              <Phone className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-[var(--ink-navy-muted)]" />
+              <Phone aria-hidden="true" className="pointer-events-none absolute left-2 top-3.5 h-4 w-4 text-ink-muted" />
               <Input
                 value={form.phoneNumber}
                 onChange={(e) => setField('phoneNumber', e.target.value)}
                 placeholder="08x-xxx-xxxx"
-                className="h-9 pl-8 font-mono"
+                className="h-11 pl-8 font-mono text-body"
               />
             </div>
           </Field>
         </div>
 
         {message ? (
-          <div
-            className="mt-3 border px-3 py-2 font-mono text-[11px]"
-            style={{
-              borderColor: message.tone === 'ok' ? 'var(--risk-low)' : 'var(--risk-high)',
-              color: message.tone === 'ok' ? 'var(--risk-low)' : 'var(--risk-high)',
-              background: 'white',
-            }}
-          >
-            {message.text}
-          </div>
+          message.tone === 'ok' ? (
+            <InlineNotice tone="ok" className="mt-3">{message.text}</InlineNotice>
+          ) : (
+            <ErrorState variant="banner" className="mt-3 rounded-xl border" message={message.text} remedy={DEFAULT_ACTION_REMEDY} />
+          )
         ) : null}
 
         <div className="mt-4 flex justify-end gap-2">
           {editing ? (
-            <Button variant="ghost" onClick={resetForm} disabled={busy}>
+            <Button variant="ghost" onClick={resetForm} disabled={busy} className="h-11">
               ยกเลิก
             </Button>
           ) : null}
-          <Button onClick={handleSave} disabled={busy || !form.cid.trim() || !form.name.trim()} className="gap-1.5">
-            <Save className="h-4 w-4" />
+          <Button
+            onClick={handleSave}
+            disabled={busy || !form.cid.trim() || !form.name.trim()}
+            className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong"
+          >
+            <Save aria-hidden="true" className="h-4 w-4" />
             {busy ? 'กำลังบันทึก...' : editing ? 'บันทึกการแก้ไข' : 'เพิ่มแพทย์'}
           </Button>
         </div>
       </div>
 
-      <div className="overflow-x-auto border bg-white" style={{ borderColor: 'var(--rule-strong)' }}>
-        <div
-          className="grid min-w-[720px] gap-2 border-b px-3 py-2 font-mono text-[12px] tracking-[0.06em] text-[var(--ink-navy-muted)]"
-          style={{
-            gridTemplateColumns: '130px minmax(180px,1fr) minmax(120px,160px) minmax(120px,150px) 90px',
-            borderColor: 'var(--rule-strong)',
-          }}
-        >
+      <div className="overflow-x-auto rounded-xl border border-border bg-surface-card">
+        <div className="grid min-w-[720px] grid-cols-[130px_minmax(180px,1fr)_minmax(120px,160px)_minmax(120px,150px)_110px] gap-2 border-b border-border px-3 py-2 text-label text-ink-muted">
           <div>CID</div>
-          <div>NAME</div>
-          <div>POSITION</div>
-          <div>PHONE</div>
-          <div className="text-right">ACTION</div>
+          <div>ชื่อ</div>
+          <div>ตำแหน่ง</div>
+          <div>โทรศัพท์</div>
+          <div className="text-right">จัดการ</div>
         </div>
         {isLoading ? (
-          <div className="px-3 py-6 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]">
-            กำลังโหลดรายชื่อแพทย์ consult...
-          </div>
+          <div className="px-3 py-6 text-center text-body text-ink-muted">กำลังโหลดรายชื่อแพทย์ consult...</div>
         ) : doctors.length === 0 ? (
-          <div className="px-3 py-6 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]">
-            ยังไม่มีแพทย์ consult สำหรับโรงพยาบาลนี้
-          </div>
+          <div className="px-3 py-6 text-center text-body text-ink-muted">ยังไม่มีแพทย์ consult สำหรับโรงพยาบาลนี้</div>
         ) : (
           doctors.map((doctor) => (
             <div
               key={doctor.id}
-              className="grid min-w-[720px] items-center gap-2 border-b px-3 py-2 text-[12px] last:border-b-0"
-              style={{
-                gridTemplateColumns: '130px minmax(180px,1fr) minmax(120px,160px) minmax(120px,150px) 90px',
-                borderColor: 'var(--rule-hair)',
-              }}
+              className="grid min-w-[720px] grid-cols-[130px_minmax(180px,1fr)_minmax(120px,160px)_minmax(120px,150px)_110px] items-center gap-2 border-b border-border px-3 py-2 text-body last:border-b-0"
             >
-              <code className="font-mono text-[12px] text-[var(--ink-navy-dim)]">{doctor.cid}</code>
-              <div className="truncate font-medium text-[var(--ink-navy)]">{doctor.name}</div>
-              <div className="truncate text-[var(--ink-navy-dim)]">{doctor.position ?? '—'}</div>
-              <div className="truncate font-mono text-[12px] text-[var(--ink-navy-dim)]">
-                {doctor.phoneNumber ?? '—'}
-              </div>
+              <code className="font-mono text-caption text-ink-muted">{doctor.cid}</code>
+              <div className="truncate font-medium text-ink">{doctor.name}</div>
+              <div className="truncate text-ink-muted">{doctor.position ?? '—'}</div>
+              <div className="truncate font-mono text-caption text-ink-muted">{doctor.phoneNumber ?? '—'}</div>
               <div className="flex justify-end gap-1">
                 <button
+                  type="button"
+                  aria-label={`แก้ไขแพทย์ ${doctor.name}`}
                   onClick={() => startEdit(doctor)}
-                  className="inline-flex items-center gap-1 px-1.5 py-1 font-mono text-[12px] hover:bg-[var(--accent-navy-soft)]"
-                  style={{ color: 'var(--ink-navy-dim)' }}
+                  className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-label text-ink-muted hover:bg-brand-soft"
                   disabled={busy || !!deleteBusyId}
                 >
-                  <Pencil className="h-3 w-3" />
+                  <Pencil aria-hidden="true" className="h-4 w-4" />
                   แก้
                 </button>
                 <button
+                  type="button"
+                  aria-label={`ลบแพทย์ ${doctor.name}`}
                   onClick={() => handleDelete(doctor)}
-                  className="inline-flex items-center gap-1 px-1.5 py-1 font-mono text-[12px] hover:bg-red-50"
-                  style={{ color: 'var(--risk-high)' }}
+                  className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-label text-danger-text hover:bg-danger-tint"
                   disabled={busy || deleteBusyId === doctor.id}
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Trash2 aria-hidden="true" className="h-4 w-4" />
                   ลบ
                 </button>
               </div>
@@ -1021,93 +952,80 @@ function TunnelSection({ hospital }: { hospital: AdminHospital }) {
   return (
     <div className="space-y-4">
       <SectionIntro
-        eyebrow="BMS connectivity"
+        eyebrow="การเชื่อมต่อ BMS"
         title="สถานะการเชื่อมต่อฐานข้อมูลโรงพยาบาล"
-        detail="ตั้งค่า tunnel, session, และตรวจสอบชนิดฐานข้อมูลที่ใช้สำหรับ sync ข้อมูล"
+        detail="ตั้งค่า tunnel, session, และตรวจสอบชนิดฐานข้อมูลที่ใช้สำหรับซิงค์ข้อมูล"
         Icon={Cable}
-        meta={hospital.bmsConfig?.databaseType ?? 'Database: —'}
+        meta={hospital.bmsConfig?.databaseType ?? 'ฐานข้อมูล: —'}
       />
 
       {/* Status strip */}
-      <div
-        className="grid gap-0 border bg-white"
-        style={{
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-          borderColor: 'var(--rule-strong)',
-        }}
-      >
+      <div className="grid grid-cols-1 gap-0 overflow-hidden rounded-xl border border-border bg-surface-card md:grid-cols-3">
         <StatBox
-          label="TUNNEL URL"
-          value={hasUrl ? 'configured' : 'not set'}
-          tone={hasUrl ? 'low' : 'muted'}
+          label="Tunnel URL"
+          value={hasUrl ? 'ตั้งค่าแล้ว' : 'ยังไม่ตั้งค่า'}
+          tone={hasUrl ? 'ok' : 'neutral'}
           Icon={hasUrl ? Wifi : WifiOff}
         />
         <StatBox
-          label="SESSION"
-          value={hospital.bmsConfig?.hasSession ? 'active' : '—'}
-          tone={hospital.bmsConfig?.hasSession ? 'low' : 'muted'}
+          label="BMS session"
+          value={hospital.bmsConfig?.hasSession ? 'ใช้งานอยู่' : '—'}
+          tone={hospital.bmsConfig?.hasSession ? 'ok' : 'neutral'}
           Icon={hospital.bmsConfig?.hasSession ? CheckCircle2 : AlertTriangle}
         />
         <StatBox
-          label="DATABASE"
+          label="ฐานข้อมูล"
           value={hospital.bmsConfig?.databaseType ?? '—'}
-          tone={hospital.bmsConfig?.databaseType ? 'navy' : 'muted'}
+          tone={hospital.bmsConfig?.databaseType ? 'brand' : 'neutral'}
           Icon={Database}
         />
       </div>
 
-      <div className="border bg-white p-4" style={{ borderColor: 'var(--rule-strong)' }}>
+      <div className="rounded-xl border border-border bg-surface-card p-4">
         <Field label="Tunnel URL">
           <Input
             value={tunnelUrl}
             onChange={(e) => setTunnelUrl(e.target.value)}
             placeholder="https://xxxxx-ondemand-win-xxxxxxxxx.tunnel.hosxp.net"
-            className="h-9 font-mono text-[12px]"
+            className="h-11 font-mono text-label"
           />
         </Field>
-        <p className="mt-1 font-mono text-[12px] leading-snug text-[var(--ink-navy-muted)]">
+        <p className="mt-1 text-caption text-ink-muted">
           ระบบจะใช้ URL นี้สำหรับดึงข้อมูลจาก BMS ของโรงพยาบาล · ต้องสามารถเข้าถึงได้จากเซิร์ฟเวอร์ของระบบ
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button onClick={handleSave} disabled={saving || !tunnelUrl.trim()} className="gap-1.5">
-            <Save className="h-4 w-4" />
+          <Button onClick={handleSave} disabled={saving || !tunnelUrl.trim()} className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong">
+            <Save aria-hidden="true" className="h-4 w-4" />
             {saving ? 'กำลังบันทึก...' : 'บันทึก'}
           </Button>
-          <Button
-            onClick={handleTest}
-            disabled={testing || !hasUrl}
-            variant="outline"
-            className="gap-1.5"
-          >
-            <FlaskConical className="h-4 w-4" />
+          <Button onClick={handleTest} disabled={testing || !hasUrl} variant="outline" className="h-11 gap-1.5">
+            <FlaskConical aria-hidden="true" className="h-4 w-4" />
             {testing ? 'กำลังทดสอบ...' : 'ทดสอบการเชื่อมต่อ'}
           </Button>
         </div>
 
         {saveMessage ? (
-          <div
-            className="mt-3 border px-3 py-2 font-mono text-[11px]"
-            style={{
-              borderColor: saveMessage.includes('สำเร็จ')
-                ? 'var(--risk-low)'
-                : 'var(--risk-high)',
-              color: saveMessage.includes('สำเร็จ')
-                ? 'var(--risk-low)'
-                : 'var(--risk-high)',
-            }}
-          >
-            {saveMessage}
-          </div>
+          saveMessage.includes('สำเร็จ') ? (
+            <InlineNotice tone="ok" className="mt-3">{saveMessage}</InlineNotice>
+          ) : (
+            <ErrorState
+              variant="banner"
+              className="mt-3 rounded-xl border"
+              message={saveMessage}
+              remedy="ตรวจสอบ Tunnel URL แล้วกด บันทึก อีกครั้ง"
+            />
+          )
         ) : null}
 
         {testResult ? (
           <div
-            className="mt-3 space-y-1 border px-3 py-2 font-mono text-[11px]"
-            style={{
-              borderColor: testResult.connected ? 'var(--risk-low)' : 'var(--risk-high)',
-              color: testResult.connected ? 'var(--risk-low)' : 'var(--risk-high)',
-            }}
+            className={cn(
+              'mt-3 space-y-1 rounded-xl border px-3 py-2 text-label',
+              testResult.connected
+                ? 'border-ok/40 bg-ok-tint text-ok-text'
+                : 'border-danger/40 bg-danger-tint text-danger-text',
+            )}
           >
             <div>
               {testResult.connected ? '✓ เชื่อมต่อสำเร็จ' : '✗ เชื่อมต่อไม่สำเร็จ'}
@@ -1115,14 +1033,12 @@ function TunnelSection({ hospital }: { hospital: AdminHospital }) {
               {testResult.databaseVersion ? ` · v${testResult.databaseVersion}` : ''}
             </div>
             {testResult.tablesFound && testResult.tablesFound.length > 0 ? (
-              <div className="text-[var(--ink-navy-dim)]">
+              <div>
                 Tables: {testResult.tablesFound.slice(0, 5).join(', ')}
                 {testResult.tablesFound.length > 5 ? '…' : ''}
               </div>
             ) : null}
-            {testResult.error ? (
-              <div className="text-[var(--ink-navy-dim)]">Error: {testResult.error}</div>
-            ) : null}
+            {testResult.error ? <div>Error: {testResult.error}</div> : null}
           </div>
         ) : null}
       </div>
@@ -1146,6 +1062,7 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
   const [revokeTarget, setRevokeTarget] = useState<WebhookKey | null>(null);
   const [revokeInput, setRevokeInput] = useState('');
   const [revoking, setRevoking] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   // Filter keys to this hospital only so the dialog is focused.
   const keys = useMemo(
@@ -1199,18 +1116,21 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
   const handleRevoke = async () => {
     if (!revokeTarget || revokeInput !== revokeTarget.keyPrefix) return;
     setRevoking(true);
+    setRevokeError(null);
     try {
       const res = await fetch(`/api/admin/webhooks/${revokeTarget.id}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => null)) as { error?: string } | null;
-        alert(err?.error ?? 'ยกเลิกไม่สำเร็จ');
+        setRevokeError(err?.error ?? 'ยกเลิกคีย์ไม่สำเร็จ');
         return;
       }
       setRevokeTarget(null);
       setRevokeInput('');
       await mutate();
+    } catch {
+      setRevokeError('ยกเลิกคีย์ไม่สำเร็จ — ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
     } finally {
       setRevoking(false);
     }
@@ -1219,81 +1139,64 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
   return (
     <div className="space-y-4">
       <SectionIntro
-        eyebrow="Integration access"
+        eyebrow="การเชื่อมต่อระบบภายนอก"
         title="Webhook API Keys"
         detail="คีย์สำหรับรับข้อมูลจากระบบภายนอกของโรงพยาบาลนี้"
         Icon={KeyRound}
-        meta={`${activeKeyCount} active · ${keys.length - activeKeyCount} revoked`}
+        meta={`ใช้งาน ${activeKeyCount} · ยกเลิกแล้ว ${keys.length - activeKeyCount}`}
       />
 
       {/* Create form */}
-      <div className="border bg-white p-4" style={{ borderColor: 'var(--rule-strong)' }}>
-        <div className="mb-2 flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em]">
-          <KeyRound className="h-3 w-3" style={{ color: 'var(--accent-navy)' }} />
-          <span style={{ color: 'var(--accent-navy)' }}>สร้าง API Key ใหม่</span>
-          <span className="text-[var(--ink-navy-muted)]">· {hospital.hcode}</span>
+      <div className="rounded-xl border border-border bg-surface-card p-4">
+        <div className="mb-2 flex items-center gap-1.5 text-label">
+          <KeyRound aria-hidden="true" className="h-4 w-4 text-brand" />
+          <span className="text-brand">สร้าง API Key ใหม่</span>
+          <span className="text-ink-muted">· {hospital.hcode}</span>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <div className="flex-1" style={{ minWidth: 260 }}>
-            <Field label="Label">
+          <div className="min-w-[260px] flex-1">
+            <Field label="ชื่อคีย์">
               <Input
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
                 placeholder="เช่น Production webhook"
-                className="h-9"
+                className="h-11 text-body"
               />
             </Field>
           </div>
-          <Button onClick={handleCreate} disabled={creating || !label.trim()} className="gap-1.5">
-            <Plus className="h-4 w-4" />
+          <Button
+            onClick={handleCreate}
+            disabled={creating || !label.trim()}
+            className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong"
+          >
+            <Plus aria-hidden="true" className="h-4 w-4" />
             {creating ? 'กำลังสร้าง...' : 'สร้าง Key'}
           </Button>
         </div>
         {createError ? (
-          <div
-            className="mt-2 border px-3 py-2 font-mono text-[11px]"
-            style={{ borderColor: 'var(--risk-high)', color: 'var(--risk-high)' }}
-          >
-            {createError}
-          </div>
+          <ErrorState variant="banner" className="mt-2 rounded-xl border" message={createError} remedy={DEFAULT_ACTION_REMEDY} />
         ) : null}
       </div>
 
       {/* Just-created reveal */}
       {justCreated ? (
-        <div
-          className="border-2 bg-white px-4 py-3"
-          style={{ borderColor: 'var(--risk-medium)' }}
-        >
+        <div className="rounded-2xl border border-warn/40 bg-warn-tint px-4 py-3">
           <div className="mb-2 flex items-start gap-2">
-            <AlertTriangle
-              className="mt-0.5 h-4 w-4 shrink-0"
-              style={{ color: 'var(--risk-medium)' }}
-            />
+            <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warn-text" />
             <div>
-              <div
-                className="font-mono text-[12px] font-semibold uppercase tracking-[0.06em]"
-                style={{ color: 'var(--risk-medium)' }}
-              >
+              <div className="text-body font-semibold text-warn-text">
                 บันทึก API Key นี้ไว้ทันที — ระบบจะไม่แสดงอีก
               </div>
-              <div className="mt-0.5 font-mono text-[12px] text-[var(--ink-navy-dim)]">
-                {justCreated.label}
-              </div>
+              <div className="mt-0.5 text-label text-ink-muted">{justCreated.label}</div>
             </div>
           </div>
-          <div
-            className="flex items-center gap-2 border bg-[var(--surface-cool)] px-3 py-2"
-            style={{ borderColor: 'var(--rule-strong)' }}
-          >
-            <code className="flex-1 overflow-x-auto font-mono text-[12px] text-[var(--ink-navy)]">
-              {justCreated.apiKey}
-            </code>
-            <Button onClick={handleCopy} variant="outline" size="sm" className="h-8 gap-1.5 text-[12px]">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2">
+            <code className="flex-1 overflow-x-auto font-mono text-label text-ink">{justCreated.apiKey}</code>
+            <Button onClick={handleCopy} variant="outline" size="sm" className="h-9 gap-1.5 text-label">
               {copied ? (
-                <Check className="h-3 w-3" style={{ color: 'var(--risk-low)' }} />
+                <Check aria-hidden="true" className="h-4 w-4 text-ok-text" />
               ) : (
-                <Copy className="h-3 w-3" />
+                <Copy aria-hidden="true" className="h-4 w-4" />
               )}
               {copied ? 'คัดลอกแล้ว' : 'คัดลอก'}
             </Button>
@@ -1302,64 +1205,48 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
       ) : null}
 
       {/* Keys list */}
-      <div className="border bg-white" style={{ borderColor: 'var(--rule-strong)' }}>
-        <div
-          className="grid gap-2 border-b px-3 py-2 font-mono text-[12px] tracking-[0.06em] text-[var(--ink-navy-muted)]"
-          style={{ gridTemplateColumns: '1fr 110px 120px 70px 80px', borderColor: 'var(--rule-strong)' }}
-        >
-          <div>LABEL</div>
-          <div>PREFIX</div>
-          <div>LAST USED</div>
-          <div>STATUS</div>
-          <div className="text-right">ACTION</div>
+      <div className="overflow-x-auto rounded-xl border border-border bg-surface-card">
+        <div className="grid min-w-[600px] grid-cols-[minmax(0,1fr)_110px_120px_100px_110px] gap-2 border-b border-border px-3 py-2 text-label text-ink-muted">
+          <div>ชื่อคีย์</div>
+          <div>รหัสขึ้นต้น</div>
+          <div>ใช้ล่าสุด</div>
+          <div>สถานะ</div>
+          <div className="text-right">จัดการ</div>
         </div>
         {keys.length === 0 ? (
-          <div className="px-3 py-6 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]">
-            ยังไม่มี API Key สำหรับโรงพยาบาลนี้
-          </div>
+          <div className="px-3 py-6 text-center text-body text-ink-muted">ยังไม่มี API Key สำหรับโรงพยาบาลนี้</div>
         ) : (
           keys.map((k) => (
             <div
               key={k.id}
-              className="grid items-center gap-2 border-b px-3 py-2 text-[12px] last:border-b-0"
-              style={{
-                gridTemplateColumns: '1fr 110px 120px 70px 80px',
-                borderColor: 'var(--rule-hair)',
-                opacity: k.isActive ? 1 : 0.55,
-              }}
+              className={cn(
+                'grid min-w-[600px] grid-cols-[minmax(0,1fr)_110px_120px_100px_110px] items-center gap-2 border-b border-border px-3 py-2 text-body last:border-b-0',
+                !k.isActive && 'text-ink-muted',
+              )}
             >
               <div className="truncate">{k.label}</div>
-              <code
-                className="border px-1.5 py-0.5 font-mono text-[12px] text-[var(--ink-navy-dim)]"
-                style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-cool)' }}
-              >
+              <code className="rounded border border-border bg-surface-muted px-1.5 py-0.5 font-mono text-caption text-ink-muted">
                 {k.keyPrefix}…
               </code>
-              <div className="font-mono text-[12px] text-[var(--ink-navy-dim)]">
+              <div className="text-label text-ink-muted">
                 {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString('th-TH') : '—'}
               </div>
               <div>
-                <span
-                  className="inline-block border px-1.5 py-0.5 font-mono text-[12px] font-semibold tracking-[0.04em]"
-                  style={{
-                    color: k.isActive ? 'var(--risk-low)' : 'var(--ink-navy-muted)',
-                    borderColor: k.isActive ? 'var(--risk-low)' : 'var(--rule-strong)',
-                  }}
-                >
-                  {k.isActive ? 'ACTIVE' : 'REVOKED'}
-                </span>
+                <StatusPill tone={k.isActive ? 'ok' : 'neutral'}>{k.isActive ? 'ใช้งาน' : 'ยกเลิกแล้ว'}</StatusPill>
               </div>
               <div className="text-right">
                 {k.isActive ? (
                   <button
+                    type="button"
+                    aria-label={`ยกเลิกคีย์ ${k.keyPrefix}`}
                     onClick={() => {
                       setRevokeTarget(k);
                       setRevokeInput('');
+                      setRevokeError(null);
                     }}
-                    className="inline-flex items-center gap-1 px-1.5 py-1 font-mono text-[12px] hover:bg-red-50"
-                    style={{ color: 'var(--risk-high)' }}
+                    className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-label text-danger-text hover:bg-danger-tint"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 aria-hidden="true" className="h-4 w-4" />
                     ยกเลิก
                   </button>
                 ) : null}
@@ -1371,16 +1258,12 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
 
       {/* Inline revoke confirm */}
       {revokeTarget ? (
-        <div
-          className="border-2 bg-white p-3"
-          style={{ borderColor: 'var(--risk-high)' }}
-        >
-          <div className="mb-2 flex items-center gap-1.5 font-mono text-[12px] font-semibold uppercase tracking-[0.06em]"
-            style={{ color: 'var(--risk-high)' }}>
-            <AlertTriangle className="h-3.5 w-3.5" />
+        <div className="rounded-2xl border border-danger/40 bg-danger-tint p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-label font-semibold text-danger-text">
+            <AlertTriangle aria-hidden="true" className="h-4 w-4" />
             ยืนยันการยกเลิก · {revokeTarget.label}
           </div>
-          <p className="mb-2 font-mono text-[12px] leading-snug text-[var(--ink-navy-dim)]">
+          <p className="mb-2 text-label text-ink-muted">
             คีย์ที่ยกเลิกแล้วจะใช้ไม่ได้ทันที · พิมพ์ prefix <code>{revokeTarget.keyPrefix}</code> เพื่อยืนยัน
           </p>
           <div className="flex gap-2">
@@ -1388,22 +1271,26 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
               value={revokeInput}
               onChange={(e) => setRevokeInput(e.target.value)}
               placeholder={revokeTarget.keyPrefix}
-              className="h-9 font-mono"
+              aria-label={`พิมพ์ ${revokeTarget.keyPrefix} เพื่อยืนยันการยกเลิก`}
+              className="h-11 font-mono"
               autoFocus
             />
-            <Button variant="ghost" onClick={() => setRevokeTarget(null)} disabled={revoking}>
+            <Button variant="ghost" onClick={() => setRevokeTarget(null)} disabled={revoking} className="h-11">
               ยกเลิก
             </Button>
             <Button
               variant="destructive"
               onClick={handleRevoke}
               disabled={revoking || revokeInput !== revokeTarget.keyPrefix}
-              className="gap-1.5"
+              className="h-11 gap-1.5"
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 aria-hidden="true" className="h-4 w-4" />
               {revoking ? 'กำลังยกเลิก...' : 'ยืนยัน'}
             </Button>
           </div>
+          {revokeError ? (
+            <ErrorState variant="banner" className="mt-2 rounded-xl border" message={revokeError} remedy="ลองอีกครั้ง หากยังไม่ได้ให้รีเฟรชหน้าแล้วตรวจสอบสถานะคีย์" />
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -1434,15 +1321,15 @@ interface PurgeResult {
 }
 
 const PURGE_TABLE_LABELS: Array<{ key: keyof PurgeCounts; label: string }> = [
-  { key: 'cached_patients', label: 'ผู้ป่วย (cached_patients)' },
-  { key: 'maternal_journeys', label: 'Journey (maternal_journeys)' },
-  { key: 'cached_partograph_observations', label: 'Partograph observations' },
-  { key: 'cached_vital_signs', label: 'Vital signs' },
-  { key: 'cpd_scores', label: 'CPD scores' },
-  { key: 'cached_anc_visits', label: 'ANC visits' },
-  { key: 'cached_anc_risks', label: 'ANC risks' },
+  { key: 'cached_patients', label: 'ผู้ป่วย' },
+  { key: 'maternal_journeys', label: 'เส้นทางการตั้งครรภ์' },
+  { key: 'cached_partograph_observations', label: 'การบันทึกพาร์โทกราฟ' },
+  { key: 'cached_vital_signs', label: 'สัญญาณชีพ' },
+  { key: 'cpd_scores', label: 'คะแนน CPD' },
+  { key: 'cached_anc_visits', label: 'การฝากครรภ์ (ANC)' },
+  { key: 'cached_anc_risks', label: 'ความเสี่ยง ANC' },
   { key: 'cached_newborns', label: 'ทารกแรกเกิด' },
-  { key: 'cached_referrals', label: 'Referrals' },
+  { key: 'cached_referrals', label: 'การส่งต่อ' },
 ];
 
 interface CountsResponse {
@@ -1511,11 +1398,13 @@ function DangerZoneSection({
         .filter((row) => row.count > 0)
     : [];
 
+  const ready = confirmInput.trim() === hospital.hcode;
+
   return (
     <div className="space-y-4">
       <SectionIntro
-        eyebrow="Destructive operations"
-        title="Danger Zone — ลบข้อมูลของโรงพยาบาลนี้"
+        eyebrow="การลบข้อมูล"
+        title="ลบข้อมูลของโรงพยาบาลนี้"
         detail="ใช้สำหรับล้างข้อมูล cached เพื่อ re-onboard ใหม่ · จะไม่ลบ tunnel config / consult doctors / webhook keys"
         Icon={ShieldAlert}
         meta={
@@ -1526,51 +1415,26 @@ function DangerZoneSection({
       />
 
       {/* Live counts — what's currently in nn-lrms for this hospital */}
-      <div
-        className="border bg-white"
-        style={{ borderColor: 'var(--rule-strong)' }}
-      >
-        <div
-          className="flex items-center justify-between border-b px-4 py-2"
-          style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-cool)' }}
-        >
-          <div className="flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--ink-navy-muted)]">
-            <Database className="h-3 w-3" />
-            ข้อมูลปัจจุบันในระบบ · HCODE {hospital.hcode}
+      <div className="overflow-hidden rounded-xl border border-border bg-surface-card">
+        <div className="flex items-center justify-between border-b border-border bg-surface-muted px-4 py-2">
+          <div className="flex items-center gap-1.5 text-label text-ink-muted">
+            <Database aria-hidden="true" className="h-4 w-4" />
+            ข้อมูลปัจจุบันในระบบ · hcode {hospital.hcode}
           </div>
-          <div
-            className="font-mono text-[13px] font-semibold tracking-[0.04em]"
-            style={{ color: liveTotal > 0 ? 'var(--accent-navy)' : 'var(--ink-navy-muted)' }}
-          >
+          <div className={cn('text-label font-semibold', liveTotal > 0 ? 'text-brand' : 'text-ink-muted')}>
             {countsLoading ? '...' : `${liveTotal.toLocaleString('th-TH')} แถวรวม`}
           </div>
         </div>
-        <div
-          className="grid"
-          style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}
-        >
-          {PURGE_TABLE_LABELS.map((row, idx) => {
+        <div className="grid grid-cols-1 sm:grid-cols-3">
+          {PURGE_TABLE_LABELS.map((row) => {
             const count = liveCounts?.[row.key] ?? 0;
-            const isLastRow = idx >= PURGE_TABLE_LABELS.length - (PURGE_TABLE_LABELS.length % 3 || 3);
-            const isLastCol = (idx + 1) % 3 === 0;
             return (
-              <div
-                key={row.key}
-                className="px-3 py-2.5"
-                style={{
-                  borderRight: isLastCol ? undefined : '1px solid var(--rule-hair)',
-                  borderBottom: isLastRow ? undefined : '1px solid var(--rule-hair)',
-                }}
-              >
-                <div className="font-mono text-[11px] uppercase tracking-[0.06em] text-[var(--ink-navy-muted)]">
+              <div key={row.key} className="border-b border-border px-3 py-2.5 sm:border-r">
+                <div className="text-label text-ink-muted">
                   {row.label}
+                  <span className="ml-1 font-mono text-caption text-ink-muted">{row.key}</span>
                 </div>
-                <div
-                  className="mt-0.5 font-mono text-[15px] font-semibold tabular-nums"
-                  style={{
-                    color: count > 0 ? 'var(--ink-navy)' : 'var(--ink-navy-muted)',
-                  }}
-                >
+                <div className={cn('mt-0.5 text-body font-semibold tabular-nums', count > 0 ? 'text-ink' : 'text-ink-muted')}>
                   {countsLoading ? '—' : count.toLocaleString('th-TH')}
                 </div>
               </div>
@@ -1579,30 +1443,21 @@ function DangerZoneSection({
         </div>
       </div>
 
-      <div
-        className="border-2 bg-white p-4"
-        style={{ borderColor: 'var(--risk-high)' }}
-      >
-        <div
-          className="mb-3 flex items-center gap-2 font-mono text-[12px] font-semibold uppercase tracking-[0.06em]"
-          style={{ color: 'var(--risk-high)' }}
-        >
-          <Eraser className="h-3.5 w-3.5" />
+      <div className="rounded-2xl border border-danger/40 bg-danger-tint p-4">
+        <div className="mb-3 flex items-center gap-2 text-label font-semibold text-danger-text">
+          <Eraser aria-hidden="true" className="h-4 w-4" />
           ลบข้อมูล cached ของ {hospital.name}
         </div>
 
-        <ul className="mb-3 space-y-1 font-mono text-[12px] leading-relaxed text-[var(--ink-navy-dim)]">
+        <ul className="mb-3 space-y-1 text-label text-ink">
           <li>· ผู้ป่วยที่ admit (cached_patients) และ partograph / vital-signs / CPD scores ที่เกี่ยวข้อง</li>
           <li>· Maternal journeys และ ANC visits / risks / newborns ที่ผูกกับ journey</li>
           <li>· Referrals ที่โรงพยาบาลนี้เป็นต้นทางหรือปลายทาง</li>
           <li>· รีเซ็ต connection_status / last_sync_at เป็น UNKNOWN</li>
         </ul>
 
-        <div
-          className="mb-3 border bg-[var(--surface-cool)] px-3 py-2 font-mono text-[12px] leading-relaxed text-[var(--ink-navy-dim)]"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          <strong className="text-[var(--ink-navy)]">จะไม่ถูกลบ:</strong> tunnel URL / session,
+        <div className="mb-3 rounded-lg border border-border bg-surface-card px-3 py-2 text-label text-ink-muted">
+          <strong className="text-ink">จะไม่ถูกลบ:</strong> tunnel URL / session,
           consult doctors, webhook API keys, audit logs, และข้อมูลโรงพยาบาลในตาราง <code>hospitals</code>
         </div>
 
@@ -1611,68 +1466,45 @@ function DangerZoneSection({
             value={confirmInput}
             onChange={(e) => setConfirmInput(e.target.value)}
             placeholder={hospital.hcode}
-            className="h-9 font-mono"
+            className="h-11 bg-surface-card font-mono"
             autoComplete="off"
             disabled={busy}
           />
         </Field>
 
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-          <span className="font-mono text-[12px] text-[var(--ink-navy-muted)]">
-            {confirmInput.trim() === hospital.hcode
-              ? '✓ พร้อมยืนยันการลบ'
-              : 'พิมพ์ hcode ให้ตรงเพื่อเปิดปุ่ม'}
+          <span className="text-label text-ink-muted">
+            {ready ? '✓ พร้อมยืนยันการลบ' : 'พิมพ์รหัสโรงพยาบาลให้ตรงเพื่อเปิดปุ่ม'}
           </span>
-          <Button
-            variant="destructive"
-            onClick={handlePurge}
-            disabled={!canSubmit}
-            className="gap-1.5"
-          >
-            <Trash2 className="h-4 w-4" />
+          <Button variant="destructive" onClick={handlePurge} disabled={!canSubmit} className="h-11 gap-1.5">
+            <Trash2 aria-hidden="true" className="h-4 w-4" />
             {busy ? 'กำลังลบ...' : 'ลบข้อมูลของโรงพยาบาลนี้'}
           </Button>
         </div>
 
         {error ? (
-          <div
-            className="mt-3 border px-3 py-2 font-mono text-[11px]"
-            style={{ borderColor: 'var(--risk-high)', color: 'var(--risk-high)' }}
-          >
-            {error}
-          </div>
+          <ErrorState variant="banner" className="mt-3 rounded-xl border" message={error} remedy={DEFAULT_ACTION_REMEDY} />
         ) : null}
 
         {result?.ok ? (
-          <div
-            className="mt-3 border bg-white px-3 py-2 font-mono text-[12px]"
-            style={{ borderColor: 'var(--risk-low)' }}
-          >
-            <div
-              className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[0.06em]"
-              style={{ color: 'var(--risk-low)' }}
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" />
+          <div className="mt-3 space-y-2">
+            <InlineNotice tone="ok">
               ลบข้อมูลสำเร็จ · ทั้งหมด {result.totalRowsDeleted ?? 0} แถว
+            </InlineNotice>
+            <div className="rounded-xl border border-border bg-surface-card px-3 py-2 text-label text-ink-muted">
+              {result.stoppedSync ? <div>· หยุด onboarding sync ที่กำลังทำงานอยู่แล้ว</div> : null}
+              {lines.length > 0 ? (
+                <ul className="mt-1 space-y-0.5">
+                  {lines.map((row) => (
+                    <li key={row.label}>
+                      · {row.label}: <strong className="text-ink">{row.count}</strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div>ไม่มีแถวข้อมูลให้ลบ (โรงพยาบาลยังไม่เคยถูก sync)</div>
+              )}
             </div>
-            {result.stoppedSync ? (
-              <div className="text-[var(--ink-navy-dim)]">
-                · หยุด onboarding sync ที่กำลังทำงานอยู่แล้ว
-              </div>
-            ) : null}
-            {lines.length > 0 ? (
-              <ul className="mt-1 space-y-0.5 text-[var(--ink-navy-dim)]">
-                {lines.map((row) => (
-                  <li key={row.label}>
-                    · {row.label}: <strong className="text-[var(--ink-navy)]">{row.count}</strong>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-[var(--ink-navy-muted)]">
-                ไม่มีแถวข้อมูลให้ลบ (โรงพยาบาลยังไม่เคยถูก sync)
-              </div>
-            )}
           </div>
         ) : null}
       </div>
@@ -1681,42 +1513,6 @@ function DangerZoneSection({
 }
 
 // ───────────────── Shared mini components ─────────────────
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="mb-1.5 block font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--ink-navy-muted)]">
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function StatusPill({
-  tone,
-  Icon,
-  label,
-}: {
-  tone: Tone;
-  Icon: React.ComponentType<{ className?: string }>;
-  label: string;
-}) {
-  const color = toneColor(tone);
-  return (
-    <span
-      className="inline-flex items-center gap-1 border px-2 py-1 font-mono text-[12px] font-semibold uppercase tracking-[0.06em]"
-      style={{
-        borderColor: color,
-        color,
-        background: tone === 'muted' ? 'white' : 'var(--surface-cool)',
-      }}
-    >
-      <Icon className="h-3 w-3" />
-      {label}
-    </span>
-  );
-}
 
 function ProfileMetric({
   label,
@@ -1727,18 +1523,15 @@ function ProfileMetric({
   label: string;
   value: string;
   Icon: React.ComponentType<{ className?: string }>;
-  tone: Tone;
+  tone: StatusTone;
 }) {
-  const color = toneColor(tone);
   return (
-    <div className="border bg-[var(--surface-cool)] px-3 py-2" style={{ borderColor: 'var(--rule-strong)' }}>
-      <div className="flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--ink-navy-muted)]">
-        <Icon className="h-3 w-3" />
+    <div className="rounded-xl border border-border bg-surface-muted px-3 py-2">
+      <div className="flex items-center gap-1.5 text-label text-ink-muted">
+        <Icon aria-hidden="true" className="h-4 w-4" />
         {label}
       </div>
-      <div className="mt-1 truncate font-mono text-[13px] font-semibold" style={{ color }}>
-        {value}
-      </div>
+      <div className={cn('mt-1 truncate text-label font-semibold', TONE_CLASSES[tone].text)}>{value}</div>
     </div>
   );
 }
@@ -1756,16 +1549,11 @@ function HeaderFact({
 }) {
   return (
     <div className="min-w-0">
-      <div className="flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--ink-navy-muted)]">
-        {Icon ? <Icon className="h-3 w-3" /> : null}
+      <div className="flex items-center gap-1.5 text-label text-ink-muted">
+        {Icon ? <Icon aria-hidden="true" className="h-4 w-4" /> : null}
         {label}
       </div>
-      <div
-        className="mt-0.5 truncate font-mono text-[13px]"
-        style={{ color: muted ? 'var(--ink-navy-muted)' : 'var(--ink-navy)' }}
-      >
-        {value}
-      </div>
+      <div className={cn('mt-0.5 truncate text-label', muted ? 'text-ink-muted' : 'text-ink')}>{value}</div>
     </div>
   );
 }
@@ -1806,40 +1594,6 @@ interface SyncProgressResponse {
   runs: SyncLogRun[];
 }
 
-function outcomeTone(outcome: SyncLogRun['outcome']): {
-  bg: string;
-  ink: string;
-  label: string;
-} {
-  switch (outcome) {
-    case 'success':
-      return { bg: '#d1fae5', ink: '#065f46', label: 'SUCCESS' };
-    case 'partial':
-      return { bg: '#fef3c7', ink: '#92400e', label: 'PARTIAL' };
-    case 'failed':
-      return { bg: '#fee2e2', ink: '#991b1b', label: 'FAILED' };
-    case 'running':
-    default:
-      return { bg: '#dbeafe', ink: '#1e3a8a', label: 'RUNNING' };
-  }
-}
-
-function stepTone(status: SyncLogStep['status']): { dot: string; ink: string } {
-  switch (status) {
-    case 'success':
-      return { dot: '#22c55e', ink: 'var(--ink-navy)' };
-    case 'warning':
-      return { dot: '#eab308', ink: '#92400e' };
-    case 'error':
-      return { dot: '#ef4444', ink: '#991b1b' };
-    case 'info':
-      return { dot: '#94a3b8', ink: 'var(--ink-navy-dim)' };
-    case 'running':
-    default:
-      return { dot: '#3b82f6', ink: 'var(--ink-navy-dim)' };
-  }
-}
-
 function formatTimeShort(iso: string): string {
   return new Date(iso).toLocaleTimeString('th-TH', {
     hour: '2-digit',
@@ -1848,18 +1602,10 @@ function formatTimeShort(iso: string): string {
   });
 }
 
-function formatRelative(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 60_000) return `${Math.max(1, Math.floor(ms / 1000))}s ago`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
-  return `${Math.floor(ms / 86_400_000)}d ago`;
-}
-
 function SyncLogSection({ hospital }: { hospital: AdminHospital }) {
   const { data, error, isLoading, mutate } = useSWR<SyncProgressResponse>(
     `/api/admin/hospitals/${hospital.hcode}/sync-progress?limit=20`,
-    { refreshInterval: 10_000 },
+    { refreshInterval: SYNC_LOG_POLL_MS },
   );
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
@@ -1873,238 +1619,131 @@ function SyncLogSection({ hospital }: { hospital: AdminHospital }) {
   return (
     <div className="space-y-4">
       <SectionIntro
-        eyebrow="OBSERVABILITY"
-        title="Sync Progress & Errors"
-        detail="ติดตามทุกรอบการ sync (ทุก ~30 วินาที) จาก HOSxP โดยอัตโนมัติ — แสดงทุกขั้นตอน, ข้อผิดพลาด, และเหตุผลที่บางรอบไม่สำเร็จ. ข้อมูลเก็บใน Redis ใช้งานได้ 24 ชม.ย้อนหลัง"
+        eyebrow="การสังเกตการณ์"
+        title="ความคืบหน้าและข้อผิดพลาดของการซิงค์"
+        detail="ติดตามทุกรอบการซิงค์ (ทุก ~30 วินาที) จาก HOSxP โดยอัตโนมัติ — แสดงทุกขั้นตอน, ข้อผิดพลาด, และเหตุผลที่บางรอบไม่สำเร็จ. ข้อมูลเก็บใน Redis ใช้งานได้ 24 ชม.ย้อนหลัง"
         Icon={Activity}
         meta={`${runs.length} รอบล่าสุด`}
       />
 
       {isLoading && (
-        <div
-          className="border bg-white px-4 py-6 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
+        <div className="rounded-xl border border-border bg-surface-card px-4 py-6 text-center text-body text-ink-muted">
           กำลังโหลด…
         </div>
       )}
 
       {error && (
-        <div
-          className="border bg-white px-4 py-3 text-[13px] text-[#991b1b]"
-          style={{ borderColor: '#fee2e2', background: '#fef2f2' }}
-        >
-          โหลดประวัติ sync ไม่สำเร็จ
-        </div>
+        <ErrorState
+          variant="banner"
+          className="rounded-xl border"
+          message="โหลดประวัติการซิงค์ไม่สำเร็จ"
+          remedy="ตรวจสอบการเชื่อมต่อ แล้วกด รีเฟรช หากยังไม่ได้ ตรวจสอบ Redis ของเซิร์ฟเวอร์"
+          onRetry={() => void mutate()}
+        />
       )}
 
       {!isLoading && !error && runs.length === 0 && (
-        <div
-          className="border bg-white px-4 py-6 text-center font-mono text-[11px] text-[var(--ink-navy-muted)]"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          ยังไม่มีรอบ sync บันทึกใน 24 ชม.ที่ผ่านมา — ตรวจสอบว่าผู้ใช้จากโรงพยาบาลนี้เปิด NN-LRMS แล้วหรือยัง
+        <div className="rounded-xl border border-border bg-surface-card px-4 py-6 text-center text-body text-ink-muted">
+          ยังไม่มีรอบซิงค์บันทึกใน 24 ชม.ที่ผ่านมา — ตรวจสอบว่าผู้ใช้จากโรงพยาบาลนี้เปิด NN-LRMS แล้วหรือยัง
         </div>
       )}
 
       {/* Run list */}
       {runs.length > 0 && (
-        <div
-          className="border bg-white"
-          style={{ borderColor: 'var(--rule-strong)' }}
-        >
-          <div
-            className="flex items-center justify-between border-b px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]"
-            style={{ borderColor: 'var(--rule-strong)' }}
-          >
-            <span>RUN HISTORY · 24h · auto-refresh 10s</span>
+        <div className="overflow-hidden rounded-xl border border-border bg-surface-card">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2 text-label text-ink-muted">
+            <span>ประวัติการซิงค์ · 24 ชม. · รีเฟรชอัตโนมัติทุก {SYNC_LOG_POLL_MS / 1000} วินาที</span>
             <button
               type="button"
               onClick={() => mutate()}
-              className="border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--accent-navy)]"
-              style={{ borderColor: 'var(--accent-navy)' }}
+              className="min-h-9 rounded-lg border border-brand px-3 text-label text-brand hover:bg-brand-soft"
             >
-              REFRESH
+              รีเฟรช
             </button>
           </div>
-          <div className="divide-y" style={{ borderColor: 'var(--rule-hair)' }}>
+          <div className="divide-y divide-border">
             {runs.map((run) => {
-              const tone = outcomeTone(run.outcome);
+              const meta = SYNC_OUTCOME_META[run.outcome];
               const expanded = effectiveExpanded === run.runId;
               const lastStep = run.steps[run.steps.length - 1];
-              const summary =
-                run.errorMessage ??
-                run.finalMessage ??
-                lastStep?.message ??
-                '—';
+              const summary = run.errorMessage ?? run.finalMessage ?? lastStep?.message ?? '—';
               return (
                 <div key={run.runId}>
                   <button
                     type="button"
-                    onClick={() =>
-                      setExpandedRunId(expanded ? null : run.runId)
-                    }
-                    className="grid w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--surface-cool)]"
-                    style={{
-                      gridTemplateColumns: '78px 1fr 80px 60px',
-                    }}
+                    onClick={() => setExpandedRunId(expanded ? null : run.runId)}
+                    className="grid w-full grid-cols-[110px_minmax(0,1fr)_90px_90px] items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-muted"
                   >
-                    <span
-                      className="font-mono text-[10px] font-bold uppercase tracking-[0.1em]"
-                      style={{
-                        background: tone.bg,
-                        color: tone.ink,
-                        padding: '2px 6px',
-                        textAlign: 'center',
-                      }}
-                    >
-                      {tone.label}
-                    </span>
-                    <span
-                      className="truncate text-[12px]"
-                      style={{ color: 'var(--ink-navy)' }}
-                    >
-                      {summary}
-                    </span>
-                    <span
-                      className="font-mono text-[10px] text-[var(--ink-navy-muted)]"
-                      style={{ textAlign: 'right' }}
-                    >
-                      {run.trigger}
-                    </span>
-                    <span
-                      className="font-mono text-[10px] tabular-nums text-[var(--ink-navy-dim)]"
-                      style={{ textAlign: 'right' }}
-                    >
-                      {formatRelative(run.startedAt)}
+                    <StatusPill tone={meta.tone} className="justify-center">
+                      {meta.labelTh}
+                    </StatusPill>
+                    <span className="truncate text-body text-ink">{summary}</span>
+                    <span className="text-right text-label text-ink-muted">{syncTriggerLabel(run.trigger)}</span>
+                    <span className="text-right text-label tabular-nums text-ink-muted">
+                      {formatRelativeTime(run.startedAt)}
                     </span>
                   </button>
 
                   {expanded && (
-                    <div
-                      className="border-t px-3 py-2"
-                      style={{
-                        borderColor: 'var(--rule-hair)',
-                        background: 'var(--surface-cool)',
-                      }}
-                    >
-                      <div className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-[10px] text-[var(--ink-navy-muted)]">
+                    <div className="border-t border-border bg-surface-muted px-3 py-2">
+                      <div className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-label text-ink-muted">
                         <span>
-                          เริ่ม:{' '}
-                          <span style={{ color: 'var(--ink-navy)' }}>
-                            {new Date(run.startedAt).toLocaleString('th-TH')}
-                          </span>
+                          เริ่ม: <span className="text-ink">{new Date(run.startedAt).toLocaleString('th-TH')}</span>
                         </span>
                         {run.finishedAt && (
                           <span>
-                            จบ:{' '}
-                            <span style={{ color: 'var(--ink-navy)' }}>
-                              {new Date(run.finishedAt).toLocaleString('th-TH')}
-                            </span>
+                            จบ: <span className="text-ink">{new Date(run.finishedAt).toLocaleString('th-TH')}</span>
                           </span>
                         )}
                         {run.durationMs != null && (
                           <span>
-                            ใช้เวลา:{' '}
-                            <span style={{ color: 'var(--ink-navy)' }}>
-                              {(run.durationMs / 1000).toFixed(1)}s
-                            </span>
+                            ใช้เวลา: <span className="text-ink">{formatSyncDuration(run.durationMs)}</span>
                           </span>
                         )}
                         <span>
-                          ขั้นตอน:{' '}
-                          <span style={{ color: 'var(--ink-navy)' }}>
-                            {run.steps.length}
-                          </span>
+                          ขั้นตอน: <span className="text-ink">{run.steps.length}</span>
                         </span>
                       </div>
 
                       {run.errorMessage && (
-                        <div
-                          className="mb-2 border px-3 py-2 text-[12px]"
-                          style={{
-                            borderColor: '#fecaca',
-                            background: '#fef2f2',
-                            color: '#991b1b',
-                          }}
-                        >
-                          <strong>Error:</strong> {run.errorMessage}
+                        <div className="mb-2 rounded-lg border border-danger/40 bg-danger-tint px-3 py-2 text-label text-danger-text">
+                          <strong>ข้อผิดพลาด:</strong> {run.errorMessage}
                         </div>
                       )}
 
-                      <ol
-                        className="border bg-white"
-                        style={{ borderColor: 'var(--rule-hair)' }}
-                      >
+                      <ol className="rounded-lg border border-border bg-surface-card">
                         {run.steps.length === 0 ? (
-                          <li
-                            className="px-3 py-2 text-[11px] text-[var(--ink-navy-muted)]"
-                          >
-                            ไม่มีขั้นตอนบันทึกในรอบนี้
-                          </li>
+                          <li className="px-3 py-2 text-label text-ink-muted">ไม่มีขั้นตอนบันทึกในรอบนี้</li>
                         ) : (
                           run.steps.map((step, i) => {
-                            const t = stepTone(step.status);
+                            const stepTone = SYNC_STEP_TONE[step.status];
+                            const warnOrError = step.status === 'warning' || step.status === 'error';
                             return (
                               <li
                                 key={i}
-                                className="grid items-start gap-2 border-b px-3 py-1.5 last:border-b-0"
-                                style={{
-                                  borderColor: 'var(--rule-hair)',
-                                  gridTemplateColumns: '12px 80px 1fr 60px',
-                                }}
+                                className="grid grid-cols-[12px_100px_minmax(0,1fr)_70px] items-start gap-2 border-b border-border px-3 py-1.5 last:border-b-0"
                               >
                                 <span
                                   aria-hidden="true"
-                                  style={{
-                                    width: 8,
-                                    height: 8,
-                                    borderRadius: '50%',
-                                    background: t.dot,
-                                    marginTop: 6,
-                                  }}
+                                  className={cn('mt-1.5 h-2 w-2 rounded-full', TONE_CLASSES[stepTone].dot)}
                                 />
-                                <span
-                                  className="font-mono text-[10px] uppercase tracking-[0.06em] text-[var(--ink-navy-muted)]"
-                                  style={{ marginTop: 2 }}
-                                >
-                                  {step.name}
-                                </span>
+                                <span className="mt-0.5 break-words font-mono text-caption text-ink-muted">{step.name}</span>
                                 <div>
-                                  <div
-                                    className="text-[12px] leading-snug"
-                                    style={{ color: t.ink }}
-                                  >
+                                  <div className={cn('text-label', warnOrError ? TONE_CLASSES[stepTone].text : 'text-ink')}>
                                     {step.message}
                                   </div>
                                   {step.detail && (
-                                    <div
-                                      className="mt-0.5 break-words font-mono text-[10px]"
-                                      style={{ color: 'var(--ink-navy-muted)' }}
-                                    >
-                                      {step.detail}
+                                    <div className="mt-0.5 break-words font-mono text-caption text-ink-muted">{step.detail}</div>
+                                  )}
+                                  {step.counts && Object.keys(step.counts).length > 0 && (
+                                    <div className="mt-0.5 font-mono text-caption text-ink-muted">
+                                      {Object.entries(step.counts)
+                                        .map(([k, v]) => `${k}=${v}`)
+                                        .join(' · ')}
                                     </div>
                                   )}
-                                  {step.counts &&
-                                    Object.keys(step.counts).length > 0 && (
-                                      <div
-                                        className="mt-0.5 font-mono text-[10px]"
-                                        style={{
-                                          color: 'var(--ink-navy-dim)',
-                                        }}
-                                      >
-                                        {Object.entries(step.counts)
-                                          .map(
-                                            ([k, v]) => `${k}=${v}`,
-                                          )
-                                          .join(' · ')}
-                                      </div>
-                                    )}
                                 </div>
-                                <span
-                                  className="font-mono text-[10px] tabular-nums text-[var(--ink-navy-muted)]"
-                                  style={{ textAlign: 'right', marginTop: 2 }}
-                                >
+                                <span className="mt-0.5 text-right font-mono text-caption tabular-nums text-ink-muted">
                                   {formatTimeShort(step.at)}
                                 </span>
                               </li>
@@ -2138,42 +1777,33 @@ function SectionIntro({
   meta?: string;
 }) {
   return (
-    <div
-      className="flex flex-col gap-2 border bg-white px-4 py-3 md:flex-row md:items-start md:justify-between"
-      style={{ borderColor: 'var(--rule-strong)' }}
-    >
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface-card px-4 py-3 md:flex-row md:items-start md:justify-between">
       <div className="flex min-w-0 gap-3">
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center border"
-          style={{
-            borderColor: 'var(--accent-navy)',
-            color: 'var(--accent-navy)',
-            background: 'var(--accent-navy-soft)',
-          }}
-        >
-          <Icon className="h-4 w-4" />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">
+          <Icon aria-hidden="true" className="h-5 w-5" />
         </div>
         <div className="min-w-0">
-          <div className="font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--ink-navy-muted)]">
-            {eyebrow}
-          </div>
-          <div className="mt-0.5 text-[15px] font-semibold leading-tight text-[var(--ink-navy)]">
-            {title}
-          </div>
-          <div className="mt-1 text-[13px] leading-snug text-[var(--ink-navy-dim)]">
-            {detail}
-          </div>
+          <div className="text-label text-ink-muted">{eyebrow}</div>
+          <div className="mt-0.5 text-body-lg text-ink">{title}</div>
+          <div className="mt-1 text-label text-ink-muted">{detail}</div>
         </div>
       </div>
       {meta ? (
-        <div className="shrink-0 border px-2.5 py-1.5 font-mono text-[12px] text-[var(--ink-navy-dim)] md:text-right"
-          style={{ borderColor: 'var(--rule-strong)', background: 'var(--surface-cool)' }}>
+        <div className="shrink-0 rounded-lg border border-border bg-surface-muted px-2.5 py-1.5 text-label text-ink-muted md:text-right">
           {meta}
         </div>
       ) : null}
     </div>
   );
 }
+
+const STAT_BAR: Record<StatusTone, string> = {
+  ok: 'border-ok',
+  warn: 'border-warn',
+  danger: 'border-danger',
+  brand: 'border-brand',
+  neutral: 'border-border',
+};
 
 function StatBox({
   label,
@@ -2183,27 +1813,16 @@ function StatBox({
 }: {
   label: string;
   value: string;
-  tone: 'low' | 'muted' | 'navy';
+  tone: StatusTone;
   Icon: React.ComponentType<{ className?: string }>;
 }) {
-  const color =
-    tone === 'low'
-      ? 'var(--risk-low)'
-      : tone === 'navy'
-        ? 'var(--accent-navy)'
-        : 'var(--ink-navy-muted)';
   return (
-    <div className="px-4 py-3" style={{ borderLeft: `2px solid ${color}` }}>
-      <div className="flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--ink-navy-muted)]">
-        <Icon className="h-3 w-3" />
+    <div className={cn('border-l-4 px-4 py-3', STAT_BAR[tone])}>
+      <div className="flex items-center gap-1.5 text-label text-ink-muted">
+        <Icon aria-hidden="true" className="h-4 w-4" />
         {label}
       </div>
-      <div
-        className="mt-1 font-mono text-[14px] font-semibold leading-none"
-        style={{ color }}
-      >
-        {value}
-      </div>
+      <div className={cn('mt-1 text-body font-semibold', TONE_CLASSES[tone].text)}>{value}</div>
     </div>
   );
 }

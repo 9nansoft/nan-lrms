@@ -282,6 +282,7 @@ const TONE_TOKENS: Record<
   SectionTone,
   { ink: string; bar: string; bg: string; ring: string }
 > = {
+  // categorical, not risk — allowlisted (section tones keep their own hues)
   fhr:       { ink: 'text-rose-700',     bar: 'bg-rose-500',     bg: 'bg-rose-50/40',     ring: 'ring-rose-200/60' },
   labour:    { ink: 'text-indigo-700',   bar: 'bg-indigo-500',   bg: 'bg-indigo-50/40',   ring: 'ring-indigo-200/60' },
   cont:      { ink: 'text-violet-700',   bar: 'bg-violet-500',   bg: 'bg-violet-50/40',   ring: 'ring-violet-200/60' },
@@ -320,7 +321,7 @@ function Section({
       <span aria-hidden className={cn('absolute left-0 top-0 bottom-0 w-1', t.bar)} />
       <h4
         className={cn(
-          'flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-[15px] font-bold tracking-tight',
+          'flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-body font-bold tracking-tight',
           t.ink,
           t.bg,
         )}
@@ -354,24 +355,24 @@ function CollapsibleSection({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className={cn(
-          'flex w-full items-center justify-between border-b border-slate-100 px-5 py-3 text-[15px] font-bold tracking-tight transition-colors hover:bg-slate-50',
+          'flex w-full items-center justify-between border-b border-slate-100 px-5 py-3 text-body font-bold tracking-tight transition-colors hover:bg-slate-50',
           t.ink,
           t.bg,
         )}
       >
         <span className="flex items-center gap-2.5">
-          <span aria-hidden className={cn('inline-block text-[12px] transition-transform', open && 'rotate-90')}>
+          <span aria-hidden className={cn('inline-block text-caption transition-transform', open && 'rotate-90')}>
             ▸
           </span>
           {title}
           {badge && (
-            <span className="text-[12px] font-normal text-slate-500">
+            <span className="text-caption font-normal text-slate-500">
               · {badge}
             </span>
           )}
         </span>
         {!open && (
-          <span className="text-[12px] font-medium text-slate-400">
+          <span className="text-caption font-medium text-slate-400">
             คลิกเพื่อขยาย
           </span>
         )}
@@ -466,7 +467,7 @@ function ChipLabelRow({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="w-24 shrink-0 text-[12px] font-semibold text-slate-700">
+      <span className="w-24 shrink-0 text-caption font-semibold text-slate-700">
         {label}
       </span>
       <ChipRow options={options} selected={selected} onPick={onPick} ariaLabel={label} />
@@ -501,28 +502,28 @@ function Field({
   const inputId = `nn-${name}`;
   const isNumeric = type === 'int' || type === 'float';
   const baseCls =
-    'h-11 w-full rounded-md border bg-white px-3.5 text-[15px] text-slate-900 shadow-sm transition-colors focus:outline-none focus:ring-2';
+    'h-11 w-full rounded-md border bg-white px-3.5 text-body text-slate-900 shadow-sm transition-colors focus:outline-none focus:ring-2';
   const numericCls = isNumeric ? 'font-semibold tabular-nums' : '';
   const normalCls = 'border-slate-200 hover:border-slate-300 focus:border-cyan-500 focus:ring-cyan-500/20';
   const abnormalCls =
-    'border-rose-400 bg-rose-50/40 font-semibold text-rose-700 focus:border-rose-500 focus:ring-rose-500/30';
+    'border-danger bg-danger-tint/40 font-semibold text-danger-text focus:border-danger focus:ring-danger/30';
   const inputCls = cn(baseCls, numericCls, abnormal ? abnormalCls : normalCls);
   return (
     <div className={cn('flex flex-col gap-1', colSpan === 'full' && 'col-span-full')}>
       <label
         htmlFor={inputId}
-        className="flex items-baseline gap-2 text-[13px] font-semibold text-slate-800"
+        className="flex items-baseline gap-2 text-caption font-semibold text-slate-800"
       >
         <span className="truncate">{label}</span>
         {hint && (
-          <span className="text-[11px] font-normal text-slate-500">
+          <span className="text-caption font-normal text-slate-500">
             {hint}
           </span>
         )}
         {abnormal && (
           <span
             data-testid={`abnormal-${name}`}
-            className="ml-auto rounded bg-rose-600 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white shadow-sm"
+            className="ml-auto rounded bg-danger px-2 py-0.5 text-caption font-bold uppercase tracking-wider text-white shadow-sm"
             title="ผิดปกติ — แจ้งแพทย์"
           >
             ผิดปกติ
@@ -659,7 +660,7 @@ export function VitalSignEntryDialog({
         <DialogHeader className="flex-row items-center justify-between gap-3 border-b-2 border-slate-900 pb-4">
           <div className="flex items-center gap-3">
             <span aria-hidden className="block h-1.5 w-8 bg-cyan-600" />
-            <DialogTitle className="text-[18px] font-bold tracking-tight text-slate-900">
+            <DialogTitle className="text-title font-bold tracking-tight text-slate-900">
               {mode === 'add' ? 'เพิ่มบันทึกสัญญาณชีพ' : 'แก้ไขบันทึกสัญญาณชีพ'}
             </DialogTitle>
           </div>
@@ -686,9 +687,9 @@ export function VitalSignEntryDialog({
                 input keeps `getByLabelText('ipd_nurse_shift_id')` queryable
                 from RTL while the chips drive the visual choice. */}
             <div className="flex flex-col gap-1">
-              <label htmlFor="nn-ipd_nurse_shift_id" className="flex items-baseline gap-2 text-[13px] font-semibold text-slate-800">
+              <label htmlFor="nn-ipd_nurse_shift_id" className="flex items-baseline gap-2 text-caption font-semibold text-slate-800">
                 <span>เวร</span>
-                <span className="text-[11px] font-normal text-slate-500">
+                <span className="text-caption font-normal text-slate-500">
                   {draft.ipd_nurse_shift_id
                     ? `· auto: ${SHIFT_OPTIONS.find((s) => String(s.id) === draft.ipd_nurse_shift_id)?.label ?? '—'}`
                     : '· เลือกเวร'}
@@ -710,14 +711,14 @@ export function VitalSignEntryDialog({
                       type="button"
                       onClick={() => set('ipd_nurse_shift_id', String(s.id))}
                       className={cn(
-                        'flex h-11 flex-1 flex-col items-center justify-center rounded-md border px-3 text-[13px] font-semibold transition-all',
+                        'flex h-11 flex-1 flex-col items-center justify-center rounded-md border px-3 text-caption font-semibold transition-all',
                         isSelected
                           ? 'border-cyan-600 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-600/20'
                           : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
                       )}
                     >
                       <span>{s.label}</span>
-                      <span className={cn('text-[10px] font-normal tabular-nums', isSelected ? 'text-cyan-50' : 'text-slate-400')}>
+                      <span className={cn('text-caption font-normal tabular-nums', isSelected ? 'text-cyan-50' : 'text-slate-400')}>
                         {s.range}
                       </span>
                     </button>
@@ -929,7 +930,7 @@ export function VitalSignEntryDialog({
           {error && (
             <div
               role="alert"
-              className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-rose-700 shadow-sm"
+              className="rounded-lg border border-danger/40 bg-danger-tint px-3 py-2 font-mono text-caption font-semibold uppercase tracking-[0.08em] text-danger-text shadow-sm"
             >
               {error}
             </div>
@@ -941,7 +942,7 @@ export function VitalSignEntryDialog({
                 type="button"
                 onClick={handleDelete}
                 disabled={saving}
-                className="rounded-md border border-rose-300 bg-white px-4 py-2.5 text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:opacity-40"
+                className="rounded-md border border-danger/40 bg-white px-4 py-2.5 text-label font-semibold text-danger-text transition-colors hover:bg-danger-tint disabled:opacity-40"
               >
                 ลบ
               </button>
@@ -951,14 +952,14 @@ export function VitalSignEntryDialog({
                 type="button"
                 onClick={onCancel}
                 disabled={saving}
-                className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-[14px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+                className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-label font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
               >
                 ยกเลิก
               </button>
               <button
                 type="submit"
                 disabled={saving}
-                className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-6 py-2.5 text-[14px] font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
+                className="rounded-md border-2 border-cyan-700 bg-cyan-700 px-6 py-2.5 text-label font-bold text-white transition-colors hover:bg-cyan-800 disabled:opacity-40"
               >
                 {saving ? 'กำลังบันทึก…' : 'บันทึก'}
               </button>

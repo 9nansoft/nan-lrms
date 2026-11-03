@@ -18,6 +18,7 @@ import {
 import { LoadingState } from '@/components/shared/LoadingState';
 import { HospitalServiceType } from '@/types/domain';
 import { guessHospitalLevel } from '@/config/hospitals';
+import { cn } from '@/lib/utils';
 
 interface MophHospital {
   hcode: string;
@@ -175,71 +176,50 @@ function BulkAddBody({ open, onClose, provinceCode, provinceName, onAdded }: Pro
 
   return (
     <>
-      <DialogHeader
-        className="border-b px-5 pt-4 pb-3"
-        style={{ borderColor: 'var(--rule-strong)' }}
-      >
+      <DialogHeader className="border-b border-border px-5 pt-4 pb-3">
         <DialogTitle className="flex flex-col gap-0.5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-navy-muted)]">
-            BULK ADD · จังหวัด {provinceCode}
-          </div>
-          <div className="text-[16px] font-semibold" style={{ color: 'var(--ink-navy)' }}>
+          <div className="text-label text-ink-muted">เพิ่มหลายโรงพยาบาล · จังหวัด {provinceCode}</div>
+          <div className="text-body-lg font-semibold text-ink">
             เพิ่มโรงพยาบาลในจังหวัด{provinceName ? ` ${provinceName}` : ''}
           </div>
         </DialogTitle>
       </DialogHeader>
 
-      <div
-        className="max-h-[65vh] overflow-y-auto px-5 py-4"
-        style={{ background: 'var(--surface-cool)' }}
-      >
+      <div className="max-h-[65vh] overflow-y-auto bg-surface-muted px-5 py-4">
         {isLoading ? (
           <LoadingState message="กำลังโหลดทะเบียน MOPH..." />
         ) : available.length === 0 ? (
-          <div
-            className="border bg-white px-4 py-6 text-center font-mono text-[12px] text-[var(--ink-navy-dim)]"
-            style={{ borderColor: 'var(--rule-strong)' }}
-          >
+          <div className="rounded-xl border border-border bg-surface-card px-4 py-6 text-center text-body text-ink-muted">
             ไม่มีโรงพยาบาลเหลืออยู่ในทะเบียน MOPH ของจังหวัดนี้ที่ยังไม่ถูกเพิ่ม
           </div>
         ) : (
           <>
-            <div className="mb-2 flex items-center justify-between font-mono text-[11px]">
+            <div className="mb-2 flex items-center justify-between text-label">
               <button
                 type="button"
                 onClick={toggleAll}
-                className="inline-flex items-center gap-1.5 border px-2 py-1 hover:bg-[var(--accent-navy-soft)]"
-                style={{
-                  borderColor: 'var(--rule-strong)',
-                  color: 'var(--ink-navy-dim)',
-                }}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border bg-surface-card px-3 text-ink-muted hover:bg-brand-soft"
                 disabled={busy}
               >
                 {allSelected ? (
-                  <CheckSquare className="h-3.5 w-3.5" />
+                  <CheckSquare aria-hidden="true" className="h-4 w-4" />
                 ) : (
-                  <Square className="h-3.5 w-3.5" />
+                  <Square aria-hidden="true" className="h-4 w-4" />
                 )}
                 {allSelected ? 'ยกเลิกเลือกทั้งหมด' : 'เลือกทั้งหมด'}
               </button>
-              <span className="text-[var(--ink-navy-muted)]">
+              <span className="text-ink-muted">
                 เลือกแล้ว {selected.size} / {available.length}
               </span>
             </div>
 
-            <div className="border bg-white" style={{ borderColor: 'var(--rule-strong)' }}>
-              <div
-                className="grid gap-2 border-b px-3 py-2 font-mono text-[10px] tracking-[0.1em] text-[var(--ink-navy-muted)]"
-                style={{
-                  gridTemplateColumns: '40px 80px 1fr 60px 60px',
-                  borderColor: 'var(--rule-strong)',
-                }}
-              >
-                <span>✓</span>
-                <span>HCODE</span>
-                <span>NAME</span>
-                <span>LEVEL</span>
-                <span className="text-right">BEDS</span>
+            <div className="overflow-hidden rounded-xl border border-border bg-surface-card">
+              <div className="grid grid-cols-[40px_80px_minmax(0,1fr)_60px_60px] gap-2 border-b border-border px-3 py-2 text-label text-ink-muted">
+                <span>เลือก</span>
+                <span>รหัส</span>
+                <span>ชื่อโรงพยาบาล</span>
+                <span>ระดับ</span>
+                <span className="text-right">เตียง</span>
               </div>
               {available.map((m) => {
                 const isSel = selected.has(m.hcode);
@@ -247,30 +227,25 @@ function BulkAddBody({ open, onClose, provinceCode, provinceName, onAdded }: Pro
                 return (
                   <label
                     key={m.hcode}
-                    className="grid cursor-pointer items-center gap-2 border-b px-3 py-2 text-[13px] hover:bg-[var(--accent-navy-soft)] last:border-b-0"
-                    style={{
-                      gridTemplateColumns: '40px 80px 1fr 60px 60px',
-                      borderColor: 'var(--rule-hair)',
-                      color: 'var(--ink-navy)',
-                      background: isSel ? 'var(--accent-navy-soft)' : undefined,
-                    }}
+                    className={cn(
+                      'grid cursor-pointer grid-cols-[40px_80px_minmax(0,1fr)_60px_60px] items-center gap-2 border-b border-border px-3 py-2 text-body text-ink last:border-b-0 hover:bg-brand-soft',
+                      isSel && 'bg-brand-soft',
+                    )}
                   >
                     <input
                       type="checkbox"
                       checked={isSel}
                       onChange={() => toggle(m.hcode)}
                       disabled={busy}
-                      className="h-4 w-4"
+                      className="h-5 w-5 accent-brand"
                     />
-                    <span className="font-mono text-[11px] text-[var(--ink-navy-dim)]">
-                      {m.hcode}
-                    </span>
+                    <span className="font-mono text-caption text-ink-muted">{m.hcode}</span>
                     <span className="flex items-center gap-1.5 truncate">
-                      <Building2 className="h-3.5 w-3.5 text-[var(--ink-navy-muted)]" />
+                      <Building2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
                       <span className="truncate">{m.name}</span>
                     </span>
-                    <span className="font-mono text-[11px] text-[var(--ink-navy-dim)]">{lvl}</span>
-                    <span className="text-right font-mono text-[11px] text-[var(--ink-navy-dim)]">
+                    <span className="font-mono text-caption text-ink-muted">{lvl}</span>
+                    <span className="text-right text-caption tabular-nums text-ink-muted">
                       {m.bedCount ?? '—'}
                     </span>
                   </label>
@@ -278,20 +253,20 @@ function BulkAddBody({ open, onClose, provinceCode, provinceName, onAdded }: Pro
               })}
             </div>
 
-            <p className="mt-2 font-mono text-[10px] leading-snug text-[var(--ink-navy-muted)]">
-              ระบบจะเลือก LEVEL จาก hospital_type_id และตั้ง service_type ให้ตามค่าเริ่มต้น —
+            <p className="mt-2 text-caption text-ink-muted">
+              ระบบจะเลือกระดับจาก hospital_type_id และตั้ง service_type ให้ตามค่าเริ่มต้น —
               สามารถแก้ไขรายตัวได้ในแท็บ &ldquo;โรงพยาบาล&rdquo; หลังเพิ่ม
             </p>
 
             {errors.length > 0 ? (
-              <div
-                className="mt-3 space-y-1 border px-3 py-2 font-mono text-[11px]"
-                style={{ borderColor: 'var(--risk-high)', color: 'var(--risk-high)' }}
-              >
+              <div role="alert" className="mt-3 space-y-1 rounded-xl border border-danger/40 bg-danger-tint px-3 py-2 text-label text-danger-text">
                 <div className="flex items-center gap-1.5 font-semibold">
-                  <AlertTriangle className="h-3.5 w-3.5" />
+                  <AlertTriangle aria-hidden="true" className="h-4 w-4" />
                   เพิ่มไม่สำเร็จ {errors.length} รายการ
                 </div>
+                <p className="text-label">
+                  วิธีแก้: รายการที่สำเร็จถูกเพิ่มแล้ว — ตรวจรายการที่ไม่สำเร็จด้านล่าง แล้วกด เพิ่ม อีกครั้งเฉพาะที่เหลือ
+                </p>
                 {errors.slice(0, 5).map((e) => (
                   <div key={e.hcode}>
                     · {e.hcode} — {e.error}
@@ -304,16 +279,16 @@ function BulkAddBody({ open, onClose, provinceCode, provinceName, onAdded }: Pro
         )}
       </div>
 
-      <DialogFooter className="border-t px-5 py-3" style={{ borderColor: 'var(--rule-strong)' }}>
+      <DialogFooter className="border-t border-border px-5 py-3">
         <Button variant="ghost" onClick={onClose} disabled={busy}>
           ยกเลิก
         </Button>
         <Button
           onClick={handleOk}
           disabled={busy || selected.size === 0 || available.length === 0}
-          className="gap-1.5"
+          className="h-10 gap-1.5 bg-brand text-white hover:bg-brand-strong"
         >
-          {busy ? <Plus className="h-4 w-4 animate-pulse" /> : <Check className="h-4 w-4" />}
+          {busy ? <Plus aria-hidden="true" className="h-4 w-4 animate-pulse" /> : <Check aria-hidden="true" className="h-4 w-4" />}
           {busy ? `กำลังเพิ่ม ${selected.size}...` : `เพิ่ม ${selected.size} แห่ง`}
         </Button>
       </DialogFooter>

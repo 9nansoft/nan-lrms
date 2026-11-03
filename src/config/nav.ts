@@ -1,4 +1,4 @@
-// Shared navigation config — used by both TopNavBar (legacy chrome) and the
+// Shared navigation config — used by both AppShell sidebar and the
 // redesigned dashboard header's row-2 menu. Single source of truth for
 // provincial menu items + role labels.
 
@@ -10,6 +10,7 @@ import {
   BarChart3,
   Stethoscope,
   Settings,
+  UserRound,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -37,4 +38,16 @@ export const ROLE_LABELS: Record<string, string> = {
 
 export function filterNavByRole(items: NavItem[], role: string | undefined | null): NavItem[] {
   return items.filter((i) => !i.adminOnly || role === 'ADMIN');
+}
+
+export type ShellVariant = 'provincial' | 'hospital';
+
+/** Hospital-role sessions: their ward and their profile (notification prefs). */
+export const HOSPITAL_NAV_ITEMS: NavItem[] = [
+  { href: '/hospital-maternity-ward', label: 'ห้องคลอด', icon: Stethoscope },
+  { href: '/profile', label: 'โปรไฟล์', icon: UserRound },
+];
+
+export function navItemsFor(variant: ShellVariant, role: string | null | undefined): NavItem[] {
+  return variant === 'hospital' ? HOSPITAL_NAV_ITEMS : filterNavByRole(NAV_ITEMS, role);
 }

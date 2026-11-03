@@ -118,15 +118,15 @@ export interface ReferOutDialogProps {
 }
 
 const inputCls =
-  'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
+  'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
 const textareaCls =
-  'min-h-[80px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
+  'min-h-[80px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-label text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
 
 function FormLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
-    <label className="text-[12px] font-semibold text-slate-700">
+    <label className="text-caption font-semibold text-slate-700">
       {children}
-      {required && <span className="ml-0.5 text-rose-600">*</span>}
+      {required && <span className="ml-0.5 text-danger-text">*</span>}
     </label>
   );
 }
@@ -149,20 +149,20 @@ function ToneChip({
       unselected: 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
     },
     emerald: {
-      selected: 'border-emerald-600 bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-600/20',
-      unselected: 'border-emerald-300 bg-emerald-50/40 text-emerald-700 hover:border-emerald-500 hover:bg-emerald-50',
+      selected: 'border-ok bg-ok-text text-white shadow-sm ring-2 ring-ok/20',
+      unselected: 'border-ok/40 bg-ok-tint/40 text-ok-text hover:border-ok hover:bg-ok-tint',
     },
     lime: {
       selected: 'border-lime-600 bg-lime-600 text-white shadow-sm ring-2 ring-lime-600/20',
       unselected: 'border-lime-300 bg-lime-50/40 text-lime-700 hover:border-lime-500 hover:bg-lime-50',
     },
     amber: {
-      selected: 'border-amber-600 bg-amber-600 text-white shadow-sm ring-2 ring-amber-600/20',
-      unselected: 'border-amber-300 bg-amber-50/40 text-amber-700 hover:border-amber-500 hover:bg-amber-50',
+      selected: 'border-warn bg-warn-text text-white shadow-sm ring-2 ring-warn/20',
+      unselected: 'border-warn/40 bg-warn-tint/40 text-warn-text hover:border-warn hover:bg-warn-tint',
     },
     rose: {
-      selected: 'border-rose-600 bg-rose-600 text-white shadow-sm ring-2 ring-rose-600/20',
-      unselected: 'border-rose-300 bg-rose-50/40 text-rose-700 hover:border-rose-500 hover:bg-rose-50',
+      selected: 'border-danger bg-danger text-white shadow-sm ring-2 ring-danger/20',
+      unselected: 'border-danger/40 bg-danger-tint/40 text-danger-text hover:border-danger hover:bg-danger-tint',
     },
   };
   const t = tones[tone];
@@ -171,7 +171,7 @@ function ToneChip({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-md border px-3 py-1.5 text-[12px] font-semibold transition-all',
+        'rounded-md border px-3 py-1.5 text-caption font-semibold transition-all',
         selected ? t.selected : t.unselected,
       )}
     >
@@ -352,12 +352,12 @@ export function ReferOutDialog({
       >
         <DialogHeader className="flex-row items-center justify-between gap-3 border-b-2 border-slate-900 pb-4">
           <div className="flex items-center gap-3">
-            <span aria-hidden className="block h-1.5 w-8 bg-amber-600" />
-            <DialogTitle className="text-[18px] font-bold tracking-tight text-slate-900">
+            <span aria-hidden className="block h-1.5 w-8 bg-warn" />
+            <DialogTitle className="text-title font-bold tracking-tight text-slate-900">
               ส่งต่อโรงพยาบาล (Refer Out)
             </DialogTitle>
             {draft.referout_id !== undefined && (
-              <span className="rounded-md bg-slate-100 px-2.5 py-1 font-mono text-[11px] font-semibold text-slate-700">
+              <span className="rounded-md bg-slate-100 px-2.5 py-1 font-mono text-caption font-semibold text-slate-700">
                 referout_id {draft.referout_id}
               </span>
             )}
@@ -365,20 +365,20 @@ export function ReferOutDialog({
         </DialogHeader>
 
         {existing.isLoading && (
-          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-500">
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-caption text-slate-500">
             กำลังโหลดข้อมูลเดิม…
           </div>
         )}
 
         {saveError && (
-          <div role="alert" className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-[13px] font-semibold text-rose-700">
+          <div role="alert" className="rounded-md border border-danger/40 bg-danger-tint px-3 py-2 text-caption font-semibold text-danger-text">
             {saveError}
           </div>
         )}
 
         {/* Section 1 · ปลายทาง */}
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+          <div className="mb-3 flex items-center gap-2 text-caption font-bold uppercase tracking-wide text-slate-500">
             <span className="block h-2 w-2 rounded-full bg-cyan-500" aria-hidden />
             ปลายทาง · Destination
           </div>
@@ -411,7 +411,7 @@ export function ReferOutDialog({
                 <input className={inputCls} disabled />
               )}
               {draft.refer_hospcode && (
-                <div className="font-mono text-[11px] text-slate-500">
+                <div className="font-mono text-caption text-slate-500">
                   รหัส: {draft.refer_hospcode}
                 </div>
               )}
@@ -458,7 +458,7 @@ export function ReferOutDialog({
                 <input className={inputCls} disabled />
               )}
               {draft.doctor && (
-                <div className="font-mono text-[11px] text-slate-500">รหัส: {draft.doctor}</div>
+                <div className="font-mono text-caption text-slate-500">รหัส: {draft.doctor}</div>
               )}
             </div>
             <div className="flex flex-col gap-1 sm:col-span-2">
@@ -484,7 +484,7 @@ export function ReferOutDialog({
               ) : (
                 <input className={inputCls} disabled />
               )}
-              <div className="text-[11px] text-slate-500">
+              <div className="text-caption text-slate-500">
                 ค่า default 03 = สูติกรรม · รหัสปัจจุบัน:{' '}
                 <span className="font-mono font-semibold">{draft.spclty || '—'}</span>
               </div>
@@ -494,7 +494,7 @@ export function ReferOutDialog({
 
         {/* Section 2 · เหตุผลและประเภท */}
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+          <div className="mb-3 flex items-center gap-2 text-caption font-bold uppercase tracking-wide text-slate-500">
             <span className="block h-2 w-2 rounded-full bg-violet-500" aria-hidden />
             เหตุผล + ประเภท + ความเร่งด่วน
           </div>
@@ -556,8 +556,8 @@ export function ReferOutDialog({
 
         {/* Section 3 · ข้อมูลคลินิก */}
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            <span className="block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
+          <div className="mb-3 flex items-center gap-2 text-caption font-bold uppercase tracking-wide text-slate-500">
+            <span className="block h-2 w-2 rounded-full bg-ok" aria-hidden />
             ข้อมูลคลินิก · Clinical brief
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -596,7 +596,7 @@ export function ReferOutDialog({
                 <input className={inputCls} disabled />
               )}
               {draft.pdx && (
-                <div className="font-mono text-[11px] text-slate-500">รหัส: {draft.pdx}</div>
+                <div className="font-mono text-caption text-slate-500">รหัส: {draft.pdx}</div>
               )}
             </div>
             <div /> {/* layout filler */}
@@ -671,8 +671,8 @@ export function ReferOutDialog({
 
         {/* Section 4 · ทีมส่งต่อ */}
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            <span className="block h-2 w-2 rounded-full bg-amber-500" aria-hidden />
+          <div className="mb-3 flex items-center gap-2 text-caption font-bold uppercase tracking-wide text-slate-500">
+            <span className="block h-2 w-2 rounded-full bg-warn" aria-hidden />
             ทีมส่งต่อและพาหนะ
           </div>
           <div className="space-y-3">
@@ -749,7 +749,7 @@ export function ReferOutDialog({
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-caption font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
           >
             ยกเลิก
           </button>
@@ -757,7 +757,7 @@ export function ReferOutDialog({
             type="button"
             onClick={save}
             disabled={saving || !config || !userInfo}
-            className="rounded-md border-2 border-amber-700 bg-amber-700 px-5 py-2 text-[14px] font-bold text-white transition-colors hover:bg-amber-800 disabled:opacity-40"
+            className="rounded-md border-2 border-warn bg-warn-text px-5 py-2 text-label font-bold text-white transition-colors hover:bg-warn-text/90 disabled:opacity-40"
           >
             {saving
               ? 'กำลังบันทึก…'

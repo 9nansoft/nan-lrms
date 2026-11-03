@@ -19,7 +19,7 @@ export function IncompleteAssessmentMarker({
 }: IncompleteAssessmentMarkerProps) {
   return (
     <span
-      className="inline-flex items-center gap-1 border px-2 py-0.5 font-mono text-[11px] font-semibold tracking-[0.06em]"
+      className="inline-flex items-center gap-1 border px-2 py-0.5 font-mono text-caption font-semibold tracking-[0.06em]"
       style={{
         color: 'var(--risk-medium)',
         borderColor: 'var(--risk-medium)',

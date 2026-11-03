@@ -13,7 +13,6 @@ import type {
 import { encrypt } from '@/lib/encryption';
 import { calculateAge } from '@/lib/utils';
 import { isValidThaiCidChecksum } from '@/lib/cid';
-import { isoDatesEqual } from '@/lib/dates';
 import {
   createJourney,
   getActiveJourneyByCid,
@@ -93,14 +92,23 @@ export async function syncAncData(
       (cidHash ? await getActiveJourneyByCid(db, cidHash) : null) ??
       (await getJourneyByHn(db, anc.hn, hospitalId));
 
-    // Same Date-vs-string trap as in webhook.ts:processAncWebhook —
-    // journey.lmp is a Date at runtime even though the type says string,
-    // so raw `!==` always fires and creates a fresh journey every cycle.
-    // Normalise to "YYYY-MM-DD" before comparing.
-    const isNewPregnancy =
-      journey &&
-      (anc.preg_no > journey.gravida ||
-        (anc.lmp != null && journey.lmp != null && !isoDatesEqual(anc.lmp, journey.lmp)));
+    // A lower pregnancy number is an out-of-order snapshot of an older
+    // pregnancy. Skip the entire row before any journey, address, visit, or
+    // risk write can overwrite the active pregnancy.
+    if (journey != null && anc.preg_no < journey.gravida) {
+      logger.warn('anc_stale_pregnancy_skipped', {
+        hospitalId,
+        journeyId: journey.id,
+        incomingPregNo: anc.preg_no,
+        currentPregNo: journey.gravida,
+      });
+      continue;
+    }
+
+    // A corrected LMP is clinical data for the current pregnancy, not a
+    // pregnancy identity signal. HOSxP may revise it after ultrasound dating;
+    // only an explicitly higher pregnancy number rolls the journey over.
+    const isNewPregnancy = journey != null && anc.preg_no > journey.gravida;
     const existingIsActive =
       journey && (journey.careStage === 'PREGNANCY' || journey.careStage === 'LABOR');
 

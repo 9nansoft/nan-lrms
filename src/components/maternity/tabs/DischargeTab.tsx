@@ -185,26 +185,26 @@ function ReadField({
   const display = value === null || value === undefined || value === '' ? '—' : String(value);
   const valueCls =
     emphasis === 'primary'
-      ? 'text-[18px] font-bold tracking-tight text-slate-900'
+      ? 'text-title font-bold tracking-tight text-slate-900'
       : emphasis === 'cyan'
-        ? 'text-[15px] font-semibold text-cyan-700'
-        : 'text-[14px] font-medium text-slate-900';
+        ? 'text-body font-semibold text-cyan-700'
+        : 'text-label font-medium text-slate-900';
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
+      <dt className="text-caption font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
       <dd className={valueCls}>{display}</dd>
     </div>
   );
 }
 
 const inputCls =
-  'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-[14px] text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
+  'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-label text-slate-900 shadow-sm transition-colors hover:border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20';
 
 function FormLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
-    <label className="text-[12px] font-semibold text-slate-700">
+    <label className="text-caption font-semibold text-slate-700">
       {children}
-      {required && <span className="ml-0.5 text-rose-600">*</span>}
+      {required && <span className="ml-0.5 text-danger-text">*</span>}
     </label>
   );
 }
@@ -230,20 +230,20 @@ function ToneChip({
       unselected: 'border-slate-200 bg-white text-slate-700 hover:border-cyan-400 hover:bg-cyan-50/60 hover:text-cyan-700',
     },
     emerald: {
-      selected: 'border-emerald-600 bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-600/20',
-      unselected: 'border-emerald-300 bg-emerald-50/40 text-emerald-700 hover:border-emerald-500 hover:bg-emerald-50',
+      selected: 'border-ok bg-ok-text text-white shadow-sm ring-2 ring-ok/20',
+      unselected: 'border-ok/40 bg-ok-tint/40 text-ok-text hover:border-ok hover:bg-ok-tint',
     },
     lime: {
       selected: 'border-lime-600 bg-lime-600 text-white shadow-sm ring-2 ring-lime-600/20',
       unselected: 'border-lime-300 bg-lime-50/40 text-lime-700 hover:border-lime-500 hover:bg-lime-50',
     },
     amber: {
-      selected: 'border-amber-600 bg-amber-600 text-white shadow-sm ring-2 ring-amber-600/20',
-      unselected: 'border-amber-300 bg-amber-50/40 text-amber-700 hover:border-amber-500 hover:bg-amber-50',
+      selected: 'border-warn bg-warn-text text-white shadow-sm ring-2 ring-warn/20',
+      unselected: 'border-warn/40 bg-warn-tint/40 text-warn-text hover:border-warn hover:bg-warn-tint',
     },
     rose: {
-      selected: 'border-rose-600 bg-rose-600 text-white shadow-sm ring-2 ring-rose-600/20',
-      unselected: 'border-rose-300 bg-rose-50/40 text-rose-700 hover:border-rose-500 hover:bg-rose-50',
+      selected: 'border-danger bg-danger text-white shadow-sm ring-2 ring-danger/20',
+      unselected: 'border-danger/40 bg-danger-tint/40 text-danger-text hover:border-danger hover:bg-danger-tint',
     },
   };
   const t = tones[tone];
@@ -253,7 +253,7 @@ function ToneChip({
       onClick={onClick}
       title={hint}
       className={cn(
-        'rounded-md border px-3 py-1.5 text-[12px] font-semibold transition-all',
+        'rounded-md border px-3 py-1.5 text-caption font-semibold transition-all',
         selected ? t.selected : t.unselected,
       )}
     >
@@ -490,17 +490,17 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
       <div className="space-y-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 pb-3">
           <div className="flex items-center gap-3">
-            <span aria-hidden className="block h-1.5 w-8 bg-emerald-600" />
-            <h2 className="text-[18px] font-bold tracking-tight text-slate-900">การจำหน่าย</h2>
-            <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+            <span aria-hidden className="block h-1.5 w-8 bg-ok" />
+            <h2 className="text-title font-bold tracking-tight text-slate-900">การจำหน่าย</h2>
+            <span className="rounded-full border border-ok/40 bg-ok-tint px-2.5 py-0.5 text-caption font-bold uppercase tracking-wide text-ok-text">
               จำหน่ายแล้ว
             </span>
           </div>
-          <span className="rounded-md bg-slate-100 px-2.5 py-1 font-mono text-[12px] font-semibold text-slate-700">
+          <span className="rounded-md bg-slate-100 px-2.5 py-1 font-mono text-caption font-semibold text-slate-700">
             AN {occupant.an}
           </span>
         </div>
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-[13px] text-emerald-800">
+        <div className="rounded-md border border-ok/40 bg-ok-tint p-3 text-caption text-ok-text">
           ดำเนินการจำหน่ายเรียบร้อย ({draft.dchdate} {draft.dchtime})
         </div>
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -549,19 +549,19 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 pb-3">
         <div className="flex items-center gap-3">
           <span aria-hidden className="block h-1.5 w-8 bg-cyan-600" />
-          <h2 className="text-[18px] font-bold tracking-tight text-slate-900">การจำหน่าย</h2>
-          <span className="rounded-full border border-cyan-300 bg-cyan-50 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-cyan-700">
+          <h2 className="text-title font-bold tracking-tight text-slate-900">การจำหน่าย</h2>
+          <span className="rounded-full border border-cyan-300 bg-cyan-50 px-2.5 py-0.5 text-caption font-bold uppercase tracking-wide text-cyan-700">
             ยังไม่มีการจำหน่าย
           </span>
         </div>
-        <span className="rounded-md bg-slate-100 px-2.5 py-1 font-mono text-[12px] font-semibold text-slate-700">
+        <span className="rounded-md bg-slate-100 px-2.5 py-1 font-mono text-caption font-semibold text-slate-700">
           AN {occupant.an}
         </span>
       </div>
 
       {/* Patient summary */}
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+        <div className="mb-3 text-caption font-bold uppercase tracking-wide text-slate-500">
           รายการแอดมิตปัจจุบัน
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -581,10 +581,10 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
 
       {/* Quick scenarios */}
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+        <div className="mb-1 text-caption font-bold uppercase tracking-wide text-slate-500">
           สถานการณ์ที่พบบ่อย — แตะหนึ่งครั้งเพื่อเติมค่าทั้งหมด
         </div>
-        <div className="mb-3 text-[11px] text-slate-500">
+        <div className="mb-3 text-caption text-slate-500">
           ปรับค่าได้ในแบบฟอร์มด้านล่าง — สถานการณ์เป็น preset เพื่อความเร็ว
         </div>
         <div className="flex flex-wrap gap-2">
@@ -602,14 +602,14 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
       </section>
 
       {saveError && (
-        <div role="alert" className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-[13px] font-semibold text-rose-700">
+        <div role="alert" className="rounded-md border border-danger/40 bg-danger-tint px-3 py-2 text-caption font-semibold text-danger-text">
           {saveError}
         </div>
       )}
 
       {/* Section 1: ข้อมูลการจำหน่าย */}
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+        <div className="mb-3 flex items-center gap-2 text-caption font-bold uppercase tracking-wide text-slate-500">
           <span className="block h-2 w-2 rounded-full bg-cyan-500" aria-hidden />
           ข้อมูลการจำหน่าย
         </div>
@@ -659,7 +659,7 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
               <input className={inputCls} disabled />
             )}
             {draft.dch_doctor && (
-              <div className="font-mono text-[11px] text-slate-500">รหัส: {draft.dch_doctor}</div>
+              <div className="font-mono text-caption text-slate-500">รหัส: {draft.dch_doctor}</div>
             )}
           </div>
           <div className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-4">
@@ -700,7 +700,7 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
 
       {/* Section 2: ผลการรักษา */}
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+        <div className="mb-3 flex items-center gap-2 text-caption font-bold uppercase tracking-wide text-slate-500">
           <span className="block h-2 w-2 rounded-full bg-violet-500" aria-hidden />
           ผลการรักษา
         </div>
@@ -722,7 +722,7 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
                 <option value={draft.dchtype}>{draft.dchtype}</option>
               )}
             </select>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-caption text-slate-500">
               {nameForType(draft.dchtype) ?? 'รหัสจาก dchtype master'}
             </div>
           </div>
@@ -743,7 +743,7 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
                 <option value={draft.dchstts}>{draft.dchstts}</option>
               )}
             </select>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-caption text-slate-500">
               {nameForStatus(draft.dchstts) ?? 'รหัสจาก dchstts master'}
             </div>
           </div>
@@ -782,34 +782,34 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
             className={cn(
               'mt-3 rounded-md border-2 p-3',
               referOut.data
-                ? 'border-emerald-300 bg-emerald-50'
-                : 'border-amber-300 bg-amber-50',
+                ? 'border-ok/40 bg-ok-tint'
+                : 'border-warn/40 bg-warn-tint',
             )}
           >
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-2 text-[13px] font-bold">
+                <div className="flex items-center gap-2 text-caption font-bold">
                   {referOut.data ? (
                     <>
-                      <span className="text-emerald-900">
+                      <span className="text-ok-text">
                         ✓ มีข้อมูลส่งต่อแล้ว
                       </span>
                       {referOut.data.refer_hospcode && (
-                        <span className="rounded-md border border-emerald-300 bg-white px-2 py-0.5 font-mono text-[11px] text-emerald-800">
+                        <span className="rounded-md border border-ok/40 bg-white px-2 py-0.5 font-mono text-caption text-ok-text">
                           → {referOut.data.refer_hospcode}
                         </span>
                       )}
                     </>
                   ) : (
-                    <span className="text-amber-900">
+                    <span className="text-warn-text">
                       ⚠ ยังไม่มีข้อมูลส่งต่อ (Refer Out)
                     </span>
                   )}
                 </div>
                 <div
                   className={cn(
-                    'text-[12px]',
-                    referOut.data ? 'text-emerald-700' : 'text-amber-700',
+                    'text-caption',
+                    referOut.data ? 'text-ok-text' : 'text-warn-text',
                   )}
                 >
                   {referOut.data
@@ -822,10 +822,10 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
                 onClick={() => setReferDialogOpen(true)}
                 disabled={!config}
                 className={cn(
-                  'rounded-md border-2 px-4 py-2 text-[13px] font-bold text-white transition-colors disabled:opacity-40',
+                  'rounded-md border-2 px-4 py-2 text-caption font-bold text-white transition-colors disabled:opacity-40',
                   referOut.data
-                    ? 'border-emerald-700 bg-emerald-700 hover:bg-emerald-800'
-                    : 'border-amber-700 bg-amber-700 hover:bg-amber-800',
+                    ? 'border-ok-text bg-ok-text hover:bg-ok-text/90'
+                    : 'border-warn-text bg-warn-text hover:bg-warn-text/90',
                 )}
               >
                 {referOut.data ? 'แก้ไขข้อมูลส่งต่อ' : 'เพิ่มข้อมูลส่งต่อ'}
@@ -834,7 +834,7 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
           </div>
         )}
         {(draft.dchstts === '08' || draft.dchstts === '09') && (
-          <div className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-[12px] text-rose-900">
+          <div className="mt-3 rounded-md border border-danger/40 bg-danger-tint p-3 text-caption text-danger-text">
             ⚠ <strong>เสียชีวิต ({draft.dchstts === '08' ? 'Stillbirth' : 'Dead'})</strong> —
             กรุณาบันทึกใบมรณบัตรในระบบ Patient Death ของ HOSxP
           </div>
@@ -843,8 +843,8 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
 
       {/* Section 3: ติดตามต่อเนื่อง */}
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-          <span className="block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
+        <div className="mb-3 flex items-center gap-2 text-caption font-bold uppercase tracking-wide text-slate-500">
+          <span className="block h-2 w-2 rounded-full bg-ok" aria-hidden />
           ติดตามต่อเนื่อง · ระยะเวลานอน
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -867,10 +867,10 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
           </div>
           <div className="flex flex-col gap-1">
             <FormLabel>ระยะเวลานอน (คำนวณ)</FormLabel>
-            <div className="flex h-10 items-center rounded-md bg-slate-50 px-3 text-[14px] font-semibold text-cyan-700">
+            <div className="flex h-10 items-center rounded-md bg-slate-50 px-3 text-label font-semibold text-cyan-700">
               {losStr}
             </div>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-caption text-slate-500">
               นับจากวัน/เวลาแอดมิต ถึงวัน/เวลาจำหน่าย
             </div>
           </div>
@@ -885,7 +885,7 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
         className={cn(
           'rounded-lg border-2 p-4',
           draft.confirm_discharge === 'Y'
-            ? 'border-rose-300 bg-rose-50'
+            ? 'border-danger/40 bg-danger-tint'
             : 'border-slate-300 bg-slate-50',
         )}
       >
@@ -898,9 +898,9 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
               aria-checked={draft.confirm_discharge === 'Y'}
               aria-label="confirm_discharge"
               className={cn(
-                'relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2',
+                'relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-danger focus:ring-offset-2',
                 draft.confirm_discharge === 'Y'
-                  ? 'border-rose-700 bg-rose-700'
+                  ? 'border-danger bg-danger'
                   : 'border-slate-400 bg-white',
               )}
             >
@@ -913,15 +913,15 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
               />
             </button>
             <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2 text-[13px] font-bold">
-                <span className={draft.confirm_discharge === 'Y' ? 'text-rose-900' : 'text-slate-700'}>
+              <div className="flex items-center gap-2 text-caption font-bold">
+                <span className={draft.confirm_discharge === 'Y' ? 'text-danger-text' : 'text-slate-700'}>
                   ยืนยันการจำหน่าย (confirm_discharge)
                 </span>
                 <span
                   className={cn(
-                    'rounded-full border px-2 py-0.5 font-mono text-[11px] font-bold uppercase',
+                    'rounded-full border px-2 py-0.5 font-mono text-caption font-bold uppercase',
                     draft.confirm_discharge === 'Y'
-                      ? 'border-rose-300 bg-rose-100 text-rose-800'
+                      ? 'border-danger/40 bg-danger-tint text-danger-text'
                       : 'border-slate-300 bg-white text-slate-700',
                   )}
                 >
@@ -930,8 +930,8 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
               </div>
               <div
                 className={cn(
-                  'text-[12px]',
-                  draft.confirm_discharge === 'Y' ? 'text-rose-700' : 'text-slate-600',
+                  'text-caption',
+                  draft.confirm_discharge === 'Y' ? 'text-danger-text' : 'text-slate-600',
                 )}
               >
                 {draft.confirm_discharge === 'Y' ? (
@@ -953,9 +953,9 @@ export function DischargeTab({ occupant }: { occupant: BedOccupancy | null }) {
             onClick={confirmAndSave}
             disabled={saving || !config}
             className={cn(
-              'rounded-md border-2 px-5 py-2 text-[14px] font-bold text-white transition-colors disabled:opacity-40',
+              'rounded-md border-2 px-5 py-2 text-label font-bold text-white transition-colors disabled:opacity-40',
               draft.confirm_discharge === 'Y'
-                ? 'border-rose-700 bg-rose-700 hover:bg-rose-800'
+                ? 'border-danger bg-danger hover:bg-danger/90'
                 : 'border-slate-700 bg-slate-700 hover:bg-slate-800',
             )}
           >

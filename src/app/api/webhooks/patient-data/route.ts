@@ -13,6 +13,7 @@ import {
   processReferralCreate,
   processReferralUpdate,
   processPartographWebhook,
+  summarizeWebhookDeletes,
   WebhookReferralError,
   REFERRAL_UPDATE_STATUSES,
 } from '@/services/webhook';
@@ -58,6 +59,19 @@ export async function POST(request: NextRequest) {
     const payloadHospCode = (body as Record<string, unknown>).hospitalCode;
     logCtx.hospitalId = keyInfo.hospitalId;
     logCtx.payloadType = typeof payloadType === 'string' ? payloadType : undefined;
+
+    // Every delete, of every payload type, leaves one PHI-free log line —
+    // HOSxP-sent deletes once silently emptied a hospital's labour board
+    // (2026-10-22). Whether a labour delete was applied is logged downstream.
+    const deletes = summarizeWebhookDeletes(body);
+    if (deletes) {
+      logger.warn('webhook_delete_received', {
+        hospitalId: keyInfo.hospitalId,
+        keyId: keyInfo.keyId,
+        sender: keyInfo.sender,
+        ...deletes,
+      });
+    }
 
     // Validate hospitalCode matches API key's hospital (if provided)
     if (payloadHospCode && typeof payloadHospCode === 'string') {
@@ -221,6 +235,7 @@ export async function POST(request: NextRequest) {
       keyInfo.hospitalId,
       validation.payload,
       sseManager,
+      { sender: keyInfo.sender },
     );
 
     // Bounded MOPH alert drain (codex #1 first-week risk: webhook EMERGENCY

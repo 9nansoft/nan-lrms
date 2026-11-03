@@ -29,9 +29,9 @@ interface PatientCardProps {
 }
 
 const RISK_STRIP_COLOR: Record<string, string> = {
-  HIGH: 'bg-gradient-to-r from-red-500 to-red-400',
-  MEDIUM: 'bg-gradient-to-r from-amber-500 to-amber-400',
-  LOW: 'bg-gradient-to-r from-green-500 to-green-400',
+  HIGH: 'bg-danger',
+  MEDIUM: 'bg-warn',
+  LOW: 'bg-ok',
 };
 
 const LABOR_STATUS_LABELS: Record<string, string> = {
@@ -87,7 +87,7 @@ interface VitalPillProps {
 
 function VitalPill({ label, value, unit }: VitalPillProps) {
   const abnormal = isVitalAbnormal(label, value);
-  const valueColor = abnormal ? 'text-red-600' : 'text-slate-600';
+  const valueColor = abnormal ? 'text-danger-text' : 'text-slate-600';
 
   return (
     <div className="flex flex-col items-center bg-slate-50 text-sm px-2.5 py-1.5 rounded-lg">
@@ -148,7 +148,7 @@ export function PatientCard({
             />
           )}
           {laborStatus === 'ACTIVE' ? (
-            <span className="bg-emerald-50 text-emerald-700 text-sm font-medium px-2.5 py-0.5 rounded-full">
+            <span className="bg-ok-tint text-ok-text text-sm font-medium px-2.5 py-0.5 rounded-full">
               {laborLabel}
             </span>
           ) : (

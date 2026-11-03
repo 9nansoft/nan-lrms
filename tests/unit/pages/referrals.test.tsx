@@ -1,9 +1,10 @@
 // Referrals board page — behavior tests for the redesigned provincial view.
 // KPI strips must come from the API's DB-wide counts (never the visible page),
 // patient identity must render masked, and INITIATED rows must show SLA aging.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SWRConfig } from 'swr';
+import { failNextRefresh } from '../../helpers/swr-stale';
 import type {
   ReferralDetailResponse,
   ReferralInsightsResponse,
@@ -13,15 +14,12 @@ import { classifyReferralAge, REFERRAL_SLA } from '@/config/referral-sla';
 import ReferralsPage from '@/app/(provincial)/referrals/page';
 
 // Mock next/navigation for the app-router page.
+const nav = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    back: vi.fn(),
-    prefetch: vi.fn(),
-  }),
+  useRouter: () => ({ push: nav.push, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
   useParams: () => ({}),
+  usePathname: () => '/referrals',
 }));
 
 const HOURS = 3600_000;
@@ -174,6 +172,13 @@ describe('ReferralsPage — KPI strips', () => {
     expect(within(screen.getByTestId('kpi-overdue')).getByText('7')).toBeInTheDocument();
   });
 
+  it('lays the five ops tiles out 3+2, never a lone tile on its own row', async () => {
+    renderPage();
+    const grid = (await screen.findByTestId('kpi-today')).closest('.grid') as HTMLElement;
+    expect(grid.className).toContain('grid-cols-3');
+    expect(grid.className).not.toContain('grid-cols-4');
+  });
+
   it('renders the status breakdown from statusCounts (DB-wide, not page rows)', async () => {
     renderPage();
 
@@ -185,7 +190,7 @@ describe('ReferralsPage — KPI strips', () => {
 
   it('shows a last-updated stamp', async () => {
     renderPage();
-    expect(await screen.findByText(/อัปเดตล่าสุด/)).toBeInTheDocument();
+    expect(await screen.findByText(/ข้อมูลหน้านี้ ณ/)).toBeInTheDocument();
   });
 });
 
@@ -265,5 +270,58 @@ describe('ReferralsPage — empty state', () => {
 
     // Rendered in both the desktop table and the mobile card container.
     expect((await screen.findAllByText(/ไม่พบรายการส่งต่อ/)).length).toBeGreaterThan(0);
+  });
+});
+
+describe('ReferralsPage — stale data', () => {
+  afterEach(() => vi.useRealTimers());
+  it('keeps the cached rows and shows the stale banner when a refresh fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { fetcher } = renderPage();
+    expect(await screen.findByTestId('referral-row-ref-emergency')).toBeInTheDocument();
+    await failNextRefresh(fetcher);
+    expect(await screen.findByText(/การเชื่อมต่อล้มเหลว/)).toBeInTheDocument();
+    expect(screen.getByTestId('referral-row-ref-emergency')).toBeInTheDocument();
+  });
+});
+
+const toggleIn =(tile: HTMLElement) => within(tile).getByRole('button', { pressed: false });
+
+describe('ReferralsPage — list-page pattern (sub-project 4)', () => {
+  it('Thai header and sections; no English mono labels', async () => {
+    renderPage();
+    expect(await screen.findByRole('heading', { level: 1, name: 'การส่งต่อ' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'งานส่งต่อ' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'รายการส่งต่อ' })).toBeInTheDocument();
+    for (const en of ['PROVINCIAL REGISTRY', 'REFERRAL CORRIDORS', 'VOLUME · LAST 7 DAYS', 'Referral queue', 'URGENCY:', 'PERIOD:', 'STATUS:', 'SHOWING']) {
+      expect(screen.queryByText(new RegExp(en))).toBeNull();
+    }
+  });
+
+  it('the overdue tile quotes REFERRAL_SLA and toggles the overdue filter', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { fetcher } = renderPage();
+    const overdue = await screen.findByTestId('kpi-overdue');
+    expect(overdue).toHaveTextContent(`ค้างเกิน ${REFERRAL_SLA.overdueAfterHours} ชม.`);
+    fireEvent.click(toggleIn(overdue));
+    await waitFor(() => expect(fetcher.mock.calls.some((c) => String(c[0]).includes('overdue=1'))).toBe(true));
+  });
+
+  it('status chips filter by status and carry DB-wide counts', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { fetcher } = renderPage();
+    const arrived = await screen.findByTestId('status-ARRIVED');
+    // The chip carries the DB-wide ARRIVED count (0 in this fixture), not a page-row tally.
+    expect(within(arrived).getByText('0')).toBeInTheDocument();
+    expect(within(screen.getByTestId('status-INITIATED')).getByText('125')).toBeInTheDocument();
+    fireEvent.click(arrived);
+    await waitFor(() => expect(fetcher.mock.calls.some((c) => String(c[0]).includes('status=ARRIVED'))).toBe(true));
+  });
+
+  it('queue total and pager read pagination.total, not the 2 visible rows', async () => {
+    renderPage();
+    const queue = await screen.findByRole('region', { name: 'รายการส่งต่อ' });
+    expect(within(queue).getByText(/ทั้งหมด 125 รายการ/)).toBeInTheDocument();
+    expect(within(queue).getByRole('navigation', { name: 'เปลี่ยนหน้า' })).toHaveTextContent('แสดง 1–20 จาก 125 รายการ');
   });
 });

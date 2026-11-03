@@ -1,5 +1,5 @@
 // TDD (Red→Green) for the browser-push → MOPH alert wiring (step 7).
-// Asserts: an HR3 (HIGH-risk) ANC patient enqueues a pending moph_alert_log row
+// Asserts: an HR3 ANC patient is durably deferred when no recipients exist
 // and the route appends a final moph_alerts_drain sync step; a non-HR3 patient
 // enqueues nothing. Drain/sender are mocked so no real LINE I/O occurs.
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
@@ -27,14 +27,9 @@ vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 // route's import-time module resolution (codex flaky-test fix: the inline
 // factory + post-import cast can race under memory pressure).
 const { mockDrain } = vi.hoisted(() => ({
-  // Typed with the real drainMophAlerts signature so assertions can read
-  // individual call args (mock.calls[0][1] = hospitalId).
-  mockDrain: vi.fn(async (_db: unknown, _hospitalId: string) => ({
-    sent: 0,
-    retryable: 0,
-    failed: 0,
-    skipped: 0,
-  })),
+  mockDrain: vi.fn<(db: DatabaseAdapter, hospitalId: string) => Promise<{
+    sent: number; retryable: number; failed: number; skipped: number;
+  }>>(async () => ({ sent: 0, retryable: 0, failed: 0, skipped: 0 })),
 }));
 vi.mock('@/services/moph-alert-drain', () => ({
   drainMophAlerts: mockDrain,
@@ -97,7 +92,7 @@ describe('POST /api/sync/browser-push — MOPH alert wiring (HIGH/HR3)', () => {
     SseManager.resetForTests();
   });
 
-  it('HR3 ANC patient enqueues a pending moph_alert_log row + appends a moph_alerts_drain step', async () => {
+  it('retains an HR3 alert awaiting recipients and appends a moph_alerts_drain step', async () => {
     const res = await POST(
       jsonRequest({ anc: { patients: [hr3Patient('1007000100131')] } }) as never,
     );
@@ -108,25 +103,22 @@ describe('POST /api/sync/browser-push — MOPH alert wiring (HIGH/HR3)', () => {
       `SELECT status, severity, alert_source FROM moph_alert_log WHERE hospital_id = ?`,
       [hid],
     );
-    // Row may not exist if no recipients are seeded (no consult doctors /
-    // center monitors). The wiring contract is: enqueue was ATTEMPTED for an
-    // HR3 patient. We assert the drain step ran regardless (drain is always
-    // appended as a final step).
+    // No recipient is seeded: retain the event without creating a delivery.
+    expect(rows).toHaveLength(0);
+    const queued = await db.query<{ status: string; severity: string; alert_source: string }>(
+      'SELECT status, severity, alert_source FROM moph_alert_event_queue WHERE hospital_id = ?',
+      [hid],
+    );
+    expect(queued).toEqual([
+      { status: 'awaiting_recipients', severity: 'high', alert_source: 'anc_hr3' },
+    ]);
     const run = await getLatestSyncRun(hid);
-    // The route appends a 'running' step, then a terminal 'success'/'warning'
-    // step — appendSyncStep pushes a NEW entry per call, so look at the LAST
-    // moph_alerts_drain step, not the first (find() would always see 'running').
-    const drainSteps = run!.steps.filter((s) => s.name === 'moph_alerts_drain');
-    expect(drainSteps.length).toBeGreaterThan(0);
-    expect(drainSteps.at(-1)!.status).toBe('success');
-    // Assert on the scalar arg instead of toHaveBeenCalledWith: its first
-    // argument is the db adapter, which holds the PGlite WASM instance —
-    // vitest's deep-equality traversal of it allocates until the worker OOMs
-    // (observed 2026-08-18; this line was unreachable before the KK test
-    // fixtures were re-seeded, so the bomb stayed hidden).
+    const drainStep = run!.steps.filter((s) => s.name === 'moph_alerts_drain').at(-1);
+    expect(drainStep).toBeDefined();
     expect(mockDrain).toHaveBeenCalledTimes(1);
     expect(mockDrain.mock.calls[0]?.[1]).toBe(hid);
-    void rows; // presence depends on seeded recipients; not asserted here
+
+    expect(drainStep!.status).toBe('success');
   });
 
   it('non-HR3 patient enqueues no alert row (drain step still runs, no-op)', async () => {
@@ -140,6 +132,7 @@ describe('POST /api/sync/browser-push — MOPH alert wiring (HIGH/HR3)', () => {
       [hid],
     );
     expect(rows[0].c).toBe(0);
+    expect(await db.query('SELECT id FROM moph_alert_event_queue WHERE hospital_id = ?', [hid])).toHaveLength(0);
     const run = await getLatestSyncRun(hid);
     expect(run!.steps.find((s) => s.name === 'moph_alerts_drain')).toBeDefined();
   });

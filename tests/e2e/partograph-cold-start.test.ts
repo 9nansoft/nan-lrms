@@ -26,6 +26,7 @@ process.env.ENCRYPTION_KEY ??= generateKey();
 
 import { createPgliteApp, type PgliteAppContext } from '../helpers/createPgliteApp';
 import type { PartogramResponse } from '@/types/api';
+import { KK_HOSPITALS, NAN_HOSPITALS } from '@/config/hospitals';
 
 // Module-scoped events buffer — the mocked SseManager.broadcast pushes here
 // so the test can assert what the route handlers broadcast.
@@ -98,12 +99,21 @@ describe('partograph cold-start E2E (blank pglite → live routes)', () => {
     }
   });
 
-  it('hospital seeder populated all 26 Khon Kaen hospitals (per MOPH)', async () => {
+  it('hospital seeder populated the Nan set plus the legacy KK test fixtures', async () => {
     const rows = await app.db.query<{ count: number | string }>(
       'SELECT COUNT(*) AS count FROM hospitals',
     );
-    // pg returns COUNT(*) as a string; coerce before comparing.
-    expect(Number(rows[0].count)).toBe(26);
+    // Under NODE_ENV=test HospitalSeeder seeds NAN_HOSPITALS + KK_HOSPITALS
+    // (see src/db/seeds/hospital-seeder.ts). pg returns COUNT(*) as a string.
+    expect(Number(rows[0].count)).toBe(NAN_HOSPITALS.length + KK_HOSPITALS.length);
+
+    // The Nan provincial hub is present (MOPH chwpart '55').
+    const hub = await app.db.query<{ hcode: string; name: string }>(
+      'SELECT hcode, name FROM hospitals WHERE hcode = ?',
+      ['10716'],
+    );
+    expect(hub).toHaveLength(1);
+    expect(hub[0].name).toBe('โรงพยาบาลน่าน');
 
     // Spot-check the canonical KK Regional Hospital is present at hcode 10670
     // (per MOPH `hospcode` table — chwpart='40', hospital_type_id=5).

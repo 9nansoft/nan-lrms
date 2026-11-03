@@ -146,7 +146,7 @@ function DraggableBedTile({ bed, occupant, onBedClick, now }: DraggableBedTilePr
       style={style}
       data-testid={`bed-${bed.bedno}`}
       data-over={isOver ? 'true' : undefined}
-      className={isOver ? 'rounded-lg ring-2 ring-emerald-500 ring-offset-1' : undefined}
+      className={isOver ? 'rounded-lg ring-2 ring-ok ring-offset-1' : undefined}
       {...(occupant ? draggable.listeners : {})}
       {...draggable.attributes}
     >
@@ -258,7 +258,7 @@ export function WardLayoutView({
                   aria-hidden
                 >
                   <div
-                    className="h-full rounded-full bg-emerald-500 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                    className="h-full rounded-full bg-ok transition-[width] duration-300 ease-out motion-reduce:transition-none"
                     style={{ width: `${occPct}%` }}
                   />
                 </div>

@@ -73,6 +73,38 @@ describe('GET /api/admin/moph-alerts', () => {
     expect(body.alerts[0].recipient_cid).not.toContain('3320500');
   });
 
+  it('returns deferred event counts so missing-recipient alerts are visible', async () => {
+    const spy = db.query as ReturnType<typeof vi.fn>;
+    spy.mockImplementationOnce(async () => [
+      {
+        id: 'r1',
+        case_id: 'ANC-1',
+        hospital_id: 'h1',
+        recipient_cid: '3320500282121',
+        recipient_scope: 'hospital_staff',
+        alert_source: 'anc_hr3',
+        severity: 'high',
+        rule_id: 'hr3',
+        status: 'sent',
+        message_id: 'msg-1',
+        attempts: 1,
+        last_error: null,
+        sent_at: null,
+        created_at: '2026-10-01T00:00:00Z',
+      },
+    ]);
+    spy.mockImplementationOnce(async () => [{ awaiting_recipients: 3, expired: 7 }]);
+
+    const res = await GET(req('http://test/api/admin/moph-alerts') as never);
+    const body = await res.json();
+
+    expect(body.eventQueue).toEqual({ awaitingRecipients: 3, expired: 7 });
+    const queueSql = spy.mock.calls[1][0] as string;
+    expect(queueSql).toContain("status = 'awaiting_recipients' AND local_date =");
+    expect(queueSql).toContain("status = 'expired'");
+    expect(queueSql).toContain("status = 'awaiting_recipients' AND local_date <>");
+  });
+
   it('rejects non-admin (401/403)', async () => {
     mockSessionUser = { ...ADMIN, role: UserRole.NURSE };
     const res = await GET(req('http://test/api/admin/moph-alerts') as never);

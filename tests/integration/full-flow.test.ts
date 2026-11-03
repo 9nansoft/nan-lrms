@@ -992,7 +992,8 @@ describe('Full Flow Integration Tests', () => {
     it('health endpoint shows correct connection summary', async () => {
       // Mark 2 hospitals ONLINE, 1 OFFLINE
       await db.execute(
-        "UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode IN ('10670','11000')",
+        "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE hcode IN ('10670','11000')",
+        [new Date().toISOString()],
       );
       await db.execute("UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '11002'");
       // Rest remain UNKNOWN
@@ -1007,7 +1008,10 @@ describe('Full Flow Integration Tests', () => {
     });
 
     it('status is degraded when any hospital is offline', async () => {
-      await db.execute("UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode = '10670'");
+      await db.execute(
+        "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE hcode = '10670'",
+        [new Date().toISOString()],
+      );
       await db.execute("UPDATE hospitals SET connection_status = 'OFFLINE' WHERE hcode = '11000'");
 
       const health = await getHealthStatus(db);
@@ -1015,9 +1019,10 @@ describe('Full Flow Integration Tests', () => {
     });
 
     it('status is healthy when no hospital is offline', async () => {
-      // Note: UNKNOWN does NOT cause degraded -- only OFFLINE does
+      // UNKNOWN does not degrade health while at least one ONLINE feed is fresh.
       await db.execute(
-        "UPDATE hospitals SET connection_status = 'ONLINE' WHERE hcode IN ('10670','11000')",
+        "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE hcode IN ('10670','11000')",
+        [new Date().toISOString()],
       );
       // Rest are UNKNOWN
 

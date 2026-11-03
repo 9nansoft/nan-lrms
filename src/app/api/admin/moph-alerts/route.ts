@@ -9,7 +9,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { requireAdmin } from '@/lib/admin-guard';
 import { drainMophAlerts } from '@/services/moph-alert-drain';
-import { mophAlertLimits } from '@/config/moph-alert-config';
+import { mophAlertLimits, mophAlertLocalDate } from '@/config/moph-alert-config';
 import { logger } from '@/lib/logger';
 
 interface AlertLogRow {
@@ -72,7 +72,38 @@ export async function GET(request: NextRequest) {
       ...r,
       recipient_cid: r.recipient_cid.length >= 4 ? `********${r.recipient_cid.slice(-4)}` : '****',
     }));
-    return NextResponse.json({ alerts: masked, count: masked.length });
+    const queueParams: unknown[] = [];
+    const queueWhere = hospitalId
+      ? (() => {
+          queueParams.push(hospitalId);
+          return 'WHERE hospital_id = $1';
+        })()
+      : '';
+    queueParams.push(mophAlertLocalDate());
+    const localDateParam = `$${queueParams.length}`;
+    const queueCounts = await db.query<{
+      awaiting_recipients: number | string;
+      expired: number | string;
+    }>(
+      `SELECT
+         COUNT(*) FILTER (
+           WHERE status = 'awaiting_recipients' AND local_date = ${localDateParam}
+         ) AS awaiting_recipients,
+         COUNT(*) FILTER (
+           WHERE status = 'expired'
+              OR (status = 'awaiting_recipients' AND local_date <> ${localDateParam})
+         ) AS expired
+       FROM moph_alert_event_queue ${queueWhere}`,
+      queueParams,
+    );
+    return NextResponse.json({
+      alerts: masked,
+      count: masked.length,
+      eventQueue: {
+        awaitingRecipients: Number(queueCounts[0]?.awaiting_recipients ?? 0),
+        expired: Number(queueCounts[0]?.expired ?? 0),
+      },
+    });
   } catch (error) {
     logger.error('admin_moph_alerts_list_failed', { error });
     return NextResponse.json({ error: 'internal_error' }, { status: 500 });

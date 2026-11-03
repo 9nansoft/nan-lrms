@@ -19,15 +19,18 @@ import {
   getJourneyByHn,
   createJourney,
   transitionToDelivered,
+  closeAbsentAncJourneys,
+  reopenReconciledJourney,
 } from '@/services/journey';
 import { AncRiskLevel, ReferralStatus } from '@/types/domain';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
 import { ANC_RISK_CONFIGS, ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
 import { insertAncScreeningIfChanged } from '@/services/anc-screening';
 import { logger } from '@/lib/logger';
+import { resolveReferralDestination } from '@/services/referral-destination';
 import { CooperativeYielder } from '@/lib/event-loop';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
-import { isoDatesEqual, toIsoDate } from '@/lib/dates';
+import { toIsoDate } from '@/lib/dates';
 import { isMaternalScreenIngestEnabled, isMaternalScreenEventsEnabled } from '@/lib/feature-flags';
 import { normalizeProteinuriaGrade } from '@/services/maternal-screening';
 import {
@@ -180,12 +183,27 @@ export interface WebhookPayload {
   activeAns?: string[];
 }
 
+/**
+ * Who is calling the webhook. 'hosxp' = a key NN-LRMS itself wrote into the
+ * hospital's HOSxP webhook_setting (pushed_to_hosxp_at stamped), i.e. HOSxP's
+ * own KKLRMSWebhookUnit; 'external' = an admin-issued key (non-HOSxP vendor).
+ */
+export type WebhookSender = 'hosxp' | 'external';
+
+export interface ProcessWebhookOptions {
+  /** Defaults to 'external' — every delete applies, the legacy behaviour. */
+  sender?: WebhookSender;
+}
+
 export interface WebhookResult {
   patientsProcessed: number;
   newAdmissions: number;
   discharges: number;
   transfers: number;
   deleted: number;
+  /** HOSxP-sent deletes of still-ACTIVE admissions that were NOT applied (A-F10).
+   *  Present only when > 0 — legacy responses stay byte-identical (GC7). */
+  deleteIgnored?: number;
   // Maternal screening ingest counters (Task 7). Present ONLY when
   // isMaternalScreenIngestEnabled() is true AND at least one patient in the
   // batch carried a `maternal_screening` object — legacy responses are
@@ -458,17 +476,62 @@ export function hashApiKey(rawKey: string): string {
   return createHash('sha256').update(rawKey).digest('hex');
 }
 
+export interface WebhookDeleteSummary {
+  payloadType: 'labor' | 'anc_data' | 'partograph' | 'referral' | 'referral_update';
+  count: number;
+  /** Admission numbers (labour / partograph). AN is not PHI; HN/CID never logged. */
+  ans?: string[];
+  observationIds?: string[];
+  referralId?: string;
+}
+
+/**
+ * The deletes a raw webhook body asks for, PHI-free, for one log line per
+ * request. Webhook deletes were invisible (the route logs only failures), so
+ * a patient vanishing from the dashboard could not be traced — 2026-10-22.
+ */
+export function summarizeWebhookDeletes(body: unknown): WebhookDeleteSummary | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  const isDelete = (x: unknown) =>
+    !!x && typeof x === 'object' && (x as Record<string, unknown>).action === 'delete';
+  const str = (x: unknown) => (typeof x === 'string' ? x : '');
+
+  if (b.type === 'referral' || b.type === 'referral_update') {
+    return isDelete(b) ? { payloadType: b.type, count: 1, referralId: str(b.referralId) } : null;
+  }
+  if (b.type === 'partograph') {
+    const dels = (Array.isArray(b.observations) ? b.observations : []).filter(isDelete);
+    if (dels.length === 0) return null;
+    return {
+      payloadType: 'partograph',
+      count: dels.length,
+      ans: dels.map((o) => str((o as Record<string, unknown>).an)),
+      observationIds: dels.map((o) => str((o as Record<string, unknown>).externalObservationId)),
+    };
+  }
+  const dels = (Array.isArray(b.patients) ? b.patients : []).filter(isDelete);
+  if (dels.length === 0) return null;
+  if (b.type === 'anc_data') return { payloadType: 'anc_data', count: dels.length };
+  return {
+    payloadType: 'labor',
+    count: dels.length,
+    ans: dels.map((p) => str((p as Record<string, unknown>).an)),
+  };
+}
+
 export async function validateApiKey(
   db: DatabaseAdapter,
   rawKey: string,
-): Promise<{ hospitalId: string; keyId: string } | null> {
+): Promise<{ hospitalId: string; keyId: string; sender: WebhookSender } | null> {
   const keyHash = hashApiKey(rawKey);
 
   const rows = await db.query<{
     id: string;
     hospital_id: string;
+    pushed_to_hosxp_at: string | null;
   }>(
-    'SELECT id, hospital_id FROM webhook_api_keys WHERE key_hash = ? AND is_active = true AND revoked_at IS NULL',
+    'SELECT id, hospital_id, pushed_to_hosxp_at FROM webhook_api_keys WHERE key_hash = ? AND is_active = true AND revoked_at IS NULL',
     [keyHash],
   );
 
@@ -480,7 +543,11 @@ export async function validateApiKey(
     rows[0].id,
   ]);
 
-  return { hospitalId: rows[0].hospital_id, keyId: rows[0].id };
+  return {
+    hospitalId: rows[0].hospital_id,
+    keyId: rows[0].id,
+    sender: rows[0].pushed_to_hosxp_at !== null ? 'hosxp' : 'external',
+  };
 }
 
 export async function createApiKey(
@@ -1078,7 +1145,9 @@ export async function processWebhookPayload(
   hospitalId: string,
   payload: WebhookPayload,
   sseManager: SseManager,
+  options: ProcessWebhookOptions = {},
 ): Promise<WebhookResult> {
+  const sender = options.sender ?? 'external';
   const encryptionKey = getEncryptionKey();
   // Bounded cooperative yielding (2026-07-17 page-latency incident): this
   // runs on the ONE serving event loop, so every ~25ms of per-patient work
@@ -1105,7 +1174,50 @@ export async function processWebhookPayload(
   // patient-owned tables (cpd_scores, cached_vital_signs,
   // cached_partograph_observations) and the patient row commit or roll back
   // together; a partial delete must never survive a failure.
-  const toDelete = payload.patients.filter((p) => p.action === 'delete');
+  //
+  // HOSxP defect A-F10: HOSxP's IPD admit form sends action:'delete' on EVERY
+  // save, so a HOSxP delete for any admission already on file — in labour or
+  // finished — is ignored. An ACTIVE woman stays on the board until the
+  // browser push's activeAns reconciliation closes her out; a DELIVERED
+  // record keeps its birth in the delivery counts. Trade-off: a genuinely
+  // cancelled admission lingers (and still counts) — only a non-HOSxP key or
+  // an admin can remove it.
+  const requestedDeletes = payload.patients.filter((p) => p.action === 'delete');
+  const requestedAns = requestedDeletes.map((p) => p.an);
+  const onFile =
+    requestedAns.length === 0
+      ? []
+      : await db.query<{ an: string; labor_status: string }>(
+          `SELECT an, labor_status FROM cached_patients WHERE hospital_id = ? AND an IN (${requestedAns.map(() => '?').join(', ')})`,
+          [hospitalId, ...requestedAns],
+        );
+  const statusByAn = new Map(onFile.map((r) => [r.an, r.labor_status]));
+  const ignoredAns = sender === 'hosxp' ? requestedAns.filter((an) => statusByAn.has(an)) : [];
+  const ignoredSet = new Set(ignoredAns);
+  const toDelete = requestedDeletes.filter((p) => !ignoredSet.has(p.an));
+  if (ignoredAns.length > 0) {
+    logger.warn('webhook_labor_delete_ignored', {
+      hospitalId,
+      hcode,
+      sender,
+      reason: 'hosxp_delete_of_cached_admission',
+      ans: ignoredAns,
+      statuses: Object.fromEntries(ignoredAns.map((an) => [an, statusByAn.get(an)])),
+    });
+  }
+  // `removed` vs `notFoundAns` tells real data loss from a no-op delete.
+  const removedAns = toDelete.map((p) => p.an).filter((an) => statusByAn.has(an));
+  if (toDelete.length > 0) {
+    logger.warn('webhook_labor_delete_applied', {
+      hospitalId,
+      hcode,
+      sender,
+      ans: toDelete.map((p) => p.an),
+      removed: removedAns.length,
+      removedAns,
+      notFoundAns: toDelete.map((p) => p.an).filter((an) => !statusByAn.has(an)),
+    });
+  }
   let deletedCount = 0;
   for (const p of toDelete) {
     await yielder.tick(); // before entering the per-patient transaction
@@ -1490,11 +1602,16 @@ export async function processWebhookPayload(
     timestamp: new Date().toISOString(),
   });
 
-  // Update hospital status
-  await db.execute(
-    "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE id = ?",
-    [new Date().toISOString(), hospitalId],
-  );
+  // Update hospital status — only when data actually arrived. HOSxP's
+  // admit-form saves send delete-only calls that change nothing (AN not on
+  // file, or protected by the A-F10 guard); counting those as a sync made
+  // hospitals with no data feed look ONLINE and fresh.
+  if (patients.length > 0 || authoritativeActiveAns !== null || removedAns.length > 0) {
+    await db.execute(
+      "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE id = ?",
+      [new Date().toISOString(), hospitalId],
+    );
+  }
 
   return {
     patientsProcessed: patients.length,
@@ -1502,6 +1619,7 @@ export async function processWebhookPayload(
     discharges: dischargeCount,
     transfers: transfers.length,
     deleted: deletedCount,
+    ...(ignoredAns.length > 0 ? { deleteIgnored: ignoredAns.length } : {}),
     // Screening counters appear ONLY when the ingest flag is on AND at least
     // one patient carried a maternal_screening object — legacy responses stay
     // byte-identical (GC7).
@@ -1562,6 +1680,44 @@ async function recordAncRiskScreening(
     recommendedFacility: config?.facilityTh ?? null,
     recommendedProvider: config?.providerTh ?? null,
   });
+}
+
+export type AncReconcileResult =
+  { ok: true; closed: number; listed: number } | { ok: false; error: string };
+
+/**
+ * Close this hospital's PREGNANCY journeys absent from the gateway's
+ * authoritative active-ANC CID list (see closeAbsentAncJourneys). The list
+ * crosses the trust boundary, so it is validated whole: one malformed entry
+ * rejects it, because closing against a corrupted list would discharge women
+ * HOSxP still follows.
+ */
+export async function reconcileAncActiveCids(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  activeCids: unknown,
+  pushedCids: readonly string[] = [],
+): Promise<AncReconcileResult> {
+  if (!Array.isArray(activeCids)) {
+    return { ok: false, error: '"activeCids" must be an array of 13-digit CIDs' };
+  }
+  const bad = activeCids.findIndex((c) => typeof c !== 'string' || !/^\d{13}$/.test(c));
+  if (bad !== -1) {
+    return { ok: false, error: `activeCids[${bad}] is not a 13-digit CID` };
+  }
+  // The gateway derives activeCids from the same rows as the pushed patients,
+  // so a pushed CID missing from it proves the list is not the full active set.
+  const listedSet = new Set(activeCids as string[]);
+  const missing = pushedCids.filter((c) => !listedSet.has(c)).length;
+  if (missing > 0) {
+    return {
+      ok: false,
+      error: `activeCids omits ${missing} patient(s) in this push — not a complete active set`,
+    };
+  }
+  const hashes = (activeCids as string[]).map((c) => createHash('sha256').update(c).digest('hex'));
+  const closed = await closeAbsentAncJourneys(db, { hospitalId, activeCidHashes: hashes });
+  return { ok: true, closed, listed: new Set(hashes).size };
 }
 
 export async function processAncWebhook(
@@ -1703,17 +1859,24 @@ export async function processAncWebhook(
           ? await getJourneyByHn(db, patientHn, hospitalId)
           : null;
 
-    // Detect if incoming data is a NEW pregnancy vs update to existing.
-    // The pg driver returns lmp as a Date (the column is `timestamp with
-    // time zone`) even though the journey type claims string|null, so a
-    // raw `!==` between the HOSxP-side string ("2026-01-12") and the
-    // Date object compared identity — always true — and synthesised a new
-    // pregnancy on every cycle. isoDatesEqual normalises both sides to
-    // "YYYY-MM-DD" and compares as strings.
-    const isNewPregnancy =
-      existing &&
-      (patient.pregNo > existing.gravida ||
-        (patient.lmp != null && existing.lmp != null && !isoDatesEqual(patient.lmp, existing.lmp)));
+    // A lower pregnancy number is an out-of-order snapshot of an older
+    // pregnancy. Skip the entire row before any journey, risk, visit, or
+    // extended-clinical write can overwrite the active pregnancy.
+    if (existing != null && patient.pregNo < existing.gravida) {
+      logger.warn('anc_stale_pregnancy_skipped', {
+        hospitalId,
+        hcode,
+        journeyId: existing.id,
+        incomingPregNo: patient.pregNo,
+        currentPregNo: existing.gravida,
+      });
+      continue;
+    }
+
+    // A corrected LMP is clinical data for the current pregnancy, not a
+    // pregnancy identity signal. HOSxP may revise it after ultrasound dating;
+    // only an explicitly higher pregnancy number rolls the journey over.
+    const isNewPregnancy = existing != null && patient.pregNo > existing.gravida;
     const existingIsActive =
       existing && (existing.careStage === 'PREGNANCY' || existing.careStage === 'LABOR');
 
@@ -1798,6 +1961,9 @@ export async function processAncWebhook(
     const journeyId = await db.transaction(async (tx) => {
       let id: string;
       if (!shouldCreateNew && existing) {
+        // HOSxP lists her again: undo an ANC-reconciliation close (no-op for
+        // every other journey, including a recorded delivery).
+        await reopenReconciledJourney(tx, existing.id);
         // Update existing journey with latest data (same pregnancy)
         const now = new Date().toISOString();
         await tx.execute(
@@ -2255,9 +2421,12 @@ export async function processReferralCreate(
   }
 
   // Resolve destination hospital
-  const toHospital = await resolveHospitalByHcode(db, payload.toHospitalCode);
+  const toHospital = await resolveReferralDestination(db, payload.toHospitalCode);
   if (!toHospital) {
-    throw new Error(`ไม่พบโรงพยาบาลปลายทาง HCODE "${payload.toHospitalCode}"`);
+    throw new WebhookReferralError(
+      'REFERRAL_DESTINATION_NOT_FOUND',
+      `ไม่พบโรงพยาบาลปลายทาง HCODE "${payload.toHospitalCode}"`,
+    );
   }
 
   // Encrypt patient data (PDPA)
@@ -2416,7 +2585,10 @@ export async function processReferralCreate(
 export class WebhookReferralError extends Error {
   constructor(
     public readonly code:
-      'REFERRAL_NOT_FOUND' | 'INVALID_REFERRAL_STATUS' | 'INVALID_REFERRAL_ACTION',
+      | 'REFERRAL_NOT_FOUND'
+      | 'REFERRAL_DESTINATION_NOT_FOUND'
+      | 'INVALID_REFERRAL_STATUS'
+      | 'INVALID_REFERRAL_ACTION',
     message: string,
   ) {
     super(message);

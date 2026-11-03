@@ -92,15 +92,15 @@ export function JitsiRoom({ roomId, displayName, onLeft }: JitsiRoomProps) {
     return (
       <div className="grid h-full place-items-center p-6 text-center">
         <div>
-          <p className="text-[15px] font-semibold text-white">ไม่สามารถโหลดระบบวิดีโอคอลได้</p>
-          <p className="mt-1 text-[13px] text-white/70">
+          <p className="text-body font-semibold text-white">ไม่สามารถโหลดระบบวิดีโอคอลได้</p>
+          <p className="mt-1 text-caption text-white/70">
             กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต หรือเปิดห้องสนทนาโดยตรง
           </p>
           <a
             href={`https://${JITSI_DOMAIN}/${roomId}`}
             target="_blank"
             rel="noreferrer"
-            className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-emerald-700"
+            className="mt-4 inline-block rounded-md bg-ok-text px-4 py-2 text-caption font-semibold text-white hover:bg-ok-text/90"
           >
             เปิดห้องสนทนาในแท็บใหม่
           </a>

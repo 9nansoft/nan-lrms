@@ -3,6 +3,7 @@
 // for coordinator desk use; row-flash on SSE count change preserved.
 'use client';
 
+import { COLOR, MIN_TEXT_PX } from '@/config/design-tokens';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { DashboardHospital } from '@/types/api';
@@ -11,6 +12,13 @@ import { RiskBar } from './shared';
 import { cn } from '@/lib/utils';
 import { formatRelativeAge } from '@/lib/relative-time';
 import { combinedWorkload } from '@/config/hospital-network';
+import {
+  classifyHospitalLink,
+  HOSPITAL_LINK_STATUS,
+  hospitalLinkText,
+  kioskLinkText,
+  type HospitalStatusTone,
+} from '@/config/hospital-status';
 
 interface HospitalTableProps {
   hospitals: DashboardHospital[];
@@ -42,6 +50,7 @@ function severityRank(h: DashboardHospital): number {
   // HIGH gets heaviest weight, then MED, then LOW, then offline penalty
   return h.counts.high * 100 + h.counts.medium * 10 + h.counts.low;
 }
+
 
 export function HospitalTable({
   hospitals,
@@ -137,6 +146,13 @@ export function HospitalTable({
   const isKiosk = variant === 'kiosk';
   const ink = isKiosk ? 'var(--kiosk-ink)' : 'var(--ink-navy)';
   const inkMuted = isKiosk ? 'var(--kiosk-dim)' : 'var(--ink-navy-muted)';
+  // HOSPITAL_LINK_STATUS tone → ink colour; neutral follows the surface's muted ink.
+  const linkToneColor: Record<HospitalStatusTone, string> = {
+    ok: 'var(--risk-low)',
+    warn: 'var(--risk-medium)',
+    danger: 'var(--risk-high)',
+    neutral: inkMuted,
+  };
   const ruleStrong = isKiosk ? 'var(--kiosk-rule)' : 'var(--rule-strong)';
   const ruleHair = isKiosk ? 'var(--kiosk-rule)' : 'var(--rule-hair)';
   const accent = isKiosk ? 'var(--kiosk-accent)' : 'var(--accent-navy)';
@@ -155,18 +171,20 @@ export function HospitalTable({
     <div className="border" style={{ borderColor: ruleStrong }}>
       {/* Sort chips */}
       <div
-        className="flex items-center gap-3 border-b px-3 py-2 font-mono text-[12px] tracking-[0.1em]"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2 text-label"
         style={{ color: inkMuted, borderColor: ruleStrong }}
       >
-        <span>SORT:</span>
+        <span>เรียงตาม:</span>
         {[
-          { k: 'severity' as SortKey, l: 'SEVERITY' },
-          { k: 'name' as SortKey, l: 'NAME' },
-          { k: 'total' as SortKey, l: 'TOTAL' },
-          { k: 'level' as SortKey, l: 'LEVEL' },
+          { k: 'severity' as SortKey, l: 'ความรุนแรง' },
+          { k: 'name' as SortKey, l: 'ชื่อ' },
+          { k: 'total' as SortKey, l: 'จำนวนผู้คลอด' },
+          { k: 'level' as SortKey, l: 'ระดับ' },
         ].map((x) => (
           <button
             key={x.k}
+            type="button"
+            aria-pressed={sortKey === x.k}
             onClick={() => handleSort(x.k)}
             className={cn(
               'cursor-pointer border-b-2 bg-transparent pb-0.5 transition-colors',
@@ -180,42 +198,24 @@ export function HospitalTable({
             {x.l} {sortKey === x.k ? (sortDir === 'asc' ? '↑' : '↓') : ''}
           </button>
         ))}
-        <span className="ml-auto">{hospitals.length} NODES</span>
+        <span className="ml-auto tabular-nums">{hospitals.length} แห่ง</span>
       </div>
 
       {/* Rows */}
       <div className={cn(isKiosk ? 'max-h-[360px]' : 'max-h-[420px]', 'overflow-y-auto')}>
         {sorted.map((h) => {
           const isSel = selected === h.hcode;
-          const isOnline = h.connectionStatus === ConnectionStatusEnum.ONLINE;
           const isOffline = h.connectionStatus === ConnectionStatusEnum.OFFLINE;
           // Sync state OVERRIDES connection state in the badge — a hospital
           // can be ONLINE (tunnel responds) but BLOCKED (authenticity probe
           // failed or admin purged), and showing "ONLINE" for that case
           // misled operators into thinking sync was healthy.
-          const isBlocked = h.syncStatus === 'BLOCKED';
-          const isNeverSynced = h.syncStatus === 'NEVER_SYNCED';
-          const statusLabel = isBlocked
-            ? 'BLOCKED'
-            : isNeverSynced && !isOffline
-              ? 'NO SYNC'
-              : isOnline
-                ? 'ONLINE'
-                : isOffline
-                  ? 'OFFLINE'
-                  : 'UNKNOWN';
-          const statusColor = isBlocked
-            ? 'var(--risk-medium)'
-            : isOnline && !isNeverSynced
-              ? 'var(--risk-low)'
-              : isOffline
-                ? 'var(--risk-high)'
-                : inkMuted;
-          const statusTitle = isBlocked
-            ? `Sync ถูกระงับ — ${h.syncBlockedReason ?? 'unknown reason'}`
-            : isNeverSynced
-              ? 'ยังไม่เคยมีการเชื่อมต่อ Sync — รอผู้ใช้จากโรงพยาบาลนี้เปิด NN-LRMS ครั้งแรก'
-              : '';
+          const link = classifyHospitalLink(h.connectionStatus, h.syncStatus);
+          const statusLabel = isKiosk ? HOSPITAL_LINK_STATUS[link].kioskLabel : HOSPITAL_LINK_STATUS[link].labelTh;
+          const statusColor = linkToneColor[HOSPITAL_LINK_STATUS[link].tone];
+          const statusTitle = isKiosk
+            ? kioskLinkText(h.connectionStatus, h.syncStatus, h.syncBlockedReason).tableTitle
+            : hospitalLinkText(link, h.syncBlockedReason).detail;
           const sev =
             h.counts.high > 0
               ? 'var(--risk-high)'
@@ -274,13 +274,16 @@ export function HospitalTable({
                   {h.name}
                 </span>
                 <span
-                  className="shrink-0 border px-1 font-mono text-[11px]"
+                  className="shrink-0 border px-1 font-mono text-caption"
                   style={{ color: inkMuted, borderColor: ruleHair }}
                 >
                   {h.level}
                 </span>
                 <span
-                  className="inline-flex shrink-0 items-center gap-1 font-mono text-[11px] uppercase tracking-wide"
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1 font-mono text-caption',
+                    isKiosk && 'uppercase tracking-wide',
+                  )}
                   style={{ color: statusColor }}
                   aria-label={`สถานะ: ${statusLabel}`}
                   title={statusTitle || undefined}
@@ -319,24 +322,21 @@ export function HospitalTable({
                 </div>
                 <div
                   className="text-left font-mono tabular-nums"
-                  style={{ color: ink, fontSize: isKiosk ? 13 : 11 }}
-                  title={`Active labor: ${h.counts.total} ราย`}
+                  style={{ color: ink, fontSize: isKiosk ? 13 : MIN_TEXT_PX }}
+                  title={`ผู้คลอดในห้องคลอด ${h.counts.total} ราย`}
                 >
-                  <span
-                    className="font-mono text-[11px] uppercase tracking-[0.08em]"
-                    style={{ color: inkMuted }}
-                  >
-                    LB
+                  <span className="text-caption" style={{ color: inkMuted }}>
+                    ห้องคลอด
                   </span>{' '}
                   {h.counts.total || '–'}
                 </div>
                 <div
                   className="flex items-baseline gap-1 font-mono tabular-nums"
-                  style={{ color: ink, fontSize: isKiosk ? 13 : 11 }}
-                  title={`ANC registry: ${h.ancCounts.total} · HR3: ${h.ancCounts.hr3}`}
+                  style={{ color: ink, fontSize: isKiosk ? 13 : MIN_TEXT_PX }}
+                  title={`ฝากครรภ์ที่ติดตาม ${h.ancCounts.total} ราย · HR3 ${h.ancCounts.hr3} ราย`}
                 >
                   <span
-                    className="font-mono text-[11px] uppercase tracking-[0.08em]"
+                    className="font-mono text-caption uppercase tracking-[0.08em]"
                     style={{ color: inkMuted }}
                   >
                     ANC
@@ -344,10 +344,10 @@ export function HospitalTable({
                   <span>{h.ancCounts.total || '–'}</span>
                   {h.ancCounts.hr3 > 0 && (
                     <span
-                      className="rounded-sm px-1 text-[11px] font-bold"
+                      className="rounded-sm px-1 text-caption font-bold"
                       style={{
-                        background: '#fde2dc',
-                        color: '#9b2c1c',
+                        background: COLOR.riskHighTint,
+                        color: COLOR.riskHighText,
                       }}
                     >
                       HR3 {h.ancCounts.hr3}
@@ -358,7 +358,7 @@ export function HospitalTable({
                 <div
                   className="text-right font-mono tabular-nums"
                   style={{
-                    fontSize: isKiosk ? 11 : 10,
+                    fontSize: isKiosk ? 11 : MIN_TEXT_PX,
                     color: (() => {
                       if (!h.lastSyncAt) return inkMuted;
                       const ageH = (Date.now() - new Date(h.lastSyncAt).getTime()) / 3600000;
@@ -369,8 +369,8 @@ export function HospitalTable({
                   }}
                   title={
                     h.lastSyncAt
-                      ? `Last sync: ${new Date(h.lastSyncAt).toLocaleString('th-TH')}`
-                      : 'ยังไม่เคย sync'
+                      ? `ซิงค์ล่าสุด ${new Date(h.lastSyncAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}`
+                      : 'ยังไม่เคยซิงค์'
                   }
                 >
                   {formatRelativeAge(h.lastSyncAt, 'short')}
@@ -380,7 +380,7 @@ export function HospitalTable({
           );
         })}
         {sorted.length === 0 && (
-          <div className="p-6 text-center font-mono text-[13px]" style={{ color: inkMuted }}>
+          <div className="p-6 text-center font-mono text-caption" style={{ color: inkMuted }}>
             ไม่มีโรงพยาบาลในรายการ
           </div>
         )}

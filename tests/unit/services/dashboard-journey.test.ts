@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { getStageKPIs, getDashboardAlerts } from '@/services/dashboard';
+import { ANC_ABSENT_CLOSED_REASON } from '@/config/anc-freshness';
 
 describe('Dashboard Journey Extensions', () => {
   let db: DatabaseAdapter;
@@ -81,6 +82,20 @@ describe('Dashboard Journey Extensions', () => {
       expect(kpis.delivered.total).toBe(1);
       expect(kpis.delivered.normal).toBe(1);
       expect(kpis.delivered.lowApgar).toBe(0);
+    });
+
+    it('delivered total excludes pregnancies closed because HOSxP stopped listing them', async () => {
+      // ANC reconciliation closes a stale backlog as DELIVERED with a
+      // closed_reason — none of those is a birth recorded this month.
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO maternal_journeys (id, hospital_id, current_hospital_id, hn, name, cid, cid_hash, age, gravida, para, care_stage, closed_reason, anc_risk_level, anc_visit_count, registered_at, stage_changed_at, synced_at, created_at, updated_at)
+         VALUES ('j-reconciled-1', ?, ?, 'HN-R1', 'Test', 'enc_cid', 'cidhash-r', 25, 1, 0, 'DELIVERED', ?, 'LOW', 0, ?, ?, ?, ?, ?)`,
+        [hospitalId, hospitalId, ANC_ABSENT_CLOSED_REASON, now, now, now, now, now],
+      );
+
+      const kpis = await getStageKPIs(db);
+      expect(kpis.delivered.total).toBe(0);
     });
   });
 

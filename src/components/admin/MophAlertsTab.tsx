@@ -9,11 +9,17 @@
 
 import { useState } from 'react';
 import useSWR from 'swr';
-import { Bell, Plus, Trash2, X, Check } from 'lucide-react';
+import { Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { InlineNotice } from '@/components/shared/InlineNotice';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { DataTable } from '@/components/shared/DataTable';
+import { cn } from '@/lib/utils';
+import { StatusPill } from './admin-ui';
 
 interface CenterMonitor {
   id: string;
@@ -28,6 +34,10 @@ interface CenterMonitor {
 
 interface ConfigResponse {
   config: { active_province_code?: string | null };
+}
+
+interface AlertStatusResponse {
+  eventQueue: { awaitingRecipients: number; expired: number };
 }
 
 const EMPTY_FORM = { id: '', cid: '', name: '', position: '', isActive: true };
@@ -49,6 +59,7 @@ export function MophAlertsTab() {
   const { data, isLoading, error, mutate } = useSWR<{ monitors: CenterMonitor[] }>(
     provinceCode ? `/api/admin/provinces/${provinceCode}/center-monitors` : null,
   );
+  const { data: alertStatus } = useSWR<AlertStatusResponse>('/api/admin/moph-alerts?limit=1');
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
@@ -148,7 +159,8 @@ export function MophAlertsTab() {
   };
 
   if (configLoading) return <LoadingState message="กำลังโหลดจังหวัดหลัก..." />;
-  if (configError) return <ErrorState message="โหลดจังหวัดหลักไม่สำเร็จ" />;
+  if (configError)
+    return <ErrorState message="โหลดจังหวัดหลักไม่สำเร็จ" remedy="ตรวจสอบการเชื่อมต่อ แล้วเปิดแท็บนี้อีกครั้ง" />;
   if (!provinceCode) {
     return (
       <ErrorState message="ยังไม่ได้ตั้งจังหวัดหลัก — กรุณาตั้งในแท็บ 'จังหวัดหลัก' ก่อนเพิ่มผู้รับเตือน" />
@@ -156,158 +168,164 @@ export function MophAlertsTab() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-baseline gap-2">
-        <Bell className="h-4 w-4 text-[var(--accent-navy)]" />
-        <h2 className="text-[15px] font-bold tracking-tight" style={{ color: 'var(--ink-navy)' }}>
-          ผู้รับการแจ้งเตือน MOPH Prompt (ศูนย์กลางจังหวัด)
-        </h2>
-        <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
-          จังหวัด {provinceCode} · {activeCount} ใช้งาน · {monitors.length - activeCount} ปิด
-        </span>
-      </div>
-      <p className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
-        ผู้รับเหล่านี้จะได้รับแจ้งเตือน LINE เมื่อมีกรณีเสี่ยงสูง/ฉุกเฉินจากโรงพยาบาลใดๆ ในจังหวัด
-      </p>
-
-      {message && (
-        <div
-          className="font-mono text-[12px] px-3 py-2"
-          style={{
-            color: message.tone === 'ok' ? 'var(--accent-navy)' : '#dc2626',
-            background: message.tone === 'ok' ? 'var(--accent-navy-soft)' : '#fef2f2',
-          }}
-        >
-          {message.text}
-        </div>
-      )}
-
-      {/* Add/Edit form */}
-      <div className="border p-4 space-y-3" style={{ borderColor: 'var(--rule-strong)' }}>
-        <div className="font-mono text-[11px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]">
-          {editing ? 'แก้ไขผู้รับเตือน' : 'เพิ่มผู้รับเตือนใหม่'}
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="space-y-1">
-            <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">
-              CID (13 หลัก)
-            </span>
-            <Input
-              value={form.cid}
-              onChange={(e) => setField('cid', e.target.value.replace(/\D/g, '').slice(0, 13))}
-              placeholder="เลขบัตรประชาชน 13 หลัก"
-              inputMode="numeric"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">ชื่อ</span>
-            <Input
-              value={form.name}
-              onChange={(e) => setField('name', e.target.value)}
-              placeholder="ชื่อผู้รับการแจ้งเตือน"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">ตำแหน่ง</span>
-            <Input
-              value={form.position}
-              onChange={(e) => setField('position', e.target.value)}
-              placeholder="ตำแหน่ง (ไม่บังคับ)"
-            />
-          </label>
-          <label className="flex items-center gap-2 self-end pb-2">
-            <input
-              type="checkbox"
-              checked={form.isActive}
-              onChange={(e) => setField('isActive', e.target.checked)}
-              className="h-4 w-4"
-            />
-            <span className="font-mono text-[11px] text-[var(--ink-navy-muted)]">ใช้งาน</span>
-          </label>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            onClick={handleSave}
-            disabled={busy || !form.cid.trim() || !form.name.trim()}
-            className="gap-1.5"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {busy ? 'กำลังบันทึก...' : editing ? 'บันทึกการแก้ไข' : 'เพิ่มผู้รับเตือน'}
-          </Button>
-          {editing && (
-            <Button variant="outline" onClick={resetForm} className="gap-1.5">
-              <X className="h-3.5 w-3.5" />
-              ยกเลิกแก้ไข
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* List */}
-      {isLoading ? (
-        <LoadingState message="กำลังโหลดผู้รับเตือน..." />
-      ) : error ? (
-        <ErrorState message="โหลดผู้รับเตือนไม่สำเร็จ" />
-      ) : monitors.length === 0 ? (
-        <div className="font-mono text-[12px] text-[var(--ink-navy-muted)] py-6 text-center">
-          ยังไม่มีผู้รับเตือน — เพิ่มด้านบน
-        </div>
-      ) : (
-        <div className="border" style={{ borderColor: 'var(--rule-strong)' }}>
+    <SectionCard
+      title="ผู้รับการแจ้งเตือน MOPH Prompt (ศูนย์กลางจังหวัด)"
+      description={`จังหวัด ${provinceCode} · ใช้งาน ${activeCount} · ปิด ${monitors.length - activeCount} — ผู้รับเหล่านี้จะได้รับแจ้งเตือน LINE เมื่อมีกรณีเสี่ยงสูง/ฉุกเฉินจากโรงพยาบาลใดๆ ในจังหวัด`}
+    >
+      <div className="space-y-4">
+        {alertStatus?.eventQueue && (
           <div
-            className="grid grid-cols-[1fr_1fr_1fr_auto_auto] gap-2 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--ink-navy-muted)]"
-            style={{ borderBottom: '1px solid var(--rule-strong)' }}
+            className={cn(
+              'rounded-xl border px-3 py-2 text-label',
+              alertStatus.eventQueue.awaitingRecipients > 0
+                ? 'border-warn/40 bg-warn-tint text-warn-text'
+                : 'border-border text-ink-muted',
+            )}
           >
-            <div>ชื่อ</div>
-            <div>CID</div>
-            <div>ตำแหน่ง</div>
-            <div>สถานะ</div>
-            <div>จัดการ</div>
+            เหตุการณ์รอผู้รับ {alertStatus.eventQueue.awaitingRecipients} · หมดอายุโดยไม่ได้ส่ง{' '}
+            {alertStatus.eventQueue.expired}
+            {alertStatus.eventQueue.awaitingRecipients > 0 && (
+              <span className="ml-2 text-warn-text">
+                เพิ่มหรือเปิดใช้งานผู้รับแจ้งเตือนเพื่อส่งเหตุการณ์ของวันนี้
+              </span>
+            )}
           </div>
-          {monitors.map((m) => (
-            <div
-              key={m.id}
-              className="grid grid-cols-[1fr_1fr_1fr_auto_auto] gap-2 px-3 py-2 items-center"
-              style={{ borderBottom: '1px solid var(--rule)' }}
-            >
-              <div className="text-[13px]" style={{ color: 'var(--ink-navy)' }}>
-                {m.name}
-              </div>
-              <code className="font-mono text-[12px] text-[var(--ink-navy-dim)]">
-                {maskCid(m.cid)}
-              </code>
-              <div className="text-[12px] text-[var(--ink-navy-muted)]">{m.position ?? '—'}</div>
-              <div>
-                {m.isActive ? (
-                  <Check className="h-3.5 w-3.5 text-green-600" />
-                ) : (
-                  <X className="h-3.5 w-3.5 text-[var(--ink-navy-muted)]" />
-                )}
-              </div>
-              <div className="flex gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => startEdit(m)}
-                  disabled={busy || !!deleteBusyId}
-                  className="h-7 px-2 text-[11px]"
-                >
-                  แก้ไข
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDelete(m)}
-                  disabled={busy || deleteBusyId === m.id}
-                  className="h-7 px-2 text-[11px]"
-                >
-                  {deleteBusyId === m.id ? '...' : <Trash2 className="h-3 w-3" />}
-                </Button>
-              </div>
-            </div>
+        )}
+
+        {message &&
+          (message.tone === 'ok' ? (
+            <InlineNotice tone="ok">{message.text}</InlineNotice>
+          ) : (
+            <ErrorState
+              variant="banner"
+              className="rounded-xl border"
+              message={message.text}
+              remedy="ตรวจข้อมูลในฟอร์มแล้วกดบันทึกอีกครั้ง หากยังไม่ได้ แจ้งผู้ดูแลระบบพร้อมข้อความนี้"
+            />
           ))}
+
+        {/* Add/Edit form */}
+        <div className="space-y-3 rounded-xl border border-border p-4">
+          <div className="text-label text-ink">{editing ? 'แก้ไขผู้รับเตือน' : 'เพิ่มผู้รับเตือนใหม่'}</div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-label text-ink">CID (13 หลัก)</span>
+              <Input
+                value={form.cid}
+                onChange={(e) => setField('cid', e.target.value.replace(/\D/g, '').slice(0, 13))}
+                placeholder="เลขบัตรประชาชน 13 หลัก"
+                inputMode="numeric"
+                className="h-11 text-body"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-label text-ink">ชื่อ</span>
+              <Input
+                value={form.name}
+                onChange={(e) => setField('name', e.target.value)}
+                placeholder="ชื่อผู้รับการแจ้งเตือน"
+                className="h-11 text-body"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-label text-ink">ตำแหน่ง</span>
+              <Input
+                value={form.position}
+                onChange={(e) => setField('position', e.target.value)}
+                placeholder="ตำแหน่ง (ไม่บังคับ)"
+                className="h-11 text-body"
+              />
+            </label>
+            <label className="flex items-center gap-2 self-end pb-2">
+              <input
+                type="checkbox"
+                checked={form.isActive}
+                onChange={(e) => setField('isActive', e.target.checked)}
+                className="h-5 w-5 accent-brand"
+              />
+              <span className="text-label text-ink">ใช้งาน</span>
+            </label>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleSave}
+              disabled={busy || !form.cid.trim() || !form.name.trim()}
+              className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong"
+            >
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              {busy ? 'กำลังบันทึก...' : editing ? 'บันทึกการแก้ไข' : 'เพิ่มผู้รับเตือน'}
+            </Button>
+            {editing && (
+              <Button variant="outline" onClick={resetForm} className="h-11 gap-1.5">
+                <X aria-hidden="true" className="h-4 w-4" />
+                ยกเลิกแก้ไข
+              </Button>
+            )}
+          </div>
         </div>
-      )}
-    </div>
+
+        {/* List */}
+        {isLoading ? (
+          <LoadingState message="กำลังโหลดผู้รับเตือน..." />
+        ) : error ? (
+          <ErrorState message="โหลดผู้รับเตือนไม่สำเร็จ" remedy="ตรวจสอบการเชื่อมต่อ แล้วเปิดแท็บนี้อีกครั้ง" />
+        ) : (
+          <DataTable
+            caption="ผู้รับการแจ้งเตือน"
+            rows={monitors}
+            rowKey={(m) => m.id}
+            empty={
+              <EmptyState
+                illustration="generic"
+                title="ยังไม่มีผู้รับเตือน"
+                description="เพิ่มผู้รับเตือนด้วยฟอร์มด้านบน"
+                className="shadow-none"
+              />
+            }
+            columns={[
+              { key: 'name', header: 'ชื่อ', cell: (m) => <span className="text-body text-ink">{m.name}</span> },
+              {
+                key: 'cid',
+                header: 'CID',
+                cell: (m) => <code className="font-mono text-label text-ink-muted">{maskCid(m.cid)}</code>,
+              },
+              { key: 'position', header: 'ตำแหน่ง', cell: (m) => <span className="text-label text-ink-muted">{m.position ?? '—'}</span> },
+              {
+                key: 'status',
+                header: 'สถานะ',
+                cell: (m) => <StatusPill tone={m.isActive ? 'ok' : 'neutral'}>{m.isActive ? 'ใช้งาน' : 'ปิดใช้งาน'}</StatusPill>,
+              },
+              {
+                key: 'actions',
+                header: 'จัดการ',
+                cell: (m) => (
+                  <div className="flex gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => startEdit(m)}
+                      disabled={busy || !!deleteBusyId}
+                      className="h-9 px-3 text-label"
+                    >
+                      แก้ไข
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDelete(m)}
+                      disabled={busy || deleteBusyId === m.id}
+                      aria-label={`ลบผู้รับเตือน ${m.name}`}
+                      className="h-9 px-3 text-label"
+                    >
+                      {deleteBusyId === m.id ? '...' : <Trash2 aria-hidden="true" className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+          />
+        )}
+      </div>
+    </SectionCard>
   );
 }

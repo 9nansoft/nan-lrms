@@ -51,10 +51,12 @@ describe('HospitalTable', () => {
 
   it('renders sort chip controls', () => {
     render(<HospitalTable hospitals={sampleHospitals} />);
-    expect(screen.getByText(/SEVERITY/)).toBeTruthy();
-    expect(screen.getByText(/NAME/)).toBeTruthy();
-    expect(screen.getByText(/TOTAL/)).toBeTruthy();
-    expect(screen.getByText(/LEVEL/)).toBeTruthy();
+    expect(screen.getByText('เรียงตาม:')).toBeTruthy();
+    for (const name of [/^ความรุนแรง/, /^ชื่อ/, /^จำนวนผู้คลอด/, /^ระดับ/]) {
+      expect(screen.getByRole('button', { name })).toBeTruthy();
+    }
+    expect(screen.getByRole('button', { name: /^ความรุนแรง/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText(/SEVERITY|SORT:/)).toBeNull();
   });
 
   it('sorts by severity descending by default (HIGH hospital first)', () => {
@@ -66,9 +68,9 @@ describe('HospitalTable', () => {
     expect(rows[1].textContent).toContain('รพ.ชุมแพ');
   });
 
-  it('clicking NAME sort chip toggles order', () => {
+  it('clicking ชื่อ sort chip toggles order', () => {
     const { container } = render(<HospitalTable hospitals={sampleHospitals} />);
-    fireEvent.click(screen.getByText(/NAME/));
+    fireEvent.click(screen.getByRole('button', { name: /^ชื่อ/ }));
     const rows = container.querySelectorAll('[data-testid="hospital-row"]');
     expect(rows.length).toBe(2);
     // NAME desc (first click defaults to desc in the new design)
@@ -100,9 +102,15 @@ describe('HospitalTable', () => {
     expect(screen.getByText('M1')).toBeTruthy();
   });
 
-  it('renders OFFLINE flag for offline hospital', () => {
+  it('keeps the English status word in kiosk mode', () => {
+    render(<HospitalTable hospitals={sampleHospitals} variant="kiosk" />);
+    expect(screen.getAllByText('OFFLINE').length).toBeGreaterThan(0);
+  });
+
+  it('renders the Thai offline status word in light mode', () => {
     render(<HospitalTable hospitals={sampleHospitals} />);
-    expect(screen.getByText('OFFLINE')).toBeTruthy();
+    expect(screen.getAllByText('ออฟไลน์').length).toBeGreaterThan(0);
+    expect(screen.queryByText('OFFLINE')).toBeNull();
   });
 
   it('shows total count for each hospital', () => {
@@ -111,9 +119,15 @@ describe('HospitalTable', () => {
     expect(screen.getByText(/^3/)).toBeTruthy();
   });
 
+  it('labels the labour count in Thai', () => {
+    render(<HospitalTable hospitals={sampleHospitals} />);
+    expect(screen.getAllByText('ห้องคลอด').length).toBe(2);
+    expect(screen.queryByText('LB')).toBeNull();
+  });
+
   it('renders node-count summary in the sort bar', () => {
     render(<HospitalTable hospitals={sampleHospitals} />);
-    expect(screen.getByText(/2 NODES/)).toBeTruthy();
+    expect(screen.getByText('2 แห่ง')).toBeTruthy();
   });
 
   it('shows empty-state message when no hospitals', () => {
