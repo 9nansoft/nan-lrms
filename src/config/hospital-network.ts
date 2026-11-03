@@ -14,10 +14,6 @@ export const SYNC_HEALTH = {
   criticalAfterHours: 24,
 } as const;
 
-/** Pseudo-hospitals that never sync: '00000' reserved system account, '99999'
- *  provincial/admin testing account. They are exempt from the access guard and
- *  excluded from every freshness count, map and roster. Client-safe: this file
- *  must never read env or import server-only modules. */
 /** Status-strip polling of /api/sync/freshness. A cached snapshot is trusted
  *  only while refreshes succeed and it is younger than maxSnapshotAgeMs — one
  *  missed refresh is tolerated, two are not (SWR keeps the last good payload
@@ -29,7 +25,27 @@ export const SYNC_FRESHNESS_POLL = {
   recheckMs: 15_000,
 } as const;
 
-export const NON_REPORTING_HCODES = ['00000', '99999'] as const;
+/** Organisations that never sync: '00000' reserved system account and
+ *  '00042' สำนักงานสาธารณสุขจังหวัดน่าน — the provincial administrators' home
+ *  hcode, which replaced the old '99999' test account. They are exempt from
+ *  the access guard (login without a hospitals-table row) and excluded from
+ *  every freshness count, map and roster. Exemption only admits the login:
+ *  /admin still requires role ADMIN, a read/write session and a CID in
+ *  ADMIN_ALLOWED_CIDS. Client-safe: this file must never read env or import
+ *  server-only modules. */
+export const NON_REPORTING_HCODES = ['00000', '00042'] as const;
+
+/** Display names for the rows the onboarding routes auto-register the first
+ *  time a NON_REPORTING_HCODES user opens NN-LRMS from HOSxP. */
+export const NON_REPORTING_HCODE_NAMES: Record<(typeof NON_REPORTING_HCODES)[number], string> = {
+  '00000': 'System (00000)',
+  '00042': 'สำนักงานสาธารณสุขจังหวัดน่าน',
+};
+
+/** Name for an auto-registered exempt row; unknown codes get a generic label. */
+export function exemptHospitalName(hcode: string): string {
+  return (NON_REPORTING_HCODE_NAMES as Record<string, string>)[hcode] ?? `Exempt (${hcode})`;
+}
 
 export function isNonReportingHcode(hcode: string | null | undefined): boolean {
   return !!hcode && (NON_REPORTING_HCODES as readonly string[]).includes(hcode);

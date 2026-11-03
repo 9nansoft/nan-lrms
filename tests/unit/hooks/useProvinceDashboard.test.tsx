@@ -60,7 +60,7 @@ beforeEach(() => {
         lastSyncAt: hoursAgo(3),
       }),
       makeHospital({
-        hcode: '99999',
+        hcode: '00042',
         connectionStatus: ConnectionStatus.ONLINE,
         lastSyncAt: hoursAgo(0),
       }),
@@ -81,8 +81,8 @@ afterEach(() => vi.useRealTimers());
 describe('useProvinceDashboard', () => {
   it('derives counts like the page did — pseudo-hospitals excluded from freshness only', () => {
     const { result } = renderHook(() => useProvinceDashboard());
-    expect(result.current.onlineCount).toBe(2); // includes 99999, as before
-    expect(result.current.reportingCount).toBe(2); // 99999 excluded
+    expect(result.current.onlineCount).toBe(2); // includes 00042, as before
+    expect(result.current.reportingCount).toBe(2); // 00042 excluded
     expect(result.current.freshCount).toBe(1); // 10671 is 3h stale
     expect(result.current.ancFallback).toEqual({ hr3: 2, dueSoon: 3 });
   });

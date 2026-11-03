@@ -16,7 +16,7 @@ describe('getSyncFreshness', () => {
       ['h3', '10998', mins(90)], // stale
       ['h4', '77652', null], // never
       ['h5', '11004', new Date(NOW.getTime() + 3_600_000).toISOString()], // future-dated
-      ['h99', '99999', mins(60 * 24 * 10)], // exempt pseudo-hospital
+      ['h99', '00042', mins(60 * 24 * 10)], // exempt pseudo-hospital
       ['h6', '11006', mins(2)], // recent sync but purged -> BLOCKED
     ];
     for (const [id, hcode, last] of rows) {
@@ -64,7 +64,7 @@ describe('getSyncFreshness', () => {
     expect(s.own).toEqual({ hcode: '11000', name: 'รพ.11000', lastSyncAt: mins(5), health: 'ok', highRisk: 1 });
   });
 
-  it.each(['99999', '00000', '55555', undefined])('exempt/unregistered/missing hcode %p → own null, no throw', async (hcode) => {
+  it.each(['00042', '00000', '55555', undefined])('exempt/unregistered/missing hcode %p → own null, no throw', async (hcode) => {
     const s = await getSyncFreshness(db, { hcode, now: NOW });
     expect(s.own).toBeNull();
     expect(s.province.reporting).toBe(6);
