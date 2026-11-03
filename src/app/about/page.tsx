@@ -83,7 +83,7 @@ export default function AboutPage() {
               <strong>NN-LRMS</strong> (Nan Labor Room Monitoring System)
               คือระบบติดตามการคลอดแบบรวมศูนย์ ระดับจังหวัด
               ที่ออกแบบมาเพื่อให้สูติแพทย์และพยาบาลห้องคลอดของ<strong>โรงพยาบาลแม่ข่าย</strong>
-              (รพ.น่าน และ รพ.ศรีนครินทร์) สามารถ<strong>ติดตามผู้คลอด</strong>ที่รอคลอดใน
+              (รพ.น่าน) สามารถ<strong>ติดตามผู้คลอด</strong>ที่รอคลอดใน
               <strong>โรงพยาบาลชุมชน (รพช.) ทุกแห่ง</strong>ในจังหวัดน่านได้แบบ Real-time
             </p>
             <p className="text-ink-muted">
