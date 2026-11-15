@@ -4,27 +4,36 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
-import { listReferrals } from '@/services/referral-list';
+import { requireSession } from '@/lib/session-guard';
+import { readReferralListForHospital } from '@/services/journey-access';
 
 export async function GET(request: NextRequest) {
   try {
     await ensureInit();
+    const session = await requireSession();
+    if (session instanceof NextResponse) return session;
+
     const db = await getDatabase();
     const searchParams = request.nextUrl.searchParams;
 
-    const response = await listReferrals(db, {
-      status: searchParams.get('status') ?? undefined,
-      urgency: searchParams.get('urgency') ?? undefined,
-      fromHospitalId: searchParams.get('from_hospital_id') ?? undefined,
-      toHospitalId: searchParams.get('to_hospital_id') ?? undefined,
-      range: searchParams.get('range') ?? undefined,
-      q: searchParams.get('q') ?? undefined,
-      overdue: searchParams.get('overdue') === '1',
-      page: parseInt(searchParams.get('page') ?? '1', 10),
-      perPage: parseInt(searchParams.get('per_page') ?? '20', 10),
-    });
+    const response = await readReferralListForHospital(
+      db,
+      {
+        status: searchParams.get('status') ?? undefined,
+        urgency: searchParams.get('urgency') ?? undefined,
+        fromHospitalId: searchParams.get('from_hospital_id') ?? undefined,
+        toHospitalId: searchParams.get('to_hospital_id') ?? undefined,
+        range: searchParams.get('range') ?? undefined,
+        q: searchParams.get('q') ?? undefined,
+        overdue: searchParams.get('overdue') === '1',
+        page: parseInt(searchParams.get('page') ?? '1', 10),
+        perPage: parseInt(searchParams.get('per_page') ?? '20', 10),
+      },
+      session.user.hospitalCode,
+    );
 
-    return NextResponse.json(response);
+    // What this returns depends on who asks, so it must not sit in a shared cache.
+    return NextResponse.json(response, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     logger.error('dashboard_referrals_list_failed', { error });
     return NextResponse.json(

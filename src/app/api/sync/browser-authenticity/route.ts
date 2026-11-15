@@ -21,10 +21,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { auth } from '@/lib/auth';
 import { logger } from '@/lib/logger';
-import {
-  recordAuthenticityVerdict,
-  type AuthenticityVerdict,
-} from '@/services/sync/polling';
+import { recordAuthenticityVerdict, type AuthenticityVerdict } from '@/services/sync/polling';
 
 // Wipe rows synced from this hospital within the last `windowMs` so a
 // freshly-flipped `name_unstable` hospital doesn't keep anonymised rows
@@ -72,6 +69,10 @@ async function purgeRecentSyncs(
       journeyIds,
     );
     ancVisits = (v as { rowCount?: number } | undefined)?.rowCount ?? 0;
+    await db.execute(
+      `DELETE FROM cached_anc_lab_results WHERE journey_id IN (${placeholders})`,
+      journeyIds,
+    );
     const r = await db.execute(
       `DELETE FROM cached_anc_risks WHERE journey_id IN (${placeholders})`,
       journeyIds,
@@ -91,10 +92,7 @@ async function purgeRecentSyncs(
       `UPDATE cached_patients SET journey_id = NULL WHERE journey_id IN (${placeholders})`,
       journeyIds,
     );
-    await db.execute(
-      `DELETE FROM maternal_journeys WHERE id IN (${placeholders})`,
-      journeyIds,
-    );
+    await db.execute(`DELETE FROM maternal_journeys WHERE id IN (${placeholders})`, journeyIds);
   }
 
   // Labor side: wipe cached_patients (+ their partograph/vitals/cpd_scores)
@@ -116,14 +114,8 @@ async function purgeRecentSyncs(
       `DELETE FROM cached_vital_signs WHERE patient_id IN (${placeholders})`,
       laborIds,
     );
-    await db.execute(
-      `DELETE FROM cpd_scores WHERE patient_id IN (${placeholders})`,
-      laborIds,
-    );
-    await db.execute(
-      `DELETE FROM cached_patients WHERE id IN (${placeholders})`,
-      laborIds,
-    );
+    await db.execute(`DELETE FROM cpd_scores WHERE patient_id IN (${placeholders})`, laborIds);
+    await db.execute(`DELETE FROM cached_patients WHERE id IN (${placeholders})`, laborIds);
   }
 
   return {
@@ -161,17 +153,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     if (session.user.accessMode === 'readonly') {
-      return NextResponse.json(
-        { error: 'readonly_session_cannot_push' },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: 'readonly_session_cannot_push' }, { status: 403 });
     }
     const hcode = session.user.hospitalCode ?? null;
     if (!hcode) {
-      return NextResponse.json(
-        { error: 'no_hospital_code_in_session' },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: 'no_hospital_code_in_session' }, { status: 400 });
     }
 
     const body = (await request.json().catch(() => null)) as VerdictBody | null;
@@ -185,9 +171,7 @@ export async function POST(request: NextRequest) {
       );
     }
     const reason =
-      typeof body.reason === 'string' && body.reason.length > 0
-        ? body.reason.slice(0, 500)
-        : null;
+      typeof body.reason === 'string' && body.reason.length > 0 ? body.reason.slice(0, 500) : null;
 
     const db = await getDatabase();
     const rows = await db.query<{ id: string; is_active: boolean | number }>(
@@ -195,16 +179,10 @@ export async function POST(request: NextRequest) {
       [hcode],
     );
     if (rows.length === 0) {
-      return NextResponse.json(
-        { error: 'hospital_not_registered', hcode },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: 'hospital_not_registered', hcode }, { status: 403 });
     }
     if (rows[0].is_active !== true && rows[0].is_active !== 1) {
-      return NextResponse.json(
-        { error: 'hospital_inactive', hcode },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: 'hospital_inactive', hcode }, { status: 403 });
     }
     const hospitalId = rows[0].id;
 
@@ -216,12 +194,7 @@ export async function POST(request: NextRequest) {
     );
     const prevStatus = prevRows[0]?.last_authenticity_status ?? null;
 
-    await recordAuthenticityVerdict(
-      db,
-      hospitalId,
-      body.status as AuthenticityVerdict,
-      reason,
-    );
+    await recordAuthenticityVerdict(db, hospitalId, body.status as AuthenticityVerdict, reason);
 
     // Auto-purge on transition INTO name_unstable. Wipes rows synced from
     // this hospital in the last 24 hours so the UI immediately stops

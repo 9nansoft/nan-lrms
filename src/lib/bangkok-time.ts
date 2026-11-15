@@ -38,12 +38,16 @@ const THAI_MONTHS_SHORT = [
  *  BE year + short-month convention matches formatThaiDate in src/lib/utils. */
 export function formatBangkokStamp(now: Date = new Date()): string {
   const shifted = new Date(now.getTime() + 7 * 3600 * 1000);
-  const day = shifted.getUTCDate();
-  const month = THAI_MONTHS_SHORT[shifted.getUTCMonth()];
-  const year = shifted.getUTCFullYear() + 543; // Buddhist Era
   const hh = String(shifted.getUTCHours()).padStart(2, '0');
   const mm = String(shifted.getUTCMinutes()).padStart(2, '0');
-  return `${day} ${month} ${year} ${hh}:${mm} น.`;
+  return `${formatBangkokDate(now)} ${hh}:${mm} น.`;
+}
+
+/** The Bangkok calendar day of an instant, as "6 ส.ค. 2569". */
+export function formatBangkokDate(date: Date): string {
+  const shifted = new Date(date.getTime() + 7 * 3600 * 1000);
+  const month = THAI_MONTHS_SHORT[shifted.getUTCMonth()];
+  return `${shifted.getUTCDate()} ${month} ${shifted.getUTCFullYear() + 543}`;
 }
 
 /** Returns the start of today in Asia/Bangkok, expressed as UTC. */

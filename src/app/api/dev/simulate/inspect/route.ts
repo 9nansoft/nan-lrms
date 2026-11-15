@@ -140,6 +140,7 @@ async function handle() {
   const tables = [
     'maternal_journeys',
     'cached_anc_visits',
+    'cached_anc_lab_results',
     'cached_anc_risks',
     'cached_patients',
     'cached_vital_signs',

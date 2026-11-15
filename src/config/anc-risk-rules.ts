@@ -68,7 +68,7 @@ export interface AncRiskLevelConfig {
   action: string;
 }
 
-import { ANC_CLASSIFYING_CANON } from '@/config/anc-classifying-canon';
+import { ANC_CLASSIFYING_CANON, ancClassifyingFallbackLabel } from '@/config/anc-classifying-canon';
 
 // Mapping from HOSxP anc_risk_id to lab boolean flags
 // These IDs correspond to entries in the HOSxP anc_risk lookup table
@@ -91,6 +91,34 @@ export const HOSXP_RISK_TO_LAB_FLAGS: Record<
   25: 'thalassemiaDisease',
   26: 'niptHighRisk',
 };
+
+/**
+ * Entries in cached_anc_risks.triggered_rules that state HIV or syphilis status.
+ * The polling path stores rule ids; the webhook path stores labels, and an item
+ * outside the canon gets a placeholder label carrying its code.
+ */
+export const ANC_SEROLOGY_RISK_KEYS: ReadonlySet<string> = new Set([
+  'hr2_syphilis',
+  'hr2_hiv',
+  ...Object.entries(HOSXP_RISK_TO_LAB_FLAGS)
+    .filter(([, flag]) => flag === 'syphilisPositive' || flag === 'hivPositive')
+    .map(([id]) => ancClassifyingFallbackLabel(Number(id))),
+]);
+
+/**
+ * ICD-10 codes that state HIV or syphilis, matched without the dot: HIV disease
+ * B20-B24, Z21, R75, Z20.6, Z71.7 and O98.7; syphilis A50-A53 and O98.1.
+ */
+const SEROLOGY_ICD10 = /^(B2[0-4]|Z21|R75|Z206|Z717|O98[17]|A5[0-3])/;
+
+/** One code and nothing else; the field is unchecked text at every write path. */
+const SINGLE_ICD10 = /^[A-Z]\d{2}(\.?\d{0,4}[A-Z]?)$/;
+
+/** Fails closed: a value that is not one clean code could be hiding a listed one. */
+export function isRestrictedDiagnosisCode(code: string): boolean {
+  const normalised = code.trim().toUpperCase();
+  return !SINGLE_ICD10.test(normalised) || SEROLOGY_ICD10.test(normalised.replace('.', ''));
+}
 
 export const ANC_RISK_LEVEL_ORDER: Record<AncRiskLevel, number> = {
   [AncRiskLevel.LOW]: 0,

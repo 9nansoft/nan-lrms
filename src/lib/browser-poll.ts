@@ -31,6 +31,8 @@ import {
 } from '@/config/hosxp-queries';
 import { isStaleAdmission } from '@/config/hospital-network';
 import { normalizeHosxpDate } from '@/lib/hosxp-date';
+import { ANC_LAB_ORDER_SQL_LIKE_TERMS, ANC_THALASSEMIA_FIELDS } from '@/config/anc-lab-canon';
+import { isClassifiableLabOrderName, type AncLabPayloadRow } from '@/services/anc-lab-classifier';
 import type { ConnectionConfig, SqlApiResponse } from '@/types/bms-browser';
 
 // ─── Webhook payload shapes (mirror src/services/webhook.ts) ────────────────
@@ -135,6 +137,8 @@ interface BrowserAncPatient {
   vdrlResult?: string | null;
   hivResult?: string | null;
   visits?: BrowserAncVisit[];
+  /** Absent on cycles with no lab pull; the server then changes no lab data. */
+  labResults?: AncLabPayloadRow[];
 }
 
 export interface BrowserPushBody {
@@ -161,7 +165,12 @@ export interface BrowserPushBody {
     withBirthDate?: number;
   };
   /** `activeCids`: see ancActiveCids — omitted when the pull may be truncated. */
-  anc?: { patients: BrowserAncPatient[]; activeCids?: string[] };
+  anc?: {
+    patients: BrowserAncPatient[];
+    activeCids?: string[];
+    /** A lab query hit its row limit, so labs in this push may be partial. */
+    labsTruncated?: boolean;
+  };
   partograph?: { observations: BrowserPartographObservation[] };
   /** Raw HOSxP delivery rows since the server-issued newborn cutoff. */
   newborns?: {
@@ -191,6 +200,13 @@ export interface BrowserPollResult {
   };
   partograph: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
   anc: { read: number; mapped: number; sent: number; droppedNameUnstable: number };
+  /** Present on cycles that pulled ANC labs (see ANC_LAB_PULL_INTERVAL_MS). */
+  ancLabs?: {
+    rows: number;
+    truncated: boolean;
+    orderQuery: AncLabOrderQueryStatus;
+    ancQueryFailed: boolean;
+  };
   /** Delivery rows read since the server-issued newborn cutoff. */
   newborns?: { infantsRead: number; pregnanciesRead: number };
   /** Referral rows read from the rolling 60-day HOSxP window. */
@@ -331,23 +347,224 @@ export function ancActiveCids(masters: Record<string, unknown>[]): string[] | un
   return [...cids];
 }
 
-const ancVisitsSql = (): string => `
+export const ancVisitsSql = (): string => `
   SELECT s.person_anc_id,
          s.anc_service_date, s.anc_service_number, s.pa_week,
          sc.bw, sc.bps, sc.bpd, sc.baby_fetal_heart_sound,
          sc.albumin, sc.sugar,
          bp.anc_baby_position_name AS presentation_name,
-         bl.anc_baby_lead_name     AS engagement_name,
-         plh.anc_lab_result AS hct_result,
-         plb.anc_lab_result AS hb_result
+         bl.anc_baby_lead_name     AS engagement_name
     FROM person_anc_service s
     LEFT JOIN person_anc_screen sc ON sc.person_anc_service_id = s.person_anc_service_id
     LEFT JOIN anc_baby_position bp ON bp.anc_baby_position_id = sc.anc_baby_position_id
     LEFT JOIN anc_baby_lead     bl ON bl.anc_baby_lead_id     = sc.anc_baby_lead_id
-    LEFT JOIN person_anc_lab    plh ON plh.person_anc_service_id = s.person_anc_service_id AND plh.anc_lab_id = 6
-    LEFT JOIN person_anc_lab    plb ON plb.person_anc_service_id = s.person_anc_service_id AND plb.anc_lab_id = 8
    WHERE s.person_anc_id IN (SELECT pa.person_anc_id FROM person_anc pa WHERE ${ancActiveWhere()})
    ORDER BY s.person_anc_id, s.anc_service_number`;
+
+// ─── ANC laboratory pull ────────────────────────────────────────────────────
+//
+// Labs change rarely but are heavy to read, so they are pulled at most every
+// ANC_LAB_PULL_INTERVAL_MS per tab, newest first, with a hard row cap. Hitting
+// a cap is reported, and the server only ever upserts these rows, so partial
+// data can never remove anything.
+
+export const ANC_LAB_ROW_LIMIT = 10_000;
+export const ANC_LAB_ORDER_ROW_LIMIT = 6_000;
+export const ANC_LAB_PULL_INTERVAL_MS = 10 * 60_000;
+
+/** Which confirmation flag the build supports; 'failed' = no lab orders read. */
+export type AncLabOrderQueryStatus = 'current' | 'legacy' | 'failed';
+
+export function shouldPullAncLabs(now: number, lastPulledAt: number | null): boolean {
+  return lastPulledAt === null || now - lastPulledAt >= ANC_LAB_PULL_INTERVAL_MS;
+}
+
+export const ancLabResultsSql = (): string => `
+  SELECT pl.person_anc_lab_id, s.person_anc_id, s.anc_service_date, s.pa_week,
+         al.anc_lab_name, al.lab_items_code,
+         li.lab_items_name, li.lab_items_unit,
+         pl.anc_lab_result, pl.lab_result_normal
+    FROM person_anc_lab pl
+    INNER JOIN person_anc_service s ON s.person_anc_service_id = pl.person_anc_service_id
+    INNER JOIN anc_lab al ON al.anc_lab_id = pl.anc_lab_id
+    LEFT JOIN lab_items li ON li.lab_items_code = al.lab_items_code
+   WHERE s.person_anc_id IN (SELECT pa.person_anc_id FROM person_anc pa WHERE ${ancActiveWhere()})
+     AND pl.anc_lab_result IS NOT NULL
+     AND pl.anc_lab_result <> ''
+   ORDER BY pl.person_anc_lab_id DESC
+   LIMIT ${ANC_LAB_ROW_LIMIT}`;
+
+/**
+ * Confirmed results for active women, including those on another VN, which
+ * HOSxP never copies into person_anc_lab. An order with a lab_head_abort row
+ * was cancelled and is excluded; the abort table is part of the query rather
+ * than a best-effort step, so a site without it reads no lab orders at all
+ * instead of reading them unfiltered.
+ */
+export const ancConfirmedLabOrdersSql = (build: 'current' | 'legacy'): string => {
+  const lmpFloor = new Date(Date.now() - 330 * 86_400_000).toISOString().slice(0, 10);
+  const confirmed = build === 'current' ? `h.confirm_report = 'Y'` : `lo.confirm = 'Y'`;
+  const names = ANC_LAB_ORDER_SQL_LIKE_TERMS.map(
+    (term) => `LOWER(li.lab_items_name) LIKE '${term}'`,
+  ).join(' OR ');
+  return `
+  SELECT pa.person_anc_id, h.lab_order_number, h.order_date,
+         lo.lab_items_code, lo.lab_order_result, lo.abnormal_result,
+         lo.lab_items_normal_value_ref,
+         li.lab_items_name, li.lab_items_unit
+    FROM person_anc pa
+    INNER JOIN person pe ON pe.person_id = pa.person_id AND LENGTH(pe.cid) = 13
+    INNER JOIN patient pt ON pt.cid = pe.cid
+    INNER JOIN lab_head h ON h.hn = pt.hn
+    INNER JOIN lab_order lo ON lo.lab_order_number = h.lab_order_number
+    INNER JOIN lab_items li ON li.lab_items_code = lo.lab_items_code
+   WHERE ${ancActiveWhere()}
+     AND ${confirmed}
+     AND h.order_date >= COALESCE(pa.lmp, '${lmpFloor}')
+     AND h.order_date >= '${lmpFloor}'
+     AND lo.lab_order_result IS NOT NULL
+     AND lo.lab_order_result <> ''
+     AND (${names})
+     AND NOT EXISTS (SELECT 1 FROM lab_head_abort ab WHERE ab.lab_order_number = h.lab_order_number)
+   ORDER BY h.order_date DESC, pa.person_anc_id DESC
+   LIMIT ${ANC_LAB_ORDER_ROW_LIMIT}`;
+};
+
+export const ancThalassemiaSql = (): string => `
+  SELECT pa.person_anc_id, ${ANC_THALASSEMIA_FIELDS.map((f) => `pa.${f.column}`).join(', ')}
+    FROM person_anc pa
+   WHERE ${ancActiveWhere()}
+   ORDER BY pa.person_anc_id DESC
+   LIMIT ${ANC_MASTERS_LIMIT}`;
+
+/** Runs one read-only statement against this hospital's HOSxP. */
+type LabQueryRunner = (sql: string) => Promise<Record<string, unknown>[]>;
+
+export interface AncLabBundle {
+  byAncId: Map<string, AncLabPayloadRow[]>;
+  rows: number;
+  /** A query hit its limit, so older rows may be absent. */
+  truncated: boolean;
+  orderQuery: AncLabOrderQueryStatus;
+  /** The person_anc_lab read failed, as opposed to returning no rows. */
+  ancQueryFailed: boolean;
+}
+
+async function pullConfirmedLabOrders(
+  run: LabQueryRunner,
+): Promise<{ rows: Record<string, unknown>[]; status: AncLabOrderQueryStatus }> {
+  for (const build of ['current', 'legacy'] as const) {
+    try {
+      return { rows: await run(ancConfirmedLabOrdersSql(build)), status: build };
+    } catch {
+      // Older builds lack confirm_report; the legacy form is tried next.
+    }
+  }
+  return { rows: [], status: 'failed' };
+}
+
+function labDate(value: unknown): string | null {
+  return hasHosxpDate(value) ? normalizeHosxpDate(strOrNull(value)) : null;
+}
+
+function mapAncLabRow(row: Record<string, unknown>): AncLabPayloadRow | null {
+  const sourceId = strOrNull(row.person_anc_lab_id);
+  if (!sourceId) return null;
+  return {
+    source: 'anc_lab',
+    sourceId,
+    resultDate: labDate(row.anc_service_date),
+    gaWeeks: intOrNull(row.pa_week),
+    ancLabName: strOrNull(row.anc_lab_name),
+    labItemsName: strOrNull(row.lab_items_name),
+    labItemsCode: strOrNull(row.lab_items_code),
+    result: strOrNull(row.anc_lab_result),
+    unit: strOrNull(row.lab_items_unit),
+    ancResultNormalRaw: strOrNull(row.lab_result_normal),
+  };
+}
+
+function mapLabOrderRow(row: Record<string, unknown>): AncLabPayloadRow | null {
+  const orderNumber = strOrNull(row.lab_order_number);
+  const code = strOrNull(row.lab_items_code);
+  const name = strOrNull(row.lab_items_name);
+  if (!orderNumber || !code || !name || !isClassifiableLabOrderName(name)) return null;
+  return {
+    source: 'lab_order',
+    sourceId: `${orderNumber}:${code}`,
+    // The blood draw, not the report: this date links the result to its visit.
+    resultDate: labDate(row.order_date),
+    labItemsName: name,
+    labItemsCode: code,
+    result: strOrNull(row.lab_order_result),
+    unit: strOrNull(row.lab_items_unit),
+    normalReference: strOrNull(row.lab_items_normal_value_ref),
+    abnormalFlag: strOrNull(row.abnormal_result),
+  };
+}
+
+function mapThalassemiaRows(row: Record<string, unknown>): AncLabPayloadRow[] {
+  const ancId = strOrNull(row.person_anc_id);
+  if (!ancId) return [];
+  const out: AncLabPayloadRow[] = [];
+  for (const field of ANC_THALASSEMIA_FIELDS) {
+    const result = strOrNull(row[field.column]);
+    if (!result) continue;
+    out.push({
+      source: 'person_anc',
+      sourceId: `${ancId}:${field.column}`,
+      ancLabName: field.label,
+      labItemsName: null,
+      result,
+    });
+  }
+  return out;
+}
+
+export async function pullAncLabBundle(run: LabQueryRunner): Promise<AncLabBundle> {
+  const ancRows = await run(ancLabResultsSql()).catch(() => null);
+  const orders = await pullConfirmedLabOrders(run);
+  // The columns may differ on old builds; never let them cost the other labs.
+  const thalRows = await run(ancThalassemiaSql()).catch(() => []);
+
+  const byAncId = new Map<string, AncLabPayloadRow[]>();
+  const seen = new Set<string>();
+  const add = (ancId: string, row: AncLabPayloadRow): void => {
+    // A lab order joins every open pregnancy of its patient; rows arrive
+    // newest pregnancy first, so the first one wins.
+    const key = `${row.source}:${row.sourceId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    byAncId.set(ancId, [...(byAncId.get(ancId) ?? []), row]);
+  };
+
+  for (const row of ancRows ?? []) {
+    const ancId = strOrNull(row.person_anc_id);
+    const mapped = mapAncLabRow(row);
+    if (ancId && mapped) add(ancId, mapped);
+  }
+  for (const row of orders.rows) {
+    const ancId = strOrNull(row.person_anc_id);
+    const mapped = mapLabOrderRow(row);
+    if (ancId && mapped) add(ancId, mapped);
+  }
+  for (const row of thalRows) {
+    for (const mapped of mapThalassemiaRows(row)) {
+      add(String(row.person_anc_id), mapped);
+    }
+  }
+
+  return {
+    byAncId,
+    rows: seen.size,
+    truncated:
+      (ancRows?.length ?? 0) >= ANC_LAB_ROW_LIMIT ||
+      orders.rows.length >= ANC_LAB_ORDER_ROW_LIMIT ||
+      thalRows.length >= ANC_MASTERS_LIMIT,
+    orderQuery: orders.status,
+    ancQueryFailed: ancRows === null,
+  };
+}
 
 const ancClassifyingSql = (): string => `
   SELECT c.person_anc_id, c.person_anc_classifying_item_id
@@ -387,14 +604,6 @@ function combineDateTime(date: unknown, time: unknown): string {
   if (!d) return new Date().toISOString();
   if (d.includes('T')) return d;
   return `${d}T${t}`;
-}
-
-function parseLabFloat(raw: string | null): number | null {
-  if (!raw) return null;
-  const cleaned = raw.replace('%', '').replace(',', '.').trim();
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
 }
 
 function pickLatest(r1: unknown, r2: unknown): string | null {
@@ -534,10 +743,11 @@ function mapPartograph(row: Record<string, unknown>): BrowserPartographObservati
   };
 }
 
-function mapAncBundle(
+export function mapAncBundle(
   masters: Record<string, unknown>[],
   visits: Record<string, unknown>[],
   classifying: Record<string, unknown>[],
+  labsByAncId?: Map<string, AncLabPayloadRow[]>,
 ): BrowserAncPatient[] {
   // Index visits + classifying by person_anc_id.
   const visitsByAnc = new Map<string, Record<string, unknown>[]>();
@@ -587,8 +797,6 @@ function mapAncBundle(
         if (bpd != null) visit.bpDiastolic = bpd;
         const fhr = intOrNull(v.baby_fetal_heart_sound);
         if (fhr != null) visit.fetalHr = fhr;
-        visit.hctPct = parseLabFloat(strOrNull(v.hct_result));
-        visit.hbGDl = parseLabFloat(strOrNull(v.hb_result));
         visit.urineProtein = strOrNull(v.albumin);
         visit.urineGlucose = strOrNull(v.sugar);
         visit.presentation = strOrNull(v.presentation_name);
@@ -619,6 +827,8 @@ function mapAncBundle(
     patient.vdrlResult = pickLatest(m.blood_vdrl1_result, m.blood_vdrl2_result);
     patient.hivResult = pickLatest(m.blood_hiv1_result, m.blood_hiv2_result);
     if (visitRows.length > 0) patient.visits = visitRows;
+    const labRows = labsByAncId?.get(ancId);
+    if (labRows && labRows.length > 0) patient.labResults = labRows;
     out.push(patient);
   }
   return out;
@@ -895,6 +1105,8 @@ export function decideLaborPush(args: {
 // Per-tab: the active-AN signature we last successfully pushed. A tab's session
 // is bound to a single hospital, so one module-level value is sufficient.
 let lastPushedActiveKey: string | null = null;
+// Per-tab: when ANC labs last reached the server (see ANC_LAB_PULL_INTERVAL_MS).
+let lastAncLabPullAt: number | null = null;
 
 export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResult> {
   const startedAt = Date.now();
@@ -1037,7 +1249,26 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     const partographs = partRows
       .map(mapPartograph)
       .filter((x): x is BrowserPartographObservation => x !== null);
-    const ancPatients = mapAncBundle(ancMasters, ancVisits, ancClasses);
+    // Pulled after the authenticity probe so an anonymised copy of HOSxP never
+    // has its labs read. Best-effort: a failure never blocks the main push.
+    let ancLabBundle: AncLabBundle | null = null;
+    const pullLabs = ancMasters.length > 0 && shouldPullAncLabs(Date.now(), lastAncLabPullAt);
+    if (pullLabs) {
+      try {
+        ancLabBundle = await pullAncLabBundle((sql) =>
+          runQuery<Record<string, unknown>>(sql, opts),
+        );
+        result.ancLabs = {
+          rows: ancLabBundle.rows,
+          truncated: ancLabBundle.truncated,
+          orderQuery: ancLabBundle.orderQuery,
+          ancQueryFailed: ancLabBundle.ancQueryFailed,
+        };
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      }
+    }
+    const ancPatients = mapAncBundle(ancMasters, ancVisits, ancClasses, ancLabBundle?.byAncId);
 
     result.labor.mapped = laborPatients.length;
     result.partograph.mapped = partographs.length;
@@ -1245,6 +1476,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       body.anc = {
         patients: ancPatients,
         ...(ancActive !== undefined ? { activeCids: ancActive } : {}),
+        ...(ancLabBundle?.truncated ? { labsTruncated: true } : {}),
       };
     }
     if (newbornsSection) body.newborns = newbornsSection;
@@ -1285,6 +1517,8 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // Remember the active set we just reconciled so a perpetually-empty ward
     // doesn't re-POST an identical reconciliation every tick.
     lastPushedActiveKey = decision.activeKey;
+    // Only after a successful push: a failed one retries the lab pull next cycle.
+    if (ancLabBundle) lastAncLabPullAt = Date.now();
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
   }

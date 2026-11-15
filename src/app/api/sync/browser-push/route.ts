@@ -36,6 +36,7 @@ import { enqueueHighRiskAlert } from '@/services/risk-alert';
 import { resolveAlertOrigin } from '@/services/alert-context';
 import { drainMophAlerts } from '@/services/moph-alert-drain';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
+import type { AncLabIngestStats } from '@/services/anc-lab-ingest';
 import { AncRiskLevel } from '@/types/domain';
 import {
   processWebhookPayload,
@@ -166,6 +167,7 @@ export async function POST(request: NextRequest) {
         downgradesBlocked: number;
         visitConflicts: number;
         fieldOverflows: number;
+        labs: AncLabIngestStats;
       };
       ancReconcile?: { closed: number };
       partograph?: { accepted: number; skipped: number };
@@ -361,12 +363,18 @@ export async function POST(request: NextRequest) {
         counts: { pregnancies: patients.length },
       });
       try {
-        const r = await processAncWebhook(db, hospitalId, ancValidation.payload, sseManager);
+        const r = await processAncWebhook(
+          db,
+          hospitalId,
+          { ...ancValidation.payload, labsTruncated: body.anc?.labsTruncated === true },
+          sseManager,
+        );
         result.anc = {
           processed: r.patientsProcessed,
           downgradesBlocked: r.downgradesBlocked,
           visitConflicts: r.visitConflicts,
           fieldOverflows: r.fieldOverflows,
+          labs: r.labs,
         };
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_anc',
@@ -377,6 +385,10 @@ export async function POST(request: NextRequest) {
             downgradesBlocked: r.downgradesBlocked,
             visitConflicts: r.visitConflicts,
             fieldOverflows: r.fieldOverflows,
+            labsUpserted: r.labs.upserted,
+            labsUnchanged: r.labs.unchanged,
+            labsSkipped: r.labs.skipped,
+            labsUnclassified: r.labs.unclassified,
           },
         });
         // WHO containment T6 — non-zero means the ingest pipeline silently
