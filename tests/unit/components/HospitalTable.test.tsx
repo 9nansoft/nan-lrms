@@ -1,6 +1,6 @@
 // HospitalTable component tests — updated 2026-04-21 for the redesigned
 // dense-list layout (no <table> rows; div grid with sort chips).
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { HospitalTable } from '@/components/dashboard/HospitalTable';
 import { ConnectionStatus, HospitalLevel } from '@/types/domain';
@@ -41,6 +41,16 @@ const sampleHospitals: DashboardHospital[] = [
 describe('HospitalTable', () => {
   beforeEach(() => {
     mockPush.mockClear();
+    // Each row renders its sync age ("5m", "303d") from Date.now(). Pin the
+    // clock 5 minutes after H001's fixed lastSyncAt so that text doesn't
+    // change with the calendar — once it reached "303d" it collided with the
+    // count matchers below. Only Date is faked; React keeps real timers.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-15T10:05:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders hospital rows', () => {
