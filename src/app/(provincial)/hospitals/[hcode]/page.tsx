@@ -51,6 +51,7 @@ import type {
   AncRiskEntry,
 } from '@/types/api';
 import { ArrowLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { serologyTile } from '@/services/anc-lab-presentation';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -1015,10 +1016,17 @@ function AncPreview({ journeyId, hcode }: { journeyId: string; hcode: string }) 
                 ? `${journey.bloodGroup} ${journey.rhFactor === 'NEG' ? 'Rh-' : journey.rhFactor === 'POS' ? 'Rh+' : ''}`.trim()
                 : null
             }
+            alarm={journey.rhFactor === 'NEG'}
           />
-          <LabCell label="HBSAG" value={journey.hbsagResult} />
-          <LabCell label="VDRL" value={journey.vdrlResult} />
-          <LabCell label="HIV" value={journey.hivResult} />
+          <LabCell label="HBSAG" value={journey.hbsagResult} alarmIfMatches={['POS']} />
+          <LabCell
+            label="VDRL"
+            {...serologyCell(journey.vdrlResult, 'VDRL_RPR', data.serologyWithheld)}
+          />
+          <LabCell
+            label="HIV"
+            {...serologyCell(journey.hivResult, 'HIV', data.serologyWithheld)}
+          />
           <LabCell label="OGTT" value={journey.ogttResult} alarmIfMatches={['ABNORMAL', 'POS']} />
           <LabCell label="DCIP" value={journey.dcipResult} alarmIfMatches={['POS']} />
           <LabCell label="HbE" value={journey.hbEResult} alarmIfMatches={['POS']} />
@@ -1029,16 +1037,23 @@ function AncPreview({ journeyId, hcode }: { journeyId: string; hcode: string }) 
   );
 }
 
+function serologyCell(...args: Parameters<typeof serologyTile>) {
+  const tile = serologyTile(...args);
+  return { value: tile.value ?? tile.statusLabel, alarm: tile.status === 'abnormal' };
+}
+
 function LabCell({
   label,
   value,
   alarmIfMatches,
+  alarm = false,
 }: {
   label: string;
   value: string | null | undefined;
   alarmIfMatches?: string[];
+  alarm?: boolean;
 }) {
-  const isAlarm = !!value && (alarmIfMatches ?? []).includes(value);
+  const isAlarm = !!value && (alarm || (alarmIfMatches ?? []).includes(value));
   const isPending = value === 'PENDING';
   const display = value ?? '—';
   return (

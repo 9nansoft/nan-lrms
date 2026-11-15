@@ -24,6 +24,11 @@ import { KpiTip } from '@/components/shared/KpiTip';
 import { FlagChip } from '@/components/shared/FlagChip';
 import { IncompleteAssessmentMarker } from '@/components/shared/IncompleteAssessmentMarker';
 import { STATUS_META, URGENCY_META } from '@/components/referrals/chips';
+import { Sparkline } from '@/components/charts/Sparkline';
+import { LabTile } from '@/components/patient/LabTile';
+import { codedTileStatus, serologyTile } from '@/services/anc-lab-presentation';
+import { ANC_LAB_SEROLOGY_WITHHELD_NOTE } from '@/config/anc-lab-display';
+import { JourneyLabPanel } from '@/components/patient/JourneyLabPanel';
 import {
   BP_SYS_HIGH,
   BP_SYS_AMBER,
@@ -205,6 +210,7 @@ interface VaccineRecord {
 }
 
 interface JourneyDetailResponse {
+  serologyWithheld?: boolean;
   journey: Journey;
   ancVisits: AncVisit[];
   latestRisk: LatestRisk | null;
@@ -437,77 +443,6 @@ function LabResult({
   );
 }
 
-// Serology tile for the labs panel — wider click-target with a clear
-// normal/abnormal color-coded status line. Abnormal tiles use a saturated
-// red background + white-on-red value with a warning icon so they pop out
-// of a row of otherwise-normal serology.
-function LabTile({
-  label,
-  value,
-  status,
-}: {
-  label: string;
-  value: string | null;
-  status: 'normal' | 'abnormal' | 'missing';
-}) {
-  if (status === 'abnormal') {
-    return (
-      <div
-        className="flex flex-col gap-0.5 border px-2.5 py-1.5"
-        style={{
-          borderColor: 'var(--risk-high)',
-          background: 'rgba(239, 68, 68, 0.14)',
-          boxShadow: 'inset 3px 0 0 var(--risk-high)',
-        }}
-      >
-        <div
-          className="inline-flex items-center gap-1 font-mono text-caption font-bold uppercase tracking-[0.12em]"
-          style={{ color: 'var(--risk-high)' }}
-        >
-          <AlertTriangle className="h-2.5 w-2.5" />
-          {label}
-        </div>
-        <div
-          className="inline-flex w-fit items-center rounded-sm px-1.5 py-0.5 font-mono text-caption font-bold tabular-nums text-white"
-          style={{ background: 'var(--risk-high)' }}
-        >
-          {value ?? '—'}
-        </div>
-      </div>
-    );
-  }
-  const palette =
-    status === 'normal'
-      ? {
-          fg: 'var(--ink-navy)',
-          accent: 'var(--risk-low)',
-          bg: 'rgba(34, 197, 94, 0.06)',
-        }
-      : {
-          fg: 'var(--ink-navy-muted)',
-          accent: 'var(--ink-navy-muted)',
-          bg: 'white',
-        };
-  return (
-    <div
-      className="flex flex-col gap-0.5 border px-2.5 py-1.5"
-      style={{
-        borderColor: 'var(--rule-strong)',
-        borderLeftColor: palette.accent,
-        borderLeftWidth: 3,
-        background: palette.bg,
-      }}
-    >
-      <div className="font-mono text-caption uppercase tracking-[0.12em] text-[var(--ink-navy-muted)]">
-        {label}
-      </div>
-      <div className="font-mono text-caption font-bold tabular-nums" style={{ color: palette.fg }}>
-        {value ?? '—'}
-      </div>
-    </div>
-  );
-}
-
 const DANGER_LABEL_TH: Record<string, string> = {
   severe_headache: 'ปวดศีรษะรุนแรง',
   blurred_vision: 'ตาพร่ามัว',
@@ -656,82 +591,6 @@ function MetricTile({
         {sub && <div className="font-mono text-caption text-[var(--ink-navy-muted)]">{sub}</div>}
       </div>
     </div>
-  );
-}
-
-// ─── Inline sparkline (no external chart lib for tiny trends) ─────────────
-//
-// Renders a polyline + dots for a small time-series of numbers. Values that
-// fall outside [lowBand, highBand] render the dot red so a clinician can
-// spot an abnormal point at a glance without reading exact numbers.
-function Sparkline({
-  values,
-  width = 140,
-  height = 34,
-  lowBand,
-  highBand,
-  color = 'var(--accent-navy)',
-}: {
-  values: Array<number | null>;
-  width?: number;
-  height?: number;
-  lowBand?: number;
-  highBand?: number;
-  color?: string;
-}) {
-  const pts = values.filter((v): v is number => v != null);
-  if (pts.length < 1) {
-    return <span className="font-mono text-caption text-[var(--ink-navy-muted)]">—</span>;
-  }
-  const min = Math.min(...pts, lowBand ?? Infinity);
-  const max = Math.max(...pts, highBand ?? -Infinity);
-  const span = max - min || 1;
-  const pad = 4;
-  const w = width - pad * 2;
-  const h = height - pad * 2;
-  const x = (i: number) => pad + (values.length === 1 ? w / 2 : (i / (values.length - 1)) * w);
-  const y = (v: number) => pad + h - ((v - min) / span) * h;
-  const polyPts = values
-    .map((v, i) => (v == null ? null : `${x(i)},${y(v)}`))
-    .filter(Boolean)
-    .join(' ');
-  // Normal band shading when both lowBand and highBand are provided.
-  const bandY0 = highBand != null ? y(highBand) : null;
-  const bandY1 = lowBand != null ? y(lowBand) : null;
-  return (
-    <svg width={width} height={height} className="block" role="img" aria-label="trend">
-      {bandY0 != null && bandY1 != null && (
-        <rect
-          x={0}
-          y={Math.min(bandY0, bandY1)}
-          width={width}
-          height={Math.abs(bandY1 - bandY0)}
-          fill="var(--risk-low)"
-          opacity={0.08}
-        />
-      )}
-      <polyline
-        points={polyPts}
-        fill="none"
-        stroke={color}
-        strokeWidth={1.4}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      {values.map((v, i) => {
-        if (v == null) return null;
-        const abnormal = (lowBand != null && v < lowBand) || (highBand != null && v > highBand);
-        return (
-          <circle
-            key={i}
-            cx={x(i)}
-            cy={y(v)}
-            r={abnormal ? 2.4 : 1.8}
-            fill={abnormal ? 'var(--risk-high)' : color}
-          />
-        );
-      })}
-    </svg>
   );
 }
 
@@ -1138,7 +997,9 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         <Icon className="h-10 w-10 text-[var(--ink-navy-muted)] opacity-50" />
         <p className="font-mono text-caption text-[var(--ink-navy-muted)]">{heading}</p>
         {error ? (
-          <p className="max-w-md text-center font-mono text-caption text-danger-text">{apiMessage}</p>
+          <p className="max-w-md text-center font-mono text-caption text-danger-text">
+            {apiMessage}
+          </p>
         ) : null}
         <button
           onClick={() => router.back()}
@@ -1151,7 +1012,8 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
     );
   }
 
-  const { journey, ancVisits, latestRisk, ancAssessment, referrals, newborns } = data;
+  const { journey, ancVisits, latestRisk, ancAssessment, referrals, newborns, serologyWithheld } =
+    data;
   const riskColor = ANC_RISK_COLOR[journey.ancRiskLevel ?? ''] ?? 'var(--ink-navy-muted)';
   const riskLabel = journey.ancRiskLevel
     ? (ANC_RISK_LABEL_TH[journey.ancRiskLevel] ?? journey.ancRiskLevel)
@@ -1215,7 +1077,8 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         className="px-5 py-3"
         style={{
           borderBottom: '1px solid var(--rule-strong)',
-          background: 'linear-gradient(90deg, var(--brand-soft) 0%, var(--surface-page) 70%, var(--surface-card) 100%)',
+          background:
+            'linear-gradient(90deg, var(--brand-soft) 0%, var(--surface-page) 70%, var(--surface-card) 100%)',
         }}
       >
         <div className="text-label text-brand">ข้อมูลการตั้งครรภ์รายบุคคล</div>
@@ -1538,7 +1401,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         {/* ─── LEFT: timeline + trends + labs ─── */}
         <div className="flex min-w-0 flex-col gap-5">
           {/* 01 — Vital trends (new) */}
-          <SectionCard title="แนวโน้มสัญญาณชีพ" description={`${derived?.visitsChrono.length ?? 0} ครั้ง · เรียงจากเก่าไปใหม่ (ซ้าย → ขวา)`}>
+          <SectionCard
+            title="แนวโน้มสัญญาณชีพ"
+            description={`${derived?.visitsChrono.length ?? 0} ครั้ง · เรียงจากเก่าไปใหม่ (ซ้าย → ขวา)`}
+          >
             <div className="mt-2 border bg-white" style={{ borderColor: 'var(--rule-strong)' }}>
               {(derived?.visitsChrono.length ?? 0) === 0 ? (
                 <div className="px-4 py-8 text-center font-mono text-caption text-[var(--ink-navy-muted)]">
@@ -1853,22 +1719,26 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           </SectionCard>
 
           {/* 03 — Labs + screening + PMH (RTCOG OB 66-029 booking panel) */}
-          <SectionCard title="ผลตรวจทางห้องปฏิบัติการ คัดกรอง และโรคประจำตัว" actions={(derived?.labFlags.length ?? 0) > 0 ? (
-                  <span className="flex flex-wrap items-center gap-1">
-                    {derived!.labFlags.map((f) => (
-                      <span
-                        key={f.key}
-                        className="inline-flex items-center border px-1.5 py-0.5 font-mono text-caption font-semibold tracking-[0.06em]"
-                        style={{ color: f.color, borderColor: f.color }}
-                      >
-                        {f.label}
-                      </span>
-                    ))}
-                  </span>
-                ) : (
-                  <span className="text-label text-ok-text">ไม่พบค่าผิดปกติ</span>
-                )}>
-
+          <SectionCard
+            title="ผลตรวจทางห้องปฏิบัติการ คัดกรอง และโรคประจำตัว"
+            actions={
+              (derived?.labFlags.length ?? 0) > 0 ? (
+                <span className="flex flex-wrap items-center gap-1">
+                  {derived!.labFlags.map((f) => (
+                    <span
+                      key={f.key}
+                      className="inline-flex items-center border px-1.5 py-0.5 font-mono text-caption font-semibold tracking-[0.06em]"
+                      style={{ color: f.color, borderColor: f.color }}
+                    >
+                      {f.label}
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                <span className="text-label text-ok-text">ไม่พบค่าผิดปกติ</span>
+              )
+            }
+          >
             {/* Iron contraindication banner — RTCOG: no iron in Hb H / β-thal */}
             {derived?.ironContra && (
               <div
@@ -1908,46 +1778,20 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 <LabTile
                   label="Rh"
                   value={journey.rhFactor}
-                  status={
-                    !journey.rhFactor
-                      ? 'missing'
-                      : journey.rhFactor === 'NEG'
-                        ? 'abnormal'
-                        : 'normal'
-                  }
+                  status={codedTileStatus(journey.rhFactor, 'POS', 'NEG')}
                 />
                 <LabTile
                   label="HBsAg"
                   value={journey.hbsagResult}
-                  status={
-                    !journey.hbsagResult
-                      ? 'missing'
-                      : journey.hbsagResult === 'POS'
-                        ? 'abnormal'
-                        : 'normal'
-                  }
+                  status={codedTileStatus(journey.hbsagResult, 'NEG', 'POS')}
                 />
                 <LabTile
                   label="VDRL"
-                  value={journey.vdrlResult}
-                  status={
-                    !journey.vdrlResult
-                      ? 'missing'
-                      : journey.vdrlResult === 'POS'
-                        ? 'abnormal'
-                        : 'normal'
-                  }
+                  {...serologyTile(journey.vdrlResult, 'VDRL_RPR', serologyWithheld)}
                 />
                 <LabTile
                   label="HIV"
-                  value={journey.hivResult}
-                  status={
-                    !journey.hivResult
-                      ? 'missing'
-                      : journey.hivResult === 'POS'
-                        ? 'abnormal'
-                        : 'normal'
-                  }
+                  {...serologyTile(journey.hivResult, 'HIV', serologyWithheld)}
                 />
                 <LabTile
                   label="OGTT"
@@ -1982,24 +1826,12 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 <LabTile
                   label="DCIP"
                   value={journey.dcipResult ?? null}
-                  status={
-                    !journey.dcipResult
-                      ? 'missing'
-                      : journey.dcipResult === 'POS'
-                        ? 'abnormal'
-                        : 'normal'
-                  }
+                  status={codedTileStatus(journey.dcipResult, 'NEG', 'POS')}
                 />
                 <LabTile
                   label="Hb E"
                   value={journey.hbEResult ?? null}
-                  status={
-                    !journey.hbEResult
-                      ? 'missing'
-                      : journey.hbEResult === 'POS'
-                        ? 'abnormal'
-                        : 'normal'
-                  }
+                  status={codedTileStatus(journey.hbEResult, 'NEG', 'POS')}
                 />
                 <LabTile
                   label="THAL TYPE"
@@ -2059,13 +1891,7 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                 <LabTile
                   label="GBS (35-37w)"
                   value={journey.gbsResult ?? null}
-                  status={
-                    !journey.gbsResult
-                      ? 'missing'
-                      : journey.gbsResult === 'POS'
-                        ? 'abnormal'
-                        : 'normal'
-                  }
+                  status={codedTileStatus(journey.gbsResult, 'NEG', 'POS')}
                 />
               </div>
             </div>
@@ -2178,8 +2004,13 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
             })()}
           </SectionCard>
 
+          <JourneyLabPanel journeyId={journeyId} />
+
           {/* 04 — Immunization (RTCOG: Tdap every pregnancy 27-36w) */}
-          <SectionCard title="วัคซีน" description={`Tdap ${derived?.immunization.tdap.length ?? 0} ครั้ง · ไข้หวัดใหญ่ ${derived?.immunization.influenza.length ?? 0} ครั้ง`}>
+          <SectionCard
+            title="วัคซีน"
+            description={`Tdap ${derived?.immunization.tdap.length ?? 0} ครั้ง · ไข้หวัดใหญ่ ${derived?.immunization.influenza.length ?? 0} ครั้ง`}
+          >
             <div
               className="mt-2 grid grid-cols-4 gap-0 border bg-white"
               style={{ borderColor: 'var(--rule-strong)' }}
@@ -2216,7 +2047,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
           </SectionCard>
 
           {/* 05 — Ultrasound timeline (T1 dating, T2 anatomy, T3 wellbeing) */}
-          <SectionCard title="อัลตราซาวด์และสุขภาพทารกในครรภ์" description="ไตรมาส 1 กำหนดอายุครรภ์ · ไตรมาส 2 ตรวจโครงสร้าง · ไตรมาส 3 ประเมินสุขภาพทารก">
+          <SectionCard
+            title="อัลตราซาวด์และสุขภาพทารกในครรภ์"
+            description="ไตรมาส 1 กำหนดอายุครรภ์ · ไตรมาส 2 ตรวจโครงสร้าง · ไตรมาส 3 ประเมินสุขภาพทารก"
+          >
             <div
               className="mt-2 grid grid-cols-1 gap-0 border bg-white md:grid-cols-3"
               style={{ borderColor: 'var(--rule-strong)' }}
@@ -2424,7 +2258,10 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
         </div>
 
         {/* ─── RIGHT: sticky clinical summary rail ─── */}
-        <aside data-testid="journey-rail" className="min-w-0 overflow-hidden rounded-2xl bg-surface-card shadow-soft @min-[1160px]:sticky @min-[1160px]:top-[calc(var(--app-header-h,0px)_+_16px)]">
+        <aside
+          data-testid="journey-rail"
+          className="min-w-0 overflow-hidden rounded-2xl bg-surface-card shadow-soft @min-[1160px]:sticky @min-[1160px]:top-[calc(var(--app-header-h,0px)_+_16px)]"
+        >
           <div className="flex flex-col @min-[1160px]:max-h-[calc(100dvh_-_var(--app-header-h,0px)_-_32px)] @min-[1160px]:overflow-y-auto">
             {/* Risk assessment — always shown; extra emphasis when HR2+ */}
             <div
@@ -2507,9 +2344,17 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
                         ))}
                       </ul>
                     </div>
-                  ) : (
+                  ) : serologyWithheld ? null : (
                     <div className="mt-2 font-mono text-caption text-[var(--ink-navy-muted)]">
                       ไม่มีปัจจัยเสี่ยง
+                    </div>
+                  )}
+                  {serologyWithheld && (
+                    <div
+                      data-testid="serology-withheld-note"
+                      className="mt-2 text-caption leading-snug text-[var(--ink-navy-muted)]"
+                    >
+                      {ANC_LAB_SEROLOGY_WITHHELD_NOTE}
                     </div>
                   )}
                 </>
@@ -2846,7 +2691,8 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ journe
       {/* ─── Footer ─── */}
       <div className="flex flex-wrap justify-between gap-2 border-t border-border bg-surface-card px-5 py-2 text-caption text-ink-muted">
         <span>
-          รหัสการตั้งครรภ์ <span className="font-semibold tabular-nums text-ink">{journey.id.slice(0, 8)}</span>
+          รหัสการตั้งครรภ์{' '}
+          <span className="font-semibold tabular-nums text-ink">{journey.id.slice(0, 8)}</span>
         </span>
         <span>รีเฟรชอัตโนมัติทุก {REFRESH_INTERVAL_MS / 1000} วินาที</span>
       </div>

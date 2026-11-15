@@ -53,6 +53,14 @@ const COUNT_QUERIES: Array<{ key: string; sql: string; placeholders: 1 | 2 | 3 }
                               WHERE hospital_id = ? OR current_hospital_id = ?)`,
   },
   {
+    key: 'cached_anc_lab_results',
+    placeholders: 3,
+    sql: `SELECT COUNT(*) AS cnt FROM cached_anc_lab_results
+        WHERE hospital_id = ?
+           OR journey_id IN (SELECT id FROM maternal_journeys
+                              WHERE hospital_id = ? OR current_hospital_id = ?)`,
+  },
+  {
     key: 'cached_anc_risks',
     placeholders: 2,
     sql: `SELECT COUNT(*) AS cnt FROM cached_anc_risks
@@ -196,6 +204,13 @@ export async function DELETE(
     ]);
     await db.execute(
       `DELETE FROM cached_anc_visits
+        WHERE hospital_id = ?
+           OR journey_id IN (SELECT id FROM maternal_journeys
+                              WHERE hospital_id = ? OR current_hospital_id = ?)`,
+      [hospitalId, hospitalId, hospitalId],
+    );
+    await db.execute(
+      `DELETE FROM cached_anc_lab_results
         WHERE hospital_id = ?
            OR journey_id IN (SELECT id FROM maternal_journeys
                               WHERE hospital_id = ? OR current_hospital_id = ?)`,

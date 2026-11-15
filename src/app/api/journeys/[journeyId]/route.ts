@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDatabase } from '@/db/connection';
-import { auth } from '@/lib/auth';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
-import { getJourneyDetail } from '@/services/journey-list';
+import { requireSession } from '@/lib/session-guard';
+import { readJourneyDetailForHospital } from '@/services/journey-access';
 
 export async function GET(
   _request: NextRequest,
@@ -13,10 +13,13 @@ export async function GET(
 ) {
   try {
     await ensureInit();
+    const session = await requireSession();
+    if (session instanceof NextResponse) return session;
+
     const { journeyId } = await params;
     const db = await getDatabase();
 
-    const detail = await getJourneyDetail(db, journeyId);
+    const detail = await readJourneyDetailForHospital(db, journeyId, session.user.hospitalCode);
     if (detail === null) {
       return NextResponse.json(
         { error: { code: 'NOT_FOUND', message: 'ไม่พบข้อมูลการตั้งครรภ์', details: null } },
@@ -25,17 +28,16 @@ export async function GET(
     }
 
     // PDPA access log — fire-and-forget (tryLogAccess never throws).
-    const session = await auth();
-    if (session?.user) {
-      await tryLogAccess(db, {
-        ...auditActorFromSession(session),
-        action: 'VIEW_JOURNEY',
-        resourceType: 'JOURNEY',
-        resourceId: journeyId,
-      });
-    }
+    await tryLogAccess(db, {
+      ...auditActorFromSession(session),
+      action: 'VIEW_JOURNEY',
+      resourceType: 'JOURNEY',
+      resourceId: journeyId,
+      metadata: { serologyWithheld: detail.serologyWithheld },
+    });
 
-    return NextResponse.json(detail);
+    // Can carry HIV and syphilis results, so it must not sit in a shared cache.
+    return NextResponse.json(detail, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     logger.error('journey_detail_api_failed', { error });
     // In non-prod, surface the underlying error message so the client error

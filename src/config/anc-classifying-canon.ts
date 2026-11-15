@@ -50,6 +50,11 @@ export interface AncClassificationResult {
   labels: string[];
 }
 
+/** The label stored for an item id that is not in the canon. */
+export function ancClassifyingFallbackLabel(id: number): string {
+  return `รายการเสี่ยงรหัส ${id}`;
+}
+
 /**
  * Classify a woman from her checked person_anc_classifying item IDs.
  * Highest level wins; unknown items fall back to HR1 (safe default, same as
@@ -61,7 +66,7 @@ export function classifyAncItems(itemIds: number[]): AncClassificationResult {
   for (const id of itemIds) {
     const item = BY_ID.get(id);
     const level = item?.level ?? 'HR1';
-    labels.push(item?.labelTh ?? `รายการเสี่ยงรหัส ${id}`);
+    labels.push(item?.labelTh ?? ancClassifyingFallbackLabel(id));
     if (LEVEL_ORDER[level] > LEVEL_ORDER[max]) max = level;
   }
   return { level: max, labels };

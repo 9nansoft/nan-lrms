@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createHash, randomBytes } from 'crypto';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
+import { plausibleHbGDl, plausibleHctPct } from '@/config/lab-plausibility';
 import {
   upsertCachedPatients,
   detectChanges,
@@ -31,6 +32,18 @@ import { resolveReferralDestination } from '@/services/referral-destination';
 import { CooperativeYielder } from '@/lib/event-loop';
 import { diagnoseCid, describeCidFailure, isValidThaiCidChecksum } from '@/lib/cid';
 import { toIsoDate } from '@/lib/dates';
+import type { AncLabPayloadRow } from '@/services/anc-lab-classifier';
+import {
+  emptyAncLabStats,
+  loadExistingLabHashes,
+  loadVisitLabValues,
+  refreshJourneyLabColumns,
+  refreshVisitLabValues,
+  sanitizeAncLabRows,
+  upsertJourneyLabResults,
+  type AncLabIngestStats,
+  type VisitLabValues,
+} from '@/services/anc-lab-ingest';
 import { isMaternalScreenIngestEnabled, isMaternalScreenEventsEnabled } from '@/lib/feature-flags';
 import { normalizeProteinuriaGrade } from '@/services/maternal-screening';
 import {
@@ -284,6 +297,8 @@ export interface WebhookAncPatient {
   amphurCode?: string; // อำเภอ 2-digit
   tambonCode?: string; // ตำบล 2-digit
   visits?: WebhookAncVisit[];
+  /** Raw HOSxP lab rows. Older clients omit this; absence changes no lab data. */
+  labResults?: AncLabPayloadRow[];
   // WHO 2016 journey-level data (L2).
   bloodGroup?: string | null; // A / B / AB / O
   rhFactor?: string | null; // POS / NEG
@@ -330,6 +345,8 @@ export interface WebhookAncPayload {
   type: 'anc_data';
   hospitalCode: string;
   patients: WebhookAncPatient[];
+  /** A lab query hit its row limit at the sender, so labs may be partial. */
+  labsTruncated?: boolean;
 }
 
 /**
@@ -372,6 +389,8 @@ export interface WebhookAncResult {
    * and the full value remains in the source EHR.
    */
   fieldOverflows: number;
+  /** Lab rows handled this push; `skipped` were malformed or over the cap. */
+  labs: AncLabIngestStats;
 }
 
 // ─── Referral webhook payload ───
@@ -1765,6 +1784,15 @@ export async function processAncWebhook(
   };
   let skippedInvalidCidChecksum = 0;
 
+  const labStats: AncLabIngestStats = emptyAncLabStats();
+  // Both read once per push: they span the hospital, so per-patient queries
+  // would multiply load on the path behind the page-latency incident.
+  let existingLabHashes: Map<string, string> | null = null;
+  let visitLabValues: VisitLabValues | null = null;
+  if (payload.labsTruncated) {
+    logger.warn('anc_lab_pull_truncated', { hospitalId, hcode });
+  }
+
   for (const patient of payload.patients) {
     await yielder.tick();
     // Per-row Thai-CID checksum gate. validateAncPayload (called by both
@@ -1802,6 +1830,9 @@ export async function processAncWebhook(
         // row pointing at a journey that no longer exists.
         await db.transaction(async (tx) => {
           await tx.execute(`DELETE FROM cached_anc_visits WHERE journey_id = ?`, [existing.id]);
+          await tx.execute(`DELETE FROM cached_anc_lab_results WHERE journey_id = ?`, [
+            existing.id,
+          ]);
           await tx.execute(`DELETE FROM cached_anc_risks WHERE journey_id = ?`, [existing.id]);
           await tx.execute(`DELETE FROM cached_newborns WHERE journey_id = ?`, [existing.id]);
           await tx.execute(`DELETE FROM cached_referrals WHERE journey_id = ?`, [existing.id]);
@@ -2047,6 +2078,57 @@ export async function processAncWebhook(
       return id;
     });
 
+    // Labs go first so this push's hemoglobin and hematocrit reach its visits.
+    if (patient.labResults !== undefined) {
+      const { rows: labRows, skipped: skippedLabRows } = sanitizeAncLabRows(patient.labResults);
+      labStats.received += labRows.length;
+      labStats.skipped += skippedLabRows;
+      if (labRows.length > 0) {
+        existingLabHashes ??= await loadExistingLabHashes(db, hospitalId);
+        const hashes = existingLabHashes;
+        let upsertedForPatient = 0;
+        // Its own top-level transaction, so a failure rolls back only this
+        // patient's labs and returns a clean connection: the journey above has
+        // committed and the visits below still run. The message is not logged
+        // because Postgres quotes the offending value in it.
+        try {
+          const outcome = await db.transaction(async (tx) => {
+            const stats = await upsertJourneyLabResults(tx, {
+              hospitalId,
+              journeyId,
+              rows: labRows,
+              existingHashes: hashes,
+              encryptionKey,
+            });
+            if (stats.upserted > 0) await refreshJourneyLabColumns(tx, journeyId);
+            return stats;
+          });
+          for (const [key, hash] of outcome.writtenHashes) hashes.set(key, hash);
+          upsertedForPatient = outcome.upserted;
+          labStats.upserted += outcome.upserted;
+          labStats.unchanged += outcome.unchanged;
+          labStats.unclassified += outcome.unclassified;
+          labStats.concealed += outcome.concealed;
+        } catch (err) {
+          labStats.skipped += labRows.length;
+          const code = (err as { code?: unknown } | null)?.code;
+          logger.error('anc_lab_upsert_failed', {
+            hospitalId,
+            journeyId,
+            rows: labRows.length,
+            code: typeof code === 'string' ? code : 'unknown',
+          });
+        }
+        if (upsertedForPatient > 0 && visitLabValues) {
+          await refreshVisitLabValues(db, hospitalId, journeyId, visitLabValues);
+        }
+      }
+    }
+    if (patient.visits && patient.visits.length > 0) {
+      visitLabValues ??= await loadVisitLabValues(db, hospitalId);
+    }
+    const journeyVisitLabs = visitLabValues?.get(journeyId);
+
     // Persist ANC visit records — HOSPITAL-SCOPED replace (WHO containment T5).
     // The journey is shared cross-hospital via cid_hash, so an UNSCOPED delete
     // let hospital B's push erase hospital A's visit rows and re-stamp them
@@ -2103,6 +2185,7 @@ export async function processAncWebhook(
           // duplicate never aborts (and rolls back) the whole transaction.
           if (day && insertedDays.has(day)) continue;
           if (day) insertedDays.add(day);
+          const visitLabs = day ? journeyVisitLabs?.get(day) : undefined;
           await tx.execute(
             `INSERT INTO cached_anc_visits
              (id, journey_id, hospital_id, visit_date, visit_number, ga_weeks,
@@ -2138,8 +2221,8 @@ export async function processAncWebhook(
               fitOrNull(visit.engagement, 50, 'engagement'),
               fitOrNull(visit.urineProtein, 50, 'urine_protein'),
               fitOrNull(visit.urineGlucose, 50, 'urine_glucose'),
-              visit.hbGDl ?? null,
-              visit.hctPct ?? null,
+              plausibleHbGDl(visitLabs?.hb ?? visit.hbGDl),
+              plausibleHctPct(visitLabs?.hct ?? visit.hctPct),
               visit.ttDoseNo ?? null,
               // Postgres is strict on boolean columns — must be true/false,
               // not 1/0. SQLite is lenient; we normalize here for both paths.
@@ -2335,6 +2418,10 @@ export async function processAncWebhook(
     [new Date().toISOString(), hospitalId],
   );
 
+  if (labStats.received > 0 || labStats.skipped > 0) {
+    logger.info('anc_lab_ingest_summary', { hospitalId, hcode, ...labStats });
+  }
+
   if (skippedInvalidCidChecksum > 0) {
     logger.info('anc_webhook_run_summary', {
       hospitalId,
@@ -2375,6 +2462,7 @@ export async function processAncWebhook(
     downgradesBlocked,
     visitConflicts,
     fieldOverflows,
+    labs: labStats,
   };
 }
 
