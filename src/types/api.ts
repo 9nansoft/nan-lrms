@@ -603,6 +603,11 @@ export interface JourneyDetailResponse {
     /** When this journey row was last written by the HOSxP sync/webhook. */
     syncedAt: string | null;
   };
+  /**
+   * True when this viewer's hospital may not see HIV or syphilis status, so
+   * those fields are blanked. A blank must then not read as "not tested".
+   */
+  serologyWithheld?: boolean;
   ancVisits: AncVisitEntry[];
   latestRisk: AncRiskEntry | null;
   /**

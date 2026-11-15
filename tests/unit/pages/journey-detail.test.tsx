@@ -1,7 +1,8 @@
 // Journey detail page — behavior tests for the 2026-07-09 redesign:
 // HOSxP sync freshness stamp, labor-admission cross-link, Thai risk-rule
 // labels (instead of raw rule IDs), and the high-risk history panel.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ANC_LAB_SEROLOGY_WITHHELD_NOTE } from '@/config/anc-lab-display';
 import { render, screen, within, act } from '@testing-library/react';
 import { Suspense } from 'react';
 import { SWRConfig } from 'swr';
@@ -354,10 +355,25 @@ describe('JourneyDetailPage — sub-project 4 chrome', () => {
 
   it('main sections are Thai SectionCards, not SectionLabels', async () => {
     await renderPage();
-    for (const name of ['แนวโน้มสัญญาณชีพ', 'ประวัติการฝากครรภ์', 'ผลตรวจทางห้องปฏิบัติการ คัดกรอง และโรคประจำตัว', 'วัคซีน', 'อัลตราซาวด์และสุขภาพทารกในครรภ์']) {
+    for (const name of [
+      'แนวโน้มสัญญาณชีพ',
+      'ประวัติการฝากครรภ์',
+      'ผลตรวจทางห้องปฏิบัติการ คัดกรอง และโรคประจำตัว',
+      'วัคซีน',
+      'อัลตราซาวด์และสุขภาพทารกในครรภ์',
+    ]) {
       expect(await screen.findByRole('region', { name })).toBeInTheDocument();
     }
-    for (const en of ['PROVINCIAL REGISTRY', 'JOURNEY DETAIL', 'Vital trends', 'ANC visit timeline', 'Immunization', 'JOURNEY ID', 'REFRESHING EVERY', 'Risk ·']) {
+    for (const en of [
+      'PROVINCIAL REGISTRY',
+      'JOURNEY DETAIL',
+      'Vital trends',
+      'ANC visit timeline',
+      'Immunization',
+      'JOURNEY ID',
+      'REFRESHING EVERY',
+      'Risk ·',
+    ]) {
       expect(screen.queryByText(new RegExp(en))).toBeNull();
     }
     expect(screen.getByText(/รีเฟรชอัตโนมัติทุก/)).toBeInTheDocument();
@@ -375,5 +391,93 @@ describe('JourneyDetailPage — sub-project 4 chrome', () => {
     expect(await screen.findByText('อายุครรภ์ (GA)')).toBeInTheDocument();
     expect(screen.getByText('กำหนดคลอด (EDC)')).toBeInTheDocument();
     expect(screen.getByText('นัดถัดไป')).toBeInTheDocument();
+  });
+});
+
+// A journey column can hold PENDING or free text from person_anc; only an exact
+// NEG may read as a normal result.
+describe('JourneyDetailPage — serology tiles', () => {
+  const tileStatus = (label: string) =>
+    screen.getByText(label).closest('[data-status]')?.getAttribute('data-status');
+
+  describe('when the server withholds serology', () => {
+    const shared = fixture as unknown as Record<string, unknown>;
+    const risk = fixture.latestRisk as unknown as { triggeredRules: string[] };
+    const rulesBefore = risk.triggeredRules;
+
+    beforeEach(() => {
+      shared.serologyWithheld = true;
+      risk.triggeredRules = [];
+    });
+
+    afterEach(() => {
+      delete shared.serologyWithheld;
+      risk.triggeredRules = rulesBefore;
+    });
+
+    it.each([['VDRL'], ['HIV']])('marks the %s tile restricted, not missing', async (label) => {
+      await renderPage();
+      expect(tileStatus(label)).toBe('concealed');
+    });
+
+    it('does not claim there are no risk factors, and says why some are hidden', async () => {
+      await renderPage();
+      expect(screen.queryByText('ไม่มีปัจจัยเสี่ยง')).toBeNull();
+      expect(screen.getByTestId('serology-withheld-note').textContent).toBe(
+        ANC_LAB_SEROLOGY_WITHHELD_NOTE,
+      );
+    });
+  });
+
+  it('shows no restriction note when serology is visible', async () => {
+    await renderPage();
+    expect(screen.queryByTestId('serology-withheld-note')).toBeNull();
+  });
+
+  it.each([
+    ['hbsagResult', 'HBsAg'],
+    ['dcipResult', 'DCIP'],
+    ['hbEResult', 'Hb E'],
+    ['gbsResult', 'GBS (35-37w)'],
+  ])('does not paint %s green unless it is NEG', async (field, label) => {
+    const journey = fixture.journey as Record<string, unknown>;
+    const before = journey[field];
+    journey[field] = 'Non-reactive';
+    try {
+      await renderPage();
+      expect(tileStatus(label)).toBe('neutral');
+    } finally {
+      journey[field] = before;
+    }
+  });
+
+  // person_anc free text: interpreted, because these two columns are not coded.
+  it.each([
+    ['vdrlResult', 'VDRL', 'Positive', 'abnormal'],
+    ['vdrlResult', 'VDRL', 'Reactive', 'abnormal'],
+    ['vdrlResult', 'VDRL', 'neg', 'normal'],
+    ['vdrlResult', 'VDRL', 'Non-reactive', 'normal'],
+    ['vdrlResult', 'VDRL', '-', 'neutral'],
+    ['vdrlResult', 'VDRL', '1:8', 'neutral'],
+    ['hivResult', 'HIV', 'Positive', 'abnormal'],
+    ['hivResult', 'HIV', 'Reactive', 'abnormal'],
+    ['hivResult', 'HIV', 'neg', 'normal'],
+    ['hivResult', 'HIV', 'Non-reactive', 'normal'],
+    ['hivResult', 'HIV', '-', 'neutral'],
+  ])('reads %s on the %s tile holding %j as %s', async (field, label, value, status) => {
+    const journey = fixture.journey as Record<string, unknown>;
+    const before = journey[field];
+    journey[field] = value;
+    try {
+      await renderPage();
+      expect(tileStatus(label)).toBe(status);
+    } finally {
+      journey[field] = before;
+    }
+  });
+
+  it('paints NEG normal', async () => {
+    await renderPage();
+    expect(tileStatus('HBsAg')).toBe('normal');
   });
 });

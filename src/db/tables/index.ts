@@ -13,6 +13,7 @@ import { webhookApiKeysTable } from './webhook-api-keys';
 import { maternalJourneysTable } from './maternal-journeys';
 import { cachedAncVisitsTable } from './cached-anc-visits';
 import { cachedAncRisksTable } from './cached-anc-risks';
+import { cachedAncLabResultsTable } from './cached-anc-lab-results';
 import { cachedReferralsTable } from './cached-referrals';
 import { cachedNewbornsTable } from './cached-newborns';
 import { provincesTable } from './provinces';
@@ -43,6 +44,7 @@ export {
   maternalJourneysTable,
   cachedAncVisitsTable,
   cachedAncRisksTable,
+  cachedAncLabResultsTable,
   cachedReferralsTable,
   cachedNewbornsTable,
   provincesTable,
@@ -92,6 +94,7 @@ export const ALL_TABLES: TableDefinition[] = [
   webhookApiKeysTable,
   cachedAncVisitsTable,
   cachedAncRisksTable,
+  cachedAncLabResultsTable,
   cachedReferralsTable,
   cachedNewbornsTable,
   videoCallsTable,

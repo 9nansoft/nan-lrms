@@ -38,12 +38,6 @@ const sampleHospitals: DashboardHospital[] = [
   },
 ];
 
-// The row renders lastSyncAt as a relative age ("2h", "303d", ...). Freeze the
-// clock so that text is deterministic and cannot drift into collisions with
-// the count assertions as real time passes. Only Date is faked; React's
-// timers stay real.
-const FROZEN_NOW = new Date('2026-01-15T12:00:00Z');
-
 /** The labour-count cell ("ห้องคลอด <n>") inside the named hospital's row. */
 function labourCountCell(hospitalName: string): HTMLElement {
   const row = screen.getByText(hospitalName).closest<HTMLElement>('[data-testid="hospital-row"]');
@@ -56,8 +50,12 @@ function labourCountCell(hospitalName: string): HTMLElement {
 describe('HospitalTable', () => {
   beforeEach(() => {
     mockPush.mockClear();
+    // Each row renders its sync age ("5m", "303d") from Date.now(). Pin the
+    // clock 5 minutes after H001's fixed lastSyncAt so that text doesn't
+    // change with the calendar — once it reached "303d" it collided with the
+    // count matchers below. Only Date is faked; React keeps real timers.
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(FROZEN_NOW);
+    vi.setSystemTime(new Date('2026-01-15T10:05:00Z'));
   });
 
   afterEach(() => {

@@ -31,6 +31,10 @@ const PER_HOSPITAL_TABLES = [
     key: 'cached_anc_visits',
     sql: 'SELECT hospital_id, COUNT(*) AS cnt FROM cached_anc_visits WHERE hospital_id IS NOT NULL GROUP BY hospital_id',
   },
+  {
+    key: 'cached_anc_lab_results',
+    sql: 'SELECT hospital_id, COUNT(*) AS cnt FROM cached_anc_lab_results GROUP BY hospital_id',
+  },
 ];
 
 const JOURNEY_HOSPITAL_TABLES = [
