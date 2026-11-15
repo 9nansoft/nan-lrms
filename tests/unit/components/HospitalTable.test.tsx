@@ -1,7 +1,7 @@
 // HospitalTable component tests — updated 2026-04-21 for the redesigned
 // dense-list layout (no <table> rows; div grid with sort chips).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { HospitalTable } from '@/components/dashboard/HospitalTable';
 import { ConnectionStatus, HospitalLevel } from '@/types/domain';
 import type { DashboardHospital } from '@/types/api';
@@ -37,6 +37,15 @@ const sampleHospitals: DashboardHospital[] = [
     syncBlockedReason: null,
   },
 ];
+
+/** The labour-count cell ("ห้องคลอด <n>") inside the named hospital's row. */
+function labourCountCell(hospitalName: string): HTMLElement {
+  const row = screen.getByText(hospitalName).closest<HTMLElement>('[data-testid="hospital-row"]');
+  if (!row) throw new Error(`hospital row not found for ${hospitalName}`);
+  const cell = within(row).getByText('ห้องคลอด').parentElement;
+  if (!cell) throw new Error(`labour-count cell not found for ${hospitalName}`);
+  return cell;
+}
 
 describe('HospitalTable', () => {
   beforeEach(() => {
@@ -125,8 +134,8 @@ describe('HospitalTable', () => {
 
   it('shows total count for each hospital', () => {
     render(<HospitalTable hospitals={sampleHospitals} />);
-    expect(screen.getByText(/^10/)).toBeTruthy(); // "10 act"
-    expect(screen.getByText(/^3/)).toBeTruthy();
+    expect(labourCountCell('รพ.ขอนแก่น')).toHaveTextContent(/^ห้องคลอด\s*10$/);
+    expect(labourCountCell('รพ.ชุมแพ')).toHaveTextContent(/^ห้องคลอด\s*3$/);
   });
 
   it('labels the labour count in Thai', () => {
