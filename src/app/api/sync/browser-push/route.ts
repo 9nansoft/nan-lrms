@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
       };
       ancReconcile?: { closed: number };
       partograph?: { accepted: number; skipped: number };
-      assessments?: { upserted: number; skipped: number };
+      assessments?: { upserted: number; skipped: number; failed: number };
       newborns?: { upserted: number; journeys: number; failedAns: number };
       referrals?: {
         referouts: BrowserReferoutsResult;
@@ -607,12 +607,12 @@ export async function POST(request: NextRequest) {
           // refused must not hold the form back, or the rows behind it would
           // never arrive.
           await advanceAssessmentCursors(db, hospitalId, maxPulledPkByTable(payload));
-          result.assessments = { upserted: r.upserted, skipped: r.skipped };
+          result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_assessments',
             status: 'success',
-            message: `Upserted ${r.upserted} assessment forms (${r.skipped} skipped).`,
-            counts: { upserted: r.upserted, skipped: r.skipped },
+            message: `Upserted ${r.upserted} assessment forms (${r.skipped} skipped, ${r.failed} refused by the database).`,
+            counts: { upserted: r.upserted, skipped: r.skipped, failed: r.failed },
           });
         } catch (e) {
           hadWarning = true;
