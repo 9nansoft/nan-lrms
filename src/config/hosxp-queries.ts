@@ -1198,6 +1198,38 @@ export function buildAssessmentRecordsSqlFor(
   );
 }
 
+/**
+ * The primary keys of a form above a cursor — what the SERVER asks HOSxP to
+ * confirm the pull position against. Keys only: the rows themselves were
+ * already read by the hospital's browser, and a form row is ~190 columns
+ * wide.
+ */
+export function buildAssessmentKeysSql(table: string, pkColumn: string): SqlQueryTemplate {
+  const body = `
+    SELECT ${pkColumn}
+      FROM ${table}
+     WHERE ${pkColumn} > {{CURSOR_PK}}
+     ORDER BY ${pkColumn} ASC
+     LIMIT ${ASSESSMENT_ROW_LIMIT}`;
+  return { postgresql: body, mysql: body };
+}
+
+/** {{CURSOR_PK}} substitution with a strict integer guard. */
+export function buildAssessmentKeysSqlFor(
+  table: string,
+  pkColumn: string,
+  cursorPk: string | number,
+): string {
+  const safe = String(cursorPk).trim();
+  if (!/^\d{1,18}$/.test(safe)) {
+    throw new Error(`invalid assessment cursor pk: ${safe}`);
+  }
+  return getQuery(buildAssessmentKeysSql(table, pkColumn), 'postgresql').replace(
+    '{{CURSOR_PK}}',
+    safe,
+  );
+}
+
 /** {{FORM_IDS}} substitution with a strict digit-list guard. */
 export function buildAssessmentItemsSql(
   formIds: number[],

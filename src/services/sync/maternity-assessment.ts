@@ -30,7 +30,7 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
 import { BmsSessionClient } from '@/lib/bms-session';
 import { APP_IDENTIFIER } from '@/lib/bms-browser-client';
-import { buildAssessmentRecordsSqlFor } from '@/config/hosxp-queries';
+import { buildAssessmentKeysSqlFor } from '@/config/hosxp-queries';
 import {
   MATERNITY_ASSESSMENT_FORMS,
   assessmentFormByTable,
@@ -448,7 +448,7 @@ export async function verifyAssessmentCursorAdvance(
     const form = MATERNITY_ASSESSMENT_FORMS.find((f) => f.table === table)!;
     try {
       const client = new BmsSessionClient(config.tunnel_url);
-      const sql = buildAssessmentRecordsSqlFor(form.table, form.pkColumn, cursors[table] ?? '0');
+      const sql = buildAssessmentKeysSqlFor(form.table, form.pkColumn, cursors[table] ?? '0');
       const res = await client.executeQuery(sql, config.tunnel_url, config.session_jwt, undefined, {
         appIdentifier: APP_IDENTIFIER,
       });
