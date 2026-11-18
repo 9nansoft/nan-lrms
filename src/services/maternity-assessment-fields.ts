@@ -9,10 +9,8 @@
 // (server-side, encrypting the name-bearing columns on the way into the
 // cache) and the hospital console (browser-side, reading HOSxP live). It
 // imports nothing node-only so it can ship in the client bundle.
-import {
-  MATERNITY_ASSESSMENT_FORMS,
-  isNameBearingColumn,
-} from '@/config/maternity-assessments';
+import { MATERNITY_ASSESSMENT_FORMS, isNameBearingColumn } from '@/config/maternity-assessments';
+import { normalizeHosxpDate } from '@/lib/hosxp-date';
 import type {
   HosxpAssessmentItemRow,
   MaternityAssessmentComponent,
@@ -74,6 +72,11 @@ export function assessmentComponent(name: string | null | undefined): MaternityA
 /**
  * The identity/context of a raw row. `dateColumns` are the form's own date
  * columns, most significant first.
+ *
+ * The timestamp keeps HOSxP's local time but uses the ISO 'T' separator:
+ * `new Date('2026-11-17 21:03:15')` is an Invalid Date in Safari, which
+ * would break the newest-first ordering. A zoneless ISO string is parsed as
+ * local time everywhere, so the ward's clock is what the reader sees.
  */
 export function readAssessmentRowMeta(
   raw: Record<string, unknown>,
@@ -82,7 +85,7 @@ export function readAssessmentRowMeta(
 ): AssessmentRowMeta {
   let recordedDate: string | null = null;
   for (const column of dateColumns) {
-    const value = str(raw[column]);
+    const value = normalizeHosxpDate(str(raw[column]));
     if (value) {
       recordedDate = value;
       break;
@@ -92,7 +95,7 @@ export function readAssessmentRowMeta(
     pk: str(raw[pkColumn]),
     an: str(raw.an),
     hn: str(raw.patient_hn),
-    recordedAt: str(raw.head_datetime),
+    recordedAt: str(raw.head_datetime)?.replace(' ', 'T') ?? null,
     recordedDate,
     entryStaff: str(raw.head_staff),
   };

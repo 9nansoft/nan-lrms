@@ -30,11 +30,9 @@ import {
   OVST_FIRST_VISIT_FOR_CIDS,
   ASSESSMENT_FORMS,
   buildAssessmentItemsSql,
-  buildAssessmentRecordsSql,
+  buildAssessmentRecordsSqlFor,
 } from '@/config/hosxp-queries';
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
-import { newestFormIdByTable } from '@/services/maternity-assessment-fields';
-import type { HosxpAssessmentFormRow } from '@/types/maternity-assessments';
 import { isStaleAdmission } from '@/config/hospital-network';
 import { normalizeHosxpDate } from '@/lib/hosxp-date';
 import { ANC_LAB_ORDER_SQL_LIKE_TERMS, ANC_THALASSEMIA_FIELDS } from '@/config/anc-lab-canon';
@@ -1151,7 +1149,7 @@ function stripEmptyRow(row: Record<string, unknown>): Record<string, unknown> {
  */
 async function pullAssessments(
   opts: RunOptions,
-  cutoff: string,
+  cursors: Record<string, string>,
 ): Promise<{
   forms: Record<string, unknown>[];
   items: Record<string, unknown>[];
@@ -1159,23 +1157,23 @@ async function pullAssessments(
 }> {
   const formRows = await runQuery<Record<string, unknown>>(ASSESSMENT_FORMS.mysql, opts);
 
-  // Newest form per table — a site can keep an older version of the same
-  // form, and the highest id is the one in use.
-  const formIdByTable = newestFormIdByTable(
-    formRows as unknown as HosxpAssessmentFormRow[],
-  );
+  // Every version of the three forms — a row recorded under an older form
+  // version must be labelled with THAT version's items.
+  const formIds = new Set<number>();
+  for (const row of formRows) {
+    const formId = Number(row.assessment_form_id);
+    if (Number.isInteger(formId)) formIds.add(formId);
+  }
 
-  const itemsSql = buildAssessmentItemsSql([...formIdByTable.values()], 'mysql');
+  const itemsSql = buildAssessmentItemsSql([...formIds], 'mysql');
   const itemRows = await runQuery<Record<string, unknown>>(itemsSql, opts);
 
   const records: Record<string, Record<string, unknown>[]> = {};
   await Promise.all(
     MATERNITY_ASSESSMENT_FORMS.map(async (form) => {
-      const sql = buildAssessmentRecordsSql(form.table, form.pkColumn).mysql.replace(
-        '{{CUTOFF}}',
-        cutoff,
-      );
+      const cursor = cursors[form.table] ?? '0';
       try {
+        const sql = buildAssessmentRecordsSqlFor(form.table, form.pkColumn, cursor);
         const rows = await runQuery<Record<string, unknown>>(sql, opts);
         records[form.table] = rows.map(stripEmptyRow);
       } catch {
@@ -1434,7 +1432,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // One boot GET serves every cutoff-driven feed (newborn + assessments).
     let boot: {
       newbornCutoff?: string;
-      assessmentCutoff?: string;
+      assessmentCursors?: Record<string, string>;
       referralArrivalProbe?: { cid?: unknown; since?: unknown }[];
     } = {};
     try {
@@ -1490,9 +1488,9 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       records: Record<string, Record<string, unknown>[]>;
     } | null = null;
     try {
-      const cutoff = boot.assessmentCutoff;
-      if (typeof cutoff === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cutoff)) {
-        const pulled = await pullAssessments(opts, cutoff);
+      const cursors = boot.assessmentCursors ?? {};
+      if (typeof cursors === 'object' && cursors !== null) {
+        const pulled = await pullAssessments(opts, cursors as Record<string, string>);
         const rowsRead = Object.values(pulled.records).reduce((n, rows) => n + rows.length, 0);
         result.assessments = {
           rowsRead,
@@ -1502,7 +1500,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
         if (rowsRead > 0) assessmentsSection = pulled;
       }
     } catch {
-      // Assessment feed is best-effort; the next cycle retries from the same cutoff.
+      // Assessment feed is best-effort; the next cycle retries from the same cursors.
     }
 
     // ─── Referrals (referout = this hospital as origin, referin = arrival

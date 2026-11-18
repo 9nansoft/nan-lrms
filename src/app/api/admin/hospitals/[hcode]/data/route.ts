@@ -210,6 +210,12 @@ export async function DELETE(
     await db.execute('DELETE FROM cached_maternity_assessments WHERE hospital_id = ?', [
       hospitalId,
     ]);
+    // The pull cursor goes with the forms: a cursor that survives a wipe
+    // would tell the sync the forms were already pulled and they would
+    // never come back.
+    await db.execute('DELETE FROM cached_maternity_assessment_cursors WHERE hospital_id = ?', [
+      hospitalId,
+    ]);
     await db.execute(
       `DELETE FROM cached_anc_visits
         WHERE hospital_id = ?

@@ -5,7 +5,7 @@
 // This service hands them to the UI: it decrypts the name-bearing entries,
 // drops empty ones and orders the forms newest first.
 import type { DatabaseAdapter } from '@/db/adapter';
-import { decryptSafe } from '@/lib/encryption';
+import { decrypt, getEncryptionKey } from '@/lib/encryption';
 import {
   MATERNITY_ASSESSMENT_FORMS,
   type MaternityAssessmentKey,
@@ -52,33 +52,39 @@ function parseFields(raw: string | MaternityAssessmentField[] | null): Maternity
 export function decryptAssessmentFields(
   fields: MaternityAssessmentField[],
 ): MaternityAssessmentField[] {
-  return fields.map((field) =>
-    field.encrypted ? { ...field, value: decryptSafe(field.value), encrypted: false } : field,
-  );
+  return fields.map((field) => {
+    if (!field.encrypted) return field;
+    // Fail closed: a key rotation that leaves the old ciphertext behind must
+    // not render as a "name" in the UI.
+    let value = '';
+    try {
+      value = decrypt(field.value, getEncryptionKey());
+    } catch {
+      value = '';
+    }
+    return { ...field, value, encrypted: false };
+  });
 }
 
 /**
  * Every cached assessment form of one admission, newest first. Rows whose
  * form key is unknown (a form the app does not know about) are skipped.
+ *
+ * The hospital scope is required: ANs are hospital-local, so an unscoped
+ * query could return another hospital's rows for a colliding AN.
  */
 export async function getPatientMaternityAssessments(
   db: DatabaseAdapter,
   an: string,
-  hospitalId?: string,
+  hospitalId: string,
 ): Promise<MaternityAssessmentDto[]> {
   const rows = await db.query<CachedAssessmentRow>(
-    hospitalId
-      ? `SELECT id, form_key, form_table, form_name, recorded_at, recorded_date,
-                entry_staff, fields_json
-           FROM cached_maternity_assessments
-          WHERE an = ? AND hospital_id = ?
-          ORDER BY recorded_at DESC`
-      : `SELECT id, form_key, form_table, form_name, recorded_at, recorded_date,
-                entry_staff, fields_json
-           FROM cached_maternity_assessments
-          WHERE an = ?
-          ORDER BY recorded_at DESC`,
-    hospitalId ? [an, hospitalId] : [an],
+    `SELECT id, form_key, form_table, form_name, recorded_at, recorded_date,
+            entry_staff, fields_json
+       FROM cached_maternity_assessments
+      WHERE an = ? AND hospital_id = ?
+      ORDER BY recorded_at DESC`,
+    [an, hospitalId],
   );
 
   const known = new Set(MATERNITY_ASSESSMENT_FORMS.map((f) => f.key));

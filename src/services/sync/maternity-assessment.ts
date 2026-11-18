@@ -7,13 +7,24 @@
 // the UI never depend on a hardcoded field list and a site that customised
 // its form still renders its own labels.
 //
-// Name-bearing columns (asm_lk*, user_login) are AES-256-GCM encrypted
-// before they are written; `fields_json` marks those entries so the read
-// boundary knows to decrypt them.
+// Three properties this module is responsible for:
+//
+//  1. NO ROW IS LOST. Each form has its own cursor (the primary key of the
+//     last row pulled for it) and the next pull asks for everything above
+//     that key. A date-based window would stall on a form that holds
+//     hundreds of rows on one day, and one shared cursor across the three
+//     forms would skip the backlog of the form that is used least.
+//  2. ONE BAD ROW CANNOT BLOCK THE REST. Every row is validated before it
+//     is written and written on its own: a row HOSxP filled with a zero
+//     date or an over-long value is dropped, not allowed to roll back the
+//     batch and freeze the form forever.
+//  3. NAMES DO NOT SIT IN THE CACHE IN CLEAR. The name-bearing columns
+//     (asm_lk*, user_login — the recording nurse, and at some sites the
+//     patient) are AES-256-GCM encrypted before they are written.
 //
 // Callers (browser-poll push, server polling) hand over the RAW rows plus
-// the form metadata; this service owns normalisation and persistence so
-// both paths store identical rows.
+// the form metadata; this service owns normalisation and persistence so both
+// paths store identical rows.
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
@@ -41,7 +52,7 @@ import type {
 export type AssessmentRecordsByTable = Record<string, Record<string, unknown>[]>;
 
 export interface AssessmentSyncInput {
-  /** `assessment_form` rows for the three maternity forms. */
+  /** `assessment_form` rows for the maternity forms. */
   forms: HosxpAssessmentFormRow[];
   /** `assessment_items` rows (with the component join) for those forms. */
   items: HosxpAssessmentItemRow[];
@@ -68,64 +79,36 @@ export interface MaternityAssessmentRow {
 export interface AssessmentSyncResult {
   /** Rows written to the cache. */
   upserted: number;
-  /** Rows the caller had to drop (no PK / no AN / no timestamp). */
+  /** Rows the caller had to drop (no PK / no AN / no usable timestamp). */
   skipped: number;
+  /** Rows the database refused — isolated, the rest of the batch landed. */
+  failed: number;
 }
 
-/** One-year backfill on the first run of a hospital. */
-export const ASSESSMENT_BACKFILL_LOOKBACK_DAYS = 365;
-/** Re-read window so a row edited shortly after it was pulled is not lost. */
-export const ASSESSMENT_REFRESH_OVERLAP_DAYS = 2;
-const DAY_MS = 24 * 3600_000;
-
-/**
- * Cutoff for the next assessment pull: the newest row already in the cache
- * minus a small overlap, or a one-year backfill when the hospital has none.
- *
- * Derived from the cache itself (no extra state table), exactly like the
- * newborn sync's cutoff — a poisoned future timestamp can never push the
- * cutoff past today.
- */
-export async function assessmentSyncCutoffDate(
-  db: DatabaseAdapter,
-  hospitalId: string,
-  now: Date = new Date(),
-): Promise<string> {
-  const rows = await db.query<{ max_recorded: string | null }>(
-    `SELECT MAX(recorded_at) AS max_recorded
-       FROM cached_maternity_assessments
-      WHERE hospital_id = ?`,
-    [hospitalId],
-  );
-  const maxRecorded = rows[0]?.max_recorded;
-  const baseMs = maxRecorded
-    ? parseRecordedAt(maxRecorded).getTime() - ASSESSMENT_REFRESH_OVERLAP_DAYS * DAY_MS
-    : now.getTime() - ASSESSMENT_BACKFILL_LOOKBACK_DAYS * DAY_MS;
-  return new Date(Math.min(baseMs, now.getTime())).toISOString().slice(0, 10);
-}
-
-/**
- * HOSxP writes `assessment_head_datetime` without a timezone (Thai local
- * time). Parsing it as UTC keeps the cutoff arithmetic independent of the
- * server's timezone — otherwise the same cache would yield a different
- * cutoff on a machine set to Asia/Bangkok.
- */
-function parseRecordedAt(value: string): Date {
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
-  const parsed = new Date(hasZone ? value : `${value}Z`);
-  return Number.isNaN(parsed.getTime()) ? new Date(0) : parsed;
-}
+// ─── Column widths (mirror src/db/tables/cached-maternity-assessments.ts) ──
+const MAX_AN = 32;
+const MAX_HN = 32;
+const MAX_FORM_NAME = 250;
+const MAX_ENTRY_STAFF = 150;
+/** HOSxP stores the recorder's account name here (not a display name). */
+const LOGIN_SHAPED = /^[A-Za-z0-9._-]{1,64}$/;
 
 /** Encrypt a name-bearing value; drop it when no encryption key is set. */
 function protectName(
   value: string,
   encryptionKey: string | null,
-): {
-  value: string;
-  encrypted: boolean;
-} {
+): { value: string; encrypted: boolean } {
   if (!encryptionKey) return { value: '', encrypted: false };
   return { value: encrypt(value, encryptionKey), encrypted: true };
+}
+
+/** A timestamp we can store and order by — rejects HOSxP zero dates. */
+function usableTimestamp(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(trimmed)) return null;
+  const parsed = new Date(trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T'));
+  return Number.isNaN(parsed.getTime()) ? null : trimmed;
 }
 
 export interface NormalizeOptions {
@@ -137,8 +120,8 @@ export interface NormalizeOptions {
 
 /**
  * Turn the raw rows of ONE form into cache rows. Rows without a primary
- * key, an AN or a recording timestamp are dropped: they cannot be linked to
- * a patient or ordered in time.
+ * key, an AN or a usable recording timestamp are dropped: they cannot be
+ * linked to a patient or ordered in time.
  */
 export function normalizeAssessmentRows(
   form: MaternityAssessmentForm,
@@ -152,7 +135,10 @@ export function normalizeAssessmentRows(
 
   for (const raw of rawRows) {
     const meta = readAssessmentRowMeta(raw, form.pkColumn, form.dateColumns);
-    if (!meta.pk || !meta.an || !meta.recordedAt) {
+    const pk = meta.pk && /^\d{1,18}$/.test(meta.pk) ? meta.pk : null;
+    const an = meta.an && meta.an.length <= MAX_AN ? meta.an : null;
+    const recordedAt = usableTimestamp(meta.recordedAt);
+    if (!pk || !an || !recordedAt) {
       skipped += 1;
       continue;
     }
@@ -163,17 +149,20 @@ export function normalizeAssessmentRows(
 
     rows.push({
       hospitalId: '',
-      patientId: options.patientIdByAn?.get(meta.an) ?? null,
-      an: meta.an,
-      hn: meta.hn,
+      patientId: options.patientIdByAn?.get(an) ?? null,
+      an,
+      hn: meta.hn && meta.hn.length <= MAX_HN ? meta.hn : null,
       sourceSystem: 'HOSXP',
-      sourcePk: `${form.table}:${meta.pk}`,
+      sourcePk: `${form.table}:${pk}`,
       formKey: form.key,
       formTable: form.table,
-      formName: assessmentFormName(form.table, formName),
-      recordedAt: meta.recordedAt,
+      formName: assessmentFormName(form.table, formName).slice(0, MAX_FORM_NAME),
+      recordedAt,
       recordedDate: meta.recordedDate,
-      entryStaff: meta.entryStaff,
+      entryStaff:
+        meta.entryStaff && LOGIN_SHAPED.test(meta.entryStaff)
+          ? meta.entryStaff.slice(0, MAX_ENTRY_STAFF)
+          : null,
       fields,
     });
   }
@@ -182,11 +171,14 @@ export function normalizeAssessmentRows(
 }
 
 /**
- * Normalise + persist every assessment form in one transaction.
+ * Normalise + persist every assessment form.
  *
  * `patient_id` is resolved from the AN the form carries; a form whose
  * patient is not in the cache is still stored (with a null patient_id) so
  * the data is not lost.
+ *
+ * Each row is written on its own: a row the database refuses is counted and
+ * skipped, never allowed to roll back the rows around it.
  */
 export async function syncMaternityAssessments(
   db: DatabaseAdapter,
@@ -196,7 +188,9 @@ export async function syncMaternityAssessments(
 ): Promise<AssessmentSyncResult> {
   const encryptionKey = options.encryptionKey ?? safeEncryptionKey();
 
-  // A site can keep an older version of the same form — the highest id wins.
+  // A site can keep an older version of the same form — the highest id is
+  // the current one, but older rows still carry their own form id and are
+  // labelled with THAT version's items.
   const formIdByTable = newestFormIdByTable(input.forms);
   const formNameByTable = new Map<string, string>();
   for (const form of input.forms) {
@@ -206,12 +200,18 @@ export async function syncMaternityAssessments(
     if (form.assessment_form_name) formNameByTable.set(table, form.assessment_form_name);
   }
 
+  const itemsByFormId = new Map<number, Map<string, HosxpAssessmentItemRow>>();
+  for (const formId of new Set(input.items.map((i) => Number(i.assessment_form_id)))) {
+    if (!Number.isInteger(formId)) continue;
+    itemsByFormId.set(formId, assessmentItemsByColumn(input.items, formId));
+  }
+
   // AN -> patient_id, one query for the whole batch.
   const allAns = new Set<string>();
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
     for (const raw of input.records[form.table] ?? []) {
       const an = str(raw.an);
-      if (an) allAns.add(an);
+      if (an && an.length <= MAX_AN) allAns.add(an);
     }
   }
   const patientIdByAn = await resolvePatientIds(db, hospitalId, [...allAns]);
@@ -221,42 +221,63 @@ export async function syncMaternityAssessments(
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
     const rawRows = input.records[form.table] ?? [];
     if (rawRows.length === 0) continue;
-    const formId = formIdByTable.get(form.table);
-    const items =
-      formId !== undefined
-        ? assessmentItemsByColumn(input.items, formId)
-        : new Map<string, HosxpAssessmentItemRow>();
-    const result = normalizeAssessmentRows(
-      form,
-      rawRows,
-      items,
-      formNameByTable.get(form.table) ?? null,
-      { encryptionKey, patientIdByAn },
-    );
-    skipped += result.skipped;
-    for (const row of result.rows) normalized.push({ ...row, hospitalId });
+
+    // A row recorded under an older form version is labelled with THAT
+    // version's items; a row whose form id we do not know (or that carries
+    // none) falls back to the current version.
+    const newestItems = itemsByFormId.get(formIdByTable.get(form.table) ?? -1) ?? new Map();
+    const groups = new Map<string, Record<string, unknown>[]>();
+    const itemsByGroup = new Map<string, Map<string, HosxpAssessmentItemRow>>();
+    for (const raw of rawRows) {
+      const rowFormId = Number(raw.head_form_id);
+      const key =
+        Number.isInteger(rowFormId) && itemsByFormId.has(rowFormId) ? String(rowFormId) : 'current';
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(raw);
+      else groups.set(key, [raw]);
+      if (!itemsByGroup.has(key)) {
+        itemsByGroup.set(key, key === 'current' ? newestItems : itemsByFormId.get(Number(key))!);
+      }
+    }
+
+    for (const [key, rows] of groups) {
+      const result = normalizeAssessmentRows(
+        form,
+        rows,
+        itemsByGroup.get(key) ?? newestItems,
+        formNameByTable.get(form.table) ?? null,
+        { encryptionKey, patientIdByAn },
+      );
+      skipped += result.skipped;
+      for (const row of result.rows) normalized.push({ ...row, hospitalId });
+    }
   }
 
-  const upserted = await upsertMaternityAssessments(db, hospitalId, normalized);
-  return { upserted, skipped };
+  const { upserted, failed } = await upsertMaternityAssessments(db, hospitalId, normalized);
+  return { upserted, skipped: skipped + failed, failed };
 }
 
 /**
- * Upsert the normalised rows. One transaction per batch so a mid-batch
- * failure cannot leave half a form persisted.
+ * Upsert the normalised rows, one row at a time.
+ *
+ * A row the database refuses (a value too long for its column, a date
+ * Postgres cannot parse) is counted and skipped — the rows around it still
+ * land. Batching them into one statement would let a single bad row roll
+ * the whole form back, and the form would never sync again.
  */
 export async function upsertMaternityAssessments(
   db: DatabaseAdapter,
   hospitalId: string,
   rows: MaternityAssessmentRow[],
-): Promise<number> {
-  if (rows.length === 0) return 0;
+): Promise<{ upserted: number; failed: number }> {
+  if (rows.length === 0) return { upserted: 0, failed: 0 };
   const now = new Date().toISOString();
+  let upserted = 0;
+  let failed = 0;
 
-  return db.transaction(async (tx) => {
-    let count = 0;
-    for (const row of rows) {
-      await tx.execute(
+  for (const row of rows) {
+    try {
+      await db.execute(
         `INSERT INTO cached_maternity_assessments (
            id, hospital_id, patient_id, an, hn, source_system, source_pk,
            form_key, form_table, form_name, recorded_at, recorded_date,
@@ -295,10 +316,92 @@ export async function upsertMaternityAssessments(
           now,
         ],
       );
-      count += 1;
+      upserted += 1;
+    } catch {
+      // One bad row must not cost the form its other rows.
+      failed += 1;
     }
-    return count;
-  });
+  }
+
+  return { upserted, failed };
+}
+
+// ─── Cursors ────────────────────────────────────────────────────────────────
+
+/** The pull position of every maternity form of one hospital, by table. */
+export async function readAssessmentCursors(
+  db: DatabaseAdapter,
+  hospitalId: string,
+): Promise<Record<string, string>> {
+  const rows = await db.query<{ form_table: string; cursor_pk: string }>(
+    `SELECT form_table, cursor_pk
+       FROM cached_maternity_assessment_cursors
+      WHERE hospital_id = ?`,
+    [hospitalId],
+  );
+  const cursors: Record<string, string> = {};
+  for (const row of rows) {
+    if (/^\d{1,18}$/.test(row.cursor_pk)) cursors[row.form_table] = row.cursor_pk;
+  }
+  return cursors;
+}
+
+/**
+ * Move the cursor of every form forward to the highest primary key the sync
+ * has PULLED — not the highest it managed to store. A row that fails to
+ * store must not hold the form back, otherwise the rows behind it would
+ * never be pulled.
+ */
+export async function advanceAssessmentCursors(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  maxPkByTable: Record<string, string>,
+): Promise<void> {
+  const now = new Date().toISOString();
+  for (const [table, pk] of Object.entries(maxPkByTable)) {
+    if (!assessmentFormByTable(table)) continue;
+    if (!/^\d{1,18}$/.test(pk)) continue;
+    const existing = await db.query<{ id: string; cursor_pk: string }>(
+      `SELECT id, cursor_pk
+         FROM cached_maternity_assessment_cursors
+        WHERE hospital_id = ? AND form_table = ?`,
+      [hospitalId, table],
+    );
+    if (existing.length > 0) {
+      if (BigInt(pk) <= BigInt(existing[0].cursor_pk)) continue;
+      await db.execute(
+        `UPDATE cached_maternity_assessment_cursors
+            SET cursor_pk = ?, updated_at = ?
+          WHERE id = ?`,
+        [pk, now, existing[0].id],
+      );
+    } else {
+      await db.execute(
+        `INSERT INTO cached_maternity_assessment_cursors
+           (id, hospital_id, form_table, cursor_pk, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [uuidv4(), hospitalId, table, pk, now],
+      );
+    }
+  }
+}
+
+/**
+ * The highest primary key of each form in a pushed batch — the position the
+ * next pull resumes from.
+ */
+export function maxPulledPkByTable(input: AssessmentSyncInput): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const form of MATERNITY_ASSESSMENT_FORMS) {
+    let max = BigInt(0);
+    for (const raw of input.records[form.table] ?? []) {
+      const pk = raw[form.pkColumn];
+      const value = typeof pk === 'number' ? BigInt(pk) : BigInt(String(pk ?? '').trim() || '0');
+      if (value > max) max = value;
+    }
+    if (max > BigInt(0)) out[form.table] = max.toString();
+  }
+  return out;
 }
 
 async function resolvePatientIds(
@@ -338,10 +441,14 @@ export function safeEncryptionKey(): string | null {
 // untrusted input: the table keys must be forms the app knows, the column
 // names must look like HOSxP columns, and the volume must stay bounded.
 
-/** Ceiling on rows per table in one push (a full backfill is ~1k). */
-export const ASSESSMENT_MAX_ROWS_PER_TABLE = 5000;
+/** Ceiling on rows per table in one push (a full pull is ~500). */
+export const ASSESSMENT_MAX_ROWS_PER_TABLE = 2000;
 /** Ceiling on columns per row (the widest HOSxP form has ~190). */
 export const ASSESSMENT_MAX_COLUMNS_PER_ROW = 400;
+/** Ceiling on form metadata rows in one push (3 forms × a few versions). */
+export const ASSESSMENT_MAX_FORMS = 20;
+/** Ceiling on item metadata rows in one push (~120 per form version). */
+export const ASSESSMENT_MAX_ITEMS = 5000;
 const COLUMN_NAME = /^[a-z][a-z0-9_]*$/;
 
 export interface AssessmentPayload {
@@ -369,6 +476,12 @@ export function validateAssessmentPayload(body: unknown): AssessmentPayloadValid
 
   if (!Array.isArray(forms) || !Array.isArray(items) || !isPlainObject(records)) {
     return { valid: false, error: 'assessments payload has a malformed section' };
+  }
+  if (forms.length > ASSESSMENT_MAX_FORMS) {
+    return { valid: false, error: 'too many assessment forms in the payload' };
+  }
+  if (items.length > ASSESSMENT_MAX_ITEMS) {
+    return { valid: false, error: 'too many assessment items in the payload' };
   }
 
   const knownTables = new Set(MATERNITY_ASSESSMENT_FORMS.map((f) => f.table));
@@ -398,6 +511,7 @@ export function validateAssessmentPayload(body: unknown): AssessmentPayloadValid
   }
 
   const cleanForms: HosxpAssessmentFormRow[] = [];
+  const knownFormIds = new Set<number>();
   for (const form of forms) {
     if (!isPlainObject(form))
       return { valid: false, error: 'assessment form row is not an object' };
@@ -406,6 +520,7 @@ export function validateAssessmentPayload(body: unknown): AssessmentPayloadValid
     if (!knownTables.has(table) || !Number.isInteger(formId)) {
       return { valid: false, error: 'assessment form row is malformed' };
     }
+    knownFormIds.add(formId);
     cleanForms.push({
       assessment_form_id: formId,
       assessment_form_table: table,
@@ -422,6 +537,9 @@ export function validateAssessmentPayload(body: unknown): AssessmentPayloadValid
     const column = item.assessment_items_column;
     if (!Number.isInteger(formId) || typeof column !== 'string' || !COLUMN_NAME.test(column)) {
       return { valid: false, error: 'assessment item row is malformed' };
+    }
+    if (!knownFormIds.has(formId)) {
+      return { valid: false, error: `assessment item row references unknown form ${formId}` };
     }
     cleanItems.push({
       assessment_form_id: formId,

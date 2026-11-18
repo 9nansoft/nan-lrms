@@ -7,6 +7,7 @@ import {
   ASSESSMENT_ITEMS,
   buildAssessmentItemsSql,
   buildAssessmentRecordsSql,
+  buildAssessmentRecordsSqlFor,
   ASSESSMENT_ROW_LIMIT,
 } from '@/config/hosxp-queries';
 
@@ -49,16 +50,43 @@ describe('maternity assessment queries', () => {
     // positional columns.
     expect(sql).toMatch(/h\.assessment_head_datetime AS head_datetime/);
     expect(sql).toMatch(/i\.hn AS patient_hn/);
-    expect(sql).toContain('{{CUTOFF}}');
+    expect(sql).toContain('{{CURSOR_PK}}');
   });
 
-  it('bounds each pull and reads oldest first so the cutoff advances', () => {
+  it('asks for everything above the cursor, oldest first', () => {
     const sql = buildAssessmentRecordsSql(
       'asm_first_pregnant_pt_nan',
       'asm_first_pregnant_pt_nan_id',
     ).postgresql;
-    expect(sql).toMatch(/ORDER BY h\.assessment_head_datetime ASC/);
-    expect(sql).toContain(`LIMIT ${ASSESSMENT_ROW_LIMIT + 1}`);
+    // A date window would re-read the same oldest page on a form that holds
+    // hundreds of rows on one day; the primary key cannot stall.
+    expect(sql).toMatch(/WHERE t\.asm_first_pregnant_pt_nan_id > \{\{CURSOR_PK\}\}/);
+    expect(sql).toMatch(/ORDER BY t\.asm_first_pregnant_pt_nan_id ASC/);
+    expect(sql).toContain(`LIMIT ${ASSESSMENT_ROW_LIMIT}`);
+  });
+
+  it('substitutes only a validated cursor pk', () => {
+    const sql = buildAssessmentRecordsSqlFor(
+      'asm_first_pregnant_pt_nan',
+      'asm_first_pregnant_pt_nan_id',
+      2418,
+    );
+    expect(sql).toContain('> 2418');
+    expect(sql).not.toContain('{{CURSOR_PK}}');
+    expect(() =>
+      buildAssessmentRecordsSqlFor(
+        'asm_first_pregnant_pt_nan',
+        'asm_first_pregnant_pt_nan_id',
+        'x',
+      ),
+    ).toThrow();
+    expect(() =>
+      buildAssessmentRecordsSqlFor(
+        'asm_first_pregnant_pt_nan',
+        'asm_first_pregnant_pt_nan_id',
+        '1; DROP TABLE x',
+      ),
+    ).toThrow();
   });
 
   it('serves the same body in both dialects', () => {

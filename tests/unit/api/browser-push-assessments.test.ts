@@ -146,6 +146,19 @@ describe('POST /api/sync/browser-push — maternity assessment forms', () => {
     expect(step!.counts).toMatchObject({ upserted: 1, skipped: 0 });
   });
 
+  it('advances the form cursor so the next pull resumes after the last row', async () => {
+    const res = await POST(jsonRequest({ assessments: assessmentPayload() }) as never);
+    expect(res.status).toBe(200);
+    const hid = await hospitalId();
+    const cursors = await db.query<{ form_table: string; cursor_pk: string }>(
+      'SELECT form_table, cursor_pk FROM cached_maternity_assessment_cursors WHERE hospital_id = ?',
+      [hid],
+    );
+    expect(cursors).toHaveLength(1);
+    expect(cursors[0].form_table).toBe('asm_lr_record_after_birth_nan');
+    expect(cursors[0].cursor_pk).toBe('2418');
+  });
+
   it('refuses an unknown assessment table and stores nothing', async () => {
     const payload = assessmentPayload();
     const res = await POST(

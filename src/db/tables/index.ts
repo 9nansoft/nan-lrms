@@ -91,6 +91,8 @@ export const ALL_TABLES: TableDefinition[] = [
   cachedPartographObservationsTable,
   // References cached_patients, hospitals (both above) — must stay after them.
   cachedMaternityAssessmentsTable,
+  // References hospitals (above).
+  cachedMaternityAssessmentCursorsTable,
   cachedVitalSignsTable,
   cpdScoresTable,
   // References cached_patients, hospitals, maternal_journeys (all above) —

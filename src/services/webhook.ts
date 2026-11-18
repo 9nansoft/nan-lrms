@@ -1241,7 +1241,12 @@ export async function processWebhookPayload(
   for (const p of toDelete) {
     await yielder.tick(); // before entering the per-patient transaction
     await db.transaction(async (tx) => {
-      for (const table of ['cpd_scores', 'cached_vital_signs', 'cached_partograph_observations']) {
+      for (const table of [
+        'cpd_scores',
+        'cached_vital_signs',
+        'cached_partograph_observations',
+        'cached_maternity_assessments',
+      ]) {
         await tx.execute(
           `DELETE FROM ${table} WHERE patient_id IN (SELECT id FROM cached_patients WHERE hospital_id = ? AND an = ?)`,
           [hospitalId, p.an],
@@ -2706,16 +2711,10 @@ export async function processReferralUpdate(
 ): Promise<WebhookReferralResult> {
   const action = payload.action ?? 'update';
   if (action !== 'update' && action !== 'delete') {
-    throw new WebhookReferralError(
-      'INVALID_REFERRAL_ACTION',
-      `action "${payload.action}" ไม่ถูกต้อง`,
-    );
+    throw new WebhookReferralError('INVALID_REFERRAL_ACTION', `action "${payload.action}" ไม่ถูกต้อง`);
   }
   if (action === 'update' && !REFERRAL_UPDATE_STATUSES.has(payload.status)) {
-    throw new WebhookReferralError(
-      'INVALID_REFERRAL_STATUS',
-      `status "${payload.status}" ไม่ถูกต้อง`,
-    );
+    throw new WebhookReferralError('INVALID_REFERRAL_STATUS', `status "${payload.status}" ไม่ถูกต้อง`);
   }
 
   // Resolve the sending hospital (fromHospitalCode) for compound key lookup

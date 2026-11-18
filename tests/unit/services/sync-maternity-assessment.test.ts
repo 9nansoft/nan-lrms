@@ -8,6 +8,11 @@
 //   3. Rows without a primary key, an AN or a recording timestamp are
 //      dropped — they cannot be linked to a patient or ordered in time.
 //   4. Re-pulling the same form upserts instead of duplicating.
+//   5. NO ROW IS LOST: each form has its own cursor (the last pk pulled),
+//      the cursor follows the PULL and never moves backwards, and a dense
+//      form (hundreds of rows on one day) still advances.
+//   6. ONE BAD ROW CANNOT BLOCK THE REST: unusable values are dropped and a
+//      row the database refuses is isolated from the rows around it.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
@@ -15,7 +20,9 @@ import { generateKey, decrypt } from '@/lib/encryption';
 import {
   normalizeAssessmentRows,
   syncMaternityAssessments,
-  assessmentSyncCutoffDate,
+  advanceAssessmentCursors,
+  maxPulledPkByTable,
+  readAssessmentCursors,
   validateAssessmentPayload,
 } from '@/services/sync/maternity-assessment';
 import { getPatientMaternityAssessments } from '@/services/maternity-assessments';
@@ -238,28 +245,161 @@ describe('read back', () => {
   });
 });
 
-describe('assessmentSyncCutoffDate', () => {
-  it('backfills a year when the hospital has no cached form', async () => {
-    const cutoff = await assessmentSyncCutoffDate(
-      db,
-      HOSPITAL_ID,
-      new Date('2026-11-18T00:00:00Z'),
-    );
-    expect(cutoff).toBe('2025-11-18');
+describe('cursors', () => {
+  it('starts empty for a hospital that never synced', async () => {
+    expect(await readAssessmentCursors(db, HOSPITAL_ID)).toEqual({});
   });
 
-  it('re-reads a small overlap after the first sync', async () => {
+  it('advances to the highest pulled pk and never moves backwards', async () => {
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: '2418',
+    });
+    expect(await readAssessmentCursors(db, HOSPITAL_ID)).toEqual({
+      asm_lr_record_after_birth_nan: '2418',
+    });
+
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: '2000',
+    });
+    expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
+      '2418',
+    );
+
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: '2500',
+    });
+    expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
+      '2500',
+    );
+  });
+
+  it('keeps one cursor per form — a busy form cannot skip a quiet one', async () => {
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: '2418',
+    });
+    const cursors = await readAssessmentCursors(db, HOSPITAL_ID);
+    expect(cursors.asm_lr_record_after_birth_nan).toBe('2418');
+    // The form the hospital barely uses has NOT moved.
+    expect(cursors.asm_first_pregnant_pt_nan).toBeUndefined();
+  });
+
+  it('ignores a cursor for a table the app does not know', async () => {
+    await advanceAssessmentCursors(db, HOSPITAL_ID, { some_other_table: '5' });
+    expect(await readAssessmentCursors(db, HOSPITAL_ID)).toEqual({});
+  });
+
+  it('reports the highest pk of every form in the batch', () => {
+    const max = maxPulledPkByTable({
+      forms: FORM_ROWS,
+      items: ITEM_ROWS,
+      records: {
+        asm_lr_record_after_birth_nan: [
+          rawRow({ asm_lr_record_after_birth_nan_id: 2418 }),
+          rawRow({ asm_lr_record_after_birth_nan_id: 2419 }),
+        ],
+        asm_first_pregnant_pt_nan: [rawRow({ asm_first_pregnant_pt_nan_id: 2938 })],
+      },
+    });
+    expect(max.asm_lr_record_after_birth_nan).toBe('2419');
+    expect(max.asm_first_pregnant_pt_nan).toBe('2938');
+  });
+
+  it('a dense form keeps advancing — the cursor, not a date, drives the pull', async () => {
+    // 600 rows recorded on the same day: a date-based window would re-read
+    // the same oldest page forever and the newest 100 rows would never land.
+    const rows = Array.from({ length: 600 }, (_, i) =>
+      rawRow({ asm_lr_record_after_birth_nan_id: 1000 + i }),
+    );
+    const firstPage = rows.slice(0, 500);
+    const secondPage = rows.slice(500);
+
+    await advanceAssessmentCursors(
+      db,
+      HOSPITAL_ID,
+      maxPulledPkByTable({
+        forms: FORM_ROWS,
+        items: ITEM_ROWS,
+        records: { asm_lr_record_after_birth_nan: firstPage },
+      }),
+    );
+    expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
+      '1499',
+    );
+
     await syncMaternityAssessments(db, HOSPITAL_ID, {
       forms: FORM_ROWS,
       items: ITEM_ROWS,
-      records: { asm_lr_record_after_birth_nan: [rawRow()] },
+      records: { asm_lr_record_after_birth_nan: secondPage },
     });
-    const cutoff = await assessmentSyncCutoffDate(
+    await advanceAssessmentCursors(
       db,
       HOSPITAL_ID,
-      new Date('2026-11-18T00:00:00Z'),
+      maxPulledPkByTable({
+        forms: FORM_ROWS,
+        items: ITEM_ROWS,
+        records: { asm_lr_record_after_birth_nan: secondPage },
+      }),
     );
-    expect(cutoff).toBe('2026-11-15');
+    expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
+      '1599',
+    );
+  });
+});
+
+describe('bad rows', () => {
+  it('drops a row HOSxP filled with a zero date', async () => {
+    const r = await syncMaternityAssessments(db, HOSPITAL_ID, {
+      forms: FORM_ROWS,
+      items: ITEM_ROWS,
+      records: {
+        asm_lr_record_after_birth_nan: [rawRow({ head_datetime: '0000-00-00 00:00:00' })],
+      },
+    });
+    expect(r.upserted).toBe(0);
+    expect(r.skipped).toBe(1);
+    const stored = await db.query('SELECT id FROM cached_maternity_assessments');
+    expect(stored).toHaveLength(0);
+  });
+
+  it('drops a row whose AN cannot be linked', async () => {
+    const r = await syncMaternityAssessments(db, HOSPITAL_ID, {
+      forms: FORM_ROWS,
+      items: ITEM_ROWS,
+      records: {
+        asm_lr_record_after_birth_nan: [rawRow({ an: 'X'.repeat(64) })],
+      },
+    });
+    expect(r.upserted).toBe(0);
+    expect(r.skipped).toBe(1);
+  });
+
+  it('keeps the other rows when one row the database refuses lands', async () => {
+    // A patient_id that does not exist violates the foreign key — the row
+    // must be isolated, not roll the batch back.
+    const { upsertMaternityAssessments } = await import('@/services/sync/maternity-assessment');
+    const good = {
+      hospitalId: HOSPITAL_ID,
+      patientId: PATIENT_ID,
+      an: 'AN-ASM-1',
+      hn: '000285565',
+      sourceSystem: 'HOSXP' as const,
+      sourcePk: 'asm_lr_record_after_birth_nan:2418',
+      formKey: 'after_birth' as const,
+      formTable: 'asm_lr_record_after_birth_nan',
+      formName: 'x',
+      recordedAt: '2026-11-17T21:03:15',
+      recordedDate: '2026-11-17',
+      entryStaff: 'jcome',
+      fields: [],
+    };
+    const bad = { ...good, sourcePk: 'asm_lr_record_after_birth_nan:2419', patientId: 'nope' };
+
+    const r = await upsertMaternityAssessments(db, HOSPITAL_ID, [good, bad]);
+    expect(r.upserted).toBe(1);
+    expect(r.failed).toBe(1);
+    const stored = await db.query('SELECT source_pk FROM cached_maternity_assessments');
+    expect(stored).toHaveLength(1);
+    expect(stored[0].source_pk).toBe('asm_lr_record_after_birth_nan:2418');
   });
 });
 

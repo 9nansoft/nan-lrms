@@ -20,7 +20,9 @@ import {
   type BrowserNewbornsSection,
 } from '@/services/sync/newborn';
 import {
-  assessmentSyncCutoffDate,
+  advanceAssessmentCursors,
+  maxPulledPkByTable,
+  readAssessmentCursors,
   syncMaternityAssessments,
   validateAssessmentPayload,
 } from '@/services/sync/maternity-assessment';
@@ -601,6 +603,10 @@ export async function POST(request: NextRequest) {
         });
         try {
           const r = await syncMaternityAssessments(db, hospitalId, payload);
+          // The cursor follows the PULL, not the store: a row the database
+          // refused must not hold the form back, or the rows behind it would
+          // never arrive.
+          await advanceAssessmentCursors(db, hospitalId, maxPulledPkByTable(payload));
           result.assessments = { upserted: r.upserted, skipped: r.skipped };
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_assessments',
@@ -871,10 +877,16 @@ export async function GET() {
       return NextResponse.json({ error: 'hospital_not_registered', hcode }, { status: 403 });
     }
     const newbornCutoff = await newbornSyncCutoffDate(db, rows[0].id);
-    // Maternity assessment forms — same self-healing shape: the newest cached
-    // form minus a 2-day overlap, or a 365-day backfill when the hospital has
-    // none yet. The client inlines it into the three form queries.
-    const assessmentCutoff = await assessmentSyncCutoffDate(db, rows[0].id);
+    // Maternity assessment forms — the pull position of each form. The client
+    // asks HOSxP for everything ABOVE these keys, so a form that holds
+    // hundreds of rows on one day still advances. Its own try/catch: a
+    // cursor read must never take the newborn cutoff down with it.
+    let assessmentCursors: Record<string, string> = {};
+    try {
+      assessmentCursors = await readAssessmentCursors(db, rows[0].id);
+    } catch (e) {
+      logger.warn('assessment_cursor_read_failed', { hcode, error: String(e) });
+    }
     // ovst arrival-probe CIDs are a care-communication disclosure to the
     // legitimate destination only: readwrite session of that same hospital.
     // (GET is also used by readonly viewers for the cutoff — never hand them
@@ -887,7 +899,7 @@ export async function GET() {
         logger.warn('referral_arrival_probe_failed', { hcode, error: String(e) });
       }
     }
-    return NextResponse.json({ newbornCutoff, assessmentCutoff, referralArrivalProbe });
+    return NextResponse.json({ newbornCutoff, assessmentCursors, referralArrivalProbe });
   } catch (error) {
     logger.error('browser_push_bootstrap_failed', { error });
     return NextResponse.json({ error: 'internal_error' }, { status: 500 });

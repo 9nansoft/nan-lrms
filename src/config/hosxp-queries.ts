@@ -1146,14 +1146,14 @@ export const ASSESSMENT_ITEMS: SqlQueryTemplate = {
 
 /**
  * Row cap per assessment table pull. The rows are wide (a form row has ~190
- * positional columns), so the cap keeps one pull's payload sane; the cutoff
- * advances as rows land, so a larger backfill simply completes over the
+ * positional columns), so the cap keeps one pull's payload sane. The pull
+ * resumes from the form's cursor, so a larger backlog completes over the
  * next cycles instead of being lost.
  */
 export const ASSESSMENT_ROW_LIMIT = 500;
 
 /**
- * Rows of one assessment form, oldest first, since the server-issued cutoff.
+ * Rows of one assessment form, oldest first, ABOVE the form's cursor.
  *
  * `t.*` keeps the pull faithful to whatever the site's form contains — the
  * app resolves the labels from `assessment_items` afterwards. The head
@@ -1161,7 +1161,10 @@ export const ASSESSMENT_ROW_LIMIT = 500;
  * columns, and `patient_hn` comes from the admission row the form belongs
  * to (the form itself carries only AN/VN).
  *
- * {{CUTOFF}} is substituted in app code with a validated YYYY-MM-DD string.
+ * The cursor is the form's primary key, NOT a date: a form can hold
+ * hundreds of rows recorded on the same day, and a date-based window would
+ * keep re-reading the same oldest page and never reach the newest rows.
+ * {{CURSOR_PK}} is substituted in app code with a validated integer.
  */
 export function buildAssessmentRecordsSql(table: string, pkColumn: string): SqlQueryTemplate {
   const body = `
@@ -1173,10 +1176,26 @@ export function buildAssessmentRecordsSql(table: string, pkColumn: string): SqlQ
       FROM ${table} t
       JOIN assessment_head h ON h.assessment_head_id = t.assessment_head_id
       LEFT JOIN ipt i ON i.an = t.an
-     WHERE h.assessment_head_datetime >= '{{CUTOFF}}'
-     ORDER BY h.assessment_head_datetime ASC, t.${pkColumn} ASC
-     LIMIT ${ASSESSMENT_ROW_LIMIT + 1}`;
+     WHERE t.${pkColumn} > {{CURSOR_PK}}
+     ORDER BY t.${pkColumn} ASC
+     LIMIT ${ASSESSMENT_ROW_LIMIT}`;
   return { postgresql: body, mysql: body };
+}
+
+/** {{CURSOR_PK}} substitution with a strict integer guard. */
+export function buildAssessmentRecordsSqlFor(
+  table: string,
+  pkColumn: string,
+  cursorPk: string | number,
+): string {
+  const safe = String(cursorPk).trim();
+  if (!/^\d{1,18}$/.test(safe)) {
+    throw new Error(`invalid assessment cursor pk: ${safe}`);
+  }
+  return getQuery(buildAssessmentRecordsSql(table, pkColumn), 'postgresql').replace(
+    '{{CURSOR_PK}}',
+    safe,
+  );
 }
 
 /** {{FORM_IDS}} substitution with a strict digit-list guard. */

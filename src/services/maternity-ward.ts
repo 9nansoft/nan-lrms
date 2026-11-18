@@ -1,12 +1,7 @@
 // No 'use client' directive — this module is plain TS using fetch and is safe
 // to import from both client components and server routes (e.g. the dev smoke
 // endpoint that exercises the upsert*() service functions end-to-end).
-import {
-  executeSql,
-  restDelete,
-  restInsert,
-  restUpdate,
-} from '@/lib/bms-browser-client';
+import { executeSql, restDelete, restInsert, restUpdate } from '@/lib/bms-browser-client';
 import { mintSerial } from '@/lib/bms-serial';
 import {
   BED_MOVE_REASONS,
@@ -198,6 +193,13 @@ export async function getPatientAssessments(
     for (const raw of rows) {
       const meta = readAssessmentRowMeta(raw, form.pkColumn, form.dateColumns);
       if (!meta.pk || !meta.recordedAt) continue;
+      // A row recorded under an older form version is labelled with THAT
+      // version's items; a row whose form id we do not know falls back to the
+      // current version.
+      const rowFormId = Number(raw.head_form_id);
+      const rowItems = Number.isInteger(rowFormId)
+        ? (assessmentItemsByColumn(items, rowFormId) ?? formItems)
+        : formItems;
       dtos.push({
         id: `${form.table}:${meta.pk}`,
         formKey: form.key,
@@ -206,7 +208,7 @@ export async function getPatientAssessments(
         recordedAt: meta.recordedAt,
         recordedDate: meta.recordedDate,
         entryStaff: meta.entryStaff,
-        fields: buildAssessmentFields(raw, formItems, form.pkColumn),
+        fields: buildAssessmentFields(raw, rowItems, form.pkColumn),
       });
     }
   }
@@ -390,9 +392,7 @@ export async function upsertPartograph(
     if (iptLabourId === undefined || iptLabourId === null) {
       const labour = await getPatientLabour(config, an);
       if (!labour) {
-        throw new Error(
-          'ไม่พบบันทึก ipt_labour สำหรับ AN นี้ — กรุณาบันทึกข้อมูลในแท็บ "การคลอด" ก่อน',
-        );
+        throw new Error('ไม่พบบันทึก ipt_labour สำหรับ AN นี้ — กรุณาบันทึกข้อมูลในแท็บ "การคลอด" ก่อน');
       }
       iptLabourId = labour.ipt_labour_id;
     }
@@ -414,12 +414,7 @@ export async function upsertPartograph(
     return payload as PartographRow;
   }
   const { ipt_labour_partograph_id, ...fields } = row;
-  await restUpdate(
-    'ipt_labour_partograph',
-    String(ipt_labour_partograph_id),
-    fields,
-    config,
-  );
+  await restUpdate('ipt_labour_partograph', String(ipt_labour_partograph_id), fields, config);
   fireAudit({
     entity: 'ipt_labour_partograph',
     op: 'update',
@@ -478,12 +473,7 @@ export async function upsertVitalSign(
     return payload as VitalSignRow;
   }
   const { ipt_pregnancy_vital_sign_id, ...fields } = row;
-  await restUpdate(
-    'ipt_pregnancy_vital_sign',
-    String(ipt_pregnancy_vital_sign_id),
-    fields,
-    config,
-  );
+  await restUpdate('ipt_pregnancy_vital_sign', String(ipt_pregnancy_vital_sign_id), fields, config);
   fireAudit({
     entity: 'ipt_pregnancy_vital_sign',
     op: 'update',
@@ -627,12 +617,7 @@ export async function upsertLabour(
     if (ipt_labour_id === undefined) {
       throw new Error('upsertLabour: update path requires fields.ipt_labour_id');
     }
-    await restUpdate(
-      'ipt_labour',
-      String(ipt_labour_id),
-      body as Record<string, unknown>,
-      config,
-    );
+    await restUpdate('ipt_labour', String(ipt_labour_id), body as Record<string, unknown>, config);
   } else {
     // ipt_labour_id is the PRI key (auto-increment in MySQL but the BMS
     // REST endpoint won't auto-fill it — sending the body without an id
@@ -678,21 +663,12 @@ export async function upsertLabor(
     if (laborid === undefined) {
       throw new Error('upsertLabor: update path requires fields.laborid');
     }
-    await restUpdate(
-      'labor',
-      String(laborid),
-      body as Record<string, unknown>,
-      config,
-    );
+    await restUpdate('labor', String(laborid), body as Record<string, unknown>, config);
   } else {
     // labor.laborid is PRI; mint a fresh serial before insert (same
     // duplicate-PK guard as upsertLabour above).
     const id = await mintSerial(config, 'labor', 'laborid');
-    await restInsert(
-      'labor',
-      { laborid: id, an, ...body } as Record<string, unknown>,
-      config,
-    );
+    await restInsert('labor', { laborid: id, an, ...body } as Record<string, unknown>, config);
   }
   fireAudit({
     entity: 'labor',
@@ -781,12 +757,7 @@ export async function upsertStageMedication(
     return payload as StageMedRow;
   }
   const { labour_stage_medication_id, ...fields } = row;
-  await restUpdate(
-    'labour_stage_medication',
-    String(labour_stage_medication_id),
-    fields,
-    config,
-  );
+  await restUpdate('labour_stage_medication', String(labour_stage_medication_id), fields, config);
   fireAudit({
     entity: 'labour_stage_medication',
     op: 'update',
@@ -840,12 +811,7 @@ export async function upsertComplication(
     return payload as ComplicationRow;
   }
   const { ipt_labour_complication_id, ...fields } = row;
-  await restUpdate(
-    'ipt_labour_complication',
-    String(ipt_labour_complication_id),
-    fields,
-    config,
-  );
+  await restUpdate('ipt_labour_complication', String(ipt_labour_complication_id), fields, config);
   fireAudit({
     entity: 'ipt_labour_complication',
     op: 'update',
@@ -932,9 +898,7 @@ export async function upsertLabourInfant(
     if (iptLabourId === undefined || iptLabourId === null) {
       const labour = await getPatientLabour(config, an);
       if (!labour) {
-        throw new Error(
-          'ไม่พบบันทึก ipt_labour สำหรับ AN นี้ — กรุณาบันทึกข้อมูลในแท็บ "การคลอด" ก่อน',
-        );
+        throw new Error('ไม่พบบันทึก ipt_labour สำหรับ AN นี้ — กรุณาบันทึกข้อมูลในแท็บ "การคลอด" ก่อน');
       }
       iptLabourId = labour.ipt_labour_id;
     }
@@ -1001,11 +965,7 @@ export async function searchDrugs(
   const trimmed = query.trim();
   if (trimmed.length < 1) return [];
   const sql = getQuery(DRUG_LOOKUP, DEFAULT_DIALECT);
-  const r = await executeSql<{ icode: string; label: string }>(
-    sql,
-    config,
-    { q: `%${trimmed}%` },
-  );
+  const r = await executeSql<{ icode: string; label: string }>(sql, config, { q: `%${trimmed}%` });
   return r.data;
 }
 
@@ -1076,18 +1036,13 @@ export async function listReferTypes(
   config: ConnectionConfig,
 ): Promise<Array<{ refer_type: number; refer_type_name: string }>> {
   const sql = getQuery(REFER_TYPE_LOOKUP, DEFAULT_DIALECT);
-  const r = await executeSql<{ refer_type: number; refer_type_name: string }>(
-    sql,
-    config,
-  );
+  const r = await executeSql<{ refer_type: number; refer_type_name: string }>(sql, config);
   return r.data;
 }
 
 export async function listReferoutEmergencyTypes(
   config: ConnectionConfig,
-): Promise<
-  Array<{ referout_emergency_type_id: number; referout_emergency_type_name: string }>
-> {
+): Promise<Array<{ referout_emergency_type_id: number; referout_emergency_type_name: string }>> {
   const sql = getQuery(REFEROUT_EMERGENCY_TYPE_LOOKUP, DEFAULT_DIALECT);
   const r = await executeSql<{
     referout_emergency_type_id: number;
@@ -1151,11 +1106,9 @@ export async function searchIcd10(
   const trimmed = query.trim();
   if (trimmed.length < 1) return [];
   const sql = getQuery(ICD10_LOOKUP, DEFAULT_DIALECT);
-  const r = await executeSql<{ code: string; name: string; tname: string | null }>(
-    sql,
-    config,
-    { q: `%${trimmed}%` },
-  );
+  const r = await executeSql<{ code: string; name: string; tname: string | null }>(sql, config, {
+    q: `%${trimmed}%`,
+  });
   return r.data;
 }
 
@@ -1238,11 +1191,9 @@ export async function searchDrugUsage(
   const trimmed = query.trim();
   if (trimmed.length < 1) return [];
   const sql = getQuery(DRUGUSAGE_LOOKUP, DEFAULT_DIALECT);
-  const r = await executeSql<{ drugusage: string; shortlist: string }>(
-    sql,
-    config,
-    { q: `%${trimmed}%` },
-  );
+  const r = await executeSql<{ drugusage: string; shortlist: string }>(sql, config, {
+    q: `%${trimmed}%`,
+  });
   return r.data;
 }
 
@@ -1265,12 +1216,7 @@ export async function movePatientBed(
   args: BedMoveArgs,
 ): Promise<void> {
   // 1. Update iptadm.bedno + roomno for the patient
-  await restUpdate(
-    'iptadm',
-    args.an,
-    { bedno: args.newBedno, roomno: args.newRoomno },
-    config,
-  );
+  await restUpdate('iptadm', args.an, { bedno: args.newBedno, roomno: args.newRoomno }, config);
   // 2. Mint a fresh iptbedmove_id
   const id = await mintSerial(config, 'iptbedmove', 'iptbedmove_id');
   // 3. Insert iptbedmove audit row with split date/time + entry_datetime
@@ -1342,12 +1288,7 @@ export async function dischargePatient(
     iptFields.followup = args.followup;
   }
   await restUpdate('ipt', args.an, iptFields, config);
-  await restUpdate(
-    'iptadm',
-    args.an,
-    { outdate: args.dchdate, outtime: args.dchtime },
-    config,
-  );
+  await restUpdate('iptadm', args.an, { outdate: args.dchdate, outtime: args.dchtime }, config);
   fireAudit({
     entity: 'ipt',
     op: 'discharge',

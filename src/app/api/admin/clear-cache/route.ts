@@ -24,6 +24,9 @@ export async function POST() {
     );
     await db.execute('DELETE FROM cached_vital_signs');
 
+    // The assessment forms reference a patient row — they go first.
+    await db.execute('DELETE FROM cached_maternity_assessments');
+
     const patientsDeleted = await db.query<{ cnt: number }>(
       'SELECT COUNT(*) as cnt FROM cached_patients',
     );
