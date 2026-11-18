@@ -86,6 +86,12 @@ export interface AssessmentSyncResult {
   skipped: number;
   /** Rows the database refused — isolated, the rest of the batch landed. */
   failed: number;
+  /** Per form: the keys that reached the cache. */
+  persistedPks: Record<string, string[]>;
+  /** Per form: the keys that were delivered but can never be stored. */
+  rejectedPks: Record<string, string[]>;
+  /** Per form: the keys the database refused. */
+  failedPks: Record<string, string[]>;
 }
 
 // ─── Column widths (mirror src/db/tables/cached-maternity-assessments.ts) ──
@@ -132,8 +138,9 @@ export function normalizeAssessmentRows(
   items: Map<string, HosxpAssessmentItemRow>,
   formName: string | null,
   options: NormalizeOptions,
-): { rows: MaternityAssessmentRow[]; skipped: number } {
+): { rows: MaternityAssessmentRow[]; skipped: number; rejectedPks: string[] } {
   const rows: MaternityAssessmentRow[] = [];
+  const rejectedPks: string[] = [];
   let skipped = 0;
 
   for (const raw of rawRows) {
@@ -143,6 +150,9 @@ export function normalizeAssessmentRows(
     const recordedAt = usableTimestamp(meta.recordedAt);
     if (!pk || !an || !recordedAt) {
       skipped += 1;
+      // The row was delivered but can never be stored (no usable key, AN or
+      // timestamp). It must not hold the form back: the cursor may pass it.
+      if (pk) rejectedPks.push(pk);
       continue;
     }
 
@@ -170,7 +180,7 @@ export function normalizeAssessmentRows(
     });
   }
 
-  return { rows, skipped };
+  return { rows, skipped, rejectedPks };
 }
 
 /**
@@ -220,6 +230,7 @@ export async function syncMaternityAssessments(
   const patientIdByAn = await resolvePatientIds(db, hospitalId, [...allAns]);
 
   const normalized: MaternityAssessmentRow[] = [];
+  const rejectedPks: Record<string, string[]> = {};
   let skipped = 0;
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
     const rawRows = input.records[form.table] ?? [];
@@ -252,12 +263,19 @@ export async function syncMaternityAssessments(
         { encryptionKey, patientIdByAn },
       );
       skipped += result.skipped;
+      if (result.rejectedPks.length > 0) {
+        rejectedPks[form.table] = [...(rejectedPks[form.table] ?? []), ...result.rejectedPks];
+      }
       for (const row of result.rows) normalized.push({ ...row, hospitalId });
     }
   }
 
-  const { upserted, failed } = await upsertMaternityAssessments(db, hospitalId, normalized);
-  return { upserted, skipped, failed };
+  const { upserted, failed, persistedPks, failedPks } = await upsertMaternityAssessments(
+    db,
+    hospitalId,
+    normalized,
+  );
+  return { upserted, skipped, failed, persistedPks, rejectedPks, failedPks };
 }
 
 /**
@@ -272,11 +290,21 @@ export async function upsertMaternityAssessments(
   db: DatabaseAdapter,
   hospitalId: string,
   rows: MaternityAssessmentRow[],
-): Promise<{ upserted: number; failed: number }> {
-  if (rows.length === 0) return { upserted: 0, failed: 0 };
+): Promise<{
+  upserted: number;
+  failed: number;
+  persistedPks: Record<string, string[]>;
+  failedPks: Record<string, string[]>;
+}> {
+  if (rows.length === 0) {
+    return { upserted: 0, failed: 0, persistedPks: {}, failedPks: {} };
+  }
   const now = new Date().toISOString();
   let upserted = 0;
   let failed = 0;
+  const persistedPks: Record<string, string[]> = {};
+  const failedPks: Record<string, string[]> = {};
+  const pkOf = (row: MaternityAssessmentRow) => row.sourcePk.slice(row.sourcePk.indexOf(':') + 1);
 
   for (const row of rows) {
     try {
@@ -320,16 +348,34 @@ export async function upsertMaternityAssessments(
         ],
       );
       upserted += 1;
+      (persistedPks[row.formTable] ??= []).push(pkOf(row));
     } catch {
       // One bad row must not cost the form its other rows.
       failed += 1;
+      (failedPks[row.formTable] ??= []).push(pkOf(row));
     }
   }
 
-  return { upserted, failed };
+  return { upserted, failed, persistedPks, failedPks };
 }
 
 // ─── Cursors ────────────────────────────────────────────────────────────────
+//
+// The cursor is the SERVER's position in the hospital's HOSxP: the highest
+// primary key of a form that the server has taken delivery of, in order,
+// with nothing skipped in between.
+//
+// It advances CONTIGUOUSLY. HOSxP is asked which keys of the form exist
+// above the cursor; the cursor only moves past a key the browser really
+// delivered AND that reached the cache (or that can never be stored — a
+// malformed row is delivered, and holding the form back for it would lose
+// every row behind it). A key the browser skipped, or one the database
+// refused, stops the progression: the row behind it is pulled again next
+// cycle instead of being skipped for good.
+//
+// When the server cannot reach HOSxP the cursor does not move at all. The
+// rows still land (the push is idempotent), so nothing is lost — only the
+// pull position waits until HOSxP can be asked again.
 
 /** The pull position of every maternity form of one hospital, by table. */
 export async function readAssessmentCursors(
@@ -349,87 +395,59 @@ export async function readAssessmentCursors(
   return cursors;
 }
 
+/** What the server knows about one form's progress in a push. */
+export interface AssessmentFormProgress {
+  /** The keys HOSxP has above the cursor, ascending. */
+  authoritative: string[];
+  /** The keys the browser delivered. */
+  delivered: string[];
+  /** The keys that reached the cache. */
+  persisted: string[];
+  /** The keys that were delivered but can never be stored. */
+  rejected: string[];
+  /** The keys the database refused — the progression stops before them. */
+  failed: string[];
+}
+
 /**
- * Move the cursor of every form forward to the highest primary key the sync
- * has PULLED — not the highest it managed to store. A row that fails to
- * store must not hold the form back, otherwise the rows behind it would
- * never be pulled.
- *
- * TRUST: a form whose position was VERIFIED against HOSxP (the server asked
- * HOSxP which keys exist above the cursor and took the highest key the
- * browser had actually delivered) moves exactly as far as HOSxP says. A form
- * the server could not verify (no tunnel, expired session) falls back to the
- * browser's own claim, but only within a bounded distance — a client must
- * not be able to park its hospital's cursor beyond the real rows.
+ * The key the cursor may move to: the last key of the authoritative page
+ * that the browser delivered and that either reached the cache or can never
+ * be stored — stopping at the first key that was skipped or refused.
  */
-export const ASSESSMENT_MAX_CURSOR_ADVANCE = 10_000_000;
+export function resolveCursorAdvance(
+  progress: AssessmentFormProgress,
+  currentCursor: string,
+): string | null {
+  const delivered = new Set(progress.delivered);
+  const passed = new Set([...progress.persisted, ...progress.rejected]);
+  const failed = new Set(progress.failed);
+  const current = BigInt(currentCursor || '0');
 
-/** How far a form may move when the server could not verify the position. */
-export interface AssessmentCursorAdvance {
-  /** The primary keys the pull offered, per form. */
-  pks: string[];
-  /** True when the server confirmed these keys with HOSxP. */
-  trusted: boolean;
-}
-
-export async function advanceAssessmentCursors(
-  db: DatabaseAdapter,
-  hospitalId: string,
-  advances: Record<string, AssessmentCursorAdvance>,
-): Promise<void> {
-  const now = new Date().toISOString();
-  for (const [table, advance] of Object.entries(advances)) {
-    if (!assessmentFormByTable(table)) continue;
-    const usable = advance.pks.filter((pk) => /^\d{1,18}$/.test(pk)).map((pk) => BigInt(pk));
-    if (usable.length === 0) continue;
-
-    const existing = await db.query<{ id: string; cursor_pk: string }>(
-      `SELECT id, cursor_pk
-         FROM cached_maternity_assessment_cursors
-        WHERE hospital_id = ? AND form_table = ?`,
-      [hospitalId, table],
-    );
-    const current = existing.length > 0 ? BigInt(existing[0].cursor_pk) : BigInt(0);
-    const ceiling = current + BigInt(ASSESSMENT_MAX_CURSOR_ADVANCE);
-    const accepted = advance.trusted
-      ? usable.filter((pk) => pk > current)
-      : usable.filter((pk) => pk > current && pk <= ceiling);
-    if (accepted.length === 0) continue;
-    const next = accepted.reduce((max, pk) => (pk > max ? pk : max), current);
-
-    if (existing.length > 0) {
-      await db.execute(
-        `UPDATE cached_maternity_assessment_cursors
-            SET cursor_pk = ?, updated_at = ?
-          WHERE id = ?`,
-        [next.toString(), now, existing[0].id],
-      );
-    } else {
-      await db.execute(
-        `INSERT INTO cached_maternity_assessment_cursors
-           (id, hospital_id, form_table, cursor_pk, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [uuidv4(), hospitalId, table, next.toString(), now],
-      );
-    }
+  let next: string | null = null;
+  for (const key of progress.authoritative) {
+    if (!/^\d{1,18}$/.test(key)) continue;
+    const value = BigInt(key);
+    if (value <= current) continue;
+    if (failed.has(key)) break; // re-pulled next cycle
+    if (!delivered.has(key)) break; // the browser skipped it — do not pass it
+    if (!passed.has(key)) break; // delivered but not accounted for
+    next = key;
   }
+  return next;
 }
 
 /**
- * Ask HOSxP which keys of a form exist above the current cursor, and return
- * the highest of them that the browser actually delivered.
+ * Ask HOSxP which keys of a form exist above the current cursor.
  *
  * This is what makes the cursor server-observed: the browser can claim any
- * key it likes, but only a key HOSxP confirms — and that the browser really
- * sent — moves the cursor. A form whose keys cannot be checked (no tunnel,
- * expired session) is reported as unverified and the caller decides.
+ * key it likes, but only a key HOSxP confirms moves the cursor — and only
+ * when every key below it was delivered too.
  */
 export async function verifyAssessmentCursorAdvance(
   db: DatabaseAdapter,
   hospitalId: string,
-  pushedPksByTable: Record<string, string[]>,
   cursors: Record<string, string>,
-): Promise<Record<string, AssessmentCursorAdvance>> {
+): Promise<Record<string, { authoritative: string[]; verified: boolean }>> {
   const configs = await db.query<{ tunnel_url: string | null; session_jwt: string | null }>(
     `SELECT tunnel_url, session_jwt
        FROM hospital_bms_config
@@ -437,38 +455,72 @@ export async function verifyAssessmentCursorAdvance(
     [hospitalId],
   );
   const config = configs[0];
-  const advances: Record<string, AssessmentCursorAdvance> = {};
-  for (const [table, pks] of Object.entries(pushedPksByTable)) {
-    if (!assessmentFormByTable(table)) continue;
-    const fallback: AssessmentCursorAdvance = { pks, trusted: false };
+  const result: Record<string, { authoritative: string[]; verified: boolean }> = {};
+  for (const form of MATERNITY_ASSESSMENT_FORMS) {
     if (!config?.tunnel_url || !config.session_jwt) {
-      advances[table] = fallback;
+      result[form.table] = { authoritative: [], verified: false };
       continue;
     }
-    const form = MATERNITY_ASSESSMENT_FORMS.find((f) => f.table === table)!;
     try {
       const client = new BmsSessionClient(config.tunnel_url);
-      const sql = buildAssessmentKeysSqlFor(form.table, form.pkColumn, cursors[table] ?? '0');
+      const sql = buildAssessmentKeysSqlFor(form.table, form.pkColumn, cursors[form.table] ?? '0');
       const res = await client.executeQuery(sql, config.tunnel_url, config.session_jwt, undefined, {
         appIdentifier: APP_IDENTIFIER,
       });
-      const authoritative = new Set(
-        (res.data as Record<string, unknown>[]).map((row) => String(row[form.pkColumn])),
-      );
-      const confirmed = pks.filter((pk) => authoritative.has(pk));
-      advances[table] = { pks: confirmed, trusted: confirmed.length > 0 };
+      const authoritative = (res.data as Record<string, unknown>[])
+        .map((row) => String(row[form.pkColumn]))
+        .filter((key) => /^\d{1,18}$/.test(key))
+        .sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
+      result[form.table] = { authoritative, verified: true };
     } catch {
-      // HOSxP could not be reached — the caller falls back to the browser's
-      // claim, bounded.
-      advances[table] = fallback;
+      // HOSxP could not be reached — the cursor does not move for this form.
+      result[form.table] = { authoritative: [], verified: false };
     }
   }
-  return advances;
+  return result;
 }
 
 /**
- * The primary keys of every form in a pushed batch — the position the next
- * pull resumes from.
+ * Move the cursor of every form to the position the server resolved. A form
+ * whose position could not be verified keeps the cursor it has.
+ */
+export async function advanceAssessmentCursors(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  nextByTable: Record<string, string | null>,
+): Promise<void> {
+  const now = new Date().toISOString();
+  for (const [table, next] of Object.entries(nextByTable)) {
+    if (!assessmentFormByTable(table)) continue;
+    if (!next || !/^\d{1,18}$/.test(next)) continue;
+    const existing = await db.query<{ id: string; cursor_pk: string }>(
+      `SELECT id, cursor_pk
+         FROM cached_maternity_assessment_cursors
+        WHERE hospital_id = ? AND form_table = ?`,
+      [hospitalId, table],
+    );
+    if (existing.length > 0) {
+      if (BigInt(next) <= BigInt(existing[0].cursor_pk)) continue;
+      await db.execute(
+        `UPDATE cached_maternity_assessment_cursors
+            SET cursor_pk = ?, updated_at = ?
+          WHERE id = ?`,
+        [next, now, existing[0].id],
+      );
+    } else {
+      await db.execute(
+        `INSERT INTO cached_maternity_assessment_cursors
+           (id, hospital_id, form_table, cursor_pk, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [uuidv4(), hospitalId, table, next, now],
+      );
+    }
+  }
+}
+
+/**
+ * The primary keys the browser delivered, per form — the "delivered" side of
+ * the cursor progression.
  */
 export function pulledPksByTable(input: AssessmentSyncInput): Record<string, string[]> {
   const out: Record<string, string[]> = {};

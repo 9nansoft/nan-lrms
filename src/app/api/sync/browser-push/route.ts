@@ -23,10 +23,12 @@ import {
   advanceAssessmentCursors,
   pulledPksByTable,
   readAssessmentCursors,
+  resolveCursorAdvance,
   syncMaternityAssessments,
   validateAssessmentPayload,
   verifyAssessmentCursorAdvance,
 } from '@/services/sync/maternity-assessment';
+import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
 import { autoArriveReferrals } from '@/services/referral';
 import { enqueueOverdueReferralAlerts } from '@/services/referral-alerts';
 import {
@@ -607,19 +609,32 @@ export async function POST(request: NextRequest) {
           // The cursor follows the PULL, not the store: a row the database
           // refused must not hold the form back, or the rows behind it would
           // never arrive.
-          // The cursor is the SERVER's position in the hospital's HOSxP: ask
-          // HOSxP which keys exist above the current cursor and take the
-          // highest one the browser actually delivered. A browser that
-          // claims a key HOSxP does not have cannot move the cursor past the
-          // real rows.
+          // The cursor is the SERVER's position in the hospital's HOSxP. Ask
+          // HOSxP which keys of the form exist above the cursor and move the
+          // cursor only past the keys the browser really delivered, in order,
+          // with nothing skipped in between. A key the browser skipped, or
+          // one the database refused, stops the progression — that row is
+          // pulled again next cycle instead of being lost.
           const cursors = await readAssessmentCursors(db, hospitalId);
-          const advances = await verifyAssessmentCursorAdvance(
-            db,
-            hospitalId,
-            pulledPksByTable(payload),
-            cursors,
-          );
-          await advanceAssessmentCursors(db, hospitalId, advances);
+          const authoritative = await verifyAssessmentCursorAdvance(db, hospitalId, cursors);
+          const delivered = pulledPksByTable(payload);
+          const nextByTable: Record<string, string | null> = {};
+          for (const form of MATERNITY_ASSESSMENT_FORMS) {
+            const verified = authoritative[form.table];
+            nextByTable[form.table] = verified?.verified
+              ? resolveCursorAdvance(
+                  {
+                    authoritative: verified.authoritative,
+                    delivered: delivered[form.table] ?? [],
+                    persisted: r.persistedPks[form.table] ?? [],
+                    rejected: r.rejectedPks[form.table] ?? [],
+                    failed: r.failedPks[form.table] ?? [],
+                  },
+                  cursors[form.table] ?? '0',
+                )
+              : null; // HOSxP could not be asked — the cursor waits.
+          }
+          await advanceAssessmentCursors(db, hospitalId, nextByTable);
           result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_assessments',

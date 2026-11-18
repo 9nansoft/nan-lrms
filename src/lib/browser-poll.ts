@@ -1138,6 +1138,12 @@ function stripEmptyRow(row: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
+ * The form metadata of the last pull, kept per browser tab: the labels of a
+ * form's columns change only when the site edits the form.
+ */
+let assessmentItemsCache: { formIds: string; items: Record<string, unknown>[] } | null = null;
+
+/**
  * Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด).
  *
  * The form metadata comes with the rows: HOSxP stores every assessment form
@@ -1166,7 +1172,17 @@ async function pullAssessments(
   }
 
   const itemsSql = buildAssessmentItemsSql([...formIds], 'mysql');
-  const itemRows = await runQuery<Record<string, unknown>>(itemsSql, opts);
+  // The item metadata (the labels of every column of every form version)
+  // only changes when the site edits its form — re-read it then, not every
+  // cycle.
+  const formIdsKey = [...formIds].sort().join(',');
+  let itemRows: Record<string, unknown>[];
+  if (assessmentItemsCache && assessmentItemsCache.formIds === formIdsKey) {
+    itemRows = assessmentItemsCache.items;
+  } else {
+    itemRows = await runQuery<Record<string, unknown>>(itemsSql, opts);
+    assessmentItemsCache = { formIds: formIdsKey, items: itemRows };
+  }
 
   const records: Record<string, Record<string, unknown>[]> = {};
   await Promise.all(

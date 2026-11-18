@@ -24,6 +24,7 @@ vi.mock('@/lib/auth', () => ({
 }));
 vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 
+import { BmsSessionClient } from '@/lib/bms-session';
 import { POST } from '@/app/api/sync/browser-push/route';
 
 const HCODE = '10716';
@@ -146,10 +147,26 @@ describe('POST /api/sync/browser-push — maternity assessment forms', () => {
     expect(step!.counts).toMatchObject({ upserted: 1, skipped: 0 });
   });
 
-  it('advances the form cursor so the next pull resumes after the last row', async () => {
+  it('advances the form cursor to the position HOSxP confirms', async () => {
+    const hid = await hospitalId();
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO hospital_bms_config
+         (id, hospital_id, tunnel_url, session_jwt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      ['hbc-1', hid, 'http://tunnel.test', 'jwt-test', now, now],
+    );
+    const executeQuery = vi
+      .spyOn(BmsSessionClient.prototype, 'executeQuery')
+      .mockImplementation(async () => ({
+        data: [{ asm_lr_record_after_birth_nan_id: 2418 }],
+        field: [],
+        field_name: [],
+        record_count: 1,
+      }));
+
     const res = await POST(jsonRequest({ assessments: assessmentPayload() }) as never);
     expect(res.status).toBe(200);
-    const hid = await hospitalId();
     const cursors = await db.query<{ form_table: string; cursor_pk: string }>(
       'SELECT form_table, cursor_pk FROM cached_maternity_assessment_cursors WHERE hospital_id = ?',
       [hid],
@@ -157,6 +174,23 @@ describe('POST /api/sync/browser-push — maternity assessment forms', () => {
     expect(cursors).toHaveLength(1);
     expect(cursors[0].form_table).toBe('asm_lr_record_after_birth_nan');
     expect(cursors[0].cursor_pk).toBe('2418');
+    executeQuery.mockRestore();
+  });
+
+  it('keeps the cursor still when HOSxP cannot confirm the position', async () => {
+    // No hospital_bms_config — the server cannot ask HOSxP which keys
+    // exist, so it does not move the cursor on the browser's word. The rows
+    // still land; only the pull position waits.
+    const res = await POST(jsonRequest({ assessments: assessmentPayload() }) as never);
+    expect(res.status).toBe(200);
+    const hid = await hospitalId();
+    const cursors = await db.query(
+      'SELECT form_table FROM cached_maternity_assessment_cursors WHERE hospital_id = ?',
+      [hid],
+    );
+    expect(cursors).toHaveLength(0);
+    const stored = await db.query('SELECT id FROM cached_maternity_assessments');
+    expect(stored).toHaveLength(1);
   });
 
   it('refuses an unknown assessment table and stores nothing', async () => {

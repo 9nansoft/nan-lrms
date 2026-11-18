@@ -20,6 +20,7 @@ import {
   advanceAssessmentCursors,
   pulledPksByTable,
   readAssessmentCursors,
+  resolveCursorAdvance,
   syncMaternityAssessments,
 } from './maternity-assessment';
 import type { HosxpAssessmentFormRow, HosxpAssessmentItemRow } from '@/types/maternity-assessments';
@@ -1355,15 +1356,25 @@ export async function pollHospital(
       const syncResult = await syncMaternityAssessments(db, hospitalId, payload);
       // The cursor follows the PULL, not the store: a row the database
       // refused must not hold the form back. These rows came from the
-      // server's own HOSxP query, so the position is trusted outright.
+      // server's own HOSxP query, so the server's own pull IS the
+      // authoritative key list.
       const pulled = pulledPksByTable(payload);
-      await advanceAssessmentCursors(
-        db,
-        hospitalId,
-        Object.fromEntries(
-          Object.entries(pulled).map(([table, pks]) => [table, { pks, trusted: true }]),
-        ),
-      );
+      const cursorState = await readAssessmentCursors(db, hospitalId);
+      const nextByTable: Record<string, string | null> = {};
+      for (const form of MATERNITY_ASSESSMENT_FORMS) {
+        const pks = pulled[form.table] ?? [];
+        nextByTable[form.table] = resolveCursorAdvance(
+          {
+            authoritative: [...pks].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1)),
+            delivered: pks,
+            persisted: syncResult.persistedPks[form.table] ?? [],
+            rejected: syncResult.rejectedPks[form.table] ?? [],
+            failed: syncResult.failedPks[form.table] ?? [],
+          },
+          cursorState[form.table] ?? '0',
+        );
+      }
+      await advanceAssessmentCursors(db, hospitalId, nextByTable);
       stats.assessmentRowsUpserted = syncResult.upserted;
 
       emitStep(options, {
