@@ -1199,17 +1199,22 @@ export function buildAssessmentRecordsSqlFor(
 }
 
 /**
- * The primary keys of a form above a cursor — what the SERVER asks HOSxP to
- * confirm the pull position against. Keys only: the rows themselves were
- * already read by the hospital's browser, and a form row is ~190 columns
- * wide.
+ * The primary keys of a form above a cursor, with the two fields the server
+ * needs to judge a row for itself — the admission it belongs to and when it
+ * was recorded. That is what lets the server classify a malformed row on its
+ * own instead of taking the browser's word for it.
+ *
+ * Three columns, not the ~190 of a full form row: the rows themselves were
+ * already read by the hospital's browser.
  */
 export function buildAssessmentKeysSql(table: string, pkColumn: string): SqlQueryTemplate {
   const body = `
-    SELECT ${pkColumn}
-      FROM ${table}
-     WHERE ${pkColumn} > {{CURSOR_PK}}
-     ORDER BY ${pkColumn} ASC
+    SELECT t.${pkColumn}, t.an,
+           h.assessment_head_datetime AS head_datetime
+      FROM ${table} t
+      JOIN assessment_head h ON h.assessment_head_id = t.assessment_head_id
+     WHERE t.${pkColumn} > {{CURSOR_PK}}
+     ORDER BY t.${pkColumn} ASC
      LIMIT ${ASSESSMENT_ROW_LIMIT}`;
   return { postgresql: body, mysql: body };
 }

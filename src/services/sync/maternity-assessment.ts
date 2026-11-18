@@ -88,8 +88,9 @@ export interface AssessmentSyncResult {
   failed: number;
   /** Per form: the keys that reached the cache. */
   persistedPks: Record<string, string[]>;
-  /** Per form: the keys that were delivered but can never be stored. */
-  rejectedPks: Record<string, string[]>;
+  /** Per form: the keys that can never be stored (the server's own verdict
+   *  on the rows it read). */
+  unusablePks: Record<string, string[]>;
   /** Per form: the keys the database refused. */
   failedPks: Record<string, string[]>;
 }
@@ -138,9 +139,9 @@ export function normalizeAssessmentRows(
   items: Map<string, HosxpAssessmentItemRow>,
   formName: string | null,
   options: NormalizeOptions,
-): { rows: MaternityAssessmentRow[]; skipped: number; rejectedPks: string[] } {
+): { rows: MaternityAssessmentRow[]; skipped: number; unusablePks: string[] } {
   const rows: MaternityAssessmentRow[] = [];
-  const rejectedPks: string[] = [];
+  const unusablePks: string[] = [];
   let skipped = 0;
 
   for (const raw of rawRows) {
@@ -152,7 +153,7 @@ export function normalizeAssessmentRows(
       skipped += 1;
       // The row was delivered but can never be stored (no usable key, AN or
       // timestamp). It must not hold the form back: the cursor may pass it.
-      if (pk) rejectedPks.push(pk);
+      if (pk) unusablePks.push(pk);
       continue;
     }
 
@@ -180,7 +181,7 @@ export function normalizeAssessmentRows(
     });
   }
 
-  return { rows, skipped, rejectedPks };
+  return { rows, skipped, unusablePks };
 }
 
 /**
@@ -230,7 +231,7 @@ export async function syncMaternityAssessments(
   const patientIdByAn = await resolvePatientIds(db, hospitalId, [...allAns]);
 
   const normalized: MaternityAssessmentRow[] = [];
-  const rejectedPks: Record<string, string[]> = {};
+  const unusablePks: Record<string, string[]> = {};
   let skipped = 0;
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
     const rawRows = input.records[form.table] ?? [];
@@ -263,8 +264,8 @@ export async function syncMaternityAssessments(
         { encryptionKey, patientIdByAn },
       );
       skipped += result.skipped;
-      if (result.rejectedPks.length > 0) {
-        rejectedPks[form.table] = [...(rejectedPks[form.table] ?? []), ...result.rejectedPks];
+      if (result.unusablePks.length > 0) {
+        unusablePks[form.table] = [...(unusablePks[form.table] ?? []), ...result.unusablePks];
       }
       for (const row of result.rows) normalized.push({ ...row, hospitalId });
     }
@@ -275,7 +276,7 @@ export async function syncMaternityAssessments(
     hospitalId,
     normalized,
   );
-  return { upserted, skipped, failed, persistedPks, rejectedPks, failedPks };
+  return { upserted, skipped, failed, persistedPks, unusablePks, failedPks };
 }
 
 /**
@@ -403,8 +404,9 @@ export interface AssessmentFormProgress {
   delivered: string[];
   /** The keys that reached the cache. */
   persisted: string[];
-  /** The keys that were delivered but can never be stored. */
-  rejected: string[];
+  /** The keys the SERVER judged un-storable (no admission, no usable
+   *  timestamp) — read from HOSxP, never taken on the browser's word. */
+  unusable: string[];
   /** The keys the database refused — the progression stops before them. */
   failed: string[];
 }
@@ -419,7 +421,10 @@ export function resolveCursorAdvance(
   currentCursor: string,
 ): string | null {
   const delivered = new Set(progress.delivered);
-  const passed = new Set([...progress.persisted, ...progress.rejected]);
+  // Only a key that reached the cache, or that the SERVER judged un-storable,
+  // may be crossed. A key the browser merely claims to have rejected is not
+  // enough — that is the browser's own word.
+  const passed = new Set([...progress.persisted, ...progress.unusable]);
   const failed = new Set(progress.failed);
   const current = BigInt(currentCursor || '0');
 
@@ -494,14 +499,21 @@ export async function verifyAssessmentCursorAdvance(
   hospitalId: string,
   cursors: Record<string, string>,
   onlyTables?: string[],
-): Promise<Record<string, { authoritative: string[]; verified: boolean }>> {
+): Promise<Record<string, { authoritative: string[]; unusable: string[]; verified: boolean }>> {
   const session = await serverBmsSession(db, hospitalId);
-  const result: Record<string, { authoritative: string[]; verified: boolean }> = {};
+  const result: Record<
+    string,
+    {
+      authoritative: string[];
+      unusable: string[];
+      verified: boolean;
+    }
+  > = {};
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
     // Only the forms that actually moved need to be checked.
     if (onlyTables && !onlyTables.includes(form.table)) continue;
     if (!session) {
-      result[form.table] = { authoritative: [], verified: false };
+      result[form.table] = { authoritative: [], unusable: [], verified: false };
       continue;
     }
     try {
@@ -510,14 +522,26 @@ export async function verifyAssessmentCursorAdvance(
       const res = await client.executeQuery(sql, session.bmsUrl, session.jwt, undefined, {
         appIdentifier: APP_IDENTIFIER,
       });
-      const authoritative = (res.data as Record<string, unknown>[])
-        .map((row) => String(row[form.pkColumn]))
-        .filter((key) => /^\d{1,18}$/.test(key))
-        .sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
-      result[form.table] = { authoritative, verified: true };
+      // The server judges each row itself: a row without a usable admission
+      // or timestamp can never be stored, and the cursor may pass it. The
+      // browser does not get to say so.
+      const authoritative: string[] = [];
+      const unusable: string[] = [];
+      for (const row of res.data as Record<string, unknown>[]) {
+        const key = String(row[form.pkColumn]);
+        if (!/^\d{1,18}$/.test(key)) continue;
+        authoritative.push(key);
+        const an = str(row.an);
+        const recordedAt = usableTimestamp(
+          typeof row.head_datetime === 'string' ? row.head_datetime : null,
+        );
+        if (!an || an.length > 32 || !recordedAt) unusable.push(key);
+      }
+      authoritative.sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
+      result[form.table] = { authoritative, unusable, verified: true };
     } catch {
       // HOSxP could not be reached — the cursor does not move for this form.
-      result[form.table] = { authoritative: [], verified: false };
+      result[form.table] = { authoritative: [], unusable: [], verified: false };
     }
   }
   return result;

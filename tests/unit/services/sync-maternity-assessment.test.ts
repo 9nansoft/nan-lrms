@@ -313,7 +313,7 @@ describe('cursors', () => {
         authoritative: ['2418', '2419', '2420'],
         delivered: ['2418', '2419', '2420'],
         persisted: ['2418', '2419', '2420'],
-        rejected: [],
+        unusable: [],
         failed: [],
       },
       '0',
@@ -329,7 +329,7 @@ describe('cursors', () => {
         authoritative: ['2418', '2419', '2420'],
         delivered: ['2418', '2420'],
         persisted: ['2418', '2420'],
-        rejected: [],
+        unusable: [],
         failed: [],
       },
       '0',
@@ -344,7 +344,7 @@ describe('cursors', () => {
         authoritative: ['2418', '2419', '2420'],
         delivered: ['2418', '2419', '2420'],
         persisted: ['2418', '2420'],
-        rejected: [],
+        unusable: [],
         failed: ['2419'],
       },
       '0',
@@ -352,15 +352,16 @@ describe('cursors', () => {
     expect(next).toBe('2418');
   });
 
-  it('moves past a key that can never be stored', () => {
+  it('moves past a key the SERVER judged un-storable', () => {
     // A malformed row is delivered and dropped for good — holding the form
-    // back for it would lose every row behind it.
+    // back for it would lose every row behind it. The verdict is the
+    // server's own (read from HOSxP), not the browser's.
     const next = resolveCursorAdvance(
       {
         authoritative: ['2418', '2419', '2420'],
         delivered: ['2418', '2419', '2420'],
         persisted: ['2418', '2420'],
-        rejected: ['2419'],
+        unusable: ['2419'],
         failed: [],
       },
       '0',
@@ -370,7 +371,7 @@ describe('cursors', () => {
 
   it('does not move when nothing was delivered', () => {
     const next = resolveCursorAdvance(
-      { authoritative: ['2418'], delivered: [], persisted: [], rejected: [], failed: [] },
+      { authoritative: ['2418'], delivered: [], persisted: [], unusable: [], failed: [] },
       '0',
     );
     expect(next).toBeNull();

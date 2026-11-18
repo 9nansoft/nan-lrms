@@ -1368,7 +1368,7 @@ export async function pollHospital(
             authoritative: [...pks].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1)),
             delivered: pks,
             persisted: syncResult.persistedPks[form.table] ?? [],
-            rejected: syncResult.rejectedPks[form.table] ?? [],
+            unusable: syncResult.unusablePks[form.table] ?? [],
             failed: syncResult.failedPks[form.table] ?? [],
           },
           cursorState[form.table] ?? '0',

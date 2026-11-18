@@ -51,7 +51,11 @@ async function finalizedRun(hid: string) {
   throw new Error('sync run never finalized');
 }
 
-function assessmentPayload() {
+function assessmentPayload(): {
+  forms: Record<string, unknown>[];
+  items: Record<string, unknown>[];
+  records: Record<string, Record<string, unknown>[]>;
+} {
   return {
     forms: [
       {
@@ -191,6 +195,48 @@ describe('POST /api/sync/browser-push — maternity assessment forms', () => {
     expect(cursors).toHaveLength(0);
     const stored = await db.query('SELECT id FROM cached_maternity_assessments');
     expect(stored).toHaveLength(1);
+  });
+
+  it('does not move the cursor past a row the browser calls malformed but HOSxP says is good', async () => {
+    // The browser pushes a row with no admission — the server drops it. HOSxP
+    // says the row has one, so the row is storable and the cursor must not
+    // step over it: the browser does not get to declare a real row
+    // un-storable.
+    const hid = await hospitalId();
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO hospital_bms_config
+         (id, hospital_id, tunnel_url, session_jwt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      ['hbc-1', hid, 'http://tunnel.test', 'jwt-test', now, now],
+    );
+    const executeQuery = vi
+      .spyOn(BmsSessionClient.prototype, 'executeQuery')
+      .mockImplementation(async () => ({
+        data: [
+          {
+            asm_lr_record_after_birth_nan_id: 2418,
+            an: 'AN-REAL',
+            head_datetime: '2026-11-17T21:03:15',
+          },
+        ],
+        field: [],
+        field_name: [],
+        record_count: 1,
+      }));
+
+    const payload = assessmentPayload();
+    const row = payload.records.asm_lr_record_after_birth_nan[0] as Record<string, unknown>;
+    payload.records.asm_lr_record_after_birth_nan[0] = { ...row, an: null };
+
+    const res = await POST(jsonRequest({ assessments: payload }) as never);
+    expect(res.status).toBe(200);
+    const cursors = await db.query(
+      'SELECT form_table FROM cached_maternity_assessment_cursors WHERE hospital_id = ?',
+      [hid],
+    );
+    expect(cursors).toHaveLength(0);
+    executeQuery.mockRestore();
   });
 
   it('refuses an unknown assessment table and stores nothing', async () => {

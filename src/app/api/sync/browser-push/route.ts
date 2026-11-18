@@ -632,7 +632,7 @@ export async function POST(request: NextRequest) {
                     authoritative: verified.authoritative,
                     delivered: delivered[form.table] ?? [],
                     persisted: r.persistedPks[form.table] ?? [],
-                    rejected: r.rejectedPks[form.table] ?? [],
+                    unusable: verified.unusable,
                     failed: r.failedPks[form.table] ?? [],
                   },
                   cursors[form.table] ?? '0',
