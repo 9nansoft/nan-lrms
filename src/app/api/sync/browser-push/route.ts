@@ -580,8 +580,8 @@ export async function POST(request: NextRequest) {
     // Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด) —
     // the raw rows the browser read, plus the form metadata that tells the
     // server what each positional column means. Persisting is idempotent
-    // ((hospital, source_system, source_pk) upsert key), so the overlap
-    // around the cutoff is safe.
+    // ((hospital, source_system, source_pk) upsert key), so a row that is
+    // pulled again is updated, never duplicated.
     if (body.assessments && typeof body.assessments === 'object') {
       const assessmentValidation = validateAssessmentPayload(body.assessments);
       if (!assessmentValidation.valid || !assessmentValidation.payload) {
