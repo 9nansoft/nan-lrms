@@ -31,11 +31,22 @@ function request(an: string) {
   return new Request(`http://test/api/patients/${an}/assessments`) as never;
 }
 
-async function seedPatient(hcode: string, an: string, id: string) {
+async function seedPatient(
+  hcode: string,
+  an: string,
+  id: string,
+  provinceCode: string | null = '55',
+) {
   const hospitals = await db.query<{ id: string }>('SELECT id FROM hospitals WHERE hcode = ?', [
     hcode,
   ]);
   if (hospitals.length === 0) return;
+  if (provinceCode !== null) {
+    await db.execute('UPDATE hospitals SET province_code = ? WHERE hcode = ?', [
+      provinceCode,
+      hcode,
+    ]);
+  }
   const now = new Date().toISOString();
   await db.execute(
     `INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at)
@@ -66,10 +77,20 @@ describe('GET /api/patients/[an]/assessments — tenant scope', () => {
     expect(body.assessments).toEqual([]);
   });
 
-  it('denies a hospital reading another hospital’s admission', async () => {
+  it('lets a hospital read an admission of the same province', async () => {
+    // The province-wide view is what NN-LRMS is built around.
     mockSessionUser = testSessionUser({ hospitalCode: OWN_HCODE });
     const res = await GET(request(`${OTHER_HCODE}-AN-OTHER`), {
       params: Promise.resolve({ an: `${OTHER_HCODE}-AN-OTHER` }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('denies a hospital reading an admission of another province', async () => {
+    await seedPatient(OTHER_HCODE, 'AN-FAR', 'pat-far', '42');
+    mockSessionUser = testSessionUser({ hospitalCode: OWN_HCODE });
+    const res = await GET(request(`${OTHER_HCODE}-AN-FAR`), {
+      params: Promise.resolve({ an: `${OTHER_HCODE}-AN-FAR` }),
     });
     expect(res.status).toBe(403);
   });

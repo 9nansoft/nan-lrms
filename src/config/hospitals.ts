@@ -202,6 +202,14 @@ export const KK_HOSPITALS: KkHospitalSeed[] = [
 // isn't published yet; โรงพยาบาลน่าน (10716) is promoted to the provincial
 // P tier as the terminal referral hub (see hospital-capabilities.ts).
 // Admins can reclassify from /admin afterwards.
+/**
+ * The province this deployment serves (MOPH chwpart '55' = น่าน). Used when
+ * an account stands for the province itself rather than for one hospital —
+ * the สสจ.น่าน account has no hospital row of its own to read a province
+ * from.
+ */
+export const APP_PROVINCE_CODE = '55';
+
 export const NAN_HOSPITALS: KkHospitalSeed[] = [
   { hcode: '10716', name: 'โรงพยาบาลน่าน', level: HospitalLevel.P },
   { hcode: '11173', name: 'โรงพยาบาลแม่จริม', level: HospitalLevel.F2 },
