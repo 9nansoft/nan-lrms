@@ -1354,8 +1354,16 @@ export async function pollHospital(
       };
       const syncResult = await syncMaternityAssessments(db, hospitalId, payload);
       // The cursor follows the PULL, not the store: a row the database
-      // refused must not hold the form back.
-      await advanceAssessmentCursors(db, hospitalId, pulledPksByTable(payload));
+      // refused must not hold the form back. These rows came from the
+      // server's own HOSxP query, so the position is trusted outright.
+      const pulled = pulledPksByTable(payload);
+      await advanceAssessmentCursors(
+        db,
+        hospitalId,
+        Object.fromEntries(
+          Object.entries(pulled).map(([table, pks]) => [table, { pks, trusted: true }]),
+        ),
+      );
       stats.assessmentRowsUpserted = syncResult.upserted;
 
       emitStep(options, {

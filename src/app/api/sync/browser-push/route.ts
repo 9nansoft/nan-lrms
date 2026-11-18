@@ -25,6 +25,7 @@ import {
   readAssessmentCursors,
   syncMaternityAssessments,
   validateAssessmentPayload,
+  verifyAssessmentCursorAdvance,
 } from '@/services/sync/maternity-assessment';
 import { autoArriveReferrals } from '@/services/referral';
 import { enqueueOverdueReferralAlerts } from '@/services/referral-alerts';
@@ -606,7 +607,19 @@ export async function POST(request: NextRequest) {
           // The cursor follows the PULL, not the store: a row the database
           // refused must not hold the form back, or the rows behind it would
           // never arrive.
-          await advanceAssessmentCursors(db, hospitalId, pulledPksByTable(payload));
+          // The cursor is the SERVER's position in the hospital's HOSxP: ask
+          // HOSxP which keys exist above the current cursor and take the
+          // highest one the browser actually delivered. A browser that
+          // claims a key HOSxP does not have cannot move the cursor past the
+          // real rows.
+          const cursors = await readAssessmentCursors(db, hospitalId);
+          const advances = await verifyAssessmentCursorAdvance(
+            db,
+            hospitalId,
+            pulledPksByTable(payload),
+            cursors,
+          );
+          await advanceAssessmentCursors(db, hospitalId, advances);
           result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_assessments',

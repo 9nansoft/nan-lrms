@@ -13,10 +13,11 @@
 //      form (hundreds of rows on one day) still advances.
 //   6. ONE BAD ROW CANNOT BLOCK THE REST: unusable values are dropped and a
 //      row the database refuses is isolated from the rows around it.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey, decrypt } from '@/lib/encryption';
+import { BmsSessionClient } from '@/lib/bms-session';
 import {
   normalizeAssessmentRows,
   syncMaternityAssessments,
@@ -24,6 +25,7 @@ import {
   pulledPksByTable,
   readAssessmentCursors,
   validateAssessmentPayload,
+  verifyAssessmentCursorAdvance,
 } from '@/services/sync/maternity-assessment';
 import { getPatientMaternityAssessments } from '@/services/maternity-assessments';
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
@@ -252,21 +254,21 @@ describe('cursors', () => {
 
   it('advances to the highest pulled pk and never moves backwards', async () => {
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: ['2418'],
+      asm_lr_record_after_birth_nan: { pks: ['2418'], trusted: true },
     });
     expect(await readAssessmentCursors(db, HOSPITAL_ID)).toEqual({
       asm_lr_record_after_birth_nan: '2418',
     });
 
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: ['2000'],
+      asm_lr_record_after_birth_nan: { pks: ['2000'], trusted: true },
     });
     expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
       '2418',
     );
 
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: ['2500'],
+      asm_lr_record_after_birth_nan: { pks: ['2500'], trusted: true },
     });
     expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
       '2500',
@@ -275,7 +277,7 @@ describe('cursors', () => {
 
   it('keeps one cursor per form — a busy form cannot skip a quiet one', async () => {
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: ['2418'],
+      asm_lr_record_after_birth_nan: { pks: ['2418'], trusted: true },
     });
     const cursors = await readAssessmentCursors(db, HOSPITAL_ID);
     expect(cursors.asm_lr_record_after_birth_nan).toBe('2418');
@@ -284,7 +286,9 @@ describe('cursors', () => {
   });
 
   it('ignores a cursor for a table the app does not know', async () => {
-    await advanceAssessmentCursors(db, HOSPITAL_ID, { some_other_table: ['5'] });
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      some_other_table: { pks: ['5'], trusted: true },
+    });
     expect(await readAssessmentCursors(db, HOSPITAL_ID)).toEqual({});
   });
 
@@ -304,18 +308,30 @@ describe('cursors', () => {
     expect(pks.asm_first_pregnant_pt_nan).toEqual(['2938']);
   });
 
-  it('does not let a client park the cursor beyond the real rows', async () => {
-    // A row whose key sits implausibly far ahead of the cursor must not
-    // move the cursor — otherwise one push could silence a hospital's own
-    // forms for good.
+  it('bounds an UNVERIFIED advance so a client cannot park the cursor', async () => {
+    // Without a server-side check of the keys, a push may only move the
+    // cursor a bounded distance — enough for a real hospital, not enough to
+    // jump past every real row.
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: ['2418'],
+      asm_lr_record_after_birth_nan: { pks: ['2418'], trusted: false },
     });
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: ['999999999999'],
+      asm_lr_record_after_birth_nan: { pks: ['999999999999'], trusted: false },
     });
     expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
       '2418',
+    );
+  });
+
+  it('lets a VERIFIED advance move exactly as far as HOSxP says', async () => {
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: { pks: ['2418'], trusted: true },
+    });
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: { pks: ['2419'], trusted: true },
+    });
+    expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
+      '2419',
     );
   });
 
@@ -328,15 +344,16 @@ describe('cursors', () => {
     const firstPage = rows.slice(0, 500);
     const secondPage = rows.slice(500);
 
-    await advanceAssessmentCursors(
-      db,
-      HOSPITAL_ID,
-      pulledPksByTable({
-        forms: FORM_ROWS,
-        items: ITEM_ROWS,
-        records: { asm_lr_record_after_birth_nan: firstPage },
-      }),
-    );
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: {
+        pks: pulledPksByTable({
+          forms: FORM_ROWS,
+          items: ITEM_ROWS,
+          records: { asm_lr_record_after_birth_nan: firstPage },
+        }).asm_lr_record_after_birth_nan,
+        trusted: true,
+      },
+    });
     expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
       '1499',
     );
@@ -346,18 +363,69 @@ describe('cursors', () => {
       items: ITEM_ROWS,
       records: { asm_lr_record_after_birth_nan: secondPage },
     });
-    await advanceAssessmentCursors(
-      db,
-      HOSPITAL_ID,
-      pulledPksByTable({
-        forms: FORM_ROWS,
-        items: ITEM_ROWS,
-        records: { asm_lr_record_after_birth_nan: secondPage },
-      }),
-    );
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: {
+        pks: pulledPksByTable({
+          forms: FORM_ROWS,
+          items: ITEM_ROWS,
+          records: { asm_lr_record_after_birth_nan: secondPage },
+        }).asm_lr_record_after_birth_nan,
+        trusted: true,
+      },
+    });
     expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
       '1599',
     );
+  });
+});
+
+describe('cursor verification against HOSxP', () => {
+  it('trusts only the keys HOSxP confirms', async () => {
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO hospital_bms_config
+         (id, hospital_id, tunnel_url, session_jwt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      ['hbc-1', HOSPITAL_ID, 'http://tunnel.test', 'jwt-test', now, now],
+    );
+
+    const executeQuery = vi
+      .spyOn(BmsSessionClient.prototype, 'executeQuery')
+      .mockImplementation(async () => ({
+        data: [{ asm_lr_record_after_birth_nan_id: 2418 }],
+        field: [],
+        field_name: [],
+        record_count: 1,
+      }));
+
+    // The browser claims 2418 (real) and 999999999999 (not in HOSxP).
+    const advances = await verifyAssessmentCursorAdvance(
+      db,
+      HOSPITAL_ID,
+      { asm_lr_record_after_birth_nan: ['2418', '999999999999'] },
+      {},
+    );
+    expect(executeQuery).toHaveBeenCalled();
+    expect(advances.asm_lr_record_after_birth_nan.trusted).toBe(true);
+    expect(advances.asm_lr_record_after_birth_nan.pks).toEqual(['2418']);
+
+    await advanceAssessmentCursors(db, HOSPITAL_ID, advances);
+    expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
+      '2418',
+    );
+    executeQuery.mockRestore();
+  });
+
+  it('falls back to the browser claim when HOSxP cannot be reached', async () => {
+    // No hospital_bms_config row — the server cannot check the keys.
+    const advances = await verifyAssessmentCursorAdvance(
+      db,
+      HOSPITAL_ID,
+      { asm_lr_record_after_birth_nan: ['2418'] },
+      {},
+    );
+    expect(advances.asm_lr_record_after_birth_nan.trusted).toBe(false);
+    expect(advances.asm_lr_record_after_birth_nan.pks).toEqual(['2418']);
   });
 });
 

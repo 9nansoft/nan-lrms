@@ -28,6 +28,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
+import { BmsSessionClient } from '@/lib/bms-session';
+import { APP_IDENTIFIER } from '@/lib/bms-browser-client';
+import { buildAssessmentRecordsSqlFor } from '@/config/hosxp-queries';
 import {
   MATERNITY_ASSESSMENT_FORMS,
   assessmentFormByTable,
@@ -352,31 +355,32 @@ export async function readAssessmentCursors(
  * store must not hold the form back, otherwise the rows behind it would
  * never be pulled.
  *
- * TRUST BOUNDARY: in the browser-push path the pull position comes from the
- * hospital's own browser, because that browser IS the client of that
- * hospital's HOSxP. The cursor is per hospital and can only ever move that
- * hospital's own form forward — the same trust the route already extends to
- * every other row the browser pushes (vitals, labs, partograph).
- *
- * The one thing the server does NOT take on faith is HOW FAR the cursor
- * may jump: a row whose primary key sits implausibly far ahead of the
- * current cursor is not accepted and does not move the cursor, so a client
- * cannot park the cursor beyond the real rows and silence its own hospital's
- * forms. A row that is merely malformed (a zero date, an unusable AN) is
- * still passed over — it can never become valid, and holding the form back
- * for it would lose every row behind it.
+ * TRUST: a form whose position was VERIFIED against HOSxP (the server asked
+ * HOSxP which keys exist above the cursor and took the highest key the
+ * browser had actually delivered) moves exactly as far as HOSxP says. A form
+ * the server could not verify (no tunnel, expired session) falls back to the
+ * browser's own claim, but only within a bounded distance — a client must
+ * not be able to park its hospital's cursor beyond the real rows.
  */
 export const ASSESSMENT_MAX_CURSOR_ADVANCE = 10_000_000;
+
+/** How far a form may move when the server could not verify the position. */
+export interface AssessmentCursorAdvance {
+  /** The primary keys the pull offered, per form. */
+  pks: string[];
+  /** True when the server confirmed these keys with HOSxP. */
+  trusted: boolean;
+}
 
 export async function advanceAssessmentCursors(
   db: DatabaseAdapter,
   hospitalId: string,
-  pulledPksByTable: Record<string, string[]>,
+  advances: Record<string, AssessmentCursorAdvance>,
 ): Promise<void> {
   const now = new Date().toISOString();
-  for (const [table, pks] of Object.entries(pulledPksByTable)) {
+  for (const [table, advance] of Object.entries(advances)) {
     if (!assessmentFormByTable(table)) continue;
-    const usable = pks.filter((pk) => /^\d{1,18}$/.test(pk)).map((pk) => BigInt(pk));
+    const usable = advance.pks.filter((pk) => /^\d{1,18}$/.test(pk)).map((pk) => BigInt(pk));
     if (usable.length === 0) continue;
 
     const existing = await db.query<{ id: string; cursor_pk: string }>(
@@ -387,7 +391,9 @@ export async function advanceAssessmentCursors(
     );
     const current = existing.length > 0 ? BigInt(existing[0].cursor_pk) : BigInt(0);
     const ceiling = current + BigInt(ASSESSMENT_MAX_CURSOR_ADVANCE);
-    const accepted = usable.filter((pk) => pk > current && pk <= ceiling);
+    const accepted = advance.trusted
+      ? usable.filter((pk) => pk > current)
+      : usable.filter((pk) => pk > current && pk <= ceiling);
     if (accepted.length === 0) continue;
     const next = accepted.reduce((max, pk) => (pk > max ? pk : max), current);
 
@@ -407,6 +413,57 @@ export async function advanceAssessmentCursors(
       );
     }
   }
+}
+
+/**
+ * Ask HOSxP which keys of a form exist above the current cursor, and return
+ * the highest of them that the browser actually delivered.
+ *
+ * This is what makes the cursor server-observed: the browser can claim any
+ * key it likes, but only a key HOSxP confirms — and that the browser really
+ * sent — moves the cursor. A form whose keys cannot be checked (no tunnel,
+ * expired session) is reported as unverified and the caller decides.
+ */
+export async function verifyAssessmentCursorAdvance(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  pushedPksByTable: Record<string, string[]>,
+  cursors: Record<string, string>,
+): Promise<Record<string, AssessmentCursorAdvance>> {
+  const configs = await db.query<{ tunnel_url: string | null; session_jwt: string | null }>(
+    `SELECT tunnel_url, session_jwt
+       FROM hospital_bms_config
+      WHERE hospital_id = ?`,
+    [hospitalId],
+  );
+  const config = configs[0];
+  const advances: Record<string, AssessmentCursorAdvance> = {};
+  for (const [table, pks] of Object.entries(pushedPksByTable)) {
+    if (!assessmentFormByTable(table)) continue;
+    const fallback: AssessmentCursorAdvance = { pks, trusted: false };
+    if (!config?.tunnel_url || !config.session_jwt) {
+      advances[table] = fallback;
+      continue;
+    }
+    const form = MATERNITY_ASSESSMENT_FORMS.find((f) => f.table === table)!;
+    try {
+      const client = new BmsSessionClient(config.tunnel_url);
+      const sql = buildAssessmentRecordsSqlFor(form.table, form.pkColumn, cursors[table] ?? '0');
+      const res = await client.executeQuery(sql, config.tunnel_url, config.session_jwt, undefined, {
+        appIdentifier: APP_IDENTIFIER,
+      });
+      const authoritative = new Set(
+        (res.data as Record<string, unknown>[]).map((row) => String(row[form.pkColumn])),
+      );
+      const confirmed = pks.filter((pk) => authoritative.has(pk));
+      advances[table] = { pks: confirmed, trusted: confirmed.length > 0 };
+    } catch {
+      // HOSxP could not be reached — the caller falls back to the browser's
+      // claim, bounded.
+      advances[table] = fallback;
+    }
+  }
+  return advances;
 }
 
 /**
