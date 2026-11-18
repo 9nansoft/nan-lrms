@@ -11,18 +11,8 @@ import {
   PARTOGRAPH_OBSERVATIONS,
   LABOUR_INFANTS_SINCE,
   IPT_PREGNANCY_DELIVERIES_SINCE,
-  ASSESSMENT_FORMS,
-  buildAssessmentItemsSql,
-  buildAssessmentRecordsSqlFor,
 } from '@/config/hosxp-queries';
-import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
-import {
-  advanceAssessmentCursors,
-  pulledPksByTable,
-  readAssessmentCursors,
-  resolveCursorAdvance,
-  syncMaternityAssessments,
-} from './maternity-assessment';
+import { pullMaternityAssessmentsFromHosxp } from './maternity-assessment';
 import type { HosxpAssessmentFormRow, HosxpAssessmentItemRow } from '@/types/maternity-assessments';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
 import {
@@ -1304,77 +1294,12 @@ export async function pollHospital(
     }
 
     // ─── Maternity assessment forms: HOSxP asm_* → cached_maternity_assessments ──
-    // The three [LR] nursing forms (แรกรับ / ระยะคลอด / หลังคลอด). The form
-    // metadata tells the server what each positional column means, so the
-    // stored form carries HOSxP's own labels. Own try/catch: a failure here
-    // must not abort the rest of the cycle.
+    // The three [LR] nursing forms (แรกรับ / ระยะคลอด / หลังคลอด). The server
+    // reads the rows itself, so what lands in the cache is the hospital's own
+    // HOSxP content; the labels come from the site's own form definition.
+    // Own try/catch: a failure here must not abort the rest of the cycle.
     try {
-      const cursors = await readAssessmentCursors(db, hospitalId);
-      emitStep(options, {
-        name: 'query_assessments',
-        status: 'running',
-        message: 'Querying HOSxP maternity assessment forms from their cursors.',
-      });
-
-      const query = async (sql: string) => {
-        const res = await client.executeQuery(sql, bmsUrl, jwt, undefined, {
-          appIdentifier: APP_IDENTIFIER,
-          marketplaceToken: options.marketplaceToken,
-        });
-        return res.data as Record<string, unknown>[];
-      };
-
-      const formRows = await query(getQuery(ASSESSMENT_FORMS, databaseType));
-      const formIds = new Set<number>();
-      for (const row of formRows) {
-        const formId = Number(row.assessment_form_id);
-        if (Number.isInteger(formId)) formIds.add(formId);
-      }
-
-      const itemRows = formIds.size
-        ? await query(buildAssessmentItemsSql([...formIds], databaseType))
-        : [];
-
-      const records: Record<string, Record<string, unknown>[]> = {};
-      for (const form of MATERNITY_ASSESSMENT_FORMS) {
-        try {
-          records[form.table] = await query(
-            buildAssessmentRecordsSqlFor(form.table, form.pkColumn, cursors[form.table] ?? '0'),
-          );
-        } catch {
-          // A site does not have to use all three forms — a missing table must
-          // not cost the hospital the forms it does use.
-          records[form.table] = [];
-        }
-      }
-
-      const payload = {
-        forms: formRows as unknown as HosxpAssessmentFormRow[],
-        items: itemRows as unknown as HosxpAssessmentItemRow[],
-        records,
-      };
-      const syncResult = await syncMaternityAssessments(db, hospitalId, payload);
-      // The cursor follows the PULL, not the store: a row the database
-      // refused must not hold the form back. These rows came from the
-      // server's own HOSxP query, so the server's own pull IS the
-      // authoritative key list.
-      const pulled = pulledPksByTable(payload);
-      const cursorState = await readAssessmentCursors(db, hospitalId);
-      const nextByTable: Record<string, string | null> = {};
-      for (const form of MATERNITY_ASSESSMENT_FORMS) {
-        const pks = pulled[form.table] ?? [];
-        nextByTable[form.table] = resolveCursorAdvance(
-          {
-            authoritative: [...pks].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1)),
-            delivered: pks,
-            persisted: syncResult.persistedPks[form.table] ?? [],
-            unusable: syncResult.unusablePks[form.table] ?? [],
-            failed: syncResult.failedPks[form.table] ?? [],
-          },
-          cursorState[form.table] ?? '0',
-        );
-      }
-      await advanceAssessmentCursors(db, hospitalId, nextByTable);
+      const syncResult = await pullMaternityAssessmentsFromHosxp(db, hospitalId, { bmsUrl, jwt });
       stats.assessmentRowsUpserted = syncResult.upserted;
 
       emitStep(options, {

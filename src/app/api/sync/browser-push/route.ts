@@ -20,15 +20,9 @@ import {
   type BrowserNewbornsSection,
 } from '@/services/sync/newborn';
 import {
-  advanceAssessmentCursors,
-  pulledPksByTable,
+  pullMaternityAssessmentsFromHosxp,
   readAssessmentCursors,
-  resolveCursorAdvance,
-  syncMaternityAssessments,
-  validateAssessmentPayload,
-  verifyAssessmentCursorAdvance,
 } from '@/services/sync/maternity-assessment';
-import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
 import { autoArriveReferrals } from '@/services/referral';
 import { enqueueOverdueReferralAlerts } from '@/services/referral-alerts';
 import {
@@ -581,81 +575,33 @@ export async function POST(request: NextRequest) {
     }
 
     // Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด) —
-    // the raw rows the browser read, plus the form metadata that tells the
-    // server what each positional column means. Persisting is idempotent
-    // ((hospital, source_system, source_pk) upsert key), so a row that is
-    // pulled again is updated, never duplicated.
+    // the server reads the rows from HOSxP itself. The browser's push is only
+    // a trigger: a browser that reports a form it does not have cannot put
+    // a row into the cache, and the labels come from the site's own form
+    // definition rather than from the push.
     if (body.assessments && typeof body.assessments === 'object') {
-      const assessmentValidation = validateAssessmentPayload(body.assessments);
-      if (!assessmentValidation.valid || !assessmentValidation.payload) {
+      await appendSyncStep(hospitalId, runId, {
+        name: 'persist_assessments',
+        status: 'running',
+        message: 'Pulling maternity assessment forms from HOSxP.',
+      });
+      try {
+        const r = await pullMaternityAssessmentsFromHosxp(db, hospitalId);
+        result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
+        await appendSyncStep(hospitalId, runId, {
+          name: 'persist_assessments',
+          status: 'success',
+          message: `Upserted ${r.upserted} assessment forms (${r.skipped} skipped, ${r.failed} refused by the database).`,
+          counts: { upserted: r.upserted, skipped: r.skipped, failed: r.failed },
+        });
+      } catch (e) {
         hadWarning = true;
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_assessments',
-          status: 'error',
-          message: 'Assessment payload failed validation; not persisted.',
-          detail: assessmentValidation.error ?? 'unknown validation error',
+          status: 'warning',
+          message: 'Assessment sync failed.',
+          detail: e instanceof Error ? e.message : String(e),
         });
-      } else {
-        const payload = assessmentValidation.payload;
-        const rowsRead = Object.values(payload.records).reduce((n, rows) => n + rows.length, 0);
-        await appendSyncStep(hospitalId, runId, {
-          name: 'persist_assessments',
-          status: 'running',
-          message: `Persisting ${rowsRead} maternity assessment rows.`,
-          counts: { rows: rowsRead },
-        });
-        try {
-          const r = await syncMaternityAssessments(db, hospitalId, payload);
-          // The cursor follows the PULL, not the store: a row the database
-          // refused must not hold the form back, or the rows behind it would
-          // never arrive.
-          // The cursor is the SERVER's position in the hospital's HOSxP. Ask
-          // HOSxP which keys of the form exist above the cursor and move the
-          // cursor only past the keys the browser really delivered, in order,
-          // with nothing skipped in between. A key the browser skipped, or
-          // one the database refused, stops the progression — that row is
-          // pulled again next cycle instead of being lost.
-          const cursors = await readAssessmentCursors(db, hospitalId);
-          const delivered = pulledPksByTable(payload);
-          const authoritative = await verifyAssessmentCursorAdvance(
-            db,
-            hospitalId,
-            cursors,
-            Object.keys(delivered),
-          );
-          const nextByTable: Record<string, string | null> = {};
-          for (const form of MATERNITY_ASSESSMENT_FORMS) {
-            const verified = authoritative[form.table];
-            nextByTable[form.table] = verified?.verified
-              ? resolveCursorAdvance(
-                  {
-                    authoritative: verified.authoritative,
-                    delivered: delivered[form.table] ?? [],
-                    persisted: r.persistedPks[form.table] ?? [],
-                    unusable: verified.unusable,
-                    failed: r.failedPks[form.table] ?? [],
-                  },
-                  cursors[form.table] ?? '0',
-                )
-              : null; // HOSxP could not be asked — the cursor waits.
-          }
-          await advanceAssessmentCursors(db, hospitalId, nextByTable);
-          result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
-          await appendSyncStep(hospitalId, runId, {
-            name: 'persist_assessments',
-            status: 'success',
-            message: `Upserted ${r.upserted} assessment forms (${r.skipped} skipped, ${r.failed} refused by the database).`,
-            counts: { upserted: r.upserted, skipped: r.skipped, failed: r.failed },
-          });
-        } catch (e) {
-          hadWarning = true;
-          await appendSyncStep(hospitalId, runId, {
-            name: 'persist_assessments',
-            status: 'warning',
-            message: 'Assessment persist failed.',
-            detail: e instanceof Error ? e.message : String(e),
-          });
-        }
       }
     }
 

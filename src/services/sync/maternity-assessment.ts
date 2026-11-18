@@ -30,7 +30,7 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { encrypt, getEncryptionKey } from '@/lib/encryption';
 import { BmsSessionClient } from '@/lib/bms-session';
 import { APP_IDENTIFIER } from '@/lib/bms-browser-client';
-import { buildAssessmentKeysSqlFor } from '@/config/hosxp-queries';
+import { buildAssessmentItemsSql, buildAssessmentRecordsSqlFor } from '@/config/hosxp-queries';
 import {
   MATERNITY_ASSESSMENT_FORMS,
   assessmentFormByTable,
@@ -488,66 +488,6 @@ async function serverBmsSession(
 }
 
 /**
- * Ask HOSxP which keys of a form exist above the current cursor.
- *
- * This is what makes the cursor server-observed: the browser can claim any
- * key it likes, but only a key HOSxP confirms moves the cursor — and only
- * when every key below it was delivered too.
- */
-export async function verifyAssessmentCursorAdvance(
-  db: DatabaseAdapter,
-  hospitalId: string,
-  cursors: Record<string, string>,
-  onlyTables?: string[],
-): Promise<Record<string, { authoritative: string[]; unusable: string[]; verified: boolean }>> {
-  const session = await serverBmsSession(db, hospitalId);
-  const result: Record<
-    string,
-    {
-      authoritative: string[];
-      unusable: string[];
-      verified: boolean;
-    }
-  > = {};
-  for (const form of MATERNITY_ASSESSMENT_FORMS) {
-    // Only the forms that actually moved need to be checked.
-    if (onlyTables && !onlyTables.includes(form.table)) continue;
-    if (!session) {
-      result[form.table] = { authoritative: [], unusable: [], verified: false };
-      continue;
-    }
-    try {
-      const client = new BmsSessionClient(session.bmsUrl);
-      const sql = buildAssessmentKeysSqlFor(form.table, form.pkColumn, cursors[form.table] ?? '0');
-      const res = await client.executeQuery(sql, session.bmsUrl, session.jwt, undefined, {
-        appIdentifier: APP_IDENTIFIER,
-      });
-      // The server judges each row itself: a row without a usable admission
-      // or timestamp can never be stored, and the cursor may pass it. The
-      // browser does not get to say so.
-      const authoritative: string[] = [];
-      const unusable: string[] = [];
-      for (const row of res.data as Record<string, unknown>[]) {
-        const key = String(row[form.pkColumn]);
-        if (!/^\d{1,18}$/.test(key)) continue;
-        authoritative.push(key);
-        const an = str(row.an);
-        const recordedAt = usableTimestamp(
-          typeof row.head_datetime === 'string' ? row.head_datetime : null,
-        );
-        if (!an || an.length > 32 || !recordedAt) unusable.push(key);
-      }
-      authoritative.sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
-      result[form.table] = { authoritative, unusable, verified: true };
-    } catch {
-      // HOSxP could not be reached — the cursor does not move for this form.
-      result[form.table] = { authoritative: [], unusable: [], verified: false };
-    }
-  }
-  return result;
-}
-
-/**
  * Move the cursor of every form to the position the server resolved. A form
  * whose position could not be verified keeps the cursor it has.
  */
@@ -586,21 +526,132 @@ export async function advanceAssessmentCursors(
 }
 
 /**
- * The primary keys the browser delivered, per form — the "delivered" side of
- * the cursor progression.
+ * Pull the maternity assessment forms from HOSxP and store them.
+ *
+ * The SERVER reads the rows, so what lands in the cache is the hospital's own
+ * HOSxP content — not a browser's report of it. The hospital's browser only
+ * tells the server that something new exists (a cheap "what is the newest
+ * key?" question); everything else here is the server's own work.
+ *
+ * The pull is bounded by the form's cursor, so a cycle that finds nothing
+ * costs three index lookups, and a cycle that finds a lot takes the rows in
+ * pages of ASSESSMENT_ROW_LIMIT.
  */
-export function pulledPksByTable(input: AssessmentSyncInput): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
+export async function pullMaternityAssessmentsFromHosxp(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  options: {
+    encryptionKey?: string | null;
+    /** A session the caller already holds (the legacy poller does). */
+    bmsUrl?: string;
+    jwt?: string;
+  } = {},
+): Promise<AssessmentSyncResult> {
+  const empty: AssessmentSyncResult = {
+    upserted: 0,
+    skipped: 0,
+    failed: 0,
+    persistedPks: {},
+    unusablePks: {},
+    failedPks: {},
+  };
+  const session =
+    options.bmsUrl && options.jwt
+      ? { bmsUrl: options.bmsUrl, jwt: options.jwt }
+      : await serverBmsSession(db, hospitalId);
+  if (!session) return empty;
+
+  const client = new BmsSessionClient(session.bmsUrl);
+  const cursors = await readAssessmentCursors(db, hospitalId);
+  const records: AssessmentRecordsByTable = {};
+  const authoritativePks: Record<string, string[]> = {};
+
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
-    const pks: string[] = [];
-    for (const raw of input.records[form.table] ?? []) {
-      const pk = raw[form.pkColumn];
-      const value = typeof pk === 'number' ? String(pk) : String(pk ?? '').trim();
-      if (/^\d{1,18}$/.test(value)) pks.push(value);
+    try {
+      const sql = buildAssessmentRecordsSqlFor(
+        form.table,
+        form.pkColumn,
+        cursors[form.table] ?? '0',
+      );
+      const res = await client.executeQuery(sql, session.bmsUrl, session.jwt, undefined, {
+        appIdentifier: APP_IDENTIFIER,
+      });
+      records[form.table] = res.data as Record<string, unknown>[];
+      authoritativePks[form.table] = records[form.table]
+        .map((row) => String(row[form.pkColumn]))
+        .filter((key) => /^\d{1,18}$/.test(key));
+    } catch {
+      // A form the site does not use (no table) must not cost the hospital
+      // the forms it does use.
+      records[form.table] = [];
+      authoritativePks[form.table] = [];
     }
-    if (pks.length > 0) out[form.table] = pks;
   }
-  return out;
+
+  if (Object.values(records).every((rows) => rows.length === 0)) return empty;
+
+  // The labels come from the site's own form definition, read from HOSxP.
+  const metadata = await readAssessmentMetadata(client, session);
+
+  const result = await syncMaternityAssessments(db, hospitalId, {
+    forms: metadata.forms,
+    items: metadata.items,
+    records,
+  });
+  result.persistedPks = result.persistedPks ?? {};
+  result.unusablePks = result.unusablePks ?? {};
+  result.failedPks = result.failedPks ?? {};
+
+  // The cursor moves only over the rows the server itself read and stored.
+  const nextByTable: Record<string, string | null> = {};
+  for (const form of MATERNITY_ASSESSMENT_FORMS) {
+    const keys = authoritativePks[form.table] ?? [];
+    nextByTable[form.table] = resolveCursorAdvance(
+      {
+        authoritative: [...keys].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1)),
+        delivered: keys,
+        persisted: result.persistedPks[form.table] ?? [],
+        unusable: result.unusablePks[form.table] ?? [],
+        failed: result.failedPks[form.table] ?? [],
+      },
+      cursors[form.table] ?? '0',
+    );
+  }
+  await advanceAssessmentCursors(db, hospitalId, nextByTable);
+
+  return result;
+}
+
+/** The form names and column labels of the three forms, read from HOSxP. */
+async function readAssessmentMetadata(
+  client: BmsSessionClient,
+  session: { bmsUrl: string; jwt: string },
+): Promise<{ forms: HosxpAssessmentFormRow[]; items: HosxpAssessmentItemRow[] }> {
+  const tables = MATERNITY_ASSESSMENT_FORMS.map((f) => `'${f.table}'`).join(', ');
+  const formsRes = await client.executeQuery(
+    `SELECT assessment_form_id, assessment_form_table, assessment_form_name
+       FROM assessment_form
+      WHERE assessment_form_table IN (${tables})
+      ORDER BY assessment_form_id DESC`,
+    session.bmsUrl,
+    session.jwt,
+    undefined,
+    { appIdentifier: APP_IDENTIFIER },
+  );
+  const forms = formsRes.data as unknown as HosxpAssessmentFormRow[];
+  const formIds = forms
+    .map((f) => Number(f.assessment_form_id))
+    .filter((id) => Number.isInteger(id) && id > 0);
+  if (formIds.length === 0) return { forms, items: [] };
+
+  const itemsRes = await client.executeQuery(
+    buildAssessmentItemsSql(formIds),
+    session.bmsUrl,
+    session.jwt,
+    undefined,
+    { appIdentifier: APP_IDENTIFIER },
+  );
+  return { forms, items: itemsRes.data as unknown as HosxpAssessmentItemRow[] };
 }
 
 async function resolvePatientIds(
@@ -632,125 +683,4 @@ export function safeEncryptionKey(): string | null {
   } catch {
     return null;
   }
-}
-
-// ─── Payload validation (browser push) ──────────────────────────────────────
-//
-// The browser pushes the raw rows it read from HOSxP, so the payload is
-// untrusted input: the table keys must be forms the app knows, the column
-// names must look like HOSxP columns, and the volume must stay bounded.
-
-/** Ceiling on rows per table in one push (a full pull is ~500). */
-export const ASSESSMENT_MAX_ROWS_PER_TABLE = 2000;
-/** Ceiling on columns per row (the widest HOSxP form has ~190). */
-export const ASSESSMENT_MAX_COLUMNS_PER_ROW = 400;
-/** Ceiling on form metadata rows in one push (3 forms × a few versions). */
-export const ASSESSMENT_MAX_FORMS = 20;
-/** Ceiling on item metadata rows in one push (~120 per form version). */
-export const ASSESSMENT_MAX_ITEMS = 5000;
-const COLUMN_NAME = /^[a-z][a-z0-9_]*$/;
-
-export interface AssessmentPayload {
-  forms: HosxpAssessmentFormRow[];
-  items: HosxpAssessmentItemRow[];
-  records: AssessmentRecordsByTable;
-}
-
-export interface AssessmentPayloadValidation {
-  valid: boolean;
-  error?: string;
-  payload?: AssessmentPayload;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-/** Validate the assessment section of a browser push. */
-export function validateAssessmentPayload(body: unknown): AssessmentPayloadValidation {
-  if (!isPlainObject(body)) {
-    return { valid: false, error: 'assessments payload is not an object' };
-  }
-  const { forms, items, records } = body;
-
-  if (!Array.isArray(forms) || !Array.isArray(items) || !isPlainObject(records)) {
-    return { valid: false, error: 'assessments payload has a malformed section' };
-  }
-  if (forms.length > ASSESSMENT_MAX_FORMS) {
-    return { valid: false, error: 'too many assessment forms in the payload' };
-  }
-  if (items.length > ASSESSMENT_MAX_ITEMS) {
-    return { valid: false, error: 'too many assessment items in the payload' };
-  }
-
-  const knownTables = new Set(MATERNITY_ASSESSMENT_FORMS.map((f) => f.table));
-  const cleanRecords: AssessmentRecordsByTable = {};
-  for (const [table, rows] of Object.entries(records)) {
-    if (!knownTables.has(table)) {
-      return { valid: false, error: `unknown assessment table: ${table}` };
-    }
-    if (!Array.isArray(rows)) {
-      return { valid: false, error: `assessment rows for ${table} are not an array` };
-    }
-    if (rows.length > ASSESSMENT_MAX_ROWS_PER_TABLE) {
-      return { valid: false, error: `too many assessment rows for ${table}` };
-    }
-    const cleanRows: Record<string, unknown>[] = [];
-    for (const row of rows) {
-      if (!isPlainObject(row)) {
-        return { valid: false, error: `assessment row for ${table} is not an object` };
-      }
-      const keys = Object.keys(row);
-      if (keys.length > ASSESSMENT_MAX_COLUMNS_PER_ROW) {
-        return { valid: false, error: `assessment row for ${table} has too many columns` };
-      }
-      cleanRows.push(row);
-    }
-    cleanRecords[table] = cleanRows;
-  }
-
-  const cleanForms: HosxpAssessmentFormRow[] = [];
-  const knownFormIds = new Set<number>();
-  for (const form of forms) {
-    if (!isPlainObject(form))
-      return { valid: false, error: 'assessment form row is not an object' };
-    const table = typeof form.assessment_form_table === 'string' ? form.assessment_form_table : '';
-    const formId = Number(form.assessment_form_id);
-    if (!knownTables.has(table) || !Number.isInteger(formId)) {
-      return { valid: false, error: 'assessment form row is malformed' };
-    }
-    knownFormIds.add(formId);
-    cleanForms.push({
-      assessment_form_id: formId,
-      assessment_form_table: table,
-      assessment_form_name:
-        typeof form.assessment_form_name === 'string' ? form.assessment_form_name : null,
-    });
-  }
-
-  const cleanItems: HosxpAssessmentItemRow[] = [];
-  for (const item of items) {
-    if (!isPlainObject(item))
-      return { valid: false, error: 'assessment item row is not an object' };
-    const formId = Number(item.assessment_form_id);
-    const column = item.assessment_items_column;
-    if (!Number.isInteger(formId) || typeof column !== 'string' || !COLUMN_NAME.test(column)) {
-      return { valid: false, error: 'assessment item row is malformed' };
-    }
-    if (!knownFormIds.has(formId)) {
-      return { valid: false, error: `assessment item row references unknown form ${formId}` };
-    }
-    cleanItems.push({
-      assessment_form_id: formId,
-      assessment_items_column: column,
-      assessment_items_note:
-        typeof item.assessment_items_note === 'string' ? item.assessment_items_note : null,
-      assessment_component_name:
-        typeof item.assessment_component_name === 'string' ? item.assessment_component_name : null,
-      assessment_data_type:
-        typeof item.assessment_data_type === 'string' ? item.assessment_data_type : null,
-    });
-  }
-
-  return { valid: true, payload: { forms: cleanForms, items: cleanItems, records: cleanRecords } };
 }

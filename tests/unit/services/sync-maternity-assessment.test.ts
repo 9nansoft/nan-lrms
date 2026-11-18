@@ -22,11 +22,8 @@ import {
   normalizeAssessmentRows,
   syncMaternityAssessments,
   advanceAssessmentCursors,
-  pulledPksByTable,
   readAssessmentCursors,
   resolveCursorAdvance,
-  validateAssessmentPayload,
-  verifyAssessmentCursorAdvance,
 } from '@/services/sync/maternity-assessment';
 import { getPatientMaternityAssessments } from '@/services/maternity-assessments';
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
@@ -291,22 +288,6 @@ describe('cursors', () => {
     expect(await readAssessmentCursors(db, HOSPITAL_ID)).toEqual({});
   });
 
-  it('reports the primary keys of every form in the batch', () => {
-    const pks = pulledPksByTable({
-      forms: FORM_ROWS,
-      items: ITEM_ROWS,
-      records: {
-        asm_lr_record_after_birth_nan: [
-          rawRow({ asm_lr_record_after_birth_nan_id: 2418 }),
-          rawRow({ asm_lr_record_after_birth_nan_id: 2419 }),
-        ],
-        asm_first_pregnant_pt_nan: [rawRow({ asm_first_pregnant_pt_nan_id: 2938 })],
-      },
-    });
-    expect(pks.asm_lr_record_after_birth_nan).toEqual(['2418', '2419']);
-    expect(pks.asm_first_pregnant_pt_nan).toEqual(['2938']);
-  });
-
   it('moves past the keys that were delivered, in order', () => {
     const next = resolveCursorAdvance(
       {
@@ -412,41 +393,6 @@ describe('cursors', () => {
   });
 });
 
-describe('cursor verification against HOSxP', () => {
-  it('reads the authoritative keys of each form from HOSxP', async () => {
-    const now = new Date().toISOString();
-    await db.execute(
-      `INSERT INTO hospital_bms_config
-         (id, hospital_id, tunnel_url, session_jwt, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      ['hbc-1', HOSPITAL_ID, 'http://tunnel.test', 'jwt-test', now, now],
-    );
-
-    const executeQuery = vi
-      .spyOn(BmsSessionClient.prototype, 'executeQuery')
-      .mockImplementation(async () => ({
-        data: [{ asm_lr_record_after_birth_nan_id: 2418 }],
-        field: [],
-        field_name: [],
-        record_count: 1,
-      }));
-
-    const verified = await verifyAssessmentCursorAdvance(db, HOSPITAL_ID, {});
-    expect(executeQuery).toHaveBeenCalled();
-    expect(verified.asm_lr_record_after_birth_nan.verified).toBe(true);
-    expect(verified.asm_lr_record_after_birth_nan.authoritative).toEqual(['2418']);
-    executeQuery.mockRestore();
-  });
-
-  it('reports a form as unverified when HOSxP cannot be reached', async () => {
-    // No hospital_bms_config row — the server cannot ask HOSxP, so the
-    // cursor must not move on the browser's word alone.
-    const verified = await verifyAssessmentCursorAdvance(db, HOSPITAL_ID, {});
-    expect(verified.asm_lr_record_after_birth_nan.verified).toBe(false);
-    expect(verified.asm_lr_record_after_birth_nan.authoritative).toEqual([]);
-  });
-});
-
 describe('bad rows', () => {
   it('drops a row HOSxP filled with a zero date', async () => {
     const r = await syncMaternityAssessments(db, HOSPITAL_ID, {
@@ -501,41 +447,5 @@ describe('bad rows', () => {
     const stored = await db.query('SELECT source_pk FROM cached_maternity_assessments');
     expect(stored).toHaveLength(1);
     expect(stored[0].source_pk).toBe('asm_lr_record_after_birth_nan:2418');
-  });
-});
-
-describe('validateAssessmentPayload', () => {
-  it('accepts a well-formed payload', () => {
-    const v = validateAssessmentPayload({
-      forms: FORM_ROWS,
-      items: ITEM_ROWS,
-      records: { asm_lr_record_after_birth_nan: [rawRow()] },
-    });
-    expect(v.valid).toBe(true);
-    expect(v.payload?.records.asm_lr_record_after_birth_nan).toHaveLength(1);
-  });
-
-  it('rejects an unknown table', () => {
-    const v = validateAssessmentPayload({
-      forms: FORM_ROWS,
-      items: ITEM_ROWS,
-      records: { some_other_table: [rawRow()] },
-    });
-    expect(v.valid).toBe(false);
-    expect(v.error).toContain('unknown assessment table');
-  });
-
-  it('rejects a malformed item row', () => {
-    const v = validateAssessmentPayload({
-      forms: FORM_ROWS,
-      items: [{ assessment_form_id: 309, assessment_items_column: 'asm_text2); DROP TABLE x--' }],
-      records: {},
-    });
-    expect(v.valid).toBe(false);
-  });
-
-  it('rejects a payload that is not an object', () => {
-    expect(validateAssessmentPayload('nope').valid).toBe(false);
-    expect(validateAssessmentPayload(null).valid).toBe(false);
   });
 });

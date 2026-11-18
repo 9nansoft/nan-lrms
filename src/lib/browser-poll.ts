@@ -28,9 +28,7 @@ import {
   REFEROUT_MATERNITY_SINCE,
   REFERIN_SINCE,
   OVST_FIRST_VISIT_FOR_CIDS,
-  ASSESSMENT_FORMS,
-  buildAssessmentItemsSql,
-  buildAssessmentRecordsSqlFor,
+  buildAssessmentMaxPkSql,
 } from '@/config/hosxp-queries';
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
 import { isStaleAdmission } from '@/config/hospital-network';
@@ -190,13 +188,8 @@ export interface BrowserPushBody {
     visitEvidences: Record<string, unknown>[];
   };
   /** Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด):
-   *  the form metadata (so the server can label every column) plus the raw
-   *  rows, grouped by HOSxP table. */
-  assessments?: {
-    forms: Record<string, unknown>[];
-    items: Record<string, unknown>[];
-    records: Record<string, Record<string, unknown>[]>;
-  };
+   *  a TRIGGER only — the server reads the rows from HOSxP itself. */
+  assessments?: { hints: Record<string, number> };
 }
 
 export interface BrowserPollResult {
@@ -221,8 +214,8 @@ export interface BrowserPollResult {
   };
   /** Delivery rows read since the server-issued newborn cutoff. */
   newborns?: { infantsRead: number; pregnanciesRead: number };
-  /** Maternity assessment rows read since the server-issued cutoff. */
-  assessments?: { rowsRead: number; formsRead: number; itemsRead: number };
+  /** Maternity forms the browser found newer than the server's cursor. */
+  assessments?: { rowsRead: number };
   /** Referral rows read from the rolling 60-day HOSxP window. */
   referrals?: { referoutsRead: number; referinsRead: number };
   pushedToServer: boolean;
@@ -1123,84 +1116,36 @@ let lastPushedActiveKey: string | null = null;
 let lastAncLabPullAt: number | null = null;
 
 /**
- * Drop empty values from a raw HOSxP row. A form row has ~120 positional
- * columns and the nurse filled a fraction of them — sending the empty ones
- * only inflates the push payload.
- */
-function stripEmptyRow(row: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(row)) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === 'string' && value.trim() === '') continue;
-    out[key] = value;
-  }
-  return out;
-}
-
-/**
- * The form metadata of the last pull, kept per browser tab: the labels of a
- * form's columns change only when the site edits the form.
- */
-let assessmentItemsCache: { formIds: string; items: Record<string, unknown>[] } | null = null;
-
-/**
- * Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด).
+ * Ask HOSxP whether a maternity assessment form has a row the server has
+ * not seen yet.
  *
- * The form metadata comes with the rows: HOSxP stores every assessment form
- * in a table of positional columns and the server needs `assessment_items`
- * to know what `asm_text12` means. The rows themselves are pulled per
- * table, oldest first, since the server-issued cutoff — the cutoff
- * advances as rows land, so a large backfill completes across cycles
- * instead of arriving in one oversized push.
+ * The browser does NOT read the form rows: the server pulls them itself, so
+ * what lands in the cache is the hospital's own HOSxP content. The browser
+ * only raises a flag — and its flag is a trigger, not a source of truth.
  */
-async function pullAssessments(
+async function pullAssessmentHints(
   opts: RunOptions,
   cursors: Record<string, string>,
-): Promise<{
-  forms: Record<string, unknown>[];
-  items: Record<string, unknown>[];
-  records: Record<string, Record<string, unknown>[]>;
-}> {
-  const formRows = await runQuery<Record<string, unknown>>(ASSESSMENT_FORMS.mysql, opts);
-
-  // Every version of the three forms — a row recorded under an older form
-  // version must be labelled with THAT version's items.
-  const formIds = new Set<number>();
-  for (const row of formRows) {
-    const formId = Number(row.assessment_form_id);
-    if (Number.isInteger(formId)) formIds.add(formId);
-  }
-
-  const itemsSql = buildAssessmentItemsSql([...formIds], 'mysql');
-  // The item metadata (the labels of every column of every form version)
-  // only changes when the site edits its form — re-read it then, not every
-  // cycle.
-  const formIdsKey = [...formIds].sort().join(',');
-  let itemRows: Record<string, unknown>[];
-  if (assessmentItemsCache && assessmentItemsCache.formIds === formIdsKey) {
-    itemRows = assessmentItemsCache.items;
-  } else {
-    itemRows = await runQuery<Record<string, unknown>>(itemsSql, opts);
-    assessmentItemsCache = { formIds: formIdsKey, items: itemRows };
-  }
-
-  const records: Record<string, Record<string, unknown>[]> = {};
+): Promise<Record<string, number> | null> {
+  const hints: Record<string, number> = {};
   await Promise.all(
     MATERNITY_ASSESSMENT_FORMS.map(async (form) => {
-      const cursor = cursors[form.table] ?? '0';
       try {
-        const sql = buildAssessmentRecordsSqlFor(form.table, form.pkColumn, cursor);
-        const rows = await runQuery<Record<string, unknown>>(sql, opts);
-        records[form.table] = rows.map(stripEmptyRow);
+        const rows = await runQuery<Record<string, unknown>>(
+          buildAssessmentMaxPkSql(form.table, form.pkColumn).mysql,
+          opts,
+        );
+        const max = rows[0]?.max_pk;
+        const maxPk = max === null || max === undefined ? 0 : Number(max);
+        if (!Number.isFinite(maxPk) || maxPk <= 0) return;
+        const cursor = Number(cursors[form.table] ?? '0');
+        if (Number.isFinite(cursor) && maxPk > cursor) hints[form.table] = maxPk;
       } catch {
-        // A site does not have to use all three forms — a missing table must
-        // not cost the hospital the forms it does use.
-        records[form.table] = [];
+        // A site does not have to use all three forms.
       }
     }),
   );
-
-  return { forms: formRows, items: itemRows, records };
+  return Object.keys(hints).length > 0 ? hints : null;
 }
 
 export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResult> {
@@ -1498,25 +1443,19 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // Additive best-effort feed: the three form tables, their metadata and
     // the rows since the server-issued cutoff. The server labels every
     // column from the metadata and stores the labelled form.
-    let assessmentsSection: {
-      forms: Record<string, unknown>[];
-      items: Record<string, unknown>[];
-      records: Record<string, Record<string, unknown>[]>;
-    } | null = null;
+    let assessmentsSection: { hints: Record<string, number> } | null = null;
+    let assessmentHints: Record<string, number> | null = null;
     try {
       const cursors = boot.assessmentCursors ?? {};
       if (typeof cursors === 'object' && cursors !== null) {
-        const pulled = await pullAssessments(opts, cursors as Record<string, string>);
-        const rowsRead = Object.values(pulled.records).reduce((n, rows) => n + rows.length, 0);
-        result.assessments = {
-          rowsRead,
-          formsRead: pulled.forms.length,
-          itemsRead: pulled.items.length,
-        };
-        if (rowsRead > 0) assessmentsSection = pulled;
+        assessmentHints = await pullAssessmentHints(opts, cursors as Record<string, string>);
+        result.assessments = { rowsRead: Object.keys(assessmentHints ?? {}).length };
+        // A new form must reach the server even when the ward itself has
+        // nothing new to push.
+        if (assessmentHints) assessmentsSection = { hints: assessmentHints };
       }
     } catch {
-      // Assessment feed is best-effort; the next cycle retries from the same cursors.
+      // Assessment feed is best-effort; the next cycle asks again.
     }
 
     // ─── Referrals (referout = this hospital as origin, referin = arrival
@@ -1608,7 +1547,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     }
     if (newbornsSection) body.newborns = newbornsSection;
     if (referralsSection) body.referrals = referralsSection;
-    if (assessmentsSection) body.assessments = assessmentsSection;
+    if (assessmentHints) body.assessments = { hints: assessmentHints };
 
     const pushRes = await fetch('/api/sync/browser-push', {
       method: 'POST',

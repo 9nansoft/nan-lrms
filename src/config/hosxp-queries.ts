@@ -1199,40 +1199,14 @@ export function buildAssessmentRecordsSqlFor(
 }
 
 /**
- * The primary keys of a form above a cursor, with the two fields the server
- * needs to judge a row for itself — the admission it belongs to and when it
- * was recorded. That is what lets the server classify a malformed row on its
- * own instead of taking the browser's word for it.
- *
- * Three columns, not the ~190 of a full form row: the rows themselves were
- * already read by the hospital's browser.
+ * The newest key of a form — the cheap question the hospital's browser asks
+ * HOSxP ("is there anything new?"). The answer is only a TRIGGER: the server
+ * pulls the rows itself, so a browser that lies about it cannot put a row
+ * into the cache.
  */
-export function buildAssessmentKeysSql(table: string, pkColumn: string): SqlQueryTemplate {
-  const body = `
-    SELECT t.${pkColumn}, t.an,
-           h.assessment_head_datetime AS head_datetime
-      FROM ${table} t
-      JOIN assessment_head h ON h.assessment_head_id = t.assessment_head_id
-     WHERE t.${pkColumn} > {{CURSOR_PK}}
-     ORDER BY t.${pkColumn} ASC
-     LIMIT ${ASSESSMENT_ROW_LIMIT}`;
+export function buildAssessmentMaxPkSql(table: string, pkColumn: string): SqlQueryTemplate {
+  const body = `SELECT MAX(${pkColumn}) AS max_pk FROM ${table}`;
   return { postgresql: body, mysql: body };
-}
-
-/** {{CURSOR_PK}} substitution with a strict integer guard. */
-export function buildAssessmentKeysSqlFor(
-  table: string,
-  pkColumn: string,
-  cursorPk: string | number,
-): string {
-  const safe = String(cursorPk).trim();
-  if (!/^\d{1,18}$/.test(safe)) {
-    throw new Error(`invalid assessment cursor pk: ${safe}`);
-  }
-  return getQuery(buildAssessmentKeysSql(table, pkColumn), 'postgresql').replace(
-    '{{CURSOR_PK}}',
-    safe,
-  );
 }
 
 /** {{FORM_IDS}} substitution with a strict digit-list guard. */
