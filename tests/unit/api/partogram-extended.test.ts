@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { SeedOrchestrator } from '@/db/seeds/index';
+import { testSessionUser } from '../../helpers/session';
 import type { PartogramResponse } from '@/types/api';
 
 // Mock the database connection and ensureInit so the route handler picks up
@@ -18,6 +19,14 @@ vi.mock('@/db/connection', () => ({
 
 vi.mock('@/lib/ensure-init', () => ({
   ensureInit: async () => undefined,
+}));
+
+// The route resolves the viewer's hospital scope, so the session has to say
+// who is asking — the same hospital that holds the admission.
+let mockSessionUser: Record<string, unknown> | null = null;
+
+vi.mock('@/lib/auth', () => ({
+  auth: async () => (mockSessionUser ? { user: mockSessionUser } : null),
 }));
 
 // Import the route under test AFTER the mocks are registered.
@@ -41,6 +50,10 @@ describe('GET /api/patients/[an]/partogram — extended response', () => {
     hospitalId = hospitals[0].id;
 
     patientId = uuidv4();
+    mockSessionUser = testSessionUser({ hospitalCode: hcode }) as unknown as Record<
+      string,
+      unknown
+    >;
     const now = new Date().toISOString();
     await testDb.execute(
       'INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',

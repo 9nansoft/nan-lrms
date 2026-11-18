@@ -38,6 +38,7 @@ import {
 import type { DatabaseAdapter } from '@/db/adapter';
 import type { SseManager } from '@/lib/sse';
 import type { PartogramResponse } from '@/types/api';
+import { testSessionUser } from '../helpers/session';
 
 // SSE mock — same duck-typed pattern as the existing pglite tests.
 class MockSseManager {
@@ -62,6 +63,14 @@ vi.mock('@/lib/ensure-init', () => ({
   ensureInit: async () => undefined,
 }));
 
+// The route resolves the viewer's hospital scope, so the session has to say
+// who is asking — the same hospital that holds the admission.
+let mockSessionUser: Record<string, unknown> | null = null;
+
+vi.mock('@/lib/auth', () => ({
+  auth: async () => (mockSessionUser ? { user: mockSessionUser } : null),
+}));
+
 // Import AFTER mocks are registered.
 import { GET as getPartogram } from '@/app/api/patients/[an]/partogram/route';
 
@@ -72,6 +81,10 @@ const PID = uuidv4();
 
 beforeEach(async () => {
   testDb = await createPgliteDb();
+  mockSessionUser = testSessionUser({ hospitalCode: HCODE }) as unknown as Record<
+    string,
+    unknown
+  >;
   const now = new Date().toISOString();
   await testDb.execute(
     `INSERT INTO hospitals (id, hcode, name, level, created_at, updated_at)

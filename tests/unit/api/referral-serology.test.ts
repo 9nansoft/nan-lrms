@@ -1,5 +1,7 @@
-// The referral board is province-wide, so a referral's diagnosis code must not
-// tell a hospital with no care link to the woman that she has HIV or syphilis.
+// The referral board shows the referrals the reader is a party to, so a
+// referral's diagnosis code must not tell a hospital with no care link to the
+// woman that she has HIV or syphilis — and a hospital with no link to the
+// referral does not see the referral at all.
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
@@ -43,13 +45,15 @@ function callDetail(id: string) {
 
 async function codeFromList(id: string): Promise<string | null> {
   const body = (await (await callList()).json()) as { referrals: ReferralBody[] };
+  // A referral the reader is not a party to is not on their board at all.
   const row = body.referrals.find((r) => r.id === id);
-  if (!row) throw new Error(`referral ${id} missing from the list`);
-  return row.diagnosisCode;
+  return row ? row.diagnosisCode : null;
 }
 
 async function codeFromDetail(id: string): Promise<string | null> {
-  const body = (await (await callDetail(id)).json()) as { referral: ReferralBody };
+  const res = await callDetail(id);
+  if (res.status === 404) return null;
+  const body = (await res.json()) as { referral: ReferralBody };
   return body.referral.diagnosisCode;
 }
 
@@ -153,10 +157,10 @@ describe('dashboard referral routes — HIV and syphilis diagnosis codes', () =>
       },
     );
 
-    it('keeps an unrelated diagnosis for an unrelated hospital', async () => {
+    it('does not show a non-restricted referral to a hospital that is not a party', async () => {
       const id = await addReferral(journeyId, REGISTERING.id, REFERRED_TO.id, 'ACCEPTED', 'O24.4');
       signInAt(UNRELATED.hcode);
-      expect(await readCode(id)).toBe('O24.4');
+      expect(await readCode(id)).toBeNull();
     });
 
     it.each([['REJECTED'], ['EXPIRED']])('gives a %s destination no access', async (status) => {
@@ -198,8 +202,10 @@ describe('dashboard referral routes — HIV and syphilis diagnosis codes', () =>
   });
 
   it('blanks the code on the search path too', async () => {
-    const id = await addReferral(journeyId, REGISTERING.id, REFERRED_TO.id, 'ACCEPTED');
-    signInAt(UNRELATED.hcode);
+    // The sender is a party to the referral, so the row is on its board — but
+    // it did not register the woman, so the code stays blank.
+    const id = await addReferral(journeyId, SENDER.id, REFERRED_TO.id, 'ACCEPTED');
+    signInAt(SENDER.hcode);
     const res = await callList('?q=HN-');
     const text = await res.clone().text();
     expect(text).toContain(id);
@@ -207,9 +213,9 @@ describe('dashboard referral routes — HIV and syphilis diagnosis codes', () =>
   });
 
   it('does not mark which rows were withheld, since that would reveal the diagnosis', async () => {
-    const restricted = await addReferral(journeyId, REGISTERING.id, REFERRED_TO.id, 'ACCEPTED');
-    const empty = await addReferral(journeyId, REGISTERING.id, REFERRED_TO.id, 'ACCEPTED', null);
-    signInAt(UNRELATED.hcode);
+    const restricted = await addReferral(journeyId, SENDER.id, REFERRED_TO.id, 'ACCEPTED');
+    const empty = await addReferral(journeyId, SENDER.id, REFERRED_TO.id, 'ACCEPTED', null);
+    signInAt(SENDER.hcode);
     const body = (await (await callList()).json()) as { referrals: ReferralBody[] };
     const fieldsOf = (id: string) =>
       Object.entries(body.referrals.find((r) => r.id === id) ?? {}).filter(

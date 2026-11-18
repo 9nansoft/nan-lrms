@@ -1,8 +1,8 @@
 // GET /api/patients/[an]/assessments — tenant scope.
 //
 // The forms are the ward's own clinical records: a hospital reads its own
-// admissions, a provincial account reads the province's, and the hcode in
-// the URL grants nothing on its own.
+// admissions, the centre hospital and the province office read every
+// admission, and the hcode in the URL grants nothing on its own.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
@@ -23,8 +23,12 @@ vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 
 import { GET } from '@/app/api/patients/[an]/assessments/route';
 
-const OWN_HCODE = '10716';
+// รพ.แม่จริม — a community hospital: its scope is its own patients.
+const OWN_HCODE = '11173';
+// รพ.พล — another hospital, same province
 const OTHER_HCODE = '11008';
+// รพ.น่าน — the centre hospital (level P): reads every hospital.
+const CENTRE_HCODE = '10716';
 const PROVINCE_HCODE = '00042';
 
 function request(an: string) {
@@ -50,8 +54,8 @@ async function seedPatient(
   const now = new Date().toISOString();
   await db.execute(
     `INSERT INTO cached_patients (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'enc-name', 28, ?, 'ACTIVE', ?, ?, ?)`,
-    [id, hospitals[0].id, `hn-${an}`, an, '2026-11-17T14:21:00', now, now, now],
+     VALUES (?, ?, ?, ?, 'enc-name', 28, '2026-11-17T14:21:00', 'ACTIVE', ?, ?, ?)`,
+    [id, hospitals[0].id, `hn-${an}`, an, now, now, now],
   );
 }
 
@@ -77,13 +81,12 @@ describe('GET /api/patients/[an]/assessments — tenant scope', () => {
     expect(body.assessments).toEqual([]);
   });
 
-  it('lets a hospital read an admission of the same province', async () => {
-    // The province-wide view is what NN-LRMS is built around.
+  it('denies a hospital reading another hospital\'s admission', async () => {
     mockSessionUser = testSessionUser({ hospitalCode: OWN_HCODE });
     const res = await GET(request(`${OTHER_HCODE}-AN-OTHER`), {
       params: Promise.resolve({ an: `${OTHER_HCODE}-AN-OTHER` }),
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
 
   it('denies a hospital reading an admission of another province', async () => {
@@ -93,6 +96,14 @@ describe('GET /api/patients/[an]/assessments — tenant scope', () => {
       params: Promise.resolve({ an: `${OTHER_HCODE}-AN-FAR` }),
     });
     expect(res.status).toBe(403);
+  });
+
+  it('lets the centre hospital read any admission', async () => {
+    mockSessionUser = testSessionUser({ hospitalCode: CENTRE_HCODE });
+    const res = await GET(request(`${OTHER_HCODE}-AN-OTHER`), {
+      params: Promise.resolve({ an: `${OTHER_HCODE}-AN-OTHER` }),
+    });
+    expect(res.status).toBe(200);
   });
 
   it('lets a provincial account read any admission', async () => {
