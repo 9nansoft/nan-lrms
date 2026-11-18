@@ -1,8 +1,8 @@
 // GET /api/dashboard/high-risk — high-risk patients across all hospitals
 import { NextResponse } from 'next/server';
-import { getDatabase } from '@/db/connection';
 import { getHighRiskPatients } from '@/services/dashboard';
-import { auth } from '@/lib/auth';
+import { resolveRequestScope } from '@/lib/request-scope';
+import { scopeCacheSuffix } from '@/services/visibility-scope';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
@@ -16,22 +16,30 @@ import type { HighRiskPatient } from '@/types/api';
 // compose-internal Redis that already holds sync-run records; note it now
 // carries decrypted display names for up to 50 patients (same data every
 // authenticated dashboard sees).
-const HR_CACHE_KEY = 'cache:dashboard:high-risk';
+//
+// The cache key carries the viewer's scope: the roster is patient data, so a
+// hospital's narrower roster must never be served from the province-wide
+// entry (or the other way round).
 const HR_CACHE_TTL_SECONDS = 30;
-const HR_STALE_KEY = 'cache:dashboard:high-risk:stale';
 const HR_STALE_TTL_SECONDS = 300;
-const HR_LOCK_KEY = 'cache:dashboard:high-risk:lock';
 const HR_LOCK_TTL_SECONDS = 15;
 const HR_CACHE_ENABLED = process.env.NODE_ENV !== 'test';
 const AUDIT_SAMPLE_WINDOW_SECONDS = 300;
 
+function hrCacheKeys(scopeSuffix: string) {
+  return {
+    main: `cache:dashboard:high-risk:${scopeSuffix}`,
+    stale: `cache:dashboard:high-risk:${scopeSuffix}:stale`,
+    lock: `cache:dashboard:high-risk:${scopeSuffix}:lock`,
+  };
+}
+
 export async function GET() {
   try {
     await ensureInit();
-    const db = await getDatabase();
+    const { db, scope, session } = await resolveRequestScope();
 
     // Audit logging — sampled: one VIEW row per user per window.
-    const session = await auth();
     if (session?.user) {
       const actor = auditActorFromSession(session);
       const userKey = String(actor.userId ?? actor.userName ?? 'anonymous');
@@ -44,20 +52,22 @@ export async function GET() {
       }
     }
 
+    const keys = hrCacheKeys(scopeCacheSuffix(scope));
+
     if (HR_CACHE_ENABLED) {
-      const cached = await cacheGetJson<HighRiskPatient[]>(HR_CACHE_KEY);
+      const cached = await cacheGetJson<HighRiskPatient[]>(keys.main);
       if (cached) return NextResponse.json({ patients: cached });
-      const claimed = await cacheSetNx(HR_LOCK_KEY, HR_LOCK_TTL_SECONDS);
+      const claimed = await cacheSetNx(keys.lock, HR_LOCK_TTL_SECONDS);
       if (!claimed) {
-        const stale = await cacheGetJson<HighRiskPatient[]>(HR_STALE_KEY);
+        const stale = await cacheGetJson<HighRiskPatient[]>(keys.stale);
         if (stale) return NextResponse.json({ patients: stale });
       }
     }
 
-    const patients = await getHighRiskPatients(db);
+    const patients = await getHighRiskPatients(db, 500, scope);
     if (HR_CACHE_ENABLED) {
-      await cacheSetJson(HR_CACHE_KEY, patients, HR_CACHE_TTL_SECONDS);
-      await cacheSetJson(HR_STALE_KEY, patients, HR_STALE_TTL_SECONDS);
+      await cacheSetJson(keys.main, patients, HR_CACHE_TTL_SECONDS);
+      await cacheSetJson(keys.stale, patients, HR_STALE_TTL_SECONDS);
     }
     return NextResponse.json({ patients });
   } catch (error) {

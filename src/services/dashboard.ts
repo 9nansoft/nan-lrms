@@ -36,6 +36,7 @@ import { getHospitalCapability } from '@/config/hospital-capabilities';
 import { ANC_RISK_LEVEL_ORDER } from '@/config/anc-risk-rules';
 import { AncRiskLevel } from '@/types/domain';
 import { isMaternalScreenUiEnabled } from '@/lib/feature-flags';
+import { patientScopeFilter, type ViewerScope } from '@/services/visibility-scope';
 import type { MaternalScreenLocalTier, MaternalEmergencyAcuity } from '@/types/maternal-screening';
 import type { MaternalScreenSummaryItem } from '@/types/api';
 
@@ -371,6 +372,10 @@ export async function getHighRiskPatients(
   // further). At 50 it silently truncated the roster the panel claims to
   // show in full.
   limit: number = 500,
+  // The viewer's visibility scope. A hospital sees its own active labor
+  // roster (and the roster of the hospitals below it in the node tree); the
+  // centre hospital and the province office see the province's.
+  scope?: ViewerScope,
 ): Promise<HighRiskPatient[]> {
   // Flag read once per request (GC-W3), not per row.
   const maternalScreenUiEnabled = isMaternalScreenUiEnabled();
@@ -379,6 +384,7 @@ export async function getHighRiskPatients(
   // INNER: the panel's "ALL ACTIVE" tab must show LOW-risk and not-yet-scored
   // women too — the old HIGH/MEDIUM pre-filter meant "all active" showed one
   // patient on a calm ward and silently hid unscored admissions.
+  const scopeFilter = scope ? patientScopeFilter(scope, 'cp') : null;
   const rows = await db.query<HighRiskRow>(
     `
     SELECT
@@ -409,10 +415,11 @@ export async function getHighRiskPatients(
     INNER JOIN hospitals h ON h.id = cp.hospital_id
     WHERE cp.labor_status = 'ACTIVE'
       AND h.is_active = true
+      ${scopeFilter ? `AND ${scopeFilter.clause}` : ''}
     ORDER BY CASE WHEN cs.score IS NULL THEN 1 ELSE 0 END, cs.score DESC
     LIMIT ?
   `,
-    [limit],
+    scopeFilter ? [...scopeFilter.params, limit] : [limit],
   );
 
   return rows.map((row) => ({

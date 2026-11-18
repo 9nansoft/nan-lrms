@@ -1,8 +1,7 @@
 // T072: GET /api/patients/[an] — patient detail with CPD score and hospital info
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatabase } from '@/db/connection';
 import { decrypt, getEncryptionKey } from '@/lib/encryption';
-import { auth } from '@/lib/auth';
+import { denyIfPatientOutOfScope, resolveRequestScope } from '@/lib/request-scope';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
@@ -24,24 +23,14 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       );
     }
     const { hcode, an } = parsed;
-    const db = await getDatabase();
-
-    // T091: Audit logging
-    const session = await auth();
-    if (session?.user) {
-      await tryLogAccess(db, {
-        ...auditActorFromSession(session),
-        action: 'VIEW_PATIENT',
-        resourceType: 'PATIENT',
-        resourceId: an,
-      });
-    }
+    const { db, scope, session } = await resolveRequestScope();
 
     // Query patient with hospital info. cid_hash is pulled for cross-hospital
     // journey lookup below (an ANC journey registered at hospital A carries
     // the same cid_hash as the labor admission at hospital B).
     const patients = await db.query<{
       id: string;
+      hospital_id: string;
       hn: string;
       an: string;
       name: string;
@@ -78,7 +67,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       hospital_name: string;
       level: string;
     }>(
-      `SELECT cp.id, cp.hn, cp.an, cp.name, cp.cid_hash, cp.journey_id,
+      `SELECT cp.id, cp.hospital_id, cp.hn, cp.an, cp.name, cp.cid_hash, cp.journey_id,
               cp.age,
               cp.gravida, cp.para, cp.abortion, cp.living_children, cp.preg_no,
               cp.ga_weeks, cp.ga_day, cp.anc_count, cp.admit_date,
@@ -98,6 +87,29 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
     if (patients.length === 0) {
       return NextResponse.json({ error: 'Patient not found', code: 'NOT_FOUND' }, { status: 404 });
+    }
+
+    // Tenant scope: the hospital holding this admission must be in the
+    // reader's scope — its own hospital, a hospital below it in the node
+    // tree, or (for the centre hospital and the province office) all of them.
+    // A patient of another hospital is readable when that hospital referred
+    // her in to the reader.
+    const denied = await denyIfPatientOutOfScope(
+      db,
+      scope,
+      patients[0].hospital_id,
+      patients[0].journey_id,
+    );
+    if (denied) return denied;
+
+    // T091: Audit logging
+    if (session?.user) {
+      await tryLogAccess(db, {
+        ...auditActorFromSession(session),
+        action: 'VIEW_PATIENT',
+        resourceType: 'PATIENT',
+        resourceId: an,
+      });
     }
 
     const p = patients[0];

@@ -1,0 +1,84 @@
+// The signed-in viewer's patient-visibility scope, resolved per request.
+//
+// The scope is read from the database on every request — never cached in the
+// JWT — so an admin changing a hospital's scope or the node tree takes effect
+// on the next request, not at the next login.
+//
+// Node-side (imports @/lib/auth) — never import from src/middleware.ts.
+import type { DatabaseAdapter } from '@/db/adapter';
+import type { Session } from 'next-auth';
+import { NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+import { getDatabase } from '@/db/connection';
+import {
+  resolveViewerScope,
+  scopeAllowsHcode,
+  scopeAllowsPatientRow,
+  type ViewerScope,
+} from '@/services/visibility-scope';
+
+export interface RequestScope {
+  db: DatabaseAdapter;
+  /** Which hospitals' patient rows this session may read. */
+  scope: ViewerScope;
+  session: Session | null;
+  /** The hospital the session belongs to (null when it has none). */
+  hospitalCode: string | null;
+}
+
+export async function resolveRequestScope(): Promise<RequestScope> {
+  const session = await auth();
+  const db = await getDatabase();
+  const hospitalCode = session?.user ? session.user.hospitalCode : null;
+  const scope = await resolveViewerScope(db, hospitalCode);
+  return { db, scope, session, hospitalCode };
+}
+
+/**
+ * The scope of an already-authenticated session. Routes that use
+ * requireSession() resolve the scope with this, so the session is read once.
+ */
+export async function scopeForSession(
+  db: DatabaseAdapter,
+  session: Session,
+): Promise<ViewerScope> {
+  const hospitalCode = session?.user ? session.user.hospitalCode : null;
+  return resolveViewerScope(db, hospitalCode);
+}
+
+const HOSPITAL_SCOPE_DENIED_BODY = {
+  error: 'Forbidden',
+  code: 'HOSPITAL_SCOPE_DENIED',
+  message: 'คุณไม่มีสิทธิ์ดูข้อมูลคนไข้ของโรงพยาบาลนี้',
+  suggestedAction:
+    'ดูได้เฉพาะข้อมูลของโรงพยาบาลของคุณ รวมถึงคนไข้ที่โรงพยาบาลอื่นส่งต่อเข้ามา',
+};
+
+/**
+ * Guard for the routes that take a hospital code (or a patient id that
+ * carries one) in the URL. Returns the 403 response when the hospital is out
+ * of the viewer's scope, or null when the request may proceed.
+ */
+export async function denyIfHospitalOutOfScope(
+  db: DatabaseAdapter,
+  scope: ViewerScope,
+  hcode: string,
+): Promise<NextResponse | null> {
+  if (await scopeAllowsHcode(db, scope, hcode)) return null;
+  return NextResponse.json(HOSPITAL_SCOPE_DENIED_BODY, { status: 403 });
+}
+
+/**
+ * Guard for the patient routes. The reader may read the row when the hospital
+ * that holds it is in scope, or when the patient was referred in to the
+ * reader's hospital — that one patient is the whole grant.
+ */
+export async function denyIfPatientOutOfScope(
+  db: DatabaseAdapter,
+  scope: ViewerScope,
+  hospitalId: string | null | undefined,
+  journeyId: string | null | undefined,
+): Promise<NextResponse | null> {
+  if (await scopeAllowsPatientRow(db, scope, hospitalId, journeyId)) return null;
+  return NextResponse.json(HOSPITAL_SCOPE_DENIED_BODY, { status: 403 });
+}

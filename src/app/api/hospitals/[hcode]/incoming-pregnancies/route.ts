@@ -8,7 +8,7 @@
 // Query: ?min_ga=34 (default 34 weeks)
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { getDatabase } from '@/db/connection';
+import { denyIfHospitalOutOfScope, resolveRequestScope } from '@/lib/request-scope';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { getIncomingTermPregnancies } from '@/services/dashboard';
@@ -20,7 +20,9 @@ export async function GET(
   try {
     await ensureInit();
     const { hcode } = await params;
-    const db = await getDatabase();
+    const { db, scope } = await resolveRequestScope();
+    const denied = await denyIfHospitalOutOfScope(db, scope, hcode);
+    if (denied) return denied;
 
     const sp = request.nextUrl.searchParams;
     const minGaRaw = sp.get('min_ga');

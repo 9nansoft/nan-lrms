@@ -5,6 +5,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { requireSession } from '@/lib/session-guard';
+import { scopeForSession } from '@/lib/request-scope';
 import { readReferralListForHospital } from '@/services/journey-access';
 
 export async function GET(request: NextRequest) {
@@ -14,6 +15,7 @@ export async function GET(request: NextRequest) {
     if (session instanceof NextResponse) return session;
 
     const db = await getDatabase();
+    const scope = await scopeForSession(db, session);
     const searchParams = request.nextUrl.searchParams;
 
     const response = await readReferralListForHospital(
@@ -30,6 +32,7 @@ export async function GET(request: NextRequest) {
         perPage: parseInt(searchParams.get('per_page') ?? '20', 10),
       },
       session.user.hospitalCode,
+      scope,
     );
 
     // What this returns depends on who asks, so it must not sit in a shared cache.

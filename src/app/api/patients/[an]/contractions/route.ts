@@ -1,6 +1,6 @@
 // T074: GET /api/patients/[an]/contractions — contraction data
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatabase } from '@/db/connection';
+import { denyIfPatientOutOfScope, resolveRequestScope } from '@/lib/request-scope';
 import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
 import { logger } from '@/lib/logger';
@@ -18,11 +18,11 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid patient ID format', code: 'BAD_REQUEST' }, { status: 400 });
     }
     const { hcode, an } = parsed;
-    const db = await getDatabase();
+    const { db, scope } = await resolveRequestScope();
 
     // Get patient ID
-    const patients = await db.query<{ id: string }>(
-      'SELECT cp.id FROM cached_patients cp JOIN hospitals h ON h.id = cp.hospital_id WHERE cp.an = ? AND h.hcode = ? LIMIT 1',
+    const patients = await db.query<{ id: string; hospital_id: string; journey_id: string | null }>(
+      'SELECT cp.id, cp.hospital_id, cp.journey_id FROM cached_patients cp JOIN hospitals h ON h.id = cp.hospital_id WHERE cp.an = ? AND h.hcode = ? LIMIT 1',
       [an, hcode],
     );
 
@@ -32,6 +32,14 @@ export async function GET(
         { status: 404 },
       );
     }
+
+    const denied = await denyIfPatientOutOfScope(
+      db,
+      scope,
+      patients[0].hospital_id,
+      patients[0].journey_id,
+    );
+    if (denied) return denied;
 
     // Contractions derived from vital signs — measured_at intervals
     const vitals = await db.query<{

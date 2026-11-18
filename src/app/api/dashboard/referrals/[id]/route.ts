@@ -5,6 +5,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { requireSession } from '@/lib/session-guard';
+import { scopeForSession } from '@/lib/request-scope';
 import { readReferralDetailForHospital } from '@/services/journey-access';
 import type { ReferralDetailResponse } from '@/types/api';
 
@@ -17,7 +18,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     const db = await getDatabase();
     const { id } = await params;
 
-    const referral = await readReferralDetailForHospital(db, id, session.user.hospitalCode);
+    const referral = await readReferralDetailForHospital(
+      db,
+      id,
+      session.user.hospitalCode,
+      await scopeForSession(db, session),
+    );
     if (!referral) {
       return NextResponse.json(
         { error: { code: 'NOT_FOUND', message: 'ไม่พบรายการส่งต่อนี้', details: null } },

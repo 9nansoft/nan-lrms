@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { getDatabase } from '@/db/connection';
-import { auth } from '@/lib/auth';
+import { resolveRequestScope } from '@/lib/request-scope';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
@@ -10,22 +9,28 @@ import { listJourneys } from '@/services/journey-list';
 export async function GET(request: NextRequest) {
   try {
     await ensureInit();
-    const db = await getDatabase();
+    const { db, scope, session } = await resolveRequestScope();
     const searchParams = request.nextUrl.searchParams;
 
-    const result = await listJourneys(db, {
-      stage: searchParams.get('stage') ?? undefined,
-      riskLevel: searchParams.get('risk_level') ?? undefined,
-      hospitalId: searchParams.get('hospital_id') ?? undefined,
-      q: searchParams.get('q') ?? undefined,
-      cohort: searchParams.get('cohort') ?? undefined,
-      sort: searchParams.get('sort') ?? undefined,
-      page: parseInt(searchParams.get('page') ?? '1', 10),
-      perPage: parseInt(searchParams.get('per_page') ?? '20', 10),
-    });
+    // The registry is patient data: a hospital reads the pregnancies of its
+    // own hospital (plus the ones its node hospitals hold), not the whole
+    // province's.
+    const result = await listJourneys(
+      db,
+      {
+        stage: searchParams.get('stage') ?? undefined,
+        riskLevel: searchParams.get('risk_level') ?? undefined,
+        hospitalId: searchParams.get('hospital_id') ?? undefined,
+        q: searchParams.get('q') ?? undefined,
+        cohort: searchParams.get('cohort') ?? undefined,
+        sort: searchParams.get('sort') ?? undefined,
+        page: parseInt(searchParams.get('page') ?? '1', 10),
+        perPage: parseInt(searchParams.get('per_page') ?? '20', 10),
+      },
+      scope,
+    );
 
     // PDPA access log — fire-and-forget (tryLogAccess never throws).
-    const session = await auth();
     if (session?.user) {
       await tryLogAccess(db, {
         ...auditActorFromSession(session),

@@ -15,6 +15,7 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import {
   ALL_SCOPE_HCODES,
   CENTER_HOSPITAL_LEVELS,
+  REFERRAL_ACCESS_STATUSES,
   parseVisibilityScope,
 } from '@/config/visibility-scope';
 
@@ -167,11 +168,19 @@ export function hospitalScopeFilter(
  */
 export function journeyScopeFilter(scope: ViewerScope, alias = 'mj'): ScopeFilter | null {
   if (scope.mode === 'ALL') return null;
-  if (scope.allowedHospitalIds.length === 0) return { clause: '1 = 0', params: [] };
-  const placeholders = scope.allowedHospitalIds.map(() => '?').join(', ');
+  const own =
+    scope.allowedHospitalIds.length > 0
+      ? {
+          clause: `(${alias}.hospital_id IN (${scope.allowedHospitalIds.map(() => '?').join(', ')}) OR ${alias}.current_hospital_id IN (${scope.allowedHospitalIds.map(() => '?').join(', ')}))`,
+          params: [...scope.allowedHospitalIds, ...scope.allowedHospitalIds],
+        }
+      : null;
+  const grant = referGrantClause(scope, `${alias}.id`);
+  if (!own) return grant;
+  if (!grant) return own;
   return {
-    clause: `(${alias}.hospital_id IN (${placeholders}) OR ${alias}.current_hospital_id IN (${placeholders}))`,
-    params: [...scope.allowedHospitalIds, ...scope.allowedHospitalIds],
+    clause: `(${own.clause} OR ${grant.clause})`,
+    params: [...own.params, ...grant.params],
   };
 }
 
@@ -187,6 +196,68 @@ export function referralScopeFilter(scope: ViewerScope, alias = 'cr'): ScopeFilt
     clause: `(${alias}.from_hospital_id IN (${placeholders}) OR ${alias}.to_hospital_id IN (${placeholders}))`,
     params: [...scope.allowedHospitalIds, ...scope.allowedHospitalIds],
   };
+}
+
+/**
+ * The refer-in grant: a patient of ANOTHER hospital is readable when that
+ * hospital referred the patient in to the viewer.
+ *
+ * The referral rows are built from HOSxP's referin / referout tables
+ * (src/services/sync/referrals.ts): the sending hospital's referout row
+ * becomes a cached_referrals row pointing at the receiving hospital, and the
+ * journey it carries is the origin hospital's pregnancy. The grant therefore
+ * opens exactly one patient — the one that was sent — and nothing else.
+ */
+function referGrantClause(scope: ViewerScope, journeyExpr: string): ScopeFilter | null {
+  if (scope.mode === 'ALL' || !scope.ownHospitalId) return null;
+  return {
+    clause: `EXISTS (SELECT 1 FROM cached_referrals r
+                WHERE r.journey_id = ${journeyExpr}
+                  AND r.to_hospital_id = ?
+                  AND r.from_hospital_id <> r.to_hospital_id
+                  AND r.status IN (${REFERRAL_ACCESS_STATUSES.map(() => '?').join(', ')}))`,
+    params: [scope.ownHospitalId, ...REFERRAL_ACCESS_STATUSES],
+  };
+}
+
+/**
+ * Restricts patient rows (alias `cp`) to the ones the viewer may read: the
+ * rows of the hospitals in scope, plus the patients other hospitals referred
+ * in to the viewer.
+ */
+export function patientScopeFilter(scope: ViewerScope, alias = 'cp'): ScopeFilter | null {
+  const own = hospitalScopeFilter(scope, `${alias}.hospital_id`);
+  if (!own) return null;
+  const grant = referGrantClause(scope, `${alias}.journey_id`);
+  if (!grant) return own;
+  return {
+    clause: `(${own.clause} OR ${grant.clause})`,
+    params: [...own.params, ...grant.params],
+  };
+}
+
+/**
+ * True when the viewer may read this patient row: the hospital that holds it
+ * is in scope, or the patient was referred in to the viewer.
+ */
+export async function scopeAllowsPatientRow(
+  db: DatabaseAdapter,
+  scope: ViewerScope,
+  hospitalId: string | null | undefined,
+  journeyId: string | null | undefined,
+): Promise<boolean> {
+  if (hospitalId && scopeAllowsHospitalId(scope, hospitalId)) return true;
+  if (!journeyId || scope.mode !== 'SCOPED' || !scope.ownHospitalId) return false;
+  const rows = await db.query<{ id: string }>(
+    `SELECT r.id FROM cached_referrals r
+      WHERE r.journey_id = ?
+        AND r.to_hospital_id = ?
+        AND r.from_hospital_id <> r.to_hospital_id
+        AND r.status IN (${REFERRAL_ACCESS_STATUSES.map(() => '?').join(', ')})
+      LIMIT 1`,
+    [journeyId, scope.ownHospitalId, ...REFERRAL_ACCESS_STATUSES],
+  );
+  return rows.length > 0;
 }
 
 /**

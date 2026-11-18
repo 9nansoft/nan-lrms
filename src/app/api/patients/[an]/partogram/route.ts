@@ -3,7 +3,7 @@
 // hydrates `cached_partograph_observations`, runs CDSS analysis, and rolls up
 // severity. Legacy `entries[]` is kept for the existing LaborProgressCard.
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatabase } from '@/db/connection';
+import { denyIfPatientOutOfScope, resolveRequestScope } from '@/lib/request-scope';
 import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
 import {
@@ -68,11 +68,16 @@ export async function GET(
       );
     }
     const { hcode, an } = parsed;
-    const db = await getDatabase();
+    const { db, scope } = await resolveRequestScope();
 
     // Patient lookup — preserves prior behaviour (joins hospitals on hcode).
-    const patients = await db.query<{ id: string; admit_date: string }>(
-      'SELECT cp.id, cp.admit_date FROM cached_patients cp JOIN hospitals h ON h.id = cp.hospital_id WHERE cp.an = ? AND h.hcode = ? LIMIT 1',
+    const patients = await db.query<{
+      id: string;
+      admit_date: string;
+      hospital_id: string;
+      journey_id: string | null;
+    }>(
+      'SELECT cp.id, cp.admit_date, cp.hospital_id, cp.journey_id FROM cached_patients cp JOIN hospitals h ON h.id = cp.hospital_id WHERE cp.an = ? AND h.hcode = ? LIMIT 1',
       [an, hcode],
     );
 
@@ -82,6 +87,14 @@ export async function GET(
         { status: 404 },
       );
     }
+
+    const denied = await denyIfPatientOutOfScope(
+      db,
+      scope,
+      patients[0].hospital_id,
+      patients[0].journey_id,
+    );
+    if (denied) return denied;
 
     const patient = patients[0];
 

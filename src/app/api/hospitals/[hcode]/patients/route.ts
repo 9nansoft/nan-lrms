@@ -1,8 +1,7 @@
 // T050: GET /api/hospitals/[hcode]/patients — patient list per hospital
 import { NextResponse, type NextRequest } from 'next/server';
-import { getDatabase } from '@/db/connection';
 import { getHospitalPatientList, getHospitalPartographAudit } from '@/services/dashboard';
-import { auth } from '@/lib/auth';
+import { denyIfHospitalOutOfScope, resolveRequestScope } from '@/lib/request-scope';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
@@ -23,7 +22,13 @@ export async function GET(
     const dateFrom = searchParams.get('date_from') ?? undefined;
     const dateTo = searchParams.get('date_to') ?? undefined;
 
-    const db = await getDatabase();
+    const { db, scope, session } = await resolveRequestScope();
+    // Patient data is hospital-scoped: a hospital reads its own patients (and
+    // the patients other hospitals referred in to it), never another
+    // hospital's roster.
+    const denied = await denyIfHospitalOutOfScope(db, scope, hcode);
+    if (denied) return denied;
+
     const result = await getHospitalPatientList(db, hcode, {
       status,
       riskLevel,
@@ -34,7 +39,6 @@ export async function GET(
     });
 
     // PDPA access log — fire-and-forget (tryLogAccess never throws).
-    const session = await auth();
     if (session?.user) {
       await tryLogAccess(db, {
         ...auditActorFromSession(session),

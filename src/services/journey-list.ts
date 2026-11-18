@@ -10,6 +10,7 @@ import { decryptSafe } from '@/lib/encryption';
 import { CareStage } from '@/types/domain';
 import { ancFreshnessCutoffs, ancRegistryScopeSql, ANC_MAX_GA_WEEKS } from '@/config/anc-freshness';
 import { ANC_OPS, ancOpsCutoffs } from '@/config/anc-ops';
+import { journeyScopeFilter, type ViewerScope } from '@/services/visibility-scope';
 import type {
   AncOpsCounts,
   JourneyHospitalFacet,
@@ -51,6 +52,16 @@ export interface JourneyListFilters {
 interface WhereClause {
   clause: string;
   params: unknown[];
+}
+
+/**
+ * The leading predicate every journey query starts from. With a scope it
+ * restricts the rows to the viewer's hospitals; without one it selects
+ * everything (the province-wide callers).
+ */
+function scopedBase(scope?: ViewerScope): WhereClause {
+  const filter = scope ? journeyScopeFilter(scope, 'mj') : null;
+  return filter ? { clause: filter.clause, params: filter.params } : { clause: '1=1', params: [] };
 }
 
 // ─── Shared predicate builder ─────────────────────────────────────────────
@@ -269,13 +280,13 @@ export async function getAncBoardCounts(
 export async function listJourneys(
   db: DatabaseAdapter,
   filters: JourneyListFilters,
+  scope?: ViewerScope,
 ): Promise<JourneyListResponse> {
   const { page, perPage } = normalizePaging(filters);
   const now = new Date();
   const q = filters.q?.trim();
 
-  const base = '1=1';
-  const baseParams: unknown[] = [];
+  const { clause: base, params: baseParams } = scopedBase(scope);
   const { clause, params } = buildJourneyWhere(base, baseParams, filters, now);
 
   let journeys: JourneyListItem[];
@@ -325,8 +336,8 @@ export async function listJourneys(
   let opsCounts: AncOpsCounts | undefined;
   let hospitalCounts: JourneyHospitalFacet[] | undefined;
   if (filters.stage === CareStage.PREGNANCY) {
-    opsCounts = await computeOpsCounts(db, filters, now);
-    hospitalCounts = await computeHospitalCounts(db, filters, now);
+    opsCounts = await computeOpsCounts(db, filters, now, scope);
+    hospitalCounts = await computeHospitalCounts(db, filters, now, scope);
   }
 
   return {
@@ -346,10 +357,12 @@ async function computeOpsCounts(
   db: DatabaseAdapter,
   filters: JourneyListFilters,
   now: Date,
+  scope?: ViewerScope,
 ): Promise<AncOpsCounts> {
+  const { clause: base, params: baseParams } = scopedBase(scope);
   const { clause, params } = buildJourneyWhere(
-    '1=1',
-    [],
+    base,
+    baseParams,
     { stage: CareStage.PREGNANCY, hospitalId: filters.hospitalId },
     now,
   );
@@ -377,8 +390,8 @@ async function computeOpsCounts(
 
   // LTFU lives outside the normal gate, so it needs its own where-clause.
   const ltfu = buildJourneyWhere(
-    '1=1',
-    [],
+    base,
+    baseParams,
     { stage: CareStage.PREGNANCY, hospitalId: filters.hospitalId, cohort: 'ltfu' },
     now,
   );
@@ -406,8 +419,10 @@ async function computeHospitalCounts(
   db: DatabaseAdapter,
   filters: JourneyListFilters,
   now: Date,
+  scope?: ViewerScope,
 ): Promise<JourneyHospitalFacet[]> {
-  const { clause, params } = buildJourneyWhere('1=1', [], { stage: filters.stage }, now);
+  const { clause: base, params: baseParams } = scopedBase(scope);
+  const { clause, params } = buildJourneyWhere(base, baseParams, { stage: filters.stage }, now);
   const rows = await db.query<Record<string, unknown>>(
     `SELECT mj.current_hospital_id as id, ch.name as name, COUNT(*) as cnt
        FROM maternal_journeys mj

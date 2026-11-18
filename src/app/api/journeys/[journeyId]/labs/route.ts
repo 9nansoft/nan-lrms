@@ -7,6 +7,7 @@ import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { requireSession } from '@/lib/session-guard';
+import { scopeForSession } from '@/lib/request-scope';
 import { readJourneyLabsForHospital } from '@/services/journey-access';
 import { ANC_LAB_ACCESS_DENIED } from '@/config/anc-lab-display';
 
@@ -27,7 +28,12 @@ export async function GET(
 
     const { journeyId } = await params;
     const db = await getDatabase();
-    const read = await readJourneyLabsForHospital(db, journeyId, session.user.hospitalCode);
+    const read = await readJourneyLabsForHospital(
+      db,
+      journeyId,
+      session.user.hospitalCode,
+      await scopeForSession(db, session),
+    );
     if (read.status === 'not_found') {
       return errorResponse(404, 'NOT_FOUND', 'ไม่พบข้อมูลการตั้งครรภ์');
     }

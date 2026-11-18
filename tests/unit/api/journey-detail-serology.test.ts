@@ -146,6 +146,16 @@ describe('GET /api/journeys/[journeyId] — HIV and syphilis visibility', () => 
     expect(body.latestRisk?.triggeredRules).toEqual([...SEROLOGY_RULES, ...OTHER_RULES]);
   }
 
+  /** A hospital with no care link does not get the pregnancy at all — the
+   *  visibility scope closes the page before the serology guard matters. */
+  async function expectNotFound() {
+    const res = await call(journeyId);
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect(text).not.toContain(HIV_SECRET);
+    expect(text).not.toContain(VDRL_SECRET);
+  }
+
   it('rejects a request with no session and reveals nothing', async () => {
     const res = await call(journeyId);
     expect(res.status).toBe(401);
@@ -172,11 +182,9 @@ describe('GET /api/journeys/[journeyId] — HIV and syphilis visibility', () => 
     },
   );
 
-  it('withholds serology from an unrelated hospital but keeps the rest', async () => {
+  it('hides the pregnancy from an unrelated hospital', async () => {
     signInAt(UNRELATED.hcode);
-    const body = await expectWithheld();
-    expect(body.journey.hbsagResult).toBe('NEG');
-    expect(body.latestRisk?.triggeredRules).toEqual(OTHER_RULES);
+    await expectNotFound();
   });
 
   describe('referral diagnosis codes', () => {
@@ -200,14 +208,16 @@ describe('GET /api/journeys/[journeyId] — HIV and syphilis visibility', () => 
       ['A53.9'],
       ['O98.1'],
     ])('blanks %s for a hospital without full access', async (code) => {
-      signInAt(UNRELATED.hcode);
+      await addVisit(VISITED.id);
+      signInAt(VISITED.hcode);
       expect(await referralCode(code)).toBeNull();
     });
 
     it.each([['O24.4, B20'], ['O24/B20'], ['O24 B20'], ['see B20'], ['O24.4.B20'], ['O244B20']])(
       'blanks %s because it is not one well-formed code',
       async (code) => {
-        signInAt(UNRELATED.hcode);
+        await addVisit(VISITED.id);
+        signInAt(VISITED.hcode);
         expect(await referralCode(code)).toBeNull();
       },
     );
@@ -215,7 +225,8 @@ describe('GET /api/journeys/[journeyId] — HIV and syphilis visibility', () => 
     it.each([['O24.4'], ['O14.1'], ['B18.1'], ['A49.9'], ['O98.4'], ['O244'], ['O24']])(
       'keeps the unrelated code %s',
       async (code) => {
-        signInAt(UNRELATED.hcode);
+        await addVisit(VISITED.id);
+        signInAt(VISITED.hcode);
         expect(await referralCode(code)).toBe(code);
       },
     );
@@ -235,13 +246,13 @@ describe('GET /api/journeys/[journeyId] — HIV and syphilis visibility', () => 
   it.each([['REJECTED'], ['EXPIRED']])('gives a %s referral no access', async (status) => {
     await addReferral(REGISTERING.id, REFERRED_TO.id, status);
     signInAt(REFERRED_TO.hcode);
-    await expectWithheld();
+    await expectNotFound();
   });
 
   it('does not count a referral a hospital made to itself', async () => {
     await addReferral(UNRELATED.id, UNRELATED.id, 'ACCEPTED');
     signInAt(UNRELATED.hcode);
-    await expectWithheld();
+    await expectNotFound();
   });
 
   it.each([
@@ -249,21 +260,22 @@ describe('GET /api/journeys/[journeyId] — HIV and syphilis visibility', () => 
     ['a read-only unit', { accessMode: 'readonly' }],
   ])('gives %s from an unrelated hospital no bypass', async (_label, extra) => {
     signInAt(UNRELATED.hcode, extra);
-    await expectWithheld();
+    await expectNotFound();
   });
 
-  it('withholds serology from the exempt system hcode', async () => {
+  it('hides the pregnancy from an unregistered hospital code', async () => {
     signInAt('99999');
-    await expectWithheld();
+    await expectNotFound();
   });
 
-  it('withholds serology from a session with no hospital code', async () => {
+  it('hides the pregnancy from a session with no hospital code', async () => {
     signInAt(UNRELATED.hcode, { hospitalCode: undefined });
-    await expectWithheld();
+    await expectNotFound();
   });
 
   it('records in the audit log whether serology was withheld', async () => {
-    signInAt(UNRELATED.hcode);
+    await addVisit(VISITED.id);
+    signInAt(VISITED.hcode);
     await call(journeyId);
     signInAt(REGISTERING.hcode);
     await call(journeyId);

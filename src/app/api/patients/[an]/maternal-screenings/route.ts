@@ -11,8 +11,7 @@
 // resolved via parsePatientId + a hospitals-join scoped by hcode — the same
 // tenant-isolation mechanism as every other nested /api/patients/[an]/* route.
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatabase } from '@/db/connection';
-import { auth } from '@/lib/auth';
+import { denyIfPatientOutOfScope, resolveRequestScope } from '@/lib/request-scope';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
@@ -38,11 +37,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       );
     }
     const { hcode, an } = parsed;
-    const db = await getDatabase();
+    const { db, scope, session } = await resolveRequestScope();
 
     // Audit logging — same fire-and-forget pattern as GET /api/patients/[an]
     // (T091): never gates the response, only records who looked.
-    const session = await auth();
     if (session?.user) {
       await tryLogAccess(db, {
         ...auditActorFromSession(session),
@@ -56,8 +54,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // nested routes (contractions, partogram, vitals): an AN only resolves
     // within the hospital named by hcode, so a caller can never read another
     // hospital's assessments by guessing an AN (GC6 tenant isolation).
-    const patients = await db.query<{ id: string; hospital_id: string }>(
-      `SELECT cp.id, cp.hospital_id
+    const patients = await db.query<{
+      id: string;
+      hospital_id: string;
+      journey_id: string | null;
+    }>(
+      `SELECT cp.id, cp.hospital_id, cp.journey_id
          FROM cached_patients cp
          JOIN hospitals h ON h.id = cp.hospital_id
         WHERE cp.an = ? AND h.hcode = ?
@@ -68,6 +70,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (patients.length === 0) {
       return NextResponse.json({ error: 'Patient not found', code: 'NOT_FOUND' }, { status: 404 });
     }
+
+    const denied = await denyIfPatientOutOfScope(
+      db,
+      scope,
+      patients[0].hospital_id,
+      patients[0].journey_id,
+    );
+    if (denied) return denied;
 
     const patient = patients[0];
 

@@ -11,6 +11,7 @@ import { toIsoString } from '@/lib/dates';
 import { decryptSafe } from '@/lib/encryption';
 import { bangkokStartOfToday } from '@/lib/bangkok-time';
 import { referralSlaCutoffs } from '@/config/referral-sla';
+import { referralScopeFilter, type ViewerScope } from '@/services/visibility-scope';
 import type {
   ProvincialReferralListItem,
   ReferralDetail,
@@ -59,9 +60,14 @@ interface WhereClause {
   params: unknown[];
 }
 
-function buildReferralWhere(filters: ReferralListFilters, now: Date): WhereClause {
-  let clause = '1=1';
-  const params: unknown[] = [];
+function buildReferralWhere(
+  filters: ReferralListFilters,
+  now: Date,
+  scope?: ViewerScope,
+): WhereClause {
+  const scopeFilter = scope ? referralScopeFilter(scope, 'cr') : null;
+  let clause = scopeFilter ? scopeFilter.clause : '1=1';
+  const params: unknown[] = scopeFilter ? [...scopeFilter.params] : [];
 
   if (filters.status) {
     clause += ` AND cr.status = ?`;
@@ -147,10 +153,16 @@ function decryptName(value: unknown): string {
 
 // DB-wide totals by status. Intentionally excludes every list filter so the
 // KPI strip shows true totals rather than the current view.
-async function computeStatusCounts(db: DatabaseAdapter): Promise<ReferralStatusCounts> {
+async function computeStatusCounts(
+  db: DatabaseAdapter,
+  scope?: ViewerScope,
+): Promise<ReferralStatusCounts> {
+  const scopeFilter = scope ? referralScopeFilter(scope, 'cr') : null;
   const rows = await db.query<{ status: string; cnt: number }>(
-    `SELECT cr.status, COUNT(*) as cnt FROM cached_referrals cr GROUP BY cr.status`,
-    [],
+    `SELECT cr.status, COUNT(*) as cnt FROM cached_referrals cr
+     ${scopeFilter ? `WHERE ${scopeFilter.clause}` : ''}
+     GROUP BY cr.status`,
+    scopeFilter ? scopeFilter.params : [],
   );
   const counts: ReferralStatusCounts = {
     initiated: 0,
@@ -186,10 +198,15 @@ async function computeStatusCounts(db: DatabaseAdapter): Promise<ReferralStatusC
 
 // Fixed-window operational KPIs, always over the whole table. SUM(CASE ...)
 // is portable across SQLite and Postgres.
-async function computeOpsCounts(db: DatabaseAdapter, now: Date): Promise<ReferralOpsCounts> {
+async function computeOpsCounts(
+  db: DatabaseAdapter,
+  now: Date,
+  scope?: ViewerScope,
+): Promise<ReferralOpsCounts> {
   const todayStart = bangkokStartOfToday(now).toISOString();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 3600_000).toISOString();
   const { overdueBefore } = referralSlaCutoffs(now);
+  const scopeFilter = scope ? referralScopeFilter(scope, 'cr') : null;
 
   const rows = await db.query<Record<string, unknown>>(
     `SELECT
@@ -202,8 +219,14 @@ async function computeOpsCounts(db: DatabaseAdapter, now: Date): Promise<Referra
       SUM(CASE WHEN cr.status = 'INITIATED'
             AND cr.initiated_at < ? THEN 1 ELSE 0 END) as overdue
     FROM cached_referrals cr
-    LEFT JOIN maternal_journeys mj ON mj.id = cr.journey_id`,
-    [todayStart, sevenDaysAgo, overdueBefore],
+    LEFT JOIN maternal_journeys mj ON mj.id = cr.journey_id
+    ${scopeFilter ? `WHERE ${scopeFilter.clause}` : ''}`,
+    [
+      todayStart,
+      sevenDaysAgo,
+      overdueBefore,
+      ...(scopeFilter ? scopeFilter.params : []),
+    ],
   );
   const r = rows[0] ?? {};
   return {
@@ -339,12 +362,13 @@ export async function listReferrals(
   db: DatabaseAdapter,
   filters: ReferralListFilters,
   now: Date = new Date(),
+  scope?: ViewerScope,
 ): Promise<ReferralListResponse> {
   const page = filters.page && filters.page > 0 ? filters.page : 1;
   const perPage = filters.perPage && filters.perPage > 0 ? filters.perPage : 20;
   const q = filters.q?.trim();
 
-  const { clause, params } = buildReferralWhere(filters, now);
+  const { clause, params } = buildReferralWhere(filters, now, scope);
   const { emergencyPinAfter } = referralSlaCutoffs(now);
 
   let referrals: ProvincialReferralListItem[];
@@ -385,8 +409,8 @@ export async function listReferrals(
     referrals = rows.map((row) => mapReferralListItem(row));
   }
 
-  const statusCounts = await computeStatusCounts(db);
-  const opsCounts = await computeOpsCounts(db, now);
+  const statusCounts = await computeStatusCounts(db, scope);
+  const opsCounts = await computeOpsCounts(db, now, scope);
 
   return {
     referrals,

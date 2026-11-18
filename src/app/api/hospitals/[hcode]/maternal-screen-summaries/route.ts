@@ -16,9 +16,8 @@
 // this route still reports real errors as 500s so the hook's `error` state
 // is observable.
 import { NextResponse, type NextRequest } from 'next/server';
-import { getDatabase } from '@/db/connection';
 import { listMaternalScreenSummariesForHospital } from '@/services/dashboard';
-import { auth } from '@/lib/auth';
+import { denyIfHospitalOutOfScope, resolveRequestScope } from '@/lib/request-scope';
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
@@ -34,7 +33,9 @@ export async function GET(
     await ensureInit();
     const { hcode } = await params;
 
-    const db = await getDatabase();
+    const { db, scope, session } = await resolveRequestScope();
+    const denied = await denyIfHospitalOutOfScope(db, scope, hcode);
+    if (denied) return denied;
 
     // uiEnabled is computed server-side, independent of the store query
     // (same GC-U3 convention as GET /api/patients/[an]/maternal-screenings):
@@ -47,7 +48,6 @@ export async function GET(
     const summaries = await listMaternalScreenSummariesForHospital(db, hcode);
 
     // PDPA access log — fire-and-forget (tryLogAccess never throws).
-    const session = await auth();
     if (session?.user) {
       await tryLogAccess(db, {
         ...auditActorFromSession(session),

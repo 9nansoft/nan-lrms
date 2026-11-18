@@ -5,6 +5,7 @@ import { auditActorFromSession } from '@/lib/audit-actor';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { requireSession } from '@/lib/session-guard';
+import { scopeForSession } from '@/lib/request-scope';
 import { readJourneyDetailForHospital } from '@/services/journey-access';
 
 export async function GET(
@@ -19,7 +20,12 @@ export async function GET(
     const { journeyId } = await params;
     const db = await getDatabase();
 
-    const detail = await readJourneyDetailForHospital(db, journeyId, session.user.hospitalCode);
+    const detail = await readJourneyDetailForHospital(
+      db,
+      journeyId,
+      session.user.hospitalCode,
+      await scopeForSession(db, session),
+    );
     if (detail === null) {
       return NextResponse.json(
         { error: { code: 'NOT_FOUND', message: 'ไม่พบข้อมูลการตั้งครรภ์', details: null } },
