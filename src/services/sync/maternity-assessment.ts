@@ -493,10 +493,13 @@ export async function verifyAssessmentCursorAdvance(
   db: DatabaseAdapter,
   hospitalId: string,
   cursors: Record<string, string>,
+  onlyTables?: string[],
 ): Promise<Record<string, { authoritative: string[]; verified: boolean }>> {
   const session = await serverBmsSession(db, hospitalId);
   const result: Record<string, { authoritative: string[]; verified: boolean }> = {};
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
+    // Only the forms that actually moved need to be checked.
+    if (onlyTables && !onlyTables.includes(form.table)) continue;
     if (!session) {
       result[form.table] = { authoritative: [], verified: false };
       continue;

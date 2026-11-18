@@ -616,8 +616,13 @@ export async function POST(request: NextRequest) {
           // one the database refused, stops the progression — that row is
           // pulled again next cycle instead of being lost.
           const cursors = await readAssessmentCursors(db, hospitalId);
-          const authoritative = await verifyAssessmentCursorAdvance(db, hospitalId, cursors);
           const delivered = pulledPksByTable(payload);
+          const authoritative = await verifyAssessmentCursorAdvance(
+            db,
+            hospitalId,
+            cursors,
+            Object.keys(delivered),
+          );
           const nextByTable: Record<string, string | null> = {};
           for (const form of MATERNITY_ASSESSMENT_FORMS) {
             const verified = authoritative[form.table];
