@@ -65,6 +65,8 @@ export const MUTATION_ROUTE_POLICIES: Record<string, MutationRoutePolicy> = {
   'src/app/api/admin/hospitals/[hcode]/data/route.ts': 'session-origin-checked',
   'src/app/api/admin/hospitals/[hcode]/route.ts': 'session-origin-checked',
   'src/app/api/admin/hospitals/[hcode]/test-connection/route.ts': 'session-origin-checked',
+  'src/app/api/admin/hospital-nodes/route.ts': 'session-origin-checked',
+  'src/app/api/admin/hospital-nodes/[id]/route.ts': 'session-origin-checked',
   'src/app/api/admin/hospitals/route.ts': 'session-origin-checked',
   'src/app/api/admin/webhooks/[keyId]/route.ts': 'session-origin-checked',
   'src/app/api/admin/webhooks/route.ts': 'session-origin-checked',

@@ -91,18 +91,16 @@ async function hospitalLink(
  * The reader may read this journey when it registered the pregnancy, when it
  * is the referral destination, or when the pregnancy sits with a hospital
  * inside the reader's visibility scope (the node tree).
+ *
+ * The journey's CURRENT hospital does not count: a hospital can set
+ * current_hospital_id on a row it pushed, so it must not unlock anyone else's
+ * results that way.
  */
 function hasFullAccess(link: LinkRow | undefined, scope?: ViewerScope): boolean {
   if (link?.is_registering || link?.is_referral_destination) return true;
   if (!scope) return false;
   if (scope.mode === 'ALL') return true;
   if (link?.journey_hospital_id && scopeAllowsHospitalId(scope, link.journey_hospital_id)) {
-    return true;
-  }
-  if (
-    link?.journey_current_hospital_id &&
-    scopeAllowsHospitalId(scope, link.journey_current_hospital_id)
-  ) {
     return true;
   }
   return false;
