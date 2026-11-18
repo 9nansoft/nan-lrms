@@ -45,6 +45,11 @@ const COUNT_QUERIES: Array<{ key: string; sql: string; placeholders: 1 | 2 | 3 }
     sql: 'SELECT COUNT(*) AS cnt FROM cached_partograph_observations WHERE hospital_id = ?',
   },
   {
+    key: 'cached_maternity_assessments',
+    placeholders: 1,
+    sql: 'SELECT COUNT(*) AS cnt FROM cached_maternity_assessments WHERE hospital_id = ?',
+  },
+  {
     key: 'cached_anc_visits',
     placeholders: 3,
     sql: `SELECT COUNT(*) AS cnt FROM cached_anc_visits
@@ -200,6 +205,9 @@ export async function DELETE(
       [hospitalId],
     );
     await db.execute('DELETE FROM cached_partograph_observations WHERE hospital_id = ?', [
+      hospitalId,
+    ]);
+    await db.execute('DELETE FROM cached_maternity_assessments WHERE hospital_id = ?', [
       hospitalId,
     ]);
     await db.execute(

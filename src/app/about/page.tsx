@@ -254,7 +254,7 @@ export default function AboutPage() {
             <StepItem
               step={2}
               title="BMS Central API ดึงข้อมูลจาก HOSxP"
-              description="BMS Central API (ตัวกลางเชื่อมต่อข้อมูล) จะเชื่อมต่อกับฐานข้อมูล HOSxP ของแต่ละ รพช. โดยอัตโนมัติ ดึงข้อมูลผู้คลอดที่กำลังรอคลอด (Active Labor) ออกมา"
+              description="BMS Central API (ตัวกลางเชื่อมต่อข้อมูล) จะเชื่อมต่อกับฐานข้อมูล HOSxP ของแต่ละ รพช. โดยอัตโนมัติ ดึงข้อมูลผู้คลอดที่กำลังรอคลอด (Active Labor) ออกมา รวมถึงแบบฟอร์มประเมินของพยาบาลห้องคลอดที่บันทึกไว้ใน HOSxP (แรกรับ ระยะคลอด และหลังคลอด)"
             />
             <div className="flex justify-center">
               <ChevronRight className="h-6 w-6 text-ink-muted rotate-90" />

@@ -145,6 +145,7 @@ async function handle() {
     'cached_patients',
     'cached_vital_signs',
     'cached_partograph_observations',
+    'cached_maternity_assessments',
     'cached_referrals',
     'cached_newborns',
     'cpd_scores',

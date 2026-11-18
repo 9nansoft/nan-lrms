@@ -28,7 +28,13 @@ import {
   REFEROUT_MATERNITY_SINCE,
   REFERIN_SINCE,
   OVST_FIRST_VISIT_FOR_CIDS,
+  ASSESSMENT_FORMS,
+  buildAssessmentItemsSql,
+  buildAssessmentRecordsSql,
 } from '@/config/hosxp-queries';
+import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
+import { newestFormIdByTable } from '@/services/maternity-assessment-fields';
+import type { HosxpAssessmentFormRow } from '@/types/maternity-assessments';
 import { isStaleAdmission } from '@/config/hospital-network';
 import { normalizeHosxpDate } from '@/lib/hosxp-date';
 import { ANC_LAB_ORDER_SQL_LIKE_TERMS, ANC_THALASSEMIA_FIELDS } from '@/config/anc-lab-canon';
@@ -185,6 +191,14 @@ export interface BrowserPushBody {
     referins: Record<string, unknown>[];
     visitEvidences: Record<string, unknown>[];
   };
+  /** Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด):
+   *  the form metadata (so the server can label every column) plus the raw
+   *  rows, grouped by HOSxP table. */
+  assessments?: {
+    forms: Record<string, unknown>[];
+    items: Record<string, unknown>[];
+    records: Record<string, Record<string, unknown>[]>;
+  };
 }
 
 export interface BrowserPollResult {
@@ -209,6 +223,8 @@ export interface BrowserPollResult {
   };
   /** Delivery rows read since the server-issued newborn cutoff. */
   newborns?: { infantsRead: number; pregnanciesRead: number };
+  /** Maternity assessment rows read since the server-issued cutoff. */
+  assessments?: { rowsRead: number; formsRead: number; itemsRead: number };
   /** Referral rows read from the rolling 60-day HOSxP window. */
   referrals?: { referoutsRead: number; referinsRead: number };
   pushedToServer: boolean;
@@ -1108,6 +1124,71 @@ let lastPushedActiveKey: string | null = null;
 // Per-tab: when ANC labs last reached the server (see ANC_LAB_PULL_INTERVAL_MS).
 let lastAncLabPullAt: number | null = null;
 
+/**
+ * Drop empty values from a raw HOSxP row. A form row has ~120 positional
+ * columns and the nurse filled a fraction of them — sending the empty ones
+ * only inflates the push payload.
+ */
+function stripEmptyRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'string' && value.trim() === '') continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด).
+ *
+ * The form metadata comes with the rows: HOSxP stores every assessment form
+ * in a table of positional columns and the server needs `assessment_items`
+ * to know what `asm_text12` means. The rows themselves are pulled per
+ * table, oldest first, since the server-issued cutoff — the cutoff
+ * advances as rows land, so a large backfill completes across cycles
+ * instead of arriving in one oversized push.
+ */
+async function pullAssessments(
+  opts: RunOptions,
+  cutoff: string,
+): Promise<{
+  forms: Record<string, unknown>[];
+  items: Record<string, unknown>[];
+  records: Record<string, Record<string, unknown>[]>;
+}> {
+  const formRows = await runQuery<Record<string, unknown>>(ASSESSMENT_FORMS.mysql, opts);
+
+  // Newest form per table — a site can keep an older version of the same
+  // form, and the highest id is the one in use.
+  const formIdByTable = newestFormIdByTable(
+    formRows as unknown as HosxpAssessmentFormRow[],
+  );
+
+  const itemsSql = buildAssessmentItemsSql([...formIdByTable.values()], 'mysql');
+  const itemRows = await runQuery<Record<string, unknown>>(itemsSql, opts);
+
+  const records: Record<string, Record<string, unknown>[]> = {};
+  await Promise.all(
+    MATERNITY_ASSESSMENT_FORMS.map(async (form) => {
+      const sql = buildAssessmentRecordsSql(form.table, form.pkColumn).mysql.replace(
+        '{{CUTOFF}}',
+        cutoff,
+      );
+      try {
+        const rows = await runQuery<Record<string, unknown>>(sql, opts);
+        records[form.table] = rows.map(stripEmptyRow);
+      } catch {
+        // A site does not have to use all three forms — a missing table must
+        // not cost the hospital the forms it does use.
+        records[form.table] = [];
+      }
+    }),
+  );
+
+  return { forms: formRows, items: itemRows, records };
+}
+
 export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResult> {
   const startedAt = Date.now();
   const result: BrowserPollResult = {
@@ -1350,6 +1431,12 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // Server-issued CIDs with open referrals TO this hospital — probed against
     // ovst below as fallback arrival evidence (referral gateway sync).
     let arrivalProbe: { cid: string; since: string }[] = [];
+    // One boot GET serves every cutoff-driven feed (newborn + assessments).
+    let boot: {
+      newbornCutoff?: string;
+      assessmentCutoff?: string;
+      referralArrivalProbe?: { cid?: unknown; since?: unknown }[];
+    } = {};
     try {
       const bootRes = await fetch('/api/sync/browser-push', {
         method: 'GET',
@@ -1357,39 +1444,65 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
         credentials: 'same-origin',
       });
       if (bootRes.ok) {
-        const boot = (await bootRes.json()) as {
-          newbornCutoff?: string;
-          referralArrivalProbe?: { cid?: unknown; since?: unknown }[];
-        };
-        if (Array.isArray(boot.referralArrivalProbe)) {
-          arrivalProbe = boot.referralArrivalProbe.filter(
-            (e): e is { cid: string; since: string } =>
-              typeof e?.cid === 'string' &&
-              /^\d{13}$/.test(e.cid) &&
-              typeof e?.since === 'string' &&
-              /^\d{4}-\d{2}-\d{2}$/.test(e.since),
-          );
-        }
-        const cutoff = boot.newbornCutoff;
-        if (typeof cutoff === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cutoff)) {
-          const infantsSql =
-            LABOUR_INFANTS_SINCE.mysql.replace('{{CUTOFF}}', cutoff) +
-            ' ORDER BY li.birth_date LIMIT 1000';
-          const pregSql =
-            IPT_PREGNANCY_DELIVERIES_SINCE.mysql.replace('{{CUTOFF}}', cutoff) +
-            ' ORDER BY ipr.labor_date LIMIT 1000';
-          const [infantRows, pregRows] = await Promise.all([
-            runQuery<Record<string, unknown>>(infantsSql, opts),
-            runQuery<Record<string, unknown>>(pregSql, opts),
-          ]);
-          result.newborns = { infantsRead: infantRows.length, pregnanciesRead: pregRows.length };
-          if (infantRows.length > 0 || pregRows.length > 0) {
-            newbornsSection = { infants: infantRows, pregnancies: pregRows };
-          }
+        boot = (await bootRes.json()) as typeof boot;
+      }
+    } catch {
+      // Boot is best-effort; the cutoff-driven feeds retry next cycle.
+    }
+    if (Array.isArray(boot.referralArrivalProbe)) {
+      arrivalProbe = boot.referralArrivalProbe.filter(
+        (e): e is { cid: string; since: string } =>
+          typeof e?.cid === 'string' &&
+          /^\d{13}$/.test(e.cid) &&
+          typeof e?.since === 'string' &&
+          /^\d{4}-\d{2}-\d{2}$/.test(e.since),
+      );
+    }
+    try {
+      const cutoff = boot.newbornCutoff;
+      if (typeof cutoff === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cutoff)) {
+        const infantsSql =
+          LABOUR_INFANTS_SINCE.mysql.replace('{{CUTOFF}}', cutoff) +
+          ' ORDER BY li.birth_date LIMIT 1000';
+        const pregSql =
+          IPT_PREGNANCY_DELIVERIES_SINCE.mysql.replace('{{CUTOFF}}', cutoff) +
+          ' ORDER BY ipr.labor_date LIMIT 1000';
+        const [infantRows, pregRows] = await Promise.all([
+          runQuery<Record<string, unknown>>(infantsSql, opts),
+          runQuery<Record<string, unknown>>(pregSql, opts),
+        ]);
+        result.newborns = { infantsRead: infantRows.length, pregnanciesRead: pregRows.length };
+        if (infantRows.length > 0 || pregRows.length > 0) {
+          newbornsSection = { infants: infantRows, pregnancies: pregRows };
         }
       }
     } catch {
       // Newborn feed is best-effort; the next cycle retries from the same cutoff.
+    }
+
+    // ─── Maternity assessment forms ([LR]) ───────────────────────────────────
+    // Additive best-effort feed: the three form tables, their metadata and
+    // the rows since the server-issued cutoff. The server labels every
+    // column from the metadata and stores the labelled form.
+    let assessmentsSection: {
+      forms: Record<string, unknown>[];
+      items: Record<string, unknown>[];
+      records: Record<string, Record<string, unknown>[]>;
+    } | null = null;
+    try {
+      const cutoff = boot.assessmentCutoff;
+      if (typeof cutoff === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cutoff)) {
+        const pulled = await pullAssessments(opts, cutoff);
+        const rowsRead = Object.values(pulled.records).reduce((n, rows) => n + rows.length, 0);
+        result.assessments = {
+          rowsRead,
+          formsRead: pulled.forms.length,
+          itemsRead: pulled.items.length,
+        };
+        if (rowsRead > 0) assessmentsSection = pulled;
+      }
+    } catch {
+      // Assessment feed is best-effort; the next cycle retries from the same cutoff.
     }
 
     // ─── Referrals (referout = this hospital as origin, referin = arrival
@@ -1460,7 +1573,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     // would re-send them each minute even on idle wards. They ride along
     // whenever a push happens anyway (ANC actives make that every cycle at
     // practically all hospitals).
-    if (decision.skip && !newbornsSection) {
+    if (decision.skip && !newbornsSection && !assessmentsSection) {
       result.durationMs = Date.now() - startedAt;
       return result;
     }
@@ -1481,6 +1594,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     }
     if (newbornsSection) body.newborns = newbornsSection;
     if (referralsSection) body.referrals = referralsSection;
+    if (assessmentsSection) body.assessments = assessmentsSection;
 
     const pushRes = await fetch('/api/sync/browser-push', {
       method: 'POST',

@@ -11,7 +11,20 @@ import {
   PARTOGRAPH_OBSERVATIONS,
   LABOUR_INFANTS_SINCE,
   IPT_PREGNANCY_DELIVERIES_SINCE,
+  ASSESSMENT_FORMS,
+  buildAssessmentItemsSql,
+  buildAssessmentRecordsSql,
 } from '@/config/hosxp-queries';
+import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
+import { newestFormIdByTable } from '@/services/maternity-assessment-fields';
+import {
+  assessmentSyncCutoffDate,
+  syncMaternityAssessments,
+} from './maternity-assessment';
+import type {
+  HosxpAssessmentFormRow,
+  HosxpAssessmentItemRow,
+} from '@/types/maternity-assessments';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
 import {
   upsertCachedPatients,
@@ -412,6 +425,8 @@ export interface PollHospitalStats {
   activePatientsSynced: number;
   partographRowsRead: number;
   partographRowsUpserted: number;
+  /** Maternity assessment forms ([LR]) upserted this cycle. */
+  assessmentRowsUpserted: number;
   // Count of cached_patients rows auto-closed from ACTIVE to DISCHARGED
   // this cycle because HOSxP no longer returned them (confirm_discharge=Y).
   dischargedClosedOut?: number;
@@ -822,6 +837,7 @@ export async function pollHospital(
     activePatientsSynced: 0,
     partographRowsRead: 0,
     partographRowsUpserted: 0,
+    assessmentRowsUpserted: 0,
     anc: emptyAncSyncStats(),
   };
 
@@ -1286,6 +1302,82 @@ export async function pollHospital(
         hospitalId,
         error: partographError,
       });
+    }
+
+    // ─── Maternity assessment forms: HOSxP asm_* → cached_maternity_assessments ──
+    // The three [LR] nursing forms (แรกรับ / ระยะคลอด / หลังคลอด). The form
+    // metadata tells the server what each positional column means, so the
+    // stored form carries HOSxP's own labels. Own try/catch: a failure here
+    // must not abort the rest of the cycle.
+    try {
+      const cutoff = await assessmentSyncCutoffDate(db, hospitalId);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) {
+        throw new Error(`invalid assessment sync cutoff: ${cutoff}`);
+      }
+      emitStep(options, {
+        name: 'query_assessments',
+        status: 'running',
+        message: `Querying HOSxP maternity assessment forms since ${cutoff}.`,
+      });
+
+      const query = async (sql: string) => {
+        const res = await client.executeQuery(sql, bmsUrl, jwt, undefined, {
+          appIdentifier: APP_IDENTIFIER,
+          marketplaceToken: options.marketplaceToken,
+        });
+        return res.data as Record<string, unknown>[];
+      };
+
+      const formRows = await query(getQuery(ASSESSMENT_FORMS, databaseType));
+      const formIdByTable = newestFormIdByTable(
+        formRows as unknown as HosxpAssessmentFormRow[],
+      );
+
+      const itemRows = formIdByTable.size
+        ? await query(buildAssessmentItemsSql([...formIdByTable.values()], databaseType))
+        : [];
+
+      const records: Record<string, Record<string, unknown>[]> = {};
+      for (const form of MATERNITY_ASSESSMENT_FORMS) {
+        const sql = getQuery(
+          buildAssessmentRecordsSql(form.table, form.pkColumn),
+          databaseType,
+        ).replace('{{CUTOFF}}', cutoff);
+        try {
+          records[form.table] = await query(sql);
+        } catch {
+          // A site does not have to use all three forms — a missing table must
+          // not cost the hospital the forms it does use.
+          records[form.table] = [];
+        }
+      }
+
+      const syncResult = await syncMaternityAssessments(db, hospitalId, {
+        forms: formRows as unknown as HosxpAssessmentFormRow[],
+        items: itemRows as unknown as HosxpAssessmentItemRow[],
+        records,
+      });
+      stats.assessmentRowsUpserted = syncResult.upserted;
+
+      emitStep(options, {
+        name: 'query_assessments',
+        status: 'success',
+        message: `Upserted ${syncResult.upserted} maternity assessment forms.`,
+        counts: { upserted: syncResult.upserted, skipped: syncResult.skipped },
+      });
+      logger.info('assessment_sync_complete', {
+        hospitalId,
+        formsUpserted: syncResult.upserted,
+        formsSkipped: syncResult.skipped,
+      });
+    } catch (assessmentError) {
+      emitStep(options, {
+        name: 'query_assessments',
+        status: 'warning',
+        message: 'Maternity assessment sync failed, but the rest of the cycle continues.',
+        detail: errorMessage(assessmentError),
+      });
+      logger.error('assessment_sync_failed', { hospitalId, error: assessmentError });
     }
 
     // ─── Newborn outcomes: HOSxP labour_infant → cached_newborns ─────────

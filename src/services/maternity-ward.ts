@@ -34,6 +34,9 @@ import {
   PATIENT_BED_MOVES_BY_AN,
   PATIENT_LABOUR_MED_BY_AN,
   PATIENT_PARTOGRAPH_BY_AN,
+  ASSESSMENT_FORMS,
+  buildAssessmentItemsSql,
+  buildAssessmentRowsByAnSql,
   PATIENT_PREGNANCY_BY_AN,
   PATIENT_NURSE_NOTES_BY_AN,
   PATIENT_STAGE_MED_BY_AN,
@@ -45,6 +48,19 @@ import {
   type DatabaseDialect,
 } from '@/config/hosxp-queries';
 import type { ConnectionConfig, UserInfo } from '@/types/bms-browser';
+import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
+import {
+  assessmentFormName,
+  assessmentItemsByColumn,
+  buildAssessmentFields,
+  newestFormIdByTable,
+  readAssessmentRowMeta,
+} from '@/services/maternity-assessment-fields';
+import type {
+  HosxpAssessmentFormRow,
+  HosxpAssessmentItemRow,
+  MaternityAssessmentDto,
+} from '@/types/maternity-assessments';
 import type {
   BedMoveArgs,
   BedMoveRow,
@@ -127,6 +143,74 @@ export async function getPatientPartograph(
   const sql = getQuery(PATIENT_PARTOGRAPH_BY_AN, DEFAULT_DIALECT);
   const r = await executeSql<PartographRow>(sql, config, { an });
   return r.data;
+}
+
+// Read the maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด)
+// of one admission straight from HOSxP, for the hospital console.
+//
+// The form metadata (assessment_form + assessment_items) is read too: HOSxP
+// stores the forms positionally, so the labels are what make the values
+// readable.
+export async function getPatientAssessments(
+  config: ConnectionConfig,
+  an: string,
+): Promise<MaternityAssessmentDto[]> {
+  const formRes = await executeSql<Record<string, unknown>>(
+    getQuery(ASSESSMENT_FORMS, DEFAULT_DIALECT),
+    config,
+  );
+  const forms = formRes.data as unknown as HosxpAssessmentFormRow[];
+  const formIdByTable = newestFormIdByTable(forms);
+
+  const itemsRes = formIdByTable.size
+    ? await executeSql<Record<string, unknown>>(
+        buildAssessmentItemsSql([...formIdByTable.values()], DEFAULT_DIALECT),
+        config,
+      )
+    : { data: [] as Record<string, unknown>[] };
+  const items = itemsRes.data as unknown as HosxpAssessmentItemRow[];
+
+  const formNameByTable = new Map<string, string>();
+  for (const form of forms) {
+    if (formIdByTable.get(form.assessment_form_table) !== Number(form.assessment_form_id)) continue;
+    if (form.assessment_form_name) {
+      formNameByTable.set(form.assessment_form_table, form.assessment_form_name);
+    }
+  }
+
+  const dtos: MaternityAssessmentDto[] = [];
+  for (const form of MATERNITY_ASSESSMENT_FORMS) {
+    const sql = getQuery(buildAssessmentRowsByAnSql(form.table), DEFAULT_DIALECT);
+    let rows: Record<string, unknown>[];
+    try {
+      rows = (await executeSql<Record<string, unknown>>(sql, config, { an })).data;
+    } catch {
+      // A site does not have to use all three forms — a missing table must
+      // not hide the forms it does use.
+      continue;
+    }
+    const formId = formIdByTable.get(form.table);
+    const formItems =
+      formId !== undefined
+        ? assessmentItemsByColumn(items, formId)
+        : new Map<string, HosxpAssessmentItemRow>();
+
+    for (const raw of rows) {
+      const meta = readAssessmentRowMeta(raw, form.pkColumn, form.dateColumns);
+      if (!meta.pk || !meta.recordedAt) continue;
+      dtos.push({
+        id: `${form.table}:${meta.pk}`,
+        formKey: form.key,
+        formTable: form.table,
+        formName: assessmentFormName(form.table, formNameByTable.get(form.table)),
+        recordedAt: meta.recordedAt,
+        recordedDate: meta.recordedDate,
+        entryStaff: meta.entryStaff,
+        fields: buildAssessmentFields(raw, formItems, form.pkColumn),
+      });
+    }
+  }
+  return dtos;
 }
 
 // Task 31: read all pregnancy vital-sign rows for a single admission. Note

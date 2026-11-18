@@ -111,6 +111,10 @@ async function purgeRecentSyncs(
       laborIds,
     );
     await db.execute(
+      `DELETE FROM cached_maternity_assessments WHERE patient_id IN (${placeholders})`,
+      laborIds,
+    );
+    await db.execute(
       `DELETE FROM cached_vital_signs WHERE patient_id IN (${placeholders})`,
       laborIds,
     );

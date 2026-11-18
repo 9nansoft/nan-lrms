@@ -559,6 +559,130 @@ describe('Sync Pipeline Integration', () => {
       vi.restoreAllMocks();
     });
 
+    it('pulls maternity assessment forms, labels them and persists them', async () => {
+      // A patient the assessment row references (AN-resolution inside
+      // pollHospital() links the form to the cached patient).
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO cached_patients
+           (id, hospital_id, hn, an, name, age, admit_date,
+            labor_status, synced_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
+        [
+          uuidv4(),
+          hospitalId,
+          'HN-AS1',
+          'AN-AS1',
+          encrypt('นาง ทดสอบ ประเมิน', TEST_ENCRYPTION_KEY),
+          30,
+          '2026-04-19T08:00:00Z',
+          now,
+          now,
+          now,
+        ],
+      );
+
+      const assessmentRow = {
+        asm_lr_record_after_birth_nan_id: 2418,
+        an: 'AN-AS1',
+        patient_type: 'IPD',
+        assessment_head_id: 1403829,
+        asm_date1: '2026-11-17',
+        asm_text2: '138',
+        asm_chk1: 'Y',
+        asm_lk6: 'พญ.ศุภิสรา ชลยุทธ',
+        head_datetime: '2026-11-17T21:03:15',
+        head_staff: 'jcome',
+        head_form_id: 309,
+        patient_hn: '000285565',
+      };
+
+      const wrapResult = (data: Record<string, unknown>[]): BmsQueryResult => ({
+        data,
+        field: [],
+        field_name: [],
+        record_count: data.length,
+      });
+
+      vi.spyOn(BmsSessionClient.prototype, 'executeQuery').mockImplementation(
+        async (sql: string): Promise<BmsQueryResult> => {
+          if (sql.includes('FROM assessment_form')) {
+            return wrapResult([
+              {
+                assessment_form_id: 309,
+                assessment_form_table: 'asm_lr_record_after_birth_nan',
+                assessment_form_name: '[LR]-แบบฟอร์มการบันทึกการพยาบาลระยะหลังคลอด',
+              },
+            ]);
+          }
+          if (sql.includes('FROM assessment_items')) {
+            return wrapResult([
+              {
+                assessment_form_id: 309,
+                assessment_items_column: 'asm_text2',
+                assessment_items_note: 'Systolic',
+                assessment_component_name: 'TextEdit',
+                assessment_data_type: 'VARCHAR(250)',
+              },
+              {
+                assessment_form_id: 309,
+                assessment_items_column: 'asm_chk1',
+                assessment_items_note: 'ได้ให้อาหารทางปาก',
+                assessment_component_name: 'CheckBox',
+                assessment_data_type: 'VARCHAR(100)',
+              },
+            ]);
+          }
+          if (sql.includes('FROM asm_lr_record_after_birth_nan')) {
+            return wrapResult([assessmentRow]);
+          }
+          if (sql.includes('WHERE cid =')) {
+            return wrapResult([{ one: 1 }]);
+          }
+          if (sql.includes('FROM ipt')) {
+            return wrapResult([]);
+          }
+          return wrapResult([]);
+        },
+      );
+
+      const sseManager = { broadcast: vi.fn() } as unknown as SseManager;
+      await pollHospital(
+        db,
+        hospitalId,
+        'http://tunnel.test',
+        'http://bms.test',
+        'jwt-test',
+        'postgresql',
+        TEST_ENCRYPTION_KEY,
+        sseManager,
+        { marketplaceToken: 'test-marketplace-token' },
+      );
+
+      const stored = await db.query<{
+        form_key: string;
+        form_name: string;
+        an: string;
+        recorded_date: string | null;
+        entry_staff: string | null;
+        patient_id: string | null;
+        fields_json: unknown;
+      }>('SELECT form_key, form_name, an, recorded_date, entry_staff, patient_id, fields_json FROM cached_maternity_assessments');
+      expect(stored).toHaveLength(1);
+      expect(stored[0].form_key).toBe('after_birth');
+      expect(stored[0].an).toBe('AN-AS1');
+      expect(stored[0].recorded_date).toBe('2026-11-17');
+      expect(stored[0].entry_staff).toBe('jcome');
+      expect(stored[0].patient_id).not.toBeNull();
+
+      // The labels come from HOSxP's own form definition, and the attending
+      // physician's name is encrypted at rest.
+      const fields = JSON.stringify(stored[0].fields_json);
+      expect(fields).toContain('Systolic');
+      expect(fields).toContain('ได้ให้อาหารทางปาก');
+      expect(fields).not.toContain('ศุภิสรา');
+    });
+
     it('pulls partograph rows, persists them, and rolls up severity', async () => {
       // Seed an active patient with a known AN that the mock partograph
       // row will reference (so AN-resolution inside pollHospital() finds it).

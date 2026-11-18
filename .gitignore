@@ -71,6 +71,10 @@ screenshots/
 # Local tool state (not checked in)
 .playwright-mcp/
 .superpowers/
+# OMC runtime state (plans, logs, handoffs). .omc/skills/ is the one
+# intentional exception — project-scoped skills belong in the repo.
+.omc/*
+!.omc/skills/
 
 # Presentation assets (not part of deployable app)
 present/

@@ -71,6 +71,7 @@ export async function POST() {
       'cpd_scores',
       'cached_vital_signs',
       'cached_partograph_observations',
+      'cached_maternity_assessments',
       'cached_anc_risks',
       'cached_anc_visits',
       'cached_anc_lab_results',

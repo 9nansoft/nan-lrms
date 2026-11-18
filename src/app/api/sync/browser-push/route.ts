@@ -19,6 +19,11 @@ import {
   newbornSyncCutoffDate,
   type BrowserNewbornsSection,
 } from '@/services/sync/newborn';
+import {
+  assessmentSyncCutoffDate,
+  syncMaternityAssessments,
+  validateAssessmentPayload,
+} from '@/services/sync/maternity-assessment';
 import { autoArriveReferrals } from '@/services/referral';
 import { enqueueOverdueReferralAlerts } from '@/services/referral-alerts';
 import {
@@ -80,6 +85,14 @@ interface BrowserPushBody {
     referouts?: BrowserReferoutRow[];
     referins?: BrowserReferinRow[];
     visitEvidences?: BrowserVisitEvidenceRow[];
+  };
+  /** Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด):
+   *  the form metadata (the server needs it to label every positional
+   *  column) plus the raw rows, grouped by HOSxP table. */
+  assessments?: {
+    forms?: Record<string, unknown>[];
+    items?: Record<string, unknown>[];
+    records?: Record<string, Record<string, unknown>[]>;
   };
 }
 
@@ -171,6 +184,7 @@ export async function POST(request: NextRequest) {
       };
       ancReconcile?: { closed: number };
       partograph?: { accepted: number; skipped: number };
+      assessments?: { upserted: number; skipped: number };
       newborns?: { upserted: number; journeys: number; failedAns: number };
       referrals?: {
         referouts: BrowserReferoutsResult;
@@ -561,6 +575,51 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด) —
+    // the raw rows the browser read, plus the form metadata that tells the
+    // server what each positional column means. Persisting is idempotent
+    // ((hospital, source_system, source_pk) upsert key), so the overlap
+    // around the cutoff is safe.
+    if (body.assessments && typeof body.assessments === 'object') {
+      const assessmentValidation = validateAssessmentPayload(body.assessments);
+      if (!assessmentValidation.valid || !assessmentValidation.payload) {
+        hadWarning = true;
+        await appendSyncStep(hospitalId, runId, {
+          name: 'persist_assessments',
+          status: 'error',
+          message: 'Assessment payload failed validation; not persisted.',
+          detail: assessmentValidation.error ?? 'unknown validation error',
+        });
+      } else {
+        const payload = assessmentValidation.payload;
+        const rowsRead = Object.values(payload.records).reduce((n, rows) => n + rows.length, 0);
+        await appendSyncStep(hospitalId, runId, {
+          name: 'persist_assessments',
+          status: 'running',
+          message: `Persisting ${rowsRead} maternity assessment rows.`,
+          counts: { rows: rowsRead },
+        });
+        try {
+          const r = await syncMaternityAssessments(db, hospitalId, payload);
+          result.assessments = { upserted: r.upserted, skipped: r.skipped };
+          await appendSyncStep(hospitalId, runId, {
+            name: 'persist_assessments',
+            status: 'success',
+            message: `Upserted ${r.upserted} assessment forms (${r.skipped} skipped).`,
+            counts: { upserted: r.upserted, skipped: r.skipped },
+          });
+        } catch (e) {
+          hadWarning = true;
+          await appendSyncStep(hospitalId, runId, {
+            name: 'persist_assessments',
+            status: 'warning',
+            message: 'Assessment persist failed.',
+            detail: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+    }
+
     // Newborn outcomes — raw labour-infant + ipt_pregnancy rows since the
     // cutoff this route's GET handed out. Both processors are idempotent
     // ((journey_id, infant_number) upsert key), so overlap is safe.
@@ -812,6 +871,10 @@ export async function GET() {
       return NextResponse.json({ error: 'hospital_not_registered', hcode }, { status: 403 });
     }
     const newbornCutoff = await newbornSyncCutoffDate(db, rows[0].id);
+    // Maternity assessment forms — same self-healing shape: the newest cached
+    // form minus a 2-day overlap, or a 365-day backfill when the hospital has
+    // none yet. The client inlines it into the three form queries.
+    const assessmentCutoff = await assessmentSyncCutoffDate(db, rows[0].id);
     // ovst arrival-probe CIDs are a care-communication disclosure to the
     // legitimate destination only: readwrite session of that same hospital.
     // (GET is also used by readonly viewers for the cutoff — never hand them
@@ -824,7 +887,7 @@ export async function GET() {
         logger.warn('referral_arrival_probe_failed', { hcode, error: String(e) });
       }
     }
-    return NextResponse.json({ newbornCutoff, referralArrivalProbe });
+    return NextResponse.json({ newbornCutoff, assessmentCutoff, referralArrivalProbe });
   } catch (error) {
     logger.error('browser_push_bootstrap_failed', { error });
     return NextResponse.json({ error: 'internal_error' }, { status: 500 });

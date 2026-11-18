@@ -1303,6 +1303,7 @@ interface PurgeCounts {
   cpd_scores?: number;
   cached_vital_signs?: number;
   cached_partograph_observations?: number;
+  cached_maternity_assessments?: number;
   cached_anc_visits?: number;
   cached_anc_risks?: number;
   cached_newborns?: number;
@@ -1324,6 +1325,7 @@ const PURGE_TABLE_LABELS: Array<{ key: keyof PurgeCounts; label: string }> = [
   { key: 'cached_patients', label: 'ผู้ป่วย' },
   { key: 'maternal_journeys', label: 'เส้นทางการตั้งครรภ์' },
   { key: 'cached_partograph_observations', label: 'การบันทึกพาร์โทกราฟ' },
+  { key: 'cached_maternity_assessments', label: 'แบบฟอร์มประเมิน (LR)' },
   { key: 'cached_vital_signs', label: 'สัญญาณชีพ' },
   { key: 'cpd_scores', label: 'คะแนน CPD' },
   { key: 'cached_anc_visits', label: 'การฝากครรภ์ (ANC)' },

@@ -1091,3 +1091,125 @@ export const DCH_STTS_LOOKUP: SqlQueryTemplate = {
   postgresql: `SELECT dchstts, name FROM dchstts ORDER BY name`,
   mysql: `SELECT dchstts, name FROM dchstts ORDER BY name`,
 };
+
+// ─── Maternity assessment forms (HOSxP generic `asm_*` tables) ───────────────
+//
+// HOSxP keeps EVERY assessment form in a table of positional columns
+// (asm_text1..N, asm_chk1..N, asm_memo1..N, asm_lk1..N, asm_date*, asm_time*).
+// The form NAME lives in `assessment_form` and the COLUMN LABELS live in
+// `assessment_items` (+ `assessment_component` for the widget family). Both
+// are pulled per hospital, so the app renders whatever the local form says
+// instead of a hardcoded field list.
+//
+// The three table names are constants (never user input), inlined so the
+// BMS gateway's parameter contract does not have to carry an array.
+
+// Form metadata for the three maternity assessment forms.
+export const ASSESSMENT_FORMS: SqlQueryTemplate = {
+  postgresql: `
+    SELECT f.assessment_form_id, f.assessment_form_table, f.assessment_form_name
+      FROM assessment_form f
+     WHERE f.assessment_form_table IN ('asm_first_pregnant_pt_nan',
+                                       'asm_lr_record_birth_period_nan',
+                                       'asm_lr_record_after_birth_nan')
+     ORDER BY f.assessment_form_id DESC`,
+  mysql: `
+    SELECT f.assessment_form_id, f.assessment_form_table, f.assessment_form_name
+      FROM assessment_form f
+     WHERE f.assessment_form_table IN ('asm_first_pregnant_pt_nan',
+                                       'asm_lr_record_birth_period_nan',
+                                       'asm_lr_record_after_birth_nan')
+     ORDER BY f.assessment_form_id DESC`,
+};
+
+// Column labels for one or more assessment forms.
+// {{FORM_IDS}} is substituted in app code with a validated comma-separated
+// list of digits (see buildAssessmentItemsSql).
+export const ASSESSMENT_ITEMS: SqlQueryTemplate = {
+  postgresql: `
+    SELECT i.assessment_form_id, i.assessment_items_column, i.assessment_items_note,
+           c.assessment_component_name, c.assessment_data_type
+      FROM assessment_items i
+      JOIN assessment_component c
+        ON c.assessment_component_id = i.assessment_component_id
+     WHERE i.assessment_form_id IN ({{FORM_IDS}})
+     ORDER BY i.assessment_items_id`,
+  mysql: `
+    SELECT i.assessment_form_id, i.assessment_items_column, i.assessment_items_note,
+           c.assessment_component_name, c.assessment_data_type
+      FROM assessment_items i
+      JOIN assessment_component c
+        ON c.assessment_component_id = i.assessment_component_id
+     WHERE i.assessment_form_id IN ({{FORM_IDS}})
+     ORDER BY i.assessment_items_id`,
+};
+
+/**
+ * Row cap per assessment table pull. The rows are wide (a form row has ~190
+ * positional columns), so the cap keeps one pull's payload sane; the cutoff
+ * advances as rows land, so a larger backfill simply completes over the
+ * next cycles instead of being lost.
+ */
+export const ASSESSMENT_ROW_LIMIT = 500;
+
+/**
+ * Rows of one assessment form, oldest first, since the server-issued cutoff.
+ *
+ * `t.*` keeps the pull faithful to whatever the site's form contains — the
+ * app resolves the labels from `assessment_items` afterwards. The head
+ * columns are aliased (`head_*`) so they never collide with the form's own
+ * columns, and `patient_hn` comes from the admission row the form belongs
+ * to (the form itself carries only AN/VN).
+ *
+ * {{CUTOFF}} is substituted in app code with a validated YYYY-MM-DD string.
+ */
+export function buildAssessmentRecordsSql(table: string, pkColumn: string): SqlQueryTemplate {
+  const body = `
+    SELECT t.*,
+           h.assessment_head_datetime AS head_datetime,
+           h.assessment_head_staff AS head_staff,
+           h.assessment_form_id AS head_form_id,
+           i.hn AS patient_hn
+      FROM ${table} t
+      JOIN assessment_head h ON h.assessment_head_id = t.assessment_head_id
+      LEFT JOIN ipt i ON i.an = t.an
+     WHERE h.assessment_head_datetime >= '{{CUTOFF}}'
+     ORDER BY h.assessment_head_datetime ASC, t.${pkColumn} ASC
+     LIMIT ${ASSESSMENT_ROW_LIMIT + 1}`;
+  return { postgresql: body, mysql: body };
+}
+
+/** {{FORM_IDS}} substitution with a strict digit-list guard. */
+export function buildAssessmentItemsSql(
+  formIds: number[],
+  dialect: DatabaseDialect = 'postgresql',
+): string {
+  const safe = formIds
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .map((id) => String(id))
+    .join(',');
+  if (!safe) throw new Error('assessment form ids missing');
+  return getQuery(ASSESSMENT_ITEMS, dialect).replace('{{FORM_IDS}}', safe);
+}
+
+/**
+ * Rows of ONE assessment form for ONE admission — the hospital console reads
+ * the forms of the patient whose drawer is open straight from HOSxP.
+ *
+ * The table name is a constant of the form (never user input) and the AN is
+ * a bound parameter.
+ */
+export function buildAssessmentRowsByAnSql(table: string): SqlQueryTemplate {
+  const body = `
+    SELECT t.*,
+           h.assessment_head_datetime AS head_datetime,
+           h.assessment_head_staff AS head_staff,
+           h.assessment_form_id AS head_form_id,
+           i.hn AS patient_hn
+      FROM ${table} t
+      JOIN assessment_head h ON h.assessment_head_id = t.assessment_head_id
+      LEFT JOIN ipt i ON i.an = t.an
+     WHERE t.an = :an
+     ORDER BY h.assessment_head_datetime DESC`;
+  return { postgresql: body, mysql: body };
+}

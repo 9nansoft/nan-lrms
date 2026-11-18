@@ -4,6 +4,8 @@ import { hospitalBmsConfigTable } from './hospital-bms-config';
 import { hospitalConsultDoctorsTable } from './hospital-consult-doctors';
 import { cachedPatientsTable } from './cached-patients';
 import { cachedPartographObservationsTable } from './cached-partograph-observations';
+import { cachedMaternityAssessmentsTable } from './cached-maternity-assessments';
+import { cachedMaternityAssessmentCursorsTable } from './cached-maternity-assessment-cursors';
 import { cachedVitalSignsTable } from './cached-vital-signs';
 import { cpdScoresTable } from './cpd-scores';
 import { maternalScreeningAssessmentsTable } from './maternal-screening-assessments';
@@ -35,6 +37,8 @@ export {
   hospitalConsultDoctorsTable,
   cachedPatientsTable,
   cachedPartographObservationsTable,
+  cachedMaternityAssessmentsTable,
+  cachedMaternityAssessmentCursorsTable,
   cachedVitalSignsTable,
   cpdScoresTable,
   maternalScreeningAssessmentsTable,
@@ -85,6 +89,8 @@ export const ALL_TABLES: TableDefinition[] = [
   maternalJourneysTable,
   cachedPatientsTable,
   cachedPartographObservationsTable,
+  // References cached_patients, hospitals (both above) — must stay after them.
+  cachedMaternityAssessmentsTable,
   cachedVitalSignsTable,
   cpdScoresTable,
   // References cached_patients, hospitals, maternal_journeys (all above) —

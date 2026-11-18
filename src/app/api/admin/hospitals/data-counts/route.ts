@@ -28,6 +28,10 @@ const PER_HOSPITAL_TABLES = [
     sql: 'SELECT hospital_id, COUNT(*) AS cnt FROM cached_partograph_observations GROUP BY hospital_id',
   },
   {
+    key: 'cached_maternity_assessments',
+    sql: 'SELECT hospital_id, COUNT(*) AS cnt FROM cached_maternity_assessments GROUP BY hospital_id',
+  },
+  {
     key: 'cached_anc_visits',
     sql: 'SELECT hospital_id, COUNT(*) AS cnt FROM cached_anc_visits WHERE hospital_id IS NOT NULL GROUP BY hospital_id',
   },

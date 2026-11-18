@@ -10,6 +10,7 @@ import { cn, calculateAge } from '@/lib/utils';
 import { maskName } from '@/lib/pii-mask';
 import type { BedOccupancy } from '@/types/maternity-ward';
 import { PartographTab } from '@/components/maternity/tabs/PartographTab';
+import { AssessmentsTab } from '@/components/maternity/tabs/AssessmentsTab';
 import { VitalsTab } from '@/components/maternity/tabs/VitalsTab';
 import { PreLabourTab } from '@/components/maternity/tabs/PreLabourTab';
 import { StageTab } from '@/components/maternity/tabs/StageTab';
@@ -41,6 +42,7 @@ export interface TabDefinition {
 // Tab order is meaningful — DO NOT reorder. Tasks 30-39 fill them in.
 export const PATIENT_DRAWER_TABS: TabDefinition[] = [
   { value: 'partograph', label: 'พาร์โทกราฟ' },
+  { value: 'assessments', label: 'แบบฟอร์มประเมิน' },
   { value: 'vitals', label: 'สัญญาณชีพ' },
   { value: 'prelabour', label: 'ก่อนคลอด' },
   { value: 'stage', label: 'ระยะคลอด' },
@@ -461,6 +463,8 @@ export function PatientDrawer({ open, occupant, onClose }: PatientDrawerProps) {
                   <TabsContent key={t.value} value={t.value}>
                     {t.value === 'partograph' ? (
                       <PartographTab an={occupant.an} occupant={occupant} />
+                    ) : t.value === 'assessments' ? (
+                      <AssessmentsTab an={occupant.an} />
                     ) : t.value === 'vitals' ? (
                       <VitalsTab an={occupant.an} />
                     ) : t.value === 'prelabour' ? (
