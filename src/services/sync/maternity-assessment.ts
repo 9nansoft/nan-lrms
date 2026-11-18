@@ -437,6 +437,52 @@ export function resolveCursorAdvance(
 }
 
 /**
+ * The server's own session for the hospital's HOSxP, refreshed when it has
+ * expired — the same move the legacy poller makes. Without it the cursor
+ * check would stop working the moment the stored session ages out.
+ */
+async function serverBmsSession(
+  db: DatabaseAdapter,
+  hospitalId: string,
+): Promise<{ bmsUrl: string; jwt: string } | null> {
+  const configs = await db.query<{
+    tunnel_url: string | null;
+    session_jwt: string | null;
+    session_expires_at: string | Date | null;
+  }>(
+    `SELECT tunnel_url, session_jwt, session_expires_at
+       FROM hospital_bms_config
+      WHERE hospital_id = ?`,
+    [hospitalId],
+  );
+  const config = configs[0];
+  if (!config?.tunnel_url) return null;
+
+  const expiresAt = config.session_expires_at ? new Date(config.session_expires_at).getTime() : 0;
+  const expired = !config.session_jwt || expiresAt <= Date.now();
+  if (!expired) {
+    return { bmsUrl: config.tunnel_url, jwt: config.session_jwt as string };
+  }
+
+  // Refresh the tunnel session the way the poller does.
+  try {
+    const client = new BmsSessionClient(config.tunnel_url);
+    const sessionId = await client.getSessionId();
+    const validateUrl = process.env.BMS_VALIDATE_URL ?? 'https://hosxp.net/phapi/PasteJSON';
+    const session = await client.validateSession(sessionId, validateUrl);
+    await db.execute(
+      `UPDATE hospital_bms_config
+          SET session_jwt = ?, session_expires_at = ?
+        WHERE hospital_id = ?`,
+      [session.jwt, session.expiresAt.toISOString(), hospitalId],
+    );
+    return { bmsUrl: session.bmsUrl || config.tunnel_url, jwt: session.jwt };
+  } catch {
+    return config.session_jwt ? { bmsUrl: config.tunnel_url, jwt: config.session_jwt } : null;
+  }
+}
+
+/**
  * Ask HOSxP which keys of a form exist above the current cursor.
  *
  * This is what makes the cursor server-observed: the browser can claim any
@@ -448,23 +494,17 @@ export async function verifyAssessmentCursorAdvance(
   hospitalId: string,
   cursors: Record<string, string>,
 ): Promise<Record<string, { authoritative: string[]; verified: boolean }>> {
-  const configs = await db.query<{ tunnel_url: string | null; session_jwt: string | null }>(
-    `SELECT tunnel_url, session_jwt
-       FROM hospital_bms_config
-      WHERE hospital_id = ?`,
-    [hospitalId],
-  );
-  const config = configs[0];
+  const session = await serverBmsSession(db, hospitalId);
   const result: Record<string, { authoritative: string[]; verified: boolean }> = {};
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
-    if (!config?.tunnel_url || !config.session_jwt) {
+    if (!session) {
       result[form.table] = { authoritative: [], verified: false };
       continue;
     }
     try {
-      const client = new BmsSessionClient(config.tunnel_url);
+      const client = new BmsSessionClient(session.bmsUrl);
       const sql = buildAssessmentKeysSqlFor(form.table, form.pkColumn, cursors[form.table] ?? '0');
-      const res = await client.executeQuery(sql, config.tunnel_url, config.session_jwt, undefined, {
+      const res = await client.executeQuery(sql, session.bmsUrl, session.jwt, undefined, {
         appIdentifier: APP_IDENTIFIER,
       });
       const authoritative = (res.data as Record<string, unknown>[])
