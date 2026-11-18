@@ -254,7 +254,7 @@ export async function syncMaternityAssessments(
   }
 
   const { upserted, failed } = await upsertMaternityAssessments(db, hospitalId, normalized);
-  return { upserted, skipped: skipped + failed, failed };
+  return { upserted, skipped, failed };
 }
 
 /**
@@ -351,55 +351,78 @@ export async function readAssessmentCursors(
  * has PULLED — not the highest it managed to store. A row that fails to
  * store must not hold the form back, otherwise the rows behind it would
  * never be pulled.
+ *
+ * TRUST BOUNDARY: in the browser-push path the pull position comes from the
+ * hospital's own browser, because that browser IS the client of that
+ * hospital's HOSxP. The cursor is per hospital and can only ever move that
+ * hospital's own form forward — the same trust the route already extends to
+ * every other row the browser pushes (vitals, labs, partograph).
+ *
+ * The one thing the server does NOT take on faith is HOW FAR the cursor
+ * may jump: a row whose primary key sits implausibly far ahead of the
+ * current cursor is not accepted and does not move the cursor, so a client
+ * cannot park the cursor beyond the real rows and silence its own hospital's
+ * forms. A row that is merely malformed (a zero date, an unusable AN) is
+ * still passed over — it can never become valid, and holding the form back
+ * for it would lose every row behind it.
  */
+export const ASSESSMENT_MAX_CURSOR_ADVANCE = 10_000_000;
+
 export async function advanceAssessmentCursors(
   db: DatabaseAdapter,
   hospitalId: string,
-  maxPkByTable: Record<string, string>,
+  pulledPksByTable: Record<string, string[]>,
 ): Promise<void> {
   const now = new Date().toISOString();
-  for (const [table, pk] of Object.entries(maxPkByTable)) {
+  for (const [table, pks] of Object.entries(pulledPksByTable)) {
     if (!assessmentFormByTable(table)) continue;
-    if (!/^\d{1,18}$/.test(pk)) continue;
+    const usable = pks.filter((pk) => /^\d{1,18}$/.test(pk)).map((pk) => BigInt(pk));
+    if (usable.length === 0) continue;
+
     const existing = await db.query<{ id: string; cursor_pk: string }>(
       `SELECT id, cursor_pk
          FROM cached_maternity_assessment_cursors
         WHERE hospital_id = ? AND form_table = ?`,
       [hospitalId, table],
     );
+    const current = existing.length > 0 ? BigInt(existing[0].cursor_pk) : BigInt(0);
+    const ceiling = current + BigInt(ASSESSMENT_MAX_CURSOR_ADVANCE);
+    const accepted = usable.filter((pk) => pk > current && pk <= ceiling);
+    if (accepted.length === 0) continue;
+    const next = accepted.reduce((max, pk) => (pk > max ? pk : max), current);
+
     if (existing.length > 0) {
-      if (BigInt(pk) <= BigInt(existing[0].cursor_pk)) continue;
       await db.execute(
         `UPDATE cached_maternity_assessment_cursors
             SET cursor_pk = ?, updated_at = ?
           WHERE id = ?`,
-        [pk, now, existing[0].id],
+        [next.toString(), now, existing[0].id],
       );
     } else {
       await db.execute(
         `INSERT INTO cached_maternity_assessment_cursors
            (id, hospital_id, form_table, cursor_pk, updated_at)
          VALUES (?, ?, ?, ?, ?)`,
-        [uuidv4(), hospitalId, table, pk, now],
+        [uuidv4(), hospitalId, table, next.toString(), now],
       );
     }
   }
 }
 
 /**
- * The highest primary key of each form in a pushed batch — the position the
- * next pull resumes from.
+ * The primary keys of every form in a pushed batch — the position the next
+ * pull resumes from.
  */
-export function maxPulledPkByTable(input: AssessmentSyncInput): Record<string, string> {
-  const out: Record<string, string> = {};
+export function pulledPksByTable(input: AssessmentSyncInput): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
-    let max = BigInt(0);
+    const pks: string[] = [];
     for (const raw of input.records[form.table] ?? []) {
       const pk = raw[form.pkColumn];
-      const value = typeof pk === 'number' ? BigInt(pk) : BigInt(String(pk ?? '').trim() || '0');
-      if (value > max) max = value;
+      const value = typeof pk === 'number' ? String(pk) : String(pk ?? '').trim();
+      if (/^\d{1,18}$/.test(value)) pks.push(value);
     }
-    if (max > BigInt(0)) out[form.table] = max.toString();
+    if (pks.length > 0) out[form.table] = pks;
   }
   return out;
 }

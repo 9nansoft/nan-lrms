@@ -21,7 +21,7 @@ import {
   normalizeAssessmentRows,
   syncMaternityAssessments,
   advanceAssessmentCursors,
-  maxPulledPkByTable,
+  pulledPksByTable,
   readAssessmentCursors,
   validateAssessmentPayload,
 } from '@/services/sync/maternity-assessment';
@@ -252,21 +252,21 @@ describe('cursors', () => {
 
   it('advances to the highest pulled pk and never moves backwards', async () => {
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: '2418',
+      asm_lr_record_after_birth_nan: ['2418'],
     });
     expect(await readAssessmentCursors(db, HOSPITAL_ID)).toEqual({
       asm_lr_record_after_birth_nan: '2418',
     });
 
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: '2000',
+      asm_lr_record_after_birth_nan: ['2000'],
     });
     expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
       '2418',
     );
 
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: '2500',
+      asm_lr_record_after_birth_nan: ['2500'],
     });
     expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
       '2500',
@@ -275,7 +275,7 @@ describe('cursors', () => {
 
   it('keeps one cursor per form — a busy form cannot skip a quiet one', async () => {
     await advanceAssessmentCursors(db, HOSPITAL_ID, {
-      asm_lr_record_after_birth_nan: '2418',
+      asm_lr_record_after_birth_nan: ['2418'],
     });
     const cursors = await readAssessmentCursors(db, HOSPITAL_ID);
     expect(cursors.asm_lr_record_after_birth_nan).toBe('2418');
@@ -284,12 +284,12 @@ describe('cursors', () => {
   });
 
   it('ignores a cursor for a table the app does not know', async () => {
-    await advanceAssessmentCursors(db, HOSPITAL_ID, { some_other_table: '5' });
+    await advanceAssessmentCursors(db, HOSPITAL_ID, { some_other_table: ['5'] });
     expect(await readAssessmentCursors(db, HOSPITAL_ID)).toEqual({});
   });
 
-  it('reports the highest pk of every form in the batch', () => {
-    const max = maxPulledPkByTable({
+  it('reports the primary keys of every form in the batch', () => {
+    const pks = pulledPksByTable({
       forms: FORM_ROWS,
       items: ITEM_ROWS,
       records: {
@@ -300,8 +300,23 @@ describe('cursors', () => {
         asm_first_pregnant_pt_nan: [rawRow({ asm_first_pregnant_pt_nan_id: 2938 })],
       },
     });
-    expect(max.asm_lr_record_after_birth_nan).toBe('2419');
-    expect(max.asm_first_pregnant_pt_nan).toBe('2938');
+    expect(pks.asm_lr_record_after_birth_nan).toEqual(['2418', '2419']);
+    expect(pks.asm_first_pregnant_pt_nan).toEqual(['2938']);
+  });
+
+  it('does not let a client park the cursor beyond the real rows', async () => {
+    // A row whose key sits implausibly far ahead of the cursor must not
+    // move the cursor — otherwise one push could silence a hospital's own
+    // forms for good.
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: ['2418'],
+    });
+    await advanceAssessmentCursors(db, HOSPITAL_ID, {
+      asm_lr_record_after_birth_nan: ['999999999999'],
+    });
+    expect((await readAssessmentCursors(db, HOSPITAL_ID)).asm_lr_record_after_birth_nan).toBe(
+      '2418',
+    );
   });
 
   it('a dense form keeps advancing — the cursor, not a date, drives the pull', async () => {
@@ -316,7 +331,7 @@ describe('cursors', () => {
     await advanceAssessmentCursors(
       db,
       HOSPITAL_ID,
-      maxPulledPkByTable({
+      pulledPksByTable({
         forms: FORM_ROWS,
         items: ITEM_ROWS,
         records: { asm_lr_record_after_birth_nan: firstPage },
@@ -334,7 +349,7 @@ describe('cursors', () => {
     await advanceAssessmentCursors(
       db,
       HOSPITAL_ID,
-      maxPulledPkByTable({
+      pulledPksByTable({
         forms: FORM_ROWS,
         items: ITEM_ROWS,
         records: { asm_lr_record_after_birth_nan: secondPage },

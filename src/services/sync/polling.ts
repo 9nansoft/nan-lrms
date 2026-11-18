@@ -18,7 +18,7 @@ import {
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
 import {
   advanceAssessmentCursors,
-  maxPulledPkByTable,
+  pulledPksByTable,
   readAssessmentCursors,
   syncMaternityAssessments,
 } from './maternity-assessment';
@@ -1355,7 +1355,7 @@ export async function pollHospital(
       const syncResult = await syncMaternityAssessments(db, hospitalId, payload);
       // The cursor follows the PULL, not the store: a row the database
       // refused must not hold the form back.
-      await advanceAssessmentCursors(db, hospitalId, maxPulledPkByTable(payload));
+      await advanceAssessmentCursors(db, hospitalId, pulledPksByTable(payload));
       stats.assessmentRowsUpserted = syncResult.upserted;
 
       emitStep(options, {

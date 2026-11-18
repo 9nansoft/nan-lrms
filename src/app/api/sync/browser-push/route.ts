@@ -21,7 +21,7 @@ import {
 } from '@/services/sync/newborn';
 import {
   advanceAssessmentCursors,
-  maxPulledPkByTable,
+  pulledPksByTable,
   readAssessmentCursors,
   syncMaternityAssessments,
   validateAssessmentPayload,
@@ -606,7 +606,7 @@ export async function POST(request: NextRequest) {
           // The cursor follows the PULL, not the store: a row the database
           // refused must not hold the form back, or the rows behind it would
           // never arrive.
-          await advanceAssessmentCursors(db, hospitalId, maxPulledPkByTable(payload));
+          await advanceAssessmentCursors(db, hospitalId, pulledPksByTable(payload));
           result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
           await appendSyncStep(hospitalId, runId, {
             name: 'persist_assessments',
