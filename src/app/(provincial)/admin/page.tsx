@@ -6,7 +6,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Activity, Bell, Building2, Database, FlaskConical, Globe, KeyRound, UsersRound, type LucideIcon } from 'lucide-react';
+import { Activity, Bell, Building2, Database, FlaskConical, Globe, KeyRound, Network, UsersRound, type LucideIcon } from 'lucide-react';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -18,9 +18,10 @@ import { SyncOverviewTab } from '@/components/admin/SyncOverviewTab';
 import { OnlineUsersTab } from '@/components/admin/OnlineUsersTab';
 import { SimulationTab } from '@/components/admin/SimulationTab';
 import { MophAlertsTab } from '@/components/admin/MophAlertsTab';
+import { NodeHospitalTab } from '@/components/admin/NodeHospitalTab';
 import { AdminMapPane } from '@/components/admin/AdminMapPane';
 
-type TabKey = 'province' | 'hospitals' | 'bms-config' | 'webhook-keys' | 'sync-overview' | 'online-users' | 'simulation' | 'moph-alerts';
+type TabKey = 'province' | 'hospitals' | 'bms-config' | 'webhook-keys' | 'sync-overview' | 'online-users' | 'simulation' | 'moph-alerts' | 'node-hospitals';
 
 const TABS: ReadonlyArray<{ key: TabKey; label: string; icon: LucideIcon }> = [
   { key: 'province', label: 'จังหวัดหลัก', icon: Globe },
@@ -31,6 +32,7 @@ const TABS: ReadonlyArray<{ key: TabKey; label: string; icon: LucideIcon }> = [
   { key: 'online-users', label: 'ผู้ใช้ออนไลน์', icon: UsersRound },
   { key: 'simulation', label: 'จำลองข้อมูล', icon: FlaskConical },
   { key: 'moph-alerts', label: 'แจ้งเตือน MOPH (LINE)', icon: Bell },
+  { key: 'node-hospitals', label: 'รพ.โหนด', icon: Network },
 ];
 
 export default function AdminPage() {
@@ -75,6 +77,7 @@ export default function AdminPage() {
               <TabsContent value="online-users"><OnlineUsersTab /></TabsContent>
               <TabsContent value="simulation"><SimulationTab /></TabsContent>
               <TabsContent value="moph-alerts"><MophAlertsTab /></TabsContent>
+              <TabsContent value="node-hospitals"><NodeHospitalTab /></TabsContent>
             </div>
             <section
               aria-label="แผนที่โรงพยาบาล"

@@ -29,6 +29,7 @@ export async function GET() {
       name: string;
       level: string;
       service_type: string | null;
+      visibility_scope: string | null;
       province_code: string | null;
       district_code: string | null;
       lat: string | number | null;
@@ -52,7 +53,7 @@ export async function GET() {
       // from 6 child tables block hard delete), so without showing them the
       // admin had no way to manage a hospital after a soft-delete.
       // Active rows sort first; inactive rows fall to the bottom.
-      `SELECT h.hcode, h.name, h.level, h.service_type, h.province_code, h.district_code,
+      `SELECT h.hcode, h.name, h.level, h.service_type, h.visibility_scope, h.province_code, h.district_code,
               h.lat, h.lon, h.is_active, h.connection_status, h.last_sync_at,
               hbc.tunnel_url, hbc.session_jwt, hbc.session_expires_at, hbc.database_type,
               hbc.marketplace_token, hbc.last_authenticity_status,
@@ -73,6 +74,7 @@ export async function GET() {
           name: h.name,
           level: h.level,
           serviceType: h.service_type,
+          visibilityScope: h.visibility_scope,
           provinceCode: h.province_code,
           districtCode: h.district_code,
           lat: lat !== null && Number.isFinite(lat) ? lat : null,

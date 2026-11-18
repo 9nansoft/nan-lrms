@@ -10,7 +10,7 @@ import type { AdminHospital } from '@/components/admin/HospitalEditDialog';
 
 export function adminHospital(o: Partial<AdminHospital> = {}): AdminHospital {
   return {
-    hcode: '10670', name: 'รพ.น่าน', level: 'A_S', serviceType: null, provinceCode: '40',
+    hcode: '10670', name: 'รพ.น่าน', level: 'A_S', serviceType: null, visibilityScope: null, provinceCode: '40',
     districtCode: '4001', lat: null, lon: null, isActive: true, connectionStatus: 'CONNECTED',
     lastSyncAt: null, bmsConfig: null, ...o,
   };

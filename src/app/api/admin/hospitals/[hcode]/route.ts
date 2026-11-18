@@ -6,14 +6,19 @@ import { ensureInit } from '@/lib/ensure-init';
 import { requireAdmin } from '@/lib/admin-guard';
 import { logger } from '@/lib/logger';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
+import { VISIBILITY_SCOPES } from '@/config/visibility-scope';
 
 const VALID_LEVELS = new Set<string>(Object.values(HospitalLevel));
 const VALID_SERVICE_TYPES = new Set<string>(Object.values(HospitalServiceType));
+const VALID_VISIBILITY_SCOPES = new Set<string>(VISIBILITY_SCOPES);
 
 interface UpdateHospitalBody {
   name?: string;
   level?: string;
   serviceType?: string | null;
+  /** 'OWN' (the hospital reads its own patients) or 'ALL' (it reads every
+   *  hospital's patients). NULL reads as 'OWN'. */
+  visibilityScope?: string | null;
   provinceCode?: string | null;
   districtCode?: string | null;
   lat?: number | null;
@@ -49,6 +54,16 @@ export async function PUT(
         { status: 400 },
       );
     }
+    if (
+      body.visibilityScope !== undefined &&
+      body.visibilityScope !== null &&
+      !VALID_VISIBILITY_SCOPES.has(body.visibilityScope)
+    ) {
+      return NextResponse.json(
+        { error: `visibilityScope must be one of ${[...VALID_VISIBILITY_SCOPES].join(', ')}` },
+        { status: 400 },
+      );
+    }
 
     const db = await getDatabase();
     const existing = await db.query<{ id: string }>('SELECT id FROM hospitals WHERE hcode = ?', [
@@ -71,6 +86,10 @@ export async function PUT(
     if (body.serviceType !== undefined) {
       updates.push('service_type = ?');
       vals.push(body.serviceType);
+    }
+    if (body.visibilityScope !== undefined) {
+      updates.push('visibility_scope = ?');
+      vals.push(body.visibilityScope);
     }
     if (body.provinceCode !== undefined) {
       updates.push('province_code = ?');

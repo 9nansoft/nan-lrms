@@ -50,6 +50,7 @@ import {
 import { ErrorState } from '@/components/shared/ErrorState';
 import { InlineNotice } from '@/components/shared/InlineNotice';
 import { SYNC_LOG_POLL_MS, SYNC_OUTCOME_META, SYNC_STEP_TONE, formatSyncDuration, syncTriggerLabel } from '@/config/sync-run-status';
+import { VISIBILITY_SCOPES, VISIBILITY_SCOPE_LABEL_TH } from '@/config/visibility-scope';
 import type { StatusTone } from '@/config/status-tone';
 import { DEFAULT_ACTION_REMEDY } from '@/lib/action-failure';
 import { cn, formatRelativeTime } from '@/lib/utils';
@@ -92,6 +93,7 @@ export interface AdminHospital {
   name: string;
   level: string;
   serviceType: string | null;
+  visibilityScope: string | null;
   provinceCode: string | null;
   districtCode?: string | null;
   lat?: number | null;
@@ -450,6 +452,9 @@ function GeneralSection({
   const [serviceType, setServiceType] = useState<string>(
     hospital.serviceType ?? HospitalServiceType.DISTRICT_WITH_MATERNITY,
   );
+  const [visibilityScope, setVisibilityScope] = useState<string>(
+    hospital.visibilityScope ?? 'OWN',
+  );
   const [provinceCode, setProvinceCode] = useState(hospital.provinceCode ?? '');
   const [lat, setLat] = useState(
     typeof hospital.lat === 'number' ? String(hospital.lat) : '',
@@ -465,6 +470,7 @@ function GeneralSection({
     setName(hospital.name);
     setLevel(hospital.level);
     setServiceType(hospital.serviceType ?? HospitalServiceType.DISTRICT_WITH_MATERNITY);
+    setVisibilityScope(hospital.visibilityScope ?? 'OWN');
     setProvinceCode(hospital.provinceCode ?? '');
     setLat(typeof hospital.lat === 'number' ? String(hospital.lat) : '');
     setLon(typeof hospital.lon === 'number' ? String(hospital.lon) : '');
@@ -488,6 +494,7 @@ function GeneralSection({
           name: name.trim(),
           level,
           serviceType,
+          visibilityScope,
           provinceCode: provinceCode || null,
           lat: latNum,
           lon: lonNum,
@@ -581,6 +588,25 @@ function GeneralSection({
           </label>
         </Field>
       </div>
+
+      <Field
+        label="ขอบเขตการเห็นข้อมูลผู้ป่วย"
+        htmlFor="visibility-scope-select"
+        hint="โรงพยาบาลนี้เห็นผู้ป่วยของตัวเอง และผู้ป่วยที่โรงพยาบาลอื่นส่งต่อเข้ามา — ถ้าเลือกขอบเขต “ทุก รพ.” จะเห็นผู้ป่วยของทุกโรงพยาบาล"
+      >
+        <select
+          id="visibility-scope-select"
+          value={visibilityScope}
+          onChange={(e) => setVisibilityScope(e.target.value)}
+          className={SELECT_CLASS}
+        >
+          {VISIBILITY_SCOPES.map((scope) => (
+            <option key={scope} value={scope}>
+              {VISIBILITY_SCOPE_LABEL_TH[scope]}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       <div>
         <div className="mb-1 flex items-center gap-1.5 text-label text-ink">

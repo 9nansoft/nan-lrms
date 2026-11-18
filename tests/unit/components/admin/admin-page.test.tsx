@@ -34,7 +34,7 @@ describe('AdminPage — characterization (must not change)', () => {
 });
 
 describe('AdminPage — direction-C layout', () => {
-  const TAB_LABELS = ['จังหวัดหลัก', 'โรงพยาบาล', 'การเชื่อมต่อ BMS', 'คีย์ Webhook', 'สถานะการซิงค์', 'ผู้ใช้ออนไลน์', 'จำลองข้อมูล', 'แจ้งเตือน MOPH (LINE)'];
+  const TAB_LABELS = ['จังหวัดหลัก', 'โรงพยาบาล', 'การเชื่อมต่อ BMS', 'คีย์ Webhook', 'สถานะการซิงค์', 'ผู้ใช้ออนไลน์', 'จำลองข้อมูล', 'แจ้งเตือน MOPH (LINE)', 'รพ.โหนด'];
   it('is a titled page with a Thai tablist', () => {
     render(<AdminPage />);
     expect(screen.getByRole('heading', { level: 1, name: 'ตั้งค่าระบบ' })).toBeInTheDocument();
