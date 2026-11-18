@@ -19,6 +19,11 @@ export const hospitalsTable: TableDefinition = {
     { name: 'district_code', type: 'string', maxLength: 4, nullable: true },
     { name: 'lat', type: 'decimal', nullable: true },
     { name: 'lon', type: 'decimal', nullable: true },
+    // Who may read this hospital's patients: 'OWN' (the default — the hospital
+    // sees its own patients, plus the patients other hospitals referred in to
+    // it) or 'ALL' (the centre hospital sees every hospital's patients).
+    // NULL means 'OWN' so pre-existing rows keep their scope.
+    { name: 'visibility_scope', type: 'string', maxLength: 10, nullable: true },
     { name: 'is_active', type: 'boolean', defaultValue: true },
     { name: 'last_sync_at', type: 'datetime', nullable: true },
     { name: 'connection_status', type: 'string', maxLength: 10, defaultValue: 'UNKNOWN' },

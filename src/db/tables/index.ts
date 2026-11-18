@@ -1,5 +1,6 @@
 import type { TableDefinition } from '../table-definition';
 import { hospitalsTable } from './hospitals';
+import { hospitalNodesTable } from './hospital-nodes';
 import { hospitalBmsConfigTable } from './hospital-bms-config';
 import { hospitalConsultDoctorsTable } from './hospital-consult-doctors';
 import { cachedPatientsTable } from './cached-patients';
@@ -33,6 +34,7 @@ import { notificationEventSubscriptionsTable } from './notification-event-subscr
 
 export {
   hospitalsTable,
+  hospitalNodesTable,
   hospitalBmsConfigTable,
   hospitalConsultDoctorsTable,
   cachedPatientsTable,
@@ -73,6 +75,8 @@ export const ALL_TABLES: TableDefinition[] = [
   mophHospitalsTable,
   systemConfigTable,
   hospitalsTable,
+  // Node-hospital tree: both FKs point at hospitals, so it follows it.
+  hospitalNodesTable,
   hospitalBmsConfigTable,
   hospitalConsultDoctorsTable,
   // MOPH Prompt alerts — both reference hospitals, so after hospitalsTable.
