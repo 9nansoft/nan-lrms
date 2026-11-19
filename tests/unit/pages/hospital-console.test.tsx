@@ -31,6 +31,8 @@ function labor() {
       level: 'A_S',
       connectionStatus: 'ONLINE',
       lastSyncAt: ago(5 * 60_000),
+      isActive: true,
+      dataPurgedAt: null,
     },
     patients: [
       {
@@ -127,10 +129,19 @@ function incoming() {
   };
 }
 
-async function renderConsole(opts: { laborFails?: boolean; journeyDetail?: unknown } = {}) {
+async function renderConsole(
+  opts: { laborFails?: boolean; journeyDetail?: unknown; laborEmpty?: boolean } = {},
+) {
   const fetcher = vi.fn(async (url: string) => {
     if (url.includes('/patients?')) {
       if (opts.laborFails) throw new Error('labor feed down');
+      if (opts.laborEmpty) {
+        return {
+          ...labor(),
+          patients: [],
+          hospital: { ...labor().hospital, lastSyncAt: null },
+        };
+      }
       return labor();
     }
     if (url.includes('/journeys?stage=PREGNANCY')) return anc();
@@ -203,6 +214,14 @@ describe('HospitalConsolePage — characterization', () => {
     fireEvent.click(await screen.findByRole('button', { name: /ANC REGISTRY|ทะเบียนฝากครรภ์/ }));
     fireEvent.click((await screen.findAllByRole('button', { name: /นาง ดาว/ }))[0]);
     expect(nav.push).toHaveBeenCalledWith('/pregnancies/j2');
+  });
+
+  it('says WHY the view is empty when the hospital never synced', async () => {
+    // An empty table says "no patients" — it must say "we never synced" when
+    // that is the truth, because the fix is completely different.
+    await renderConsole({ laborEmpty: true });
+
+    expect(await screen.findByText(/ยังไม่เคยซิงก์/)).toBeInTheDocument();
   });
 
   it('a failing labour feed shows its banner and keeps the ANC registry', async () => {

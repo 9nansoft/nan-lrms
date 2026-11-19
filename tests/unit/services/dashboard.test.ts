@@ -191,6 +191,29 @@ describe('Dashboard Service', () => {
   });
 
   // T105: Date range filtering tests
+  it('getHospitalPatientList says whether the hospital can sync at all', async () => {
+    // The console has to tell an empty view apart: a ward with nobody in it,
+    // a hospital that never synced, one that is switched off, and one whose
+    // data was erased.
+    const hospitals = await db.query<{ id: string }>(
+      "SELECT id FROM hospitals WHERE hcode = '10670'",
+    );
+    const hospitalId = hospitals[0].id;
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO hospital_bms_config (id, hospital_id, tunnel_url, data_purged_at, created_at, updated_at)
+       VALUES (?, ?, 'https://tunnel.test', ?, ?, ?)
+       ON CONFLICT (hospital_id) DO UPDATE SET data_purged_at = EXCLUDED.data_purged_at`,
+      ['hbc-dash-1', hospitalId, '2026-11-01T00:00:00.000Z', now, now],
+    );
+    await db.execute("UPDATE hospitals SET is_active = false WHERE hcode = '10670'");
+
+    const result = await getHospitalPatientList(db, '10670', { status: 'active' });
+
+    expect(result?.hospital?.isActive).toBe(false);
+    expect(result?.hospital?.dataPurgedAt).toBe('2026-11-01T00:00:00.000Z');
+  });
+
   it('getHospitalPatientList returns lastSyncAt as an ISO string, not a pg Date', async () => {
     await db.execute("UPDATE hospitals SET last_sync_at = ? WHERE hcode = '10670'", [
       '2026-07-01T02:30:00.000Z',

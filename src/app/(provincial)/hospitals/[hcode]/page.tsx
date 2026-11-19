@@ -36,6 +36,7 @@ import { KpiGrid } from '@/components/shared/KpiGrid';
 import { KpiTile } from '@/components/shared/KpiTile';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { hospitalSyncNote } from '@/lib/hospital-sync-note';
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable';
 import { AncRiskChip } from '@/components/shared/AncRiskChip';
 import { RiskBar } from '@/components/dashboard/shared';
@@ -100,6 +101,11 @@ interface HospitalInfo {
   level: string;
   connectionStatus: string;
   lastSyncAt: string | null;
+  /** The hospital is switched off in the admin board. */
+  isActive: boolean;
+  /** The admin erased this hospital's data — it is suspended until it is
+   *  re-onboarded. */
+  dataPurgedAt: string | null;
 }
 
 interface LaborResponse {
@@ -1586,7 +1592,10 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
                   <EmptyState
                     illustration="ward"
                     title="ไม่มีผู้คลอดในขณะนี้"
-                    description="ข้อมูลจะปรากฏเมื่อโรงพยาบาลรับผู้คลอดเข้าห้องคลอดใน HOSxP"
+                    description={
+                      hospitalSyncNote(laborData?.hospital) ??
+                      'ข้อมูลจะปรากฏเมื่อโรงพยาบาลรับผู้คลอดเข้าห้องคลอดใน HOSxP'
+                    }
                   />
                 ) : (
                   <div>
@@ -1610,7 +1619,10 @@ export default function HospitalConsolePage({ params }: { params: Promise<{ hcod
             ) : journeys.length === 0 ? (
               <EmptyState
                 title="ยังไม่มีหญิงตั้งครรภ์ลงทะเบียนกับโรงพยาบาลนี้"
-                description="ข้อมูลจะปรากฏเมื่อโรงพยาบาลซิงค์ทะเบียนฝากครรภ์จาก HOSxP"
+                description={
+                  hospitalSyncNote(laborData?.hospital) ??
+                  'ข้อมูลจะปรากฏเมื่อโรงพยาบาลซิงค์ทะเบียนฝากครรภ์จาก HOSxP'
+                }
               />
             ) : (
               <div className="space-y-3">

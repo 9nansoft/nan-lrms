@@ -549,9 +549,16 @@ export async function getHospitalPatientList(
     level: string;
     connection_status: string;
     last_sync_at: string | null;
-  }>('SELECT id, name, level, connection_status, last_sync_at FROM hospitals WHERE hcode = ?', [
-    hcode,
-  ]);
+    is_active: boolean | number;
+    data_purged_at: string | Date | null;
+  }>(
+    `SELECT h.id, h.name, h.level, h.connection_status, h.last_sync_at, h.is_active,
+            c.data_purged_at
+       FROM hospitals h
+       LEFT JOIN hospital_bms_config c ON c.hospital_id = h.id
+      WHERE h.hcode = ?`,
+    [hcode],
+  );
   if (hospitals.length === 0) {
     return {
       hospital: null,
@@ -569,6 +576,14 @@ export async function getHospitalPatientList(
     // pg returns timestamptz as a Date object — normalize to the declared
     // ISO-string API shape (same pattern as getProvinceDashboard above).
     lastSyncAt: hospitalRow.last_sync_at ? new Date(hospitalRow.last_sync_at).toISOString() : null,
+    // Why the view may be empty: the hospital is switched off, or its data
+    // was erased (both mean "no rows", and each needs a different fix).
+    isActive: hospitalRow.is_active === true || hospitalRow.is_active === 1,
+    // pg returns timestamptz as a Date object — normalize to the declared
+    // ISO-string shape (same pattern as lastSyncAt above).
+    dataPurgedAt: hospitalRow.data_purged_at
+      ? new Date(hospitalRow.data_purged_at).toISOString()
+      : null,
   };
 
   let whereClause = 'WHERE cp.hospital_id = ?';
