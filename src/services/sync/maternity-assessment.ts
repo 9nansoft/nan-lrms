@@ -27,9 +27,10 @@
 // paths store identical rows.
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '@/db/adapter';
-import { encrypt, getEncryptionKey } from '@/lib/encryption';
+import { encrypt, getEncryptionKey, decryptSafe } from '@/lib/encryption';
 import { BmsSessionClient } from '@/lib/bms-session';
 import { APP_IDENTIFIER } from '@/lib/bms-browser-client';
+import { logger } from '@/lib/logger';
 import { buildAssessmentItemsSql, buildAssessmentRecordsSqlFor } from '@/config/hosxp-queries';
 import {
   MATERNITY_ASSESSMENT_FORMS,
@@ -93,6 +94,10 @@ export interface AssessmentSyncResult {
   unusablePks: Record<string, string[]>;
   /** Per form: the keys the database refused. */
   failedPks: Record<string, string[]>;
+  /** The forms whose HOSxP query failed — the pull did NOT cover them. */
+  failedForms: string[];
+  /** Why the pull could not run at all (no HOSxP session). */
+  error: string | null;
 }
 
 // ─── Column widths (mirror src/db/tables/cached-maternity-assessments.ts) ──
@@ -110,6 +115,52 @@ function protectName(
 ): { value: string; encrypted: boolean } {
   if (!encryptionKey) return { value: '', encrypted: false };
   return { value: encrypt(value, encryptionKey), encrypted: true };
+}
+
+/** The message of a thrown value, for logs and sync steps. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The form table the database says does not exist, if that is the error.
+ *
+ * PostgreSQL: `relation "asm_x" does not exist`; MariaDB: `Table
+ * 'nanhosxp.asm_x' doesn't exist`. A site that does not use a form must not
+ * look like a site whose pull failed.
+ */
+function missingFormTable(message: string): string | null {
+  const postgres = /relation\s+"([^"]+)"\s+does not exist/i.exec(message);
+  if (postgres) return postgres[1];
+  const mysql = /table\s+'[^']*\.?([A-Za-z0-9_]+)'\s+doesn't exist/i.exec(message);
+  if (mysql) return mysql[1];
+  return null;
+}
+
+/** The host of a URL, or null when it cannot be read. */
+function urlHost(url: string): string | null {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when a session points at the same tunnel as the hospital's config.
+ *
+ * The tunnel is hospital specific (10716-saciw.tunnel.hosxp.net), so a
+ * session that points elsewhere belongs to another site. A LOCAL gateway
+ * (127.0.0.1:45011 on the ward's workstation) is the one exception: its
+ * host is never the tunnel's, and it is the hospital's own machine.
+ */
+function sameTunnel(configuredTunnel: string, sessionUrl: string): boolean {
+  const configuredHost = urlHost(configuredTunnel);
+  const sessionHost = urlHost(sessionUrl);
+  if (!configuredHost || !sessionHost) return true; // cannot judge — do not block
+  if (configuredHost === sessionHost) return true;
+  const localHosts = ['127.0.0.1', 'localhost', '[::1]'];
+  return localHosts.includes(configuredHost);
 }
 
 /** A timestamp we can store and order by — rejects HOSxP zero dates. */
@@ -276,7 +327,16 @@ export async function syncMaternityAssessments(
     hospitalId,
     normalized,
   );
-  return { upserted, skipped, failed, persistedPks, unusablePks, failedPks };
+  return {
+    upserted,
+    skipped,
+    failed,
+    persistedPks,
+    unusablePks,
+    failedPks,
+    failedForms: [],
+    error: null,
+  };
 }
 
 /**
@@ -442,49 +502,140 @@ export function resolveCursorAdvance(
 }
 
 /**
+ * The server's own session for the hospital's HOSxP, plus the marketplace
+ * token that scopes its queries.
+ */
+export interface HospitalBmsSession {
+  bmsUrl: string;
+  jwt: string;
+  marketplaceToken: string | null;
+}
+
+/**
  * The server's own session for the hospital's HOSxP, refreshed when it has
- * expired — the same move the legacy poller makes. Without it the cursor
- * check would stop working the moment the stored session ages out.
+ * expired.
+ *
+ * The server cannot mint a HOSxP session on its own: the tunnel's
+ * /api/SessionID belongs to the LOCAL gateway on the ward's workstation and
+ * a public tunnel answers "Access Denied". The only entity that holds a
+ * live session id is the hospital's own browser — and it rides along with
+ * every push (`bms_session_id`). So the refresh order is:
+ *
+ *   1. the stored session, while it is still valid;
+ *   2. the session id the browser just pushed, exchanged for a bearer token;
+ *   3. the tunnel's own session id, for a gateway that does expose it.
+ *
+ * The bearer token is stored back, so the next cycle starts from (1) again.
  */
 async function serverBmsSession(
   db: DatabaseAdapter,
   hospitalId: string,
-): Promise<{ bmsUrl: string; jwt: string } | null> {
+  options: { bmsSessionId?: string | null } = {},
+): Promise<HospitalBmsSession | null> {
   const configs = await db.query<{
     tunnel_url: string | null;
     session_jwt: string | null;
     session_expires_at: string | Date | null;
+    marketplace_token: string | null;
+    hcode: string;
   }>(
-    `SELECT tunnel_url, session_jwt, session_expires_at
-       FROM hospital_bms_config
-      WHERE hospital_id = ?`,
+    `SELECT c.tunnel_url, c.session_jwt, c.session_expires_at, c.marketplace_token,
+            h.hcode
+       FROM hospital_bms_config c
+       JOIN hospitals h ON h.id = c.hospital_id
+      WHERE c.hospital_id = ?`,
     [hospitalId],
   );
   const config = configs[0];
   if (!config?.tunnel_url) return null;
 
+  const marketplaceToken = config.marketplace_token
+    ? decryptSafe(config.marketplace_token) || null
+    : null;
+
   const expiresAt = config.session_expires_at ? new Date(config.session_expires_at).getTime() : 0;
   const expired = !config.session_jwt || expiresAt <= Date.now();
   if (!expired) {
-    return { bmsUrl: config.tunnel_url, jwt: config.session_jwt as string };
+    return {
+      bmsUrl: config.tunnel_url,
+      jwt: config.session_jwt as string,
+      marketplaceToken,
+    };
   }
 
-  // Refresh the tunnel session the way the poller does.
-  try {
-    const client = new BmsSessionClient(config.tunnel_url);
-    const sessionId = await client.getSessionId();
-    const validateUrl = process.env.BMS_VALIDATE_URL ?? 'https://hosxp.net/phapi/PasteJSON';
-    const session = await client.validateSession(sessionId, validateUrl);
-    await db.execute(
-      `UPDATE hospital_bms_config
-          SET session_jwt = ?, session_expires_at = ?
-        WHERE hospital_id = ?`,
-      [session.jwt, session.expiresAt.toISOString(), hospitalId],
-    );
-    return { bmsUrl: session.bmsUrl || config.tunnel_url, jwt: session.jwt };
-  } catch {
-    return config.session_jwt ? { bmsUrl: config.tunnel_url, jwt: config.session_jwt } : null;
+  const validateUrl = process.env.BMS_VALIDATE_URL ?? 'https://hosxp.net/phapi/PasteJSON';
+  const client = new BmsSessionClient(config.tunnel_url);
+
+  // The browser's session id is the one source that works from the server;
+  // the tunnel's own id is the fallback for a gateway that exposes it. The
+  // tunnel is asked only when the browser's id did not work — a public
+  // tunnel answers "Access Denied", and waiting for that answer costs a
+  // round trip on every refresh.
+  const pushedSessionId = options.bmsSessionId?.trim();
+  async function* candidateSessionIds(): AsyncGenerator<string> {
+    if (pushedSessionId) yield pushedSessionId;
+    try {
+      yield await client.getSessionId();
+    } catch (error) {
+      logger.debug('assessment_tunnel_session_id_unavailable', {
+        hospitalId,
+        error: errorMessage(error),
+      });
+    }
   }
+
+  for await (const sessionId of candidateSessionIds()) {
+    try {
+      const session = await client.validateSession(sessionId, validateUrl);
+      // The pushed session must belong to THIS hospital. Two guards, because
+      // either can be missing on a given site:
+      //   1. the hospital code the session reports;
+      //   2. the tunnel the session points at — the tunnel is hospital
+      //      specific, so a session from another site points elsewhere. (A
+      //      local gateway on the ward's workstation is skipped: its host is
+      //      not the tunnel's.)
+      const sessionHcode = session.userInfo.hospital_code?.trim();
+      if (sessionHcode && config.hcode && sessionHcode !== config.hcode) {
+        logger.warn('assessment_session_hospital_mismatch', {
+          hospitalId,
+          hcode: config.hcode,
+          sessionHcode,
+        });
+        continue;
+      }
+      if (!sameTunnel(config.tunnel_url, session.bmsUrl)) {
+        logger.warn('assessment_session_tunnel_mismatch', {
+          hospitalId,
+          tunnel: config.tunnel_url,
+          sessionTunnel: session.bmsUrl,
+        });
+        continue;
+      }
+      await db.execute(
+        `UPDATE hospital_bms_config
+            SET session_jwt = ?, session_expires_at = ?
+          WHERE hospital_id = ?`,
+        [session.jwt, session.expiresAt.toISOString(), hospitalId],
+      );
+      logger.info('assessment_session_refreshed', { hospitalId, source: 'session_id' });
+      return {
+        bmsUrl: session.bmsUrl || config.tunnel_url,
+        jwt: session.jwt,
+        marketplaceToken,
+      };
+    } catch (error) {
+      logger.warn('assessment_session_refresh_failed', {
+        hospitalId,
+        error: errorMessage(error),
+      });
+    }
+  }
+
+  // No fresh session. Fall back to the stored one — the gateway may still
+  // accept it — but never report success on its basis.
+  return config.session_jwt
+    ? { bmsUrl: config.tunnel_url, jwt: config.session_jwt, marketplaceToken }
+    : null;
 }
 
 /**
@@ -536,6 +687,11 @@ export async function advanceAssessmentCursors(
  * The pull is bounded by the form's cursor, so a cycle that finds nothing
  * costs three index lookups, and a cycle that finds a lot takes the rows in
  * pages of ASSESSMENT_ROW_LIMIT.
+ *
+ * Every failure is reported: a form whose query failed is named in
+ * `failedForms`, a pull without a HOSxP session carries the reason in
+ * `error`. A cycle that pulled nothing must never look like a cycle that
+ * found nothing.
  */
 export async function pullMaternityAssessmentsFromHosxp(
   db: DatabaseAdapter,
@@ -545,6 +701,13 @@ export async function pullMaternityAssessmentsFromHosxp(
     /** A session the caller already holds (the legacy poller does). */
     bmsUrl?: string;
     jwt?: string;
+    /** The marketplace token that scopes the queries (see hosxp-sync-status). */
+    marketplaceToken?: string | null;
+    /**
+     * The BMS PasteJSON session id the hospital's browser pushed along with
+     * the sync bundle — the server's only source of a fresh HOSxP session.
+     */
+    bmsSessionId?: string | null;
   } = {},
 ): Promise<AssessmentSyncResult> {
   const empty: AssessmentSyncResult = {
@@ -554,17 +717,35 @@ export async function pullMaternityAssessmentsFromHosxp(
     persistedPks: {},
     unusablePks: {},
     failedPks: {},
+    failedForms: [],
+    error: null,
   };
   const session =
     options.bmsUrl && options.jwt
-      ? { bmsUrl: options.bmsUrl, jwt: options.jwt }
-      : await serverBmsSession(db, hospitalId);
-  if (!session) return empty;
+      ? {
+          bmsUrl: options.bmsUrl,
+          jwt: options.jwt,
+          marketplaceToken: options.marketplaceToken ?? null,
+        }
+      : await serverBmsSession(db, hospitalId, { bmsSessionId: options.bmsSessionId });
+  if (!session) {
+    return {
+      ...empty,
+      error:
+        'no HOSxP session for this hospital — the browser must push its bms_session_id, ' +
+        'or the hospital must be registered with a tunnel URL',
+    };
+  }
 
   const client = new BmsSessionClient(session.bmsUrl);
+  const queryOptions = {
+    appIdentifier: APP_IDENTIFIER,
+    marketplaceToken: session.marketplaceToken,
+  };
   const cursors = await readAssessmentCursors(db, hospitalId);
   const records: AssessmentRecordsByTable = {};
   const authoritativePks: Record<string, string[]> = {};
+  const failedForms: string[] = [];
 
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
     try {
@@ -573,25 +754,59 @@ export async function pullMaternityAssessmentsFromHosxp(
         form.pkColumn,
         cursors[form.table] ?? '0',
       );
-      const res = await client.executeQuery(sql, session.bmsUrl, session.jwt, undefined, {
-        appIdentifier: APP_IDENTIFIER,
-      });
+      const res = await client.executeQuery(sql, session.bmsUrl, session.jwt, undefined, queryOptions);
       records[form.table] = res.data as Record<string, unknown>[];
       authoritativePks[form.table] = records[form.table]
         .map((row) => String(row[form.pkColumn]))
         .filter((key) => /^\d{1,18}$/.test(key));
-    } catch {
-      // A form the site does not use (no table) must not cost the hospital
-      // the forms it does use.
+    } catch (error) {
       records[form.table] = [];
       authoritativePks[form.table] = [];
+      // A form the site does not use (the table does not exist there) is
+      // not a failure — it must not cost the hospital the forms it does
+      // use, and it must not turn every push into a warning.
+      const missingTable = missingFormTable(errorMessage(error));
+      if (missingTable === form.table) {
+        logger.debug('assessment_form_not_in_use', { hospitalId, formTable: form.table });
+        continue;
+      }
+      // Any other failure must be named, or the sync log reports an empty
+      // pull as a healthy one.
+      failedForms.push(form.table);
+      logger.error('assessment_form_query_failed', {
+        hospitalId,
+        formTable: form.table,
+        error: errorMessage(error),
+      });
     }
   }
 
-  if (Object.values(records).every((rows) => rows.length === 0)) return empty;
+  if (Object.values(records).every((rows) => rows.length === 0)) {
+    return {
+      ...empty,
+      failedForms,
+      error:
+        failedForms.length > 0
+          ? `HOSxP query failed for: ${failedForms.join(', ')}`
+          : null,
+    };
+  }
 
   // The labels come from the site's own form definition, read from HOSxP.
-  const metadata = await readAssessmentMetadata(client, session);
+  // A metadata hiccup must not throw the fetched rows away: without the
+  // labels the fields keep their HOSxP column names, which is still a form.
+  let metadata: { forms: HosxpAssessmentFormRow[]; items: HosxpAssessmentItemRow[] } = {
+    forms: [],
+    items: [],
+  };
+  try {
+    metadata = await readAssessmentMetadata(client, session, queryOptions);
+  } catch (error) {
+    logger.error('assessment_metadata_read_failed', {
+      hospitalId,
+      error: errorMessage(error),
+    });
+  }
 
   const result = await syncMaternityAssessments(db, hospitalId, {
     forms: metadata.forms,
@@ -601,6 +816,9 @@ export async function pullMaternityAssessmentsFromHosxp(
   result.persistedPks = result.persistedPks ?? {};
   result.unusablePks = result.unusablePks ?? {};
   result.failedPks = result.failedPks ?? {};
+  result.failedForms = failedForms;
+  result.error =
+    failedForms.length > 0 ? `HOSxP query failed for: ${failedForms.join(', ')}` : null;
 
   // The cursor moves only over the rows the server itself read and stored.
   const nextByTable: Record<string, string | null> = {};
@@ -626,6 +844,7 @@ export async function pullMaternityAssessmentsFromHosxp(
 async function readAssessmentMetadata(
   client: BmsSessionClient,
   session: { bmsUrl: string; jwt: string },
+  queryOptions: { appIdentifier: string; marketplaceToken: string | null },
 ): Promise<{ forms: HosxpAssessmentFormRow[]; items: HosxpAssessmentItemRow[] }> {
   const tables = MATERNITY_ASSESSMENT_FORMS.map((f) => `'${f.table}'`).join(', ');
   const formsRes = await client.executeQuery(
@@ -636,7 +855,7 @@ async function readAssessmentMetadata(
     session.bmsUrl,
     session.jwt,
     undefined,
-    { appIdentifier: APP_IDENTIFIER },
+    queryOptions,
   );
   const forms = formsRes.data as unknown as HosxpAssessmentFormRow[];
   const formIds = forms
@@ -649,7 +868,7 @@ async function readAssessmentMetadata(
     session.bmsUrl,
     session.jwt,
     undefined,
-    { appIdentifier: APP_IDENTIFIER },
+    queryOptions,
   );
   return { forms, items: itemsRes.data as unknown as HosxpAssessmentItemRow[] };
 }

@@ -42,21 +42,25 @@ describe('BmsSessionClient', () => {
   });
 
   describe('validateSession', () => {
-    it('should validate session ID via hosxp.net and return config', async () => {
+    it('exchanges the session id over GET ?Action=GET&code= and reads the PasteJSON envelope', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          jwt: 'eyJhbGc...',
-          bms_url: 'https://99999-test.tunnel.hosxp.net',
-          user_info: {
-            name: 'Test User',
-            position: 'doctor',
-            hospital_code: '99999',
-            department: 'OB/GYN',
-            is_hr_admin: false,
-            is_director: false,
+          MessageCode: 200,
+          result: {
+            user_info: {
+              name: 'Test User',
+              position: 'doctor',
+              hospital_code: '99999',
+              department: 'OB/GYN',
+              is_hr_admin: false,
+              is_director: false,
+              bms_url: 'https://99999-test.tunnel.hosxp.net',
+              bms_session_code: 'eyJhbGc...',
+            },
+            key_value: 'eyJhbGc...',
+            expired_second: 36000,
           },
-          expired_second: 2592000,
         }),
       });
 
@@ -67,6 +71,57 @@ describe('BmsSessionClient', () => {
       expect(config.jwt).toBe('eyJhbGc...');
       expect(config.bmsUrl).toBe('https://99999-test.tunnel.hosxp.net');
       expect(config.userInfo.name).toBe('Test User');
+      expect(config.userInfo.hospital_code).toBe('99999');
+      expect(config.expiredSecond).toBe(36000);
+
+      // The exchange only works over GET with Action=GET&code=<sid> — a POST
+      // answers 200 with a payload that carries no bearer token at all.
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(init.method ?? 'GET').toBe('GET');
+      expect(url).toContain('Action=GET');
+      expect(url).toContain(`code=${encodeURIComponent('test-session-id')}`);
+    });
+
+    it('falls back to key_value when user_info has no bms_session_code', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: {
+            user_info: { bms_url: 'https://99999-test.tunnel.hosxp.net' },
+            key_value: 'key-value-token',
+            expired_second: 36000,
+          },
+        }),
+      });
+
+      const config = await client.validateSession('sid', 'https://hosxp.net/phapi/PasteJSON');
+      expect(config.jwt).toBe('key-value-token');
+    });
+
+    it('throws instead of returning a session without a bearer token', async () => {
+      // What PasteJSON answers to the POST form: 200 OK, MessageCode 500,
+      // "No Action" — no result.user_info envelope, so no token and no URL.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ result: {}, MessageCode: 500, Message: 'No Action' }),
+      });
+
+      await expect(
+        client.validateSession('bad-session', 'https://hosxp.net/phapi/PasteJSON'),
+      ).rejects.toThrow(BmsApiErrorClass);
+    });
+
+    it('throws when the envelope carries no API URL', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: { user_info: { bms_session_code: 'eyJhbGc...' }, key_value: 'eyJhbGc...' },
+        }),
+      });
+
+      await expect(
+        client.validateSession('sid', 'https://hosxp.net/phapi/PasteJSON'),
+      ).rejects.toThrow(BmsApiErrorClass);
     });
 
     it('should throw BmsApiError on 501 unauthorized', async () => {

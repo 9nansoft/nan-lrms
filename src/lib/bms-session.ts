@@ -68,14 +68,29 @@ export class BmsSessionClient {
         signal: AbortSignal.timeout(10000),
       });
       if (!response.ok) {
+        // A public tunnel answers "Access Denied" here: /api/SessionID belongs
+        // to the LOCAL gateway (127.0.0.1:45011) on the ward's workstation.
+        // Say that, so the log names the cause instead of a bare 500.
+        const detail = await response.text().catch(() => '');
         throw new BmsApiErrorClass({
           code: 'CONNECTION_ERROR',
-          message: `Failed to get session ID: ${response.statusText}`,
+          message: `Failed to get session ID from ${this.tunnelUrl}: ${response.statusText}${
+            detail ? ` — ${detail.slice(0, 120)}` : ''
+          }`,
           statusCode: response.status,
         });
       }
       const sessionId = await response.json();
-      return typeof sessionId === 'string' ? sessionId : String(sessionId);
+      if (typeof sessionId === 'string') return sessionId;
+      // Some gateways answer {session_id: "..."} / {SessionID: "..."}.
+      const fromObject = (sessionId as { session_id?: unknown; SessionID?: unknown } | null) ?? {};
+      const candidate = fromObject.session_id ?? fromObject.SessionID;
+      if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate.trim();
+      throw new BmsApiErrorClass({
+        code: 'CONNECTION_ERROR',
+        message: `Failed to get session ID from ${this.tunnelUrl}: the response carries no session id`,
+        statusCode: response.status,
+      });
     } catch (error) {
       if (error instanceof BmsApiErrorClass) throw error;
       throw new BmsApiErrorClass(classifyTransportError(error));
@@ -83,36 +98,83 @@ export class BmsSessionClient {
   }
 
   async validateSession(sessionId: string, validateUrl: string): Promise<SessionConfig> {
+    let response: Response;
     try {
-      const response = await fetch(validateUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId }),
-        signal: AbortSignal.timeout(10000),
+      // PasteJSON answers the session exchange ONLY over GET with
+      // ?Action=GET&code=<sid>. A POST with a JSON body answers 200 OK with
+      // {MessageCode: 500, Message: 'No Action'} — a payload without the
+      // result.user_info envelope, so neither the bearer token nor the API
+      // URL ever arrives. The browser client (src/lib/bms-browser-client.ts)
+      // has always used the GET form; the server port did not, and every
+      // session refresh therefore produced a session without a token.
+      // The cache-busting `_` keeps an intermediate proxy from replaying a
+      // stale session.
+      const url = `${validateUrl}${validateUrl.includes('?') ? '&' : '?'}Action=GET&code=${encodeURIComponent(sessionId)}&_=${Date.now()}`;
+      response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(15000),
       });
-
-      if (!response.ok) {
-        const code = response.status === 501 ? 'UNAUTHORIZED' : 'CONNECTION_ERROR';
-        throw new BmsApiErrorClass({
-          code,
-          message: `Session validation failed: ${response.statusText}`,
-          statusCode: response.status,
-        });
-      }
-
-      const data: BmsValidateResponse = await response.json();
-      return {
-        sessionId,
-        jwt: data.jwt,
-        bmsUrl: data.bms_url,
-        userInfo: data.user_info,
-        expiresAt: new Date(Date.now() + data.expired_second * 1000),
-        expiredSecond: data.expired_second,
-      };
     } catch (error) {
-      if (error instanceof BmsApiErrorClass) throw error;
       throw new BmsApiErrorClass(classifyTransportError(error));
     }
+
+    if (!response.ok) {
+      const code = response.status === 501 ? 'UNAUTHORIZED' : 'CONNECTION_ERROR';
+      throw new BmsApiErrorClass({
+        code,
+        message: `Session validation failed: ${response.statusText}`,
+        statusCode: response.status,
+      });
+    }
+
+    let data: BmsValidateResponse;
+    try {
+      data = (await response.json()) as BmsValidateResponse;
+    } catch (error) {
+      throw new BmsApiErrorClass({
+        code: 'CONNECTION_ERROR',
+        message: 'Session validation failed: invalid JSON response',
+        statusCode: response.status,
+      });
+    }
+
+    // The envelope: result.user_info holds the API URL and the bearer token
+    // (bms_session_code); result.key_value is the token's fallback. The
+    // top-level jwt/bms_url of the old port are NOT part of the response.
+    const result = data.result ?? {};
+    const userInfo = result.user_info ?? {};
+    const jwt = userInfo.bms_session_code ?? result.key_value ?? data.jwt;
+    const bmsUrl = userInfo.bms_url ?? data.bms_url;
+
+    // A session without a token is worse than no session: every later query
+    // would go out with "Bearer undefined" and fail as a silent 401. Fail
+    // here, where the cause is still visible.
+    if (!jwt || !bmsUrl) {
+      throw new BmsApiErrorClass({
+        code: 'UNAUTHORIZED',
+        message:
+          'Session validation failed: the response carries no bearer token (bms_session_code/key_value) and no API URL',
+        statusCode: response.status,
+      });
+    }
+
+    const expiredSecond = Number(result.expired_second ?? data.expired_second ?? 0);
+    return {
+      sessionId,
+      jwt,
+      bmsUrl,
+      userInfo: {
+        name: userInfo.name ?? '',
+        position: userInfo.position ?? '',
+        hospital_code: userInfo.hospital_code ?? '',
+        department: userInfo.department ?? '',
+        is_hr_admin: Boolean(userInfo.is_hr_admin),
+        is_director: Boolean(userInfo.is_director),
+      },
+      expiresAt: new Date(Date.now() + expiredSecond * 1000),
+      expiredSecond,
+    };
   }
 
   async executeQuery(
@@ -149,9 +211,20 @@ export class BmsSessionClient {
             : response.status === 409
               ? 'SQL_ERROR'
               : 'CONNECTION_ERROR';
+        // The gateway's own message names the cause ("relation ... does not
+        // exist", a syntax error, a permission problem). Without it every
+        // failure reads the same and the operator has to guess.
+        const body = await response.text().catch(() => '');
+        let message = `SQL query failed: ${response.statusText}`;
+        try {
+          const parsed = JSON.parse(body) as { Message?: string };
+          if (parsed?.Message) message = `${message} — ${parsed.Message}`;
+        } catch {
+          // A non-JSON body — keep the status line.
+        }
         throw new BmsApiErrorClass({
           code,
-          message: `SQL query failed: ${response.statusText}`,
+          message,
           statusCode: response.status,
         });
       }

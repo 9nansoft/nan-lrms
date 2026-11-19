@@ -13,17 +13,18 @@
 //      form (hundreds of rows on one day) still advances.
 //   6. ONE BAD ROW CANNOT BLOCK THE REST: unusable values are dropped and a
 //      row the database refuses is isolated from the rows around it.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createTestDb } from '../../helpers/testDb';
 import type { DatabaseAdapter } from '@/db/adapter';
-import { generateKey, decrypt } from '@/lib/encryption';
-import { BmsSessionClient } from '@/lib/bms-session';
+import { generateKey, decrypt, encrypt } from '@/lib/encryption';
+import { BmsSessionClient, BmsApiErrorClass } from '@/lib/bms-session';
 import {
   normalizeAssessmentRows,
   syncMaternityAssessments,
   advanceAssessmentCursors,
   readAssessmentCursors,
   resolveCursorAdvance,
+  pullMaternityAssessmentsFromHosxp,
 } from '@/services/sync/maternity-assessment';
 import { getPatientMaternityAssessments } from '@/services/maternity-assessments';
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
@@ -447,5 +448,220 @@ describe('bad rows', () => {
     const stored = await db.query('SELECT source_pk FROM cached_maternity_assessments');
     expect(stored).toHaveLength(1);
     expect(stored[0].source_pk).toBe('asm_lr_record_after_birth_nan:2418');
+  });
+});
+
+describe('pullMaternityAssessmentsFromHosxp', () => {
+  const TUNNEL = 'http://tunnel.test';
+
+  async function seedBmsConfig(options: { jwt?: string | null; expiresAt?: string | null; marketplaceToken?: string | null } = {}) {
+    const now = new Date().toISOString();
+    await db.execute('DELETE FROM hospital_bms_config WHERE hospital_id = ?', [HOSPITAL_ID]);
+    await db.execute(
+      `INSERT INTO hospital_bms_config
+         (id, hospital_id, tunnel_url, session_jwt, session_expires_at, marketplace_token, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'hbc-asm-1',
+        HOSPITAL_ID,
+        TUNNEL,
+        options.jwt === undefined ? 'jwt-old' : options.jwt,
+        options.expiresAt === undefined
+          ? new Date(Date.now() + 3600_000).toISOString()
+          : options.expiresAt,
+        options.marketplaceToken ? encrypt(options.marketplaceToken, KEY) : null,
+        now,
+        now,
+      ],
+    );
+  }
+
+  /** The three form queries answer with the same mock HOSxP does. */
+  function mockHosxp(options: { failTables?: string[] } = {}) {
+    return vi.spyOn(BmsSessionClient.prototype, 'executeQuery').mockImplementation(
+      async (sql: string) => {
+        const wrap = (data: Record<string, unknown>[]) => ({
+          data,
+          field: [],
+          field_name: [],
+          record_count: data.length,
+        });
+        for (const table of options.failTables ?? []) {
+          if (sql.includes(`FROM ${table}`)) throw new Error(`query failed: ${table}`);
+        }
+        if (sql.includes('FROM assessment_form')) {
+          return wrap([
+            {
+              assessment_form_id: 309,
+              assessment_form_table: 'asm_lr_record_after_birth_nan',
+              assessment_form_name: '[LR]-แบบฟอร์มการบันทึกการพยาบาลระยะหลังคลอด',
+            },
+          ]);
+        }
+        if (sql.includes('FROM assessment_items')) return wrap([]);
+        if (sql.includes('FROM asm_lr_record_after_birth_nan')) return wrap([rawRow()]);
+        return wrap([]);
+      },
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('names the form whose HOSxP query failed instead of reporting an empty pull', async () => {
+    await seedBmsConfig();
+    mockHosxp({ failTables: ['asm_first_pregnant_pt_nan'] });
+
+    const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID);
+
+    expect(r.failedForms).toContain('asm_first_pregnant_pt_nan');
+    expect(r.error).toContain('asm_first_pregnant_pt_nan');
+    // The form that DID answer still landed.
+    expect(r.upserted).toBe(1);
+  });
+
+  it('does not report a form the site does not use as a failure', async () => {
+    await seedBmsConfig();
+    const spy = mockHosxp();
+    spy.mockImplementation(async (sql: string) => {
+      if (sql.includes('asm_first_pregnant_pt_nan')) {
+        throw new BmsApiErrorClass({
+          code: 'SQL_ERROR',
+          message:
+            'SQL query failed: Conflict — Database error: relation "asm_first_pregnant_pt_nan" does not exist',
+          statusCode: 409,
+        });
+      }
+      return { data: [], field: [], field_name: [], record_count: 0 };
+    });
+
+    const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID);
+
+    // A site without the form is not a broken pull.
+    expect(r.failedForms).not.toContain('asm_first_pregnant_pt_nan');
+    expect(r.error).toBeNull();
+  });
+
+  it('reports the reason when the hospital has no HOSxP session at all', async () => {
+    await seedBmsConfig({ jwt: null, expiresAt: null });
+    vi.spyOn(BmsSessionClient.prototype, 'getSessionId').mockRejectedValue(new Error('denied'));
+
+    const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID);
+
+    expect(r.upserted).toBe(0);
+    expect(r.error).toMatch(/no HOSxP session/);
+  });
+
+  it('sends the marketplace token with every query (HOSxP randomises HN without it)', async () => {
+    await seedBmsConfig({ marketplaceToken: 'MKT-TOKEN' });
+    const spy = mockHosxp();
+
+    await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID);
+
+    expect(spy).toHaveBeenCalled();
+    for (const call of spy.mock.calls) {
+      expect(call[4]).toMatchObject({ marketplaceToken: 'MKT-TOKEN' });
+    }
+  });
+
+  it('exchanges the session id the browser pushed for a bearer token', async () => {
+    await seedBmsConfig({ jwt: null, expiresAt: null });
+    vi.spyOn(BmsSessionClient.prototype, 'getSessionId').mockRejectedValue(
+      new Error('Access Denied'),
+    );
+    const validate = vi
+      .spyOn(BmsSessionClient.prototype, 'validateSession')
+      .mockResolvedValue({
+        sessionId: 'SID-1',
+        jwt: 'jwt-fresh',
+        bmsUrl: TUNNEL,
+        userInfo: {
+          name: 'Test',
+          position: 'nurse',
+          hospital_code: '10716',
+          department: 'OB',
+          is_hr_admin: false,
+          is_director: false,
+        },
+        expiresAt: new Date(Date.now() + 3600_000),
+        expiredSecond: 3600,
+      });
+    mockHosxp();
+
+    const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, {
+      bmsSessionId: 'SID-1',
+    });
+
+    expect(validate).toHaveBeenCalledWith('SID-1', expect.any(String));
+    expect(r.upserted).toBe(1);
+    // The fresh token is stored, so the next cycle starts from it.
+    const stored = await db.query<{ session_jwt: string }>(
+      'SELECT session_jwt FROM hospital_bms_config WHERE hospital_id = ?',
+      [HOSPITAL_ID],
+    );
+    expect(stored[0].session_jwt).toBe('jwt-fresh');
+  });
+
+  it('refuses a pushed session that points at another hospital tunnel', async () => {
+    await seedBmsConfig({ jwt: null, expiresAt: null });
+    vi.spyOn(BmsSessionClient.prototype, 'getSessionId').mockRejectedValue(
+      new Error('Access Denied'),
+    );
+    vi.spyOn(BmsSessionClient.prototype, 'validateSession').mockResolvedValue({
+      sessionId: 'SID-OTHER',
+      jwt: 'jwt-other',
+      // Another site's tunnel — the hospital code happens to match, the
+      // tunnel does not.
+      bmsUrl: 'https://99999-other.tunnel.hosxp.net',
+      userInfo: {
+        name: 'Other',
+        position: 'nurse',
+        hospital_code: '10716',
+        department: 'OB',
+        is_hr_admin: false,
+        is_director: false,
+      },
+      expiresAt: new Date(Date.now() + 3600_000),
+      expiredSecond: 3600,
+    });
+    mockHosxp();
+
+    const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, {
+      bmsSessionId: 'SID-OTHER',
+    });
+
+    expect(r.upserted).toBe(0);
+    expect(r.error).toMatch(/no HOSxP session/);
+  });
+
+  it('refuses a pushed session that belongs to another hospital', async () => {
+    await seedBmsConfig({ jwt: null, expiresAt: null });
+    vi.spyOn(BmsSessionClient.prototype, 'getSessionId').mockRejectedValue(
+      new Error('Access Denied'),
+    );
+    vi.spyOn(BmsSessionClient.prototype, 'validateSession').mockResolvedValue({
+      sessionId: 'SID-OTHER',
+      jwt: 'jwt-other',
+      bmsUrl: TUNNEL,
+      userInfo: {
+        name: 'Other',
+        position: 'nurse',
+        hospital_code: '99999',
+        department: 'OB',
+        is_hr_admin: false,
+        is_director: false,
+      },
+      expiresAt: new Date(Date.now() + 3600_000),
+      expiredSecond: 3600,
+    });
+    mockHosxp();
+
+    const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, {
+      bmsSessionId: 'SID-OTHER',
+    });
+
+    expect(r.upserted).toBe(0);
+    expect(r.error).toMatch(/no HOSxP session/);
   });
 });

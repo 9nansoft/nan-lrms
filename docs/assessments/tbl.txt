@@ -1,6 +1,20 @@
 lr1_table=asm_first_pregnant_pt_nan
 lr1_name=[LR]-การบันทึกประวัติและประเมินสมรรถนะหญิงตั้งครรภ์ แรกรับ
+lr1_form_key=first_pregnant
 lr2_table=asm_lr_record_after_birth_nan
 lr2_name=[LR]-แบบฟอร์มการบันทึกการพยาบาลระยะหลังคลอด
+lr2_form_key=after_birth
 lr3_table=asm_lr_record_birth_period_nan
 lr3_name=[LR]-แบบฟอร์มการบันทึกการพยาบาลในระยะคลอด
+lr3_form_key=birth_period
+
+# The lr1/lr2/lr3 numbers are the site's own form numbering (assessment_form.
+# assessment_form_name). The app keys the same forms by meaning — see
+# MATERNITY_ASSESSMENT_FORMS in src/config/maternity-assessments.ts — and
+# lists them first_pregnant, birth_period, after_birth (ระยะคลอด before
+# หลังคลอด, the reverse of the site's lr2/lr3 order).
+#
+# The .sql files are the tables' DDL (reference only). The sync pulls the
+# rows with t.* and resolves every column's label from the site's own
+# assessment_items / assessment_component, so a customised form still
+# renders its own labels — the dumps are not a field list the app follows.

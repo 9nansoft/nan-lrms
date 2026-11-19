@@ -41,11 +41,33 @@ export interface BmsQueryResult {
   MessageCode?: number;
 }
 
+// PasteJSON wraps the session details in `result`: the API URL and the
+// bearer token live in `result.user_info` (`bms_url`, `bms_session_code`),
+// `result.key_value` is the token's fallback and `result.expired_second`
+// the lifetime. The top-level `jwt`/`bms_url` of the old port are NOT part
+// of the response — they are read only as a fallback for older gateways.
+export interface BmsValidateUserInfo extends Partial<UserIdentity> {
+  bms_url?: string;
+  bms_session_code?: string;
+  bms_database_name?: string;
+  bms_database_type?: string;
+}
+
+export interface BmsValidateResult {
+  user_info?: BmsValidateUserInfo;
+  key_value?: string;
+  expired_second?: number;
+}
+
 export interface BmsValidateResponse {
-  jwt: string;
-  bms_url: string;
-  user_info: UserIdentity;
-  expired_second: number;
+  MessageCode?: number;
+  Message?: string;
+  result?: BmsValidateResult;
+  /** Legacy top-level fields — read as a fallback only. */
+  jwt?: string;
+  bms_url?: string;
+  user_info?: UserIdentity;
+  expired_second?: number;
 }
 
 export interface BmsApiError {

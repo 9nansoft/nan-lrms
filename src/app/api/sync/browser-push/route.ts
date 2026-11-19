@@ -148,8 +148,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
     }
 
+    // The browser's PasteJSON session id — the server's only source of a
+    // fresh HOSxP session (the tunnel's own /api/SessionID belongs to the
+    // local gateway on the ward's workstation and a public tunnel denies it).
+    const bmsSessionId = readBmsSessionId(body.bms_session_id);
+
     runId = await startSyncRun(hospitalId, hcode, 'browser', {
-      bmsSessionId: readBmsSessionId(body.bms_session_id),
+      bmsSessionId,
     });
 
     const sseManager = SseManager.getInstance();
@@ -579,19 +584,42 @@ export async function POST(request: NextRequest) {
     // a trigger: a browser that reports a form it does not have cannot put
     // a row into the cache, and the labels come from the site's own form
     // definition rather than from the push.
-    if (body.assessments && typeof body.assessments === 'object') {
+    //
+    // The pull is bounded by the server's own cursor, so it costs three
+    // index lookups when there is nothing new. That is why it runs for
+    // every hospital that has a HOSxP link and not only when the browser
+    // hinted: a hint that never arrives (a broken browser query) would
+    // otherwise leave the forms empty for good.
+    const hospitalHasHosxp = (
+      await db.query<{ id: string }>(
+        'SELECT id FROM hospital_bms_config WHERE hospital_id = ? AND tunnel_url IS NOT NULL',
+        [hospitalId],
+      )
+    ).length > 0;
+    if (
+      hospitalHasHosxp ||
+      (body.assessments && typeof body.assessments === 'object')
+    ) {
       await appendSyncStep(hospitalId, runId, {
         name: 'persist_assessments',
         status: 'running',
         message: 'Pulling maternity assessment forms from HOSxP.',
       });
       try {
-        const r = await pullMaternityAssessmentsFromHosxp(db, hospitalId);
+        const r = await pullMaternityAssessmentsFromHosxp(db, hospitalId, { bmsSessionId });
         result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
+        // A pull that fetched nothing because it could not run is NOT a
+        // successful pull of zero rows — say so, or the Sync Log reads as a
+        // healthy hospital while its forms sit empty.
+        const failed = r.failed > 0 || r.failedForms.length > 0 || r.error !== null;
+        if (failed) hadWarning = true;
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_assessments',
-          status: 'success',
-          message: `Upserted ${r.upserted} assessment forms (${r.skipped} skipped, ${r.failed} refused by the database).`,
+          status: failed ? 'warning' : 'success',
+          message: failed
+            ? `Assessment sync incomplete: ${r.upserted} stored, ${r.skipped} skipped, ${r.failed} refused by the database.`
+            : `Upserted ${r.upserted} assessment forms (${r.skipped} skipped, ${r.failed} refused by the database).`,
+          detail: r.error ?? undefined,
           counts: { upserted: r.upserted, skipped: r.skipped, failed: r.failed },
         });
       } catch (e) {

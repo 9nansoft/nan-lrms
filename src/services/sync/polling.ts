@@ -1299,19 +1299,38 @@ export async function pollHospital(
     // HOSxP content; the labels come from the site's own form definition.
     // Own try/catch: a failure here must not abort the rest of the cycle.
     try {
-      const syncResult = await pullMaternityAssessmentsFromHosxp(db, hospitalId, { bmsUrl, jwt });
+      const syncResult = await pullMaternityAssessmentsFromHosxp(db, hospitalId, {
+        bmsUrl,
+        jwt,
+        marketplaceToken: options.marketplaceToken ?? null,
+      });
       stats.assessmentRowsUpserted = syncResult.upserted;
 
+      // A pull that could not run is not a pull of zero rows — report it as
+      // a warning with the reason, so the Sync Log never shows a healthy
+      // cycle while the forms sit empty.
+      const incomplete =
+        syncResult.error !== null || syncResult.failedForms.length > 0 || syncResult.failed > 0;
       emitStep(options, {
         name: 'query_assessments',
-        status: 'success',
-        message: `Upserted ${syncResult.upserted} maternity assessment forms.`,
-        counts: { upserted: syncResult.upserted, skipped: syncResult.skipped },
+        status: incomplete ? 'warning' : 'success',
+        message: incomplete
+          ? `Maternity assessment sync incomplete: ${syncResult.upserted} forms stored, ${syncResult.skipped} skipped, ${syncResult.failed} refused by the database.`
+          : `Upserted ${syncResult.upserted} maternity assessment forms.`,
+        detail: syncResult.error ?? undefined,
+        counts: {
+          upserted: syncResult.upserted,
+          skipped: syncResult.skipped,
+          failed: syncResult.failed,
+        },
       });
       logger.info('assessment_sync_complete', {
         hospitalId,
         formsUpserted: syncResult.upserted,
         formsSkipped: syncResult.skipped,
+        formsFailed: syncResult.failed,
+        failedForms: syncResult.failedForms,
+        error: syncResult.error,
       });
     } catch (assessmentError) {
       emitStep(options, {

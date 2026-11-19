@@ -238,3 +238,90 @@ describe('POST /api/sync/browser-push — maternity assessment forms', () => {
     expect(step!.counts).toMatchObject({ upserted: 1, skipped: 0 });
   });
 });
+
+describe('POST /api/sync/browser-push — the server needs a HOSxP session', () => {
+  beforeEach(async () => {
+    db = await createTestDb();
+    await new SeedOrchestrator().run(db);
+    mockSessionUser = testSessionUser({ hospitalCode: HCODE });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A config without a stored token: the server must mint one. */
+  async function seedConfigWithoutToken(hid: string) {
+    const now = new Date().toISOString();
+    await db.execute('DELETE FROM hospital_bms_config WHERE hospital_id = ?', [hid]);
+    await db.execute(
+      `INSERT INTO hospital_bms_config
+         (id, hospital_id, tunnel_url, session_jwt, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, ?, ?)`,
+      ['hbc-no-token', hid, 'http://tunnel.test', now, now],
+    );
+  }
+
+  function mockSessionExchange() {
+    vi.spyOn(BmsSessionClient.prototype, 'getSessionId').mockRejectedValue(
+      new Error('Access Denied'),
+    );
+    return vi.spyOn(BmsSessionClient.prototype, 'validateSession').mockResolvedValue({
+      sessionId: 'SID-1',
+      jwt: 'jwt-fresh',
+      bmsUrl: 'http://tunnel.test',
+      userInfo: {
+        name: 'Test',
+        position: 'nurse',
+        hospital_code: HCODE,
+        department: 'OB',
+        is_hr_admin: false,
+        is_director: false,
+      },
+      expiresAt: new Date(Date.now() + 3600_000),
+      expiredSecond: 3600,
+    });
+  }
+
+  it('exchanges the session id the browser pushed for a bearer token and pulls', async () => {
+    const hid = await hospitalId();
+    await seedConfigWithoutToken(hid);
+    const validate = mockSessionExchange();
+    mockHosxp();
+
+    const res = await POST(
+      jsonRequest({ assessments: { hints: {} }, bms_session_id: 'SID-1' }) as never,
+    );
+    expect(res.status).toBe(200);
+    expect(validate).toHaveBeenCalledWith('SID-1', expect.any(String));
+    const body = await res.json();
+    expect(body.assessments).toMatchObject({ upserted: 1 });
+
+    const stored = await db.query<{ session_jwt: string }>(
+      'SELECT session_jwt FROM hospital_bms_config WHERE hospital_id = ?',
+      [hid],
+    );
+    expect(stored[0].session_jwt).toBe('jwt-fresh');
+  });
+
+  it('reports the failure in the sync trail when no session can be had', async () => {
+    const hid = await hospitalId();
+    await seedConfigWithoutToken(hid);
+    // Neither source can produce a session: the tunnel denies its
+    // /api/SessionID and no session id was pushed.
+    vi.spyOn(BmsSessionClient.prototype, 'getSessionId').mockRejectedValue(
+      new Error('Access Denied'),
+    );
+    vi.spyOn(BmsSessionClient.prototype, 'validateSession').mockRejectedValue(
+      new Error('No Action'),
+    );
+
+    const res = await POST(jsonRequest({ assessments: { hints: {} } }) as never);
+    expect(res.status).toBe(200);
+    const run = await finalizedRun(hid);
+    const step = run.steps.find((s) => s.name === 'persist_assessments' && s.status !== 'running');
+    expect(step).toBeDefined();
+    // A pull that could not run must not look like a healthy pull of zero rows.
+    expect(step!.status).toBe('warning');
+  });
+});
