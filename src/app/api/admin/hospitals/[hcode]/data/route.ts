@@ -190,6 +190,23 @@ export async function DELETE(
     // is running.
     const stopped = stopOnboardingHosxpSync(hospitalId);
 
+    // Block every sync path BEFORE the deletes. The flag is what the sync
+    // paths check, and a pull that is in flight while the deletes run would
+    // put the data back after it was wiped. The blanked session forces a
+    // fresh onboarding instead of a cached session.
+    //
+    // The flag is set AGAIN at the end of this handler, together with the
+    // rest of the status: a re-onboarding that cleared the flag while the
+    // deletes were running must not leave the hospital unblocked.
+    const purgedAt = new Date().toISOString();
+    await db.execute(
+      `UPDATE hospital_bms_config
+          SET data_purged_at = ?, session_jwt = NULL,
+              session_expires_at = NULL, updated_at = ?
+        WHERE hospital_id = ?`,
+      [purgedAt, purgedAt, hospitalId],
+    );
+
     // Snapshot counts BEFORE delete so the response can show what was wiped.
     const counts = await readCounts(db, hospitalId);
 
@@ -267,7 +284,6 @@ export async function DELETE(
 
     // Reset header so the dashboard shows "not yet synced" instead of stale
     // last-sync timestamps that no longer correspond to any cached rows.
-    const purgedAt = new Date().toISOString();
     await db.execute(
       `UPDATE hospitals
           SET connection_status = 'UNKNOWN',

@@ -238,6 +238,29 @@ describe('syncMaternityAssessments', () => {
     );
     expect(stored[0].patient_id).toBeNull();
   });
+
+  it('writes nothing when the hospital data was purged', async () => {
+    // The admin wiped this hospital's data: every sync path is suspended
+    // until it is re-onboarded, so the forms must not come back.
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO hospital_bms_config
+         (id, hospital_id, tunnel_url, data_purged_at, created_at, updated_at)
+       VALUES ('hbc-purged-asm', ?, 'https://tunnel.test', ?, ?, ?)`,
+      [HOSPITAL_ID, '2026-11-01T00:00:00.000Z', now, now],
+    );
+
+    const r = await syncMaternityAssessments(db, HOSPITAL_ID, {
+      forms: FORM_ROWS,
+      items: ITEM_ROWS,
+      records: { asm_lr_record_after_birth_nan: [rawRow()] },
+    });
+
+    expect(r.purged).toBe(true);
+    expect(r.upserted).toBe(0);
+    const stored = await db.query('SELECT id FROM cached_maternity_assessments');
+    expect(stored).toHaveLength(0);
+  });
 });
 
 describe('read back', () => {
@@ -642,6 +665,28 @@ describe('pullMaternityAssessmentsFromHosxp', () => {
 
     expect(r.upserted).toBe(0);
     expect(r.error).toMatch(/no HOSxP session/);
+  });
+
+  it('writes nothing for a hospital whose data was purged', async () => {
+    // The scheduler skips a purged hospital — but the guard that matters is
+    // at the write: a pull that was already running when the admin purged
+    // must not put the data back.
+    await seedBmsConfig();
+    await db.execute(
+      'UPDATE hospital_bms_config SET data_purged_at = ? WHERE hospital_id = ?',
+      ['2026-11-01T00:00:00.000Z', HOSPITAL_ID],
+    );
+    const spy = mockHosxp();
+
+    const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID);
+
+    expect(r.purged).toBe(true);
+    expect(r.upserted).toBe(0);
+    expect(r.error).toMatch(/purged/);
+    // HOSxP was never even asked.
+    expect(spy).not.toHaveBeenCalled();
+    const stored = await db.query('SELECT id FROM cached_maternity_assessments');
+    expect(stored).toHaveLength(0);
   });
 
   it('sends the marketplace token with every query (HOSxP randomises HN without it)', async () => {

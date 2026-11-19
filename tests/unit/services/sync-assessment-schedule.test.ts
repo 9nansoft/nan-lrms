@@ -38,6 +38,7 @@ function pullResult(overrides: Partial<AssessmentSyncResult> = {}): AssessmentSy
     skipped: 0,
     failed: 0,
     deleted: 0,
+    purged: false,
     persistedPks: {},
     unusablePks: {},
     failedPks: {},

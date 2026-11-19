@@ -103,6 +103,11 @@ export interface AssessmentSyncResult {
   failed: number;
   /** Cached rows removed because HOSxP does not have them any more. */
   deleted: number;
+  /**
+   * The hospital's data was purged: the pull wrote nothing, and the data
+   * the admin erased does not come back until the hospital is re-onboarded.
+   */
+  purged: boolean;
   /** Per form: the keys that reached the cache. */
   persistedPks: Record<string, string[]>;
   /** Per form: the keys that can never be stored (the server's own verdict
@@ -189,6 +194,26 @@ function sameTunnel(configuredTunnel: string, sessionUrl: string): boolean {
   if (configuredHost === sessionHost) return true;
   const localHosts = ['127.0.0.1', 'localhost', '[::1]'];
   return localHosts.includes(configuredHost);
+}
+
+/**
+ * True when the hospital's data was purged and the hospital was not
+ * re-onboarded since.
+ *
+ * The purge deletes the cache and suspends every sync path until an admin
+ * re-onboards the hospital: the data the admin erased must not come back. A
+ * hospital with no BMS config row was never purged — the flag lives on that
+ * row.
+ */
+export async function isHospitalPurged(
+  db: DatabaseAdapter,
+  hospitalId: string,
+): Promise<boolean> {
+  const rows = await db.query<{ data_purged_at: string | null }>(
+    'SELECT data_purged_at FROM hospital_bms_config WHERE hospital_id = ?',
+    [hospitalId],
+  );
+  return !!rows[0]?.data_purged_at;
 }
 
 /** A timestamp we can store and order by — rejects HOSxP zero dates. */
@@ -350,7 +375,7 @@ export async function syncMaternityAssessments(
     }
   }
 
-  const { upserted, failed, persistedPks, failedPks } = await upsertMaternityAssessments(
+  const { upserted, failed, persistedPks, failedPks, purged } = await upsertMaternityAssessments(
     db,
     hospitalId,
     normalized,
@@ -360,6 +385,7 @@ export async function syncMaternityAssessments(
     skipped,
     failed,
     deleted: 0,
+    purged,
     persistedPks,
     unusablePks,
     failedPks,
@@ -387,25 +413,40 @@ export async function upsertMaternityAssessments(
   failed: number;
   persistedPks: Record<string, string[]>;
   failedPks: Record<string, string[]>;
+  /** The hospital was purged while the batch was being written — the write
+   *  was refused and the batch stopped. */
+  purged: boolean;
 }> {
   if (rows.length === 0) {
-    return { upserted: 0, failed: 0, persistedPks: {}, failedPks: {} };
+    return { upserted: 0, failed: 0, persistedPks: {}, failedPks: {}, purged: false };
   }
   const now = new Date().toISOString();
   let upserted = 0;
   let failed = 0;
+  let purged = false;
   const persistedPks: Record<string, string[]> = {};
   const failedPks: Record<string, string[]> = {};
   const pkOf = (row: MaternityAssessmentRow) => row.sourcePk.slice(row.sourcePk.indexOf(':') + 1);
 
   for (const row of rows) {
     try {
-      await db.execute(
+      // The purge guard lives IN the write, not beside it: the check and the
+      // insert are one statement, so there is no moment between them in
+      // which an admin's purge could slip in and be written over. A hospital
+      // whose data was purged must not get it back until it is re-onboarded.
+      //
+      // A hospital with no BMS config row was never purged — the flag lives
+      // on that row — so it writes as before.
+      const written = await db.query<{ id: string }>(
         `INSERT INTO cached_maternity_assessments (
            id, hospital_id, patient_id, an, hn, source_system, source_pk,
            form_key, form_table, form_name, recorded_at, recorded_date,
            entry_staff, fields_json, synced_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         )
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          WHERE NOT EXISTS (
+            SELECT 1 FROM hospital_bms_config
+             WHERE hospital_id = ? AND data_purged_at IS NOT NULL)
          ON CONFLICT (hospital_id, source_system, source_pk) DO UPDATE SET
            patient_id = EXCLUDED.patient_id,
            an = EXCLUDED.an,
@@ -418,7 +459,8 @@ export async function upsertMaternityAssessments(
            entry_staff = EXCLUDED.entry_staff,
            fields_json = EXCLUDED.fields_json,
            synced_at = EXCLUDED.synced_at,
-           updated_at = EXCLUDED.updated_at`,
+           updated_at = EXCLUDED.updated_at
+         RETURNING id`,
         [
           uuidv4(),
           hospitalId,
@@ -437,8 +479,17 @@ export async function upsertMaternityAssessments(
           now,
           now,
           now,
+          hospitalId,
         ],
       );
+      if (written.length === 0) {
+        // The hospital was purged while this batch was being written. The
+        // row was refused, so the rest of the batch must not be written
+        // either — the data the admin erased must not come back a row at a
+        // time.
+        purged = true;
+        break;
+      }
       upserted += 1;
       (persistedPks[row.formTable] ??= []).push(pkOf(row));
     } catch {
@@ -448,7 +499,7 @@ export async function upsertMaternityAssessments(
     }
   }
 
-  return { upserted, failed, persistedPks, failedPks };
+  return { upserted, failed, persistedPks, failedPks, purged };
 }
 
 // ─── Cursors ────────────────────────────────────────────────────────────────
@@ -879,6 +930,7 @@ export async function pullMaternityAssessmentsFromHosxp(
     skipped: 0,
     failed: 0,
     deleted: 0,
+    purged: false,
     persistedPks: {},
     unusablePks: {},
     failedPks: {},
@@ -909,6 +961,21 @@ export async function pullMaternityAssessmentsFromHosxp(
     appIdentifier: APP_IDENTIFIER,
     marketplaceToken: session.marketplaceToken,
   };
+
+  // The purge guard. The admin deleted this hospital's data and suspended
+  // every sync path until it is re-onboarded — a pull must not bring the
+  // data back. Checked before anything is read, and again before anything is
+  // written: the purge can land while HOSxP is being read.
+  if (await isHospitalPurged(db, hospitalId)) {
+    logger.info('assessment_sync_blocked_purged', { hospitalId });
+    return {
+      ...empty,
+      purged: true,
+      error:
+        'the hospital data was purged — the pull wrote nothing; re-onboard the hospital to resume',
+    };
+  }
+
   const cursors = await readAssessmentCursors(db, hospitalId);
   const records: AssessmentRecordsByTable = {};
   const authoritativePks: Record<string, string[]> = {};
@@ -1033,6 +1100,20 @@ export async function pullMaternityAssessmentsFromHosxp(
           ? `HOSxP query failed for: ${failedForms.join(', ')}`
           : null,
       reconcileError,
+    };
+  }
+
+  // The purge can land while HOSxP was being read. Nothing of a purged
+  // hospital may be written — not the forms, not the label cache, not the
+  // cursor.
+  if (await isHospitalPurged(db, hospitalId)) {
+    logger.info('assessment_sync_blocked_purged', { hospitalId });
+    return {
+      ...empty,
+      failedForms,
+      purged: true,
+      error:
+        'the hospital data was purged while the pull was running — nothing was written; re-onboard the hospital to resume',
     };
   }
 
@@ -1161,6 +1242,16 @@ export async function pullMaternityAssessmentsFromHosxp(
   result.reconcileError = reconcileError;
   result.error =
     failedForms.length > 0 ? `HOSxP query failed for: ${failedForms.join(', ')}` : null;
+
+  if (result.purged) {
+    // The purge landed between the check and the write: the write refused
+    // the rows, so nothing was stored. The cursor must not move either — a
+    // purged hospital must keep no state at all until it is re-onboarded.
+    logger.info('assessment_sync_blocked_purged', { hospitalId });
+    result.error =
+      'the hospital data was purged while the pull was running — nothing was written; re-onboard the hospital to resume';
+    return result;
+  }
 
   // The cursor moves only over the rows the server itself read and stored.
   const nextByTable: Record<string, string | null> = {};

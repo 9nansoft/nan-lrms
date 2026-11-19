@@ -113,6 +113,7 @@ async function pullHospital(db: DatabaseAdapter, hospitalId: string): Promise<vo
       hospitalId,
       upserted: result.upserted,
       deleted: result.deleted,
+      purged: result.purged,
       failedForms: result.failedForms,
       metadataError: result.metadataError,
       reconcileError: result.reconcileError,
