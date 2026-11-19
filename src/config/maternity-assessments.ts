@@ -66,6 +66,29 @@ export const MATERNITY_ASSESSMENT_FORMS: readonly MaternityAssessmentForm[] = [
  */
 export const ASSESSMENT_METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How far back the reconciliation pass looks.
+ *
+ * The pull is cursor-driven, so a row HOSxP deleted — or one inserted with a
+ * key BELOW the cursor — is never read again and would stay in the cache for
+ * ever. The reconciliation pass re-reads the recent window whatever the key
+ * is, and drops the cached rows the window no longer holds.
+ *
+ * A week is long enough to cover a form a nurse wrote last week and then
+ * deleted, and short enough to keep the window small.
+ */
+export const ASSESSMENT_RECONCILE_WINDOW_DAYS = 7;
+
+/**
+ * How often one hospital's reconciliation pass runs.
+ *
+ * The pass re-reads a window of rows and rewrites them — far more work than
+ * the incremental pull, and it finds nothing most of the time. An hour is
+ * often enough for a deleted form to disappear from the cache, and rare
+ * enough to keep the extra reads off every cycle.
+ */
+export const ASSESSMENT_RECONCILE_INTERVAL_MS = 60 * 60 * 1000;
+
 export function assessmentFormByKey(key: string): MaternityAssessmentForm | undefined {
   return MATERNITY_ASSESSMENT_FORMS.find((f) => f.key === key);
 }

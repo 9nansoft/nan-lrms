@@ -25,8 +25,12 @@ import {
   readAssessmentCursors,
   resolveCursorAdvance,
   pullMaternityAssessmentsFromHosxp,
+  pruneReconciledAssessments,
 } from '@/services/sync/maternity-assessment';
-import { getPatientMaternityAssessments } from '@/services/maternity-assessments';
+import {
+  getPatientMaternityAssessments,
+  MAX_CACHED_ASSESSMENTS_PER_ADMISSION,
+} from '@/services/maternity-assessments';
 import {
   writeAssessmentMetadataCache,
   UNUSED_FORM_ID,
@@ -237,6 +241,28 @@ describe('syncMaternityAssessments', () => {
 });
 
 describe('read back', () => {
+  /** `count` cached forms of one admission, oldest first (one minute apart). */
+  async function insertCachedForms(
+    count: number,
+    options: { an?: string; hospitalId?: string; idPrefix?: string } = {},
+  ): Promise<void> {
+    const an = options.an ?? 'AN-ASM-1';
+    const hospitalId = options.hospitalId ?? HOSPITAL_ID;
+    const prefix = options.idPrefix ?? 'cma';
+    await db.execute(
+      `INSERT INTO cached_maternity_assessments
+         (id, hospital_id, an, source_system, source_pk, form_key, form_table,
+          recorded_at, fields_json, synced_at, created_at, updated_at)
+       SELECT ? || '-' || lpad(g.n::text, 4, '0'), ?, ?, 'HOSXP',
+              ? || '-src-' || g.n::text, 'after_birth',
+              'asm_lr_record_after_birth_nan',
+              ?::timestamptz + make_interval(mins => g.n),
+              '[]'::jsonb, now(), now(), now()
+         FROM generate_series(1, ?) AS g(n)`,
+      [prefix, hospitalId, an, prefix, '2026-01-01T00:00:00.000Z', count],
+    );
+  }
+
   it('decrypts the names and returns the DTO', async () => {
     await syncMaternityAssessments(db, HOSPITAL_ID, {
       forms: FORM_ROWS,
@@ -248,6 +274,39 @@ describe('read back', () => {
     expect(dtos[0].formKey).toBe('after_birth');
     expect(dtos[0].fields.find((f) => f.column === 'asm_lk6')?.value).toBe('พญ.ศุภิสรา ชลยุทธ');
     expect(dtos[0].fields.find((f) => f.column === 'asm_lk6')?.encrypted).toBe(false);
+  });
+
+  it('caps the read and keeps the newest forms', async () => {
+    // An admission with a long stay accumulates a form per nursing shift.
+    // The reader only shows the newest ones, so the read is bounded — and
+    // the bound must not throw away the NEWEST rows.
+    const total = MAX_CACHED_ASSESSMENTS_PER_ADMISSION + 5;
+    await insertCachedForms(total);
+
+    const dtos = await getPatientMaternityAssessments(db, 'AN-ASM-1', HOSPITAL_ID);
+
+    expect(dtos).toHaveLength(MAX_CACHED_ASSESSMENTS_PER_ADMISSION);
+    expect(dtos[0].id).toBe('cma-0205');
+    expect(dtos[dtos.length - 1].id).toBe('cma-0006');
+    // The oldest rows are the ones dropped.
+    expect(dtos.map((d) => d.id)).not.toContain('cma-0005');
+  });
+
+  it('reads nothing of another admission or another hospital', async () => {
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO hospitals (id, hcode, name, level, created_at, updated_at)
+         VALUES ('h-asm-other', '10799', 'Other', 'M2', ?, ?)`,
+      [now, now],
+    );
+    await insertCachedForms(3);
+    await insertCachedForms(3, { an: 'AN-OTHER', idPrefix: 'cma-an' });
+    await insertCachedForms(3, { hospitalId: 'h-asm-other', idPrefix: 'cma-h' });
+
+    const dtos = await getPatientMaternityAssessments(db, 'AN-ASM-1', HOSPITAL_ID);
+
+    expect(dtos).toHaveLength(3);
+    expect(dtos.every((d) => d.id.startsWith('cma-'))).toBe(true);
   });
 });
 
@@ -697,6 +756,198 @@ describe('pullMaternityAssessmentsFromHosxp', () => {
     expect(r.error).toMatch(/no HOSxP session/);
   });
 
+  // ─── The reconciliation pass ──────────────────────────────────────────────
+  //
+  // The cursor pull only ever sees the keys ABOVE the cursor. A row HOSxP
+  // deleted — or one inserted with a key below the cursor — is therefore
+  // never read again and stays in the cache for ever. The reconciliation pass
+  // re-reads the recent window whatever the key is, and drops the cached rows
+  // the window no longer holds.
+  describe('reconciliation', () => {
+    const TABLE = 'asm_lr_record_after_birth_nan';
+
+    /** The plain timestamp of a moment, the way HOSxP writes it down. */
+    function stamp(offsetMs: number): string {
+      return new Date(Date.now() + offsetMs).toISOString().slice(0, 19).replace('T', ' ');
+    }
+    /** The same stamp with the separator HOSxP uses in a datetime column. */
+    function headStamp(offsetMs: number): string {
+      return new Date(Date.now() + offsetMs).toISOString().slice(0, 19);
+    }
+
+    const INSIDE_WINDOW = -24 * 60 * 60 * 1000; // yesterday
+    const OUTSIDE_WINDOW = -30 * 24 * 60 * 60 * 1000; // a month ago
+
+    /** A cached row of the after-birth form. */
+    async function insertCached(pk: string, recordedAt: string): Promise<void> {
+      await db.execute(
+        `INSERT INTO cached_maternity_assessments
+           (id, hospital_id, an, source_system, source_pk, form_key, form_table,
+            recorded_at, fields_json, synced_at, created_at, updated_at)
+         VALUES (?, ?, 'AN-ASM-1', 'HOSXP', ?, 'after_birth', ?, ?::timestamptz,
+                 '[]'::jsonb, now(), now(), now())`,
+        [`cma-${pk}`, HOSPITAL_ID, `${TABLE}:${pk}`, TABLE, recordedAt],
+      );
+    }
+
+    /** The keys of the cached rows of the after-birth form. */
+    async function cachedPks(): Promise<string[]> {
+      const rows = await db.query<{ source_pk: string }>(
+        `SELECT source_pk FROM cached_maternity_assessments
+          WHERE hospital_id = ? AND form_table = ? ORDER BY source_pk`,
+        [HOSPITAL_ID, TABLE],
+      );
+      return rows.map((row) => row.source_pk.slice(row.source_pk.indexOf(':') + 1));
+    }
+
+    /** The mock that answers the cursor query and the window query apart. */
+    function mockWindowed(
+      options: {
+        cursorRows?: Record<string, unknown>[];
+        windowRows?: Record<string, unknown>[];
+        failWindow?: boolean;
+      } = {},
+    ) {
+      return vi.spyOn(BmsSessionClient.prototype, 'executeQuery').mockImplementation(
+        async (sql: string) => {
+          const wrap = (data: Record<string, unknown>[]) => ({
+            data,
+            field: [],
+            field_name: [],
+            record_count: data.length,
+          });
+          if (sql.includes('FROM assessment_form')) {
+            return wrap([
+              {
+                assessment_form_id: 309,
+                assessment_form_table: TABLE,
+                assessment_form_name: '[LR]-แบบฟอร์มหลังคลอด',
+              },
+            ]);
+          }
+          if (sql.includes('FROM assessment_items')) return wrap([]);
+          if (sql.includes(`FROM ${TABLE}`)) {
+            if (sql.includes('assessment_head_datetime >=')) {
+              if (options.failWindow) throw new Error('window query failed');
+              return wrap(options.windowRows ?? []);
+            }
+            return wrap(options.cursorRows ?? []);
+          }
+          return wrap([]);
+        },
+      );
+    }
+
+    /** The window queries of a pull. */
+    function windowQueries(spy: ReturnType<typeof mockWindowed>): string[] {
+      return spy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((sql) => sql.includes('assessment_head_datetime >='));
+    }
+
+    it('does not read the window unless the pass is asked for', async () => {
+      await seedBmsConfig();
+      const spy = mockWindowed();
+
+      await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID);
+
+      expect(windowQueries(spy)).toHaveLength(0);
+    });
+
+    it('drops the cached rows the window no longer holds', async () => {
+      await seedBmsConfig();
+      await insertCached('7', stamp(INSIDE_WINDOW));
+      await insertCached('9', stamp(INSIDE_WINDOW));
+      await insertCached('3', stamp(OUTSIDE_WINDOW));
+      // HOSxP still has the row 7 — the row 9 is gone.
+      mockWindowed({
+        windowRows: [rawRow({ asm_lr_record_after_birth_nan_id: 7, head_datetime: headStamp(INSIDE_WINDOW) })],
+      });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { reconcile: true });
+
+      expect(r.deleted).toBe(1);
+      const pks = await cachedPks();
+      expect(pks).toContain('7');
+      expect(pks).not.toContain('9');
+      // A row from before the window is not the window's business.
+      expect(pks).toContain('3');
+    });
+
+    it('stores a row the cursor pull would never see again', async () => {
+      // The cursor is already past this row's key: only the window read can
+      // bring it back.
+      await seedBmsConfig();
+      await advanceAssessmentCursors(db, HOSPITAL_ID, { [TABLE]: '9999' });
+      mockWindowed({
+        windowRows: [rawRow({ asm_lr_record_after_birth_nan_id: 7, head_datetime: headStamp(INSIDE_WINDOW) })],
+      });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { reconcile: true });
+
+      expect(r.upserted).toBe(1);
+      expect(await cachedPks()).toContain('7');
+    });
+
+    it('stores a row the cursor pull and the window read both saw once', async () => {
+      await seedBmsConfig();
+      const row = rawRow({
+        asm_lr_record_after_birth_nan_id: 7,
+        head_datetime: headStamp(INSIDE_WINDOW),
+      });
+      mockWindowed({ cursorRows: [row], windowRows: [row] });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { reconcile: true });
+
+      expect(r.upserted).toBe(1);
+      expect((await cachedPks()).filter((pk) => pk === '7')).toHaveLength(1);
+    });
+
+    it('keeps every cached row when the window read failed', async () => {
+      await seedBmsConfig();
+      await insertCached('9', stamp(INSIDE_WINDOW));
+      mockWindowed({ failWindow: true });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { reconcile: true });
+
+      // A read that failed does not know what is missing — nothing is dropped.
+      expect(r.deleted).toBe(0);
+      expect(r.reconcileError).toContain(TABLE);
+      expect(await cachedPks()).toContain('9');
+    });
+
+    it('prunes nothing when the window read did not see the whole window', async () => {
+      // The read hit the row limit: it knows what it saw, not what it did
+      // not see. Guessing would delete live forms.
+      await seedBmsConfig();
+      await insertCached('9', stamp(INSIDE_WINDOW));
+
+      const pruned = await pruneReconciledAssessments(
+        db,
+        HOSPITAL_ID,
+        { [TABLE]: [rawRow({ asm_lr_record_after_birth_nan_id: 7, head_datetime: headStamp(INSIDE_WINDOW) })] },
+        { [TABLE]: false },
+        stamp(-7 * 24 * 60 * 60 * 1000),
+      );
+
+      expect(pruned.deleted).toBe(0);
+      expect(await cachedPks()).toContain('9');
+    });
+
+    it('drops the cached rows of a window HOSxP emptied', async () => {
+      // HOSxP has no row of the form any more: every cached row of the
+      // window is gone and must not stay behind.
+      await seedBmsConfig();
+      await insertCached('9', stamp(INSIDE_WINDOW));
+      mockWindowed({ windowRows: [] });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { reconcile: true });
+
+      expect(r.deleted).toBe(1);
+      expect(await cachedPks()).not.toContain('9');
+    });
+  });
+
   // ─── The label cache ──────────────────────────────────────────────────────
   //
   // The labels of a form change only when the SITE changes its form, so the
@@ -832,6 +1083,40 @@ describe('pullMaternityAssessmentsFromHosxp', () => {
       const fields = await storedFields();
       expect(fields).toContain('asm_text2');
       expect(fields).not.toContain('Systolic');
+    });
+
+    it('reports the metadata failure — the pull of the rows itself still worked', async () => {
+      // The rows landed, but they carry the raw HOSxP column names. The admin
+      // has to see that: a pull that reports itself as healthy while every
+      // field reads `asm_text12` is not healthy.
+      await seedBmsConfig();
+      mockHosxp({ failMetadata: true });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(r.metadataError).toContain('metadata');
+      // The pull itself was fine — only the labels are missing.
+      expect(r.error).toBeNull();
+      expect(r.upserted).toBe(1);
+    });
+
+    it('reports no metadata failure when the labels came from the cache', async () => {
+      await seedBmsConfig();
+      mockHosxp({ failMetadata: true });
+      await writeAssessmentMetadataCache(
+        db,
+        HOSPITAL_ID,
+        CACHE_FORMS,
+        ITEM_ROWS,
+        new Date(Date.now() - 25 * 60 * 60 * 1000),
+      );
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      // The read failed, but the rows were labelled from the cache — the
+      // failure is still reported, because the next read may find nothing.
+      expect(r.metadataError).toContain('metadata');
+      expect(await storedFields()).toContain('Systolic');
     });
 
     it('re-reads the metadata when a row was recorded under a form version the cache does not know', async () => {

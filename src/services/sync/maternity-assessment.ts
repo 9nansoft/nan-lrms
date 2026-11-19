@@ -31,10 +31,16 @@ import { encrypt, getEncryptionKey, decryptSafe } from '@/lib/encryption';
 import { BmsSessionClient } from '@/lib/bms-session';
 import { APP_IDENTIFIER } from '@/lib/bms-browser-client';
 import { logger } from '@/lib/logger';
-import { buildAssessmentItemsSql, buildAssessmentRecordsSqlFor } from '@/config/hosxp-queries';
+import {
+  ASSESSMENT_ROW_LIMIT,
+  buildAssessmentItemsSql,
+  buildAssessmentRecordsSqlFor,
+  buildAssessmentReconcileSqlFor,
+} from '@/config/hosxp-queries';
 import {
   MATERNITY_ASSESSMENT_FORMS,
   ASSESSMENT_METADATA_CACHE_TTL_MS,
+  ASSESSMENT_RECONCILE_WINDOW_DAYS,
   assessmentFormByTable,
   type MaternityAssessmentForm,
   type MaternityAssessmentKey,
@@ -95,6 +101,8 @@ export interface AssessmentSyncResult {
   skipped: number;
   /** Rows the database refused — isolated, the rest of the batch landed. */
   failed: number;
+  /** Cached rows removed because HOSxP does not have them any more. */
+  deleted: number;
   /** Per form: the keys that reached the cache. */
   persistedPks: Record<string, string[]>;
   /** Per form: the keys that can never be stored (the server's own verdict
@@ -106,6 +114,18 @@ export interface AssessmentSyncResult {
   failedForms: string[];
   /** Why the pull could not run at all (no HOSxP session). */
   error: string | null;
+  /**
+   * Why the form labels could not be read. The rows still land — with their
+   * raw HOSxP column names when no cached label was available — so this must
+   * be reported: a pull that looks healthy while every field reads
+   * `asm_text12` is not healthy.
+   */
+  metadataError: string | null;
+  /**
+   * Why the reconciliation pass could not complete. The pull itself is
+   * unaffected, but rows HOSxP deleted may still sit in the cache.
+   */
+  reconcileError: string | null;
 }
 
 // ─── Column widths (mirror src/db/tables/cached-maternity-assessments.ts) ──
@@ -339,11 +359,14 @@ export async function syncMaternityAssessments(
     upserted,
     skipped,
     failed,
+    deleted: 0,
     persistedPks,
     unusablePks,
     failedPks,
     failedForms: [],
     error: null,
+    metadataError: null,
+    reconcileError: null,
   };
 }
 
@@ -685,6 +708,121 @@ export async function advanceAssessmentCursors(
 }
 
 /**
+ * The start of the reconciliation window, as the plain timestamp BOTH sides
+ * compare against.
+ *
+ * HOSxP stores its clock as a local time without a zone, and the cache stores
+ * that very string. The window read and the cache read therefore compare
+ * NAIVE values — and they must compare against the SAME literal, or the two
+ * sides would not agree on which rows are inside the window.
+ *
+ * The literal is the UTC clock without a zone. The hospital's clock is a few
+ * hours ahead of it; a window of days does not care, and both sides shift
+ * together.
+ */
+function reconcileWindowStart(now: Date): string {
+  const start = new Date(now.getTime() - ASSESSMENT_RECONCILE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  return start.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/**
+ * The rows of one form to store: the cursor pull and the reconciliation
+ * window, each row once.
+ *
+ * The window read repeats the rows the cursor pull already got — the window
+ * is a re-read, not a new set. The cursor row wins, they are the same row.
+ */
+function mergeAssessmentRows(
+  cursorRows: Record<string, unknown>[],
+  windowRows: Record<string, unknown>[],
+  pkColumn: string,
+): Record<string, unknown>[] {
+  const merged = new Map<string, Record<string, unknown>>();
+  for (const row of cursorRows) merged.set(String(row[pkColumn]), row);
+  for (const row of windowRows) {
+    const key = String(row[pkColumn]);
+    if (!merged.has(key)) merged.set(key, row);
+  }
+  return [...merged.values()];
+}
+
+/**
+ * Drop the cached rows of one form that HOSxP no longer has.
+ *
+ * The window read is the authority for the window: a cached row whose
+ * recording time falls inside the window and whose key the read did NOT
+ * return is gone from HOSxP — deleted, or moved to another admission — and
+ * must not stay in the cache for ever.
+ */
+export async function pruneDeletedAssessments(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  table: string,
+  seenPks: Set<string>,
+  since: string,
+): Promise<number> {
+  const cached = await db.query<{ source_pk: string }>(
+    `SELECT source_pk
+       FROM cached_maternity_assessments
+      WHERE hospital_id = ? AND form_table = ? AND recorded_at >= ?`,
+    [hospitalId, table, since],
+  );
+  let deleted = 0;
+  for (const row of cached) {
+    const pk = row.source_pk.slice(row.source_pk.indexOf(':') + 1);
+    if (seenPks.has(pk)) continue;
+    await db.execute(
+      `DELETE FROM cached_maternity_assessments
+        WHERE hospital_id = ? AND source_system = 'HOSXP' AND source_pk = ?`,
+      [hospitalId, row.source_pk],
+    );
+    deleted += 1;
+  }
+  return deleted;
+}
+
+/**
+ * Drop the cached rows the reconciliation window no longer holds.
+ *
+ * A form whose window read FAILED, or that hit the row limit, is left alone:
+ * such a read does not know what is missing, and guessing would delete live
+ * forms. The pass reports what it could not do instead.
+ */
+export async function pruneReconciledAssessments(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  windowRecords: AssessmentRecordsByTable,
+  windowComplete: Record<string, boolean>,
+  since: string,
+): Promise<{ deleted: number; error: string | null }> {
+  let deleted = 0;
+  const failed: string[] = [];
+  for (const form of MATERNITY_ASSESSMENT_FORMS) {
+    if (!windowComplete[form.table]) continue;
+    const rows = windowRecords[form.table] ?? [];
+    const seen = new Set(
+      rows
+        .map((row) => String(row[form.pkColumn]))
+        .filter((key) => /^\d{1,18}$/.test(key)),
+    );
+    try {
+      deleted += await pruneDeletedAssessments(db, hospitalId, form.table, seen, since);
+    } catch (error) {
+      failed.push(form.table);
+      logger.error('assessment_reconcile_prune_failed', {
+        hospitalId,
+        formTable: form.table,
+        error: errorMessage(error),
+      });
+    }
+  }
+  return {
+    deleted,
+    error: failed.length > 0 ? `could not prune stale forms of: ${failed.join(', ')}` : null,
+  };
+}
+
+/**
  * Pull the maternity assessment forms from HOSxP and store them.
  *
  * The SERVER reads the rows, so what lands in the cache is the hospital's own
@@ -725,17 +863,29 @@ export async function pullMaternityAssessmentsFromHosxp(
      * The clock the cache freshness is judged against (defaults to now).
      */
     now?: Date;
+    /**
+     * Reconcile the recent window against the cache: re-read the rows of the
+     * last ASSESSMENT_RECONCILE_WINDOW_DAYS days whatever their key is, and
+     * drop the cached rows HOSxP no longer has.
+     *
+     * Off by default — the pass rewrites a window of rows and finds nothing
+     * most of the time. The scheduler turns it on once an hour.
+     */
+    reconcile?: boolean;
   } = {},
 ): Promise<AssessmentSyncResult> {
   const empty: AssessmentSyncResult = {
     upserted: 0,
     skipped: 0,
     failed: 0,
+    deleted: 0,
     persistedPks: {},
     unusablePks: {},
     failedPks: {},
     failedForms: [],
     error: null,
+    metadataError: null,
+    reconcileError: null,
   };
   const session =
     options.bmsUrl && options.jwt
@@ -763,6 +913,18 @@ export async function pullMaternityAssessmentsFromHosxp(
   const records: AssessmentRecordsByTable = {};
   const authoritativePks: Record<string, string[]> = {};
   const failedForms: string[] = [];
+
+  // The reconciliation pass re-reads the recent window of every form — the
+  // rows the cursor pull will never see again, because it only ever asks for
+  // the keys ABOVE the cursor. Off by default: it rewrites a window of rows
+  // and finds nothing most of the time. The scheduler turns it on once an
+  // hour.
+  const reconcile = options.reconcile === true;
+  const now = options.now ?? new Date();
+  const windowStart = reconcile ? reconcileWindowStart(now) : null;
+  const windowRecords: AssessmentRecordsByTable = {};
+  const windowComplete: Record<string, boolean> = {};
+  const reconcileFailedForms: string[] = [];
 
   for (const form of MATERNITY_ASSESSMENT_FORMS) {
     try {
@@ -796,16 +958,81 @@ export async function pullMaternityAssessmentsFromHosxp(
         error: errorMessage(error),
       });
     }
+
+    if (!reconcile || !windowStart) continue;
+    try {
+      const sql = buildAssessmentReconcileSqlFor(
+        form.table,
+        form.pkColumn,
+        windowStart,
+      );
+      const res = await client.executeQuery(sql, session.bmsUrl, session.jwt, undefined, queryOptions);
+      const rows = res.data as Record<string, unknown>[];
+      windowRecords[form.table] = rows;
+      // A read that hit the limit does not know what it did NOT see — the
+      // window may hold more rows than it returned.
+      windowComplete[form.table] = rows.length < ASSESSMENT_ROW_LIMIT;
+    } catch (error) {
+      windowRecords[form.table] = [];
+      windowComplete[form.table] = false;
+      const missingTable = missingFormTable(errorMessage(error));
+      if (missingTable === form.table) {
+        logger.debug('assessment_form_not_in_use', { hospitalId, formTable: form.table });
+        continue;
+      }
+      reconcileFailedForms.push(form.table);
+      logger.error('assessment_reconcile_query_failed', {
+        hospitalId,
+        formTable: form.table,
+        error: errorMessage(error),
+      });
+    }
   }
 
-  if (Object.values(records).every((rows) => rows.length === 0)) {
+  // The rows to store: the cursor pull plus the reconciliation window. The
+  // window read repeats the rows the cursor pull already got — they are
+  // stored once.
+  const storeRecords: AssessmentRecordsByTable = {};
+  for (const form of MATERNITY_ASSESSMENT_FORMS) {
+    storeRecords[form.table] = mergeAssessmentRows(
+      records[form.table] ?? [],
+      windowRecords[form.table] ?? [],
+      form.pkColumn,
+    );
+  }
+
+  // The stale rows are dropped BEFORE the early return below: a window that
+  // came back empty means every cached row of the window is gone from HOSxP,
+  // and that must not be left behind in the cache.
+  let deleted = 0;
+  let reconcileError: string | null =
+    reconcileFailedForms.length > 0
+      ? `HOSxP reconcile query failed for: ${reconcileFailedForms.join(', ')}`
+      : null;
+  if (reconcile && windowStart) {
+    const pruned = await pruneReconciledAssessments(
+      db,
+      hospitalId,
+      windowRecords,
+      windowComplete,
+      windowStart,
+    );
+    deleted = pruned.deleted;
+    reconcileError = reconcileError
+      ? `${reconcileError}; ${pruned.error}`
+      : pruned.error;
+  }
+
+  if (Object.values(storeRecords).every((rows) => rows.length === 0)) {
     return {
       ...empty,
       failedForms,
+      deleted,
       error:
         failedForms.length > 0
           ? `HOSxP query failed for: ${failedForms.join(', ')}`
           : null,
+      reconcileError,
     };
   }
 
@@ -818,7 +1045,6 @@ export async function pullMaternityAssessmentsFromHosxp(
   // the fields keep their HOSxP column names, which is still a form — and a
   // stale cache still carries the labels of the last good read.
   const metadataTtlMs = options.assessmentMetadataTtlMs ?? ASSESSMENT_METADATA_CACHE_TTL_MS;
-  const now = options.now ?? new Date();
 
   let cached: AssessmentMetadata = { forms: [], items: [], coveredTables: [], syncedAt: null };
   let cacheFresh = false;
@@ -844,7 +1070,7 @@ export async function pullMaternityAssessmentsFromHosxp(
   // back to the current version's items, exactly as it did before the cache
   // existed — so it must NOT invalidate the cache (the pull would read the
   // metadata and rewrite the cache on every round, for ever).
-  const pulled = pulledFormVersions(records);
+  const pulled = pulledFormVersions(storeRecords);
   const newestCachedByTable = new Map<string, number>();
   for (const form of cached.forms) {
     const id = Number(form.assessment_form_id);
@@ -871,6 +1097,7 @@ export async function pullMaternityAssessmentsFromHosxp(
   const cacheHasLabels = cached.forms.length > 0;
 
   let metadata: Pick<AssessmentMetadata, 'forms' | 'items'> = { forms: [], items: [] };
+  let metadataError: string | null = null;
   if (
     cacheFresh &&
     cacheHasLabels &&
@@ -885,6 +1112,11 @@ export async function pullMaternityAssessmentsFromHosxp(
       metadata = await readAssessmentMetadata(client, session, queryOptions);
       read = true;
     } catch (error) {
+      // The rows still land — without labels they keep their raw HOSxP column
+      // names, which is still a form. But the admins must SEE it: a pull
+      // that looks healthy while every field reads `asm_text12` is not
+      // healthy, so the reason travels with the result.
+      metadataError = `HOSxP form metadata read failed: ${errorMessage(error)}`;
       logger.error('assessment_metadata_read_failed', {
         hospitalId,
         error: errorMessage(error),
@@ -918,12 +1150,15 @@ export async function pullMaternityAssessmentsFromHosxp(
   const result = await syncMaternityAssessments(db, hospitalId, {
     forms: metadata.forms,
     items: metadata.items,
-    records,
+    records: storeRecords,
   });
   result.persistedPks = result.persistedPks ?? {};
   result.unusablePks = result.unusablePks ?? {};
   result.failedPks = result.failedPks ?? {};
   result.failedForms = failedForms;
+  result.deleted = deleted;
+  result.metadataError = metadataError;
+  result.reconcileError = reconcileError;
   result.error =
     failedForms.length > 0 ? `HOSxP query failed for: ${failedForms.join(', ')}` : null;
 

@@ -85,13 +85,12 @@ interface BrowserPushBody {
     referins?: BrowserReferinRow[];
     visitEvidences?: BrowserVisitEvidenceRow[];
   };
-  /** Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด):
-   *  the form metadata (the server needs it to label every positional
-   *  column) plus the raw rows, grouped by HOSxP table. */
+  /** Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด).
+   *  HINTS ONLY: the browser reports the newest key of each form so the
+   *  server knows something changed. The rows themselves are read by the
+   *  server from HOSxP — a browser cannot put a row into the cache. */
   assessments?: {
-    forms?: Record<string, unknown>[];
-    items?: Record<string, unknown>[];
-    records?: Record<string, Record<string, unknown>[]>;
+    hints?: Record<string, number>;
   };
 }
 
@@ -610,8 +609,13 @@ export async function POST(request: NextRequest) {
         result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
         // A pull that fetched nothing because it could not run is NOT a
         // successful pull of zero rows — say so, or the Sync Log reads as a
-        // healthy hospital while its forms sit empty.
-        const failed = r.failed > 0 || r.failedForms.length > 0 || r.error !== null;
+        // healthy hospital while its forms sit empty. The same goes for a
+        // pull whose labels could not be read: the rows land with their raw
+        // HOSxP column names, and the admin has to see that.
+        const problems = [r.error, r.metadataError, r.reconcileError].filter(
+          (reason): reason is string => !!reason,
+        );
+        const failed = r.failed > 0 || r.failedForms.length > 0 || problems.length > 0;
         if (failed) hadWarning = true;
         await appendSyncStep(hospitalId, runId, {
           name: 'persist_assessments',
@@ -619,7 +623,7 @@ export async function POST(request: NextRequest) {
           message: failed
             ? `Assessment sync incomplete: ${r.upserted} stored, ${r.skipped} skipped, ${r.failed} refused by the database.`
             : `Upserted ${r.upserted} assessment forms (${r.skipped} skipped, ${r.failed} refused by the database).`,
-          detail: r.error ?? undefined,
+          detail: problems.length > 0 ? problems.join(' · ') : undefined,
           counts: { upserted: r.upserted, skipped: r.skipped, failed: r.failed },
         });
       } catch (e) {

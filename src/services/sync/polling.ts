@@ -1308,16 +1308,23 @@ export async function pollHospital(
 
       // A pull that could not run is not a pull of zero rows — report it as
       // a warning with the reason, so the Sync Log never shows a healthy
-      // cycle while the forms sit empty.
+      // cycle while the forms sit empty. The same goes for a pull whose
+      // labels could not be read: the rows land with their raw HOSxP column
+      // names, and the admin has to see that.
+      const problems = [
+        syncResult.error,
+        syncResult.metadataError,
+        syncResult.reconcileError,
+      ].filter((reason): reason is string => !!reason);
       const incomplete =
-        syncResult.error !== null || syncResult.failedForms.length > 0 || syncResult.failed > 0;
+        problems.length > 0 || syncResult.failedForms.length > 0 || syncResult.failed > 0;
       emitStep(options, {
         name: 'query_assessments',
         status: incomplete ? 'warning' : 'success',
         message: incomplete
           ? `Maternity assessment sync incomplete: ${syncResult.upserted} forms stored, ${syncResult.skipped} skipped, ${syncResult.failed} refused by the database.`
           : `Upserted ${syncResult.upserted} maternity assessment forms.`,
-        detail: syncResult.error ?? undefined,
+        detail: problems.length > 0 ? problems.join(' · ') : undefined,
         counts: {
           upserted: syncResult.upserted,
           skipped: syncResult.skipped,
@@ -1331,6 +1338,8 @@ export async function pollHospital(
         formsFailed: syncResult.failed,
         failedForms: syncResult.failedForms,
         error: syncResult.error,
+        metadataError: syncResult.metadataError,
+        reconcileError: syncResult.reconcileError,
       });
     } catch (assessmentError) {
       emitStep(options, {

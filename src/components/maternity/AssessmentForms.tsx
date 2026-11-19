@@ -12,12 +12,6 @@ import type {
 } from '@/types/maternity-assessments';
 import { cn } from '@/lib/utils';
 
-const FORM_TITLES: Record<string, string> = {
-  first_pregnant: 'แรกรับ',
-  birth_period: 'ระยะคลอด',
-  after_birth: 'หลังคลอด',
-};
-
 export function fmtDateTimeTh(value: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
@@ -79,7 +73,7 @@ export function AssessmentForms({
       {grouped.map(({ form, records }) => (
         <div key={form.key} className="flex flex-col gap-2">
           <h3 className="text-label font-semibold text-brand">
-            {FORM_TITLES[form.key] ?? form.titleTh}
+            {form.titleTh}
             {records.length > 1 && (
               <span className="ml-2 text-caption font-normal text-ink-muted">
                 {records.length} ครั้ง

@@ -16,6 +16,7 @@ import {
   scheduleAuditLogRetention,
   stopAuditLogRetentionSchedule,
 } from '@/services/audit-retention';
+import { scheduleAssessmentSync, stopAssessmentSync } from '@/services/sync/assessment-schedule';
 import { backfillActiveConsultDoctorPrefs } from '@/services/notification-preference';
 import { logger } from '@/lib/logger';
 
@@ -159,6 +160,18 @@ export async function initializeApp(): Promise<void> {
       scheduleAuditLogRetention(db);
     }
 
+    // 6a. Assessment (LR) form sync. The maternity forms used to reach the
+    //     cache only through a browser push, so a ward with no tab open had
+    //     no forms at all. This timer pulls the forms on its own every
+    //     ASSESSMENT_SYNC_INTERVAL_MS — SEPARATE from the legacy patient
+    //     polling above, which stays browser-only: this one touches the
+    //     assessment forms and nothing else. Gated off in tests the same way
+    //     the retention schedule is — a background timer has no place in a
+    //     unit test process. See src/services/sync/assessment-schedule.ts.
+    if (process.env.NODE_ENV !== 'test') {
+      scheduleAssessmentSync(db);
+    }
+
     _flag.done = true;
     const elapsed = Date.now() - startTime;
     logger.info('initialization_completed', { elapsedMs: elapsed });
@@ -172,6 +185,7 @@ export async function shutdownApp(): Promise<void> {
   logger.info('shutdown_started', {});
   stopPolling();
   stopAuditLogRetentionSchedule();
+  stopAssessmentSync();
   await closeDatabase();
   SseManager.getInstance().destroy();
   _flag.done = false;

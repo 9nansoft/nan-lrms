@@ -1199,6 +1199,52 @@ export function buildAssessmentRecordsSqlFor(
 }
 
 /**
+ * Rows of one assessment form recorded in a RECENT WINDOW, whatever their key.
+ *
+ * The cursor pull only ever sees the rows ABOVE the cursor, so a row HOSxP
+ * deleted — or one inserted with a key below the cursor — stays in the cache
+ * for ever. This read ignores the cursor and asks for the rows of the last
+ * days: the pass compares them with the cache and drops what HOSxP no longer
+ * has.
+ *
+ * {{SINCE}} is substituted in app code with a validated plain timestamp (see
+ * buildAssessmentReconcileSqlFor).
+ */
+export function buildAssessmentReconcileSql(table: string, pkColumn: string): SqlQueryTemplate {
+  const body = `
+    SELECT t.*,
+           h.assessment_head_datetime AS head_datetime,
+           h.assessment_head_staff AS head_staff,
+           h.assessment_form_id AS head_form_id,
+           i.hn AS patient_hn
+      FROM ${table} t
+      JOIN assessment_head h ON h.assessment_head_id = t.assessment_head_id
+      LEFT JOIN ipt i ON i.an = t.an
+     WHERE h.assessment_head_datetime >= {{SINCE}}
+     ORDER BY t.${pkColumn} ASC
+     LIMIT ${ASSESSMENT_ROW_LIMIT}`;
+  return { postgresql: body, mysql: body };
+}
+
+/** {{SINCE}} substitution with a strict plain-timestamp guard. */
+export function buildAssessmentReconcileSqlFor(
+  table: string,
+  pkColumn: string,
+  since: string,
+): string {
+  const safe = String(since).trim();
+  // A plain local timestamp — the same shape HOSxP stores its own clock in.
+  // Nothing but digits and separators may reach the query.
+  if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(safe)) {
+    throw new Error(`invalid assessment reconcile timestamp: ${safe}`);
+  }
+  return getQuery(buildAssessmentReconcileSql(table, pkColumn), 'postgresql').replace(
+    '{{SINCE}}',
+    safe,
+  );
+}
+
+/**
  * The newest key of a form — the cheap question the hospital's browser asks
  * HOSxP ("is there anything new?"). The answer is only a TRIGGER: the server
  * pulls the rows itself, so a browser that lies about it cannot put a row
