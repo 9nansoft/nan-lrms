@@ -1,0 +1,301 @@
+// Consults — the care team asking one of the hospital's own doctors for
+// advice about a patient who stays here.
+//
+// NOT a referral: a referral moves the patient to another hospital (that
+// flow has its own page and its own permissions). A consult asks a doctor of
+// THIS hospital for advice, follows the answer up, and writes down what the
+// doctor said.
+//
+// The doctors come from the hospital's admin-managed consult list; the API
+// sends them with the consults, so the request form never guesses.
+'use client';
+
+import { useState, type FormEvent } from 'react';
+import { Stethoscope } from 'lucide-react';
+import { SectionCard } from '@/components/shared/SectionCard';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { StatusChip } from '@/components/shared/StatusChip';
+import { Button } from '@/components/ui/button';
+import type { ConsultDoctor, ConsultStatus, PatientConsult } from '@/types/api';
+import type { StatusTone } from '@/config/status-tone';
+import { fmtDateTimeTh } from './format';
+
+/** The Thai label of each consult state. */
+const CONSULT_STATUS_LABEL: Record<ConsultStatus, string> = {
+  REQUESTED: 'รอติดต่อ',
+  CONTACTED: 'ติดต่อแล้ว',
+  COMPLETED: 'ตอบแล้ว',
+};
+
+/** The tone of each consult state — the same vocabulary as the rest of the app. */
+const CONSULT_STATUS_TONE: Record<ConsultStatus, StatusTone> = {
+  REQUESTED: 'warn',
+  CONTACTED: 'brand',
+  COMPLETED: 'ok',
+};
+
+const fieldCls =
+  'w-full rounded-lg border border-border bg-surface-card px-2 py-1.5 text-caption text-ink placeholder:text-ink-subtle focus:border-brand focus:outline-none';
+
+export interface ConsultCardProps {
+  /** The admission in URL form: {hcode}-{an}. */
+  patientId: string;
+  /** The consults of this admission, newest first. */
+  consults: PatientConsult[];
+  /** The doctors of this hospital that can be consulted. */
+  doctors: ConsultDoctor[];
+  isLoading?: boolean;
+  error?: unknown;
+  /** Records a consult request. Throws with a Thai message when refused. */
+  onRequestConsult: (doctorId: string, reason: string) => Promise<unknown>;
+  /** Moves a consult on and writes the advice. Throws when refused. */
+  onUpdateConsult: (
+    consultId: string,
+    input: { status?: ConsultStatus; advice?: string },
+  ) => Promise<unknown>;
+}
+
+export function ConsultCard({
+  patientId,
+  consults,
+  doctors,
+  isLoading,
+  error,
+  onRequestConsult,
+  onUpdateConsult,
+}: ConsultCardProps) {
+  const [doctorId, setDoctorId] = useState('');
+  const [reason, setReason] = useState('');
+  const [adviceDrafts, setAdviceDrafts] = useState<Record<string, string>>({});
+  // Which write is in flight: 'request' or `update:{consultId}`.
+  const [busy, setBusy] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const doctorFieldId = `consult-doctor-${patientId}`;
+  const reasonFieldId = `consult-reason-${patientId}`;
+
+  async function handleRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError(null);
+    const trimmedReason = reason.trim();
+    if (!doctorId) {
+      setFormError('กรุณาเลือกแพทย์ที่ต้องการปรึกษา');
+      return;
+    }
+    if (!trimmedReason) {
+      setFormError('กรุณาระบุเหตุผลที่ขอปรึกษา');
+      return;
+    }
+    setBusy('request');
+    try {
+      await onRequestConsult(doctorId, trimmedReason);
+      setDoctorId('');
+      setReason('');
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'ขอปรึกษาไม่สำเร็จ — ลองใหม่อีกครั้ง');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUpdate(consult: PatientConsult, status: ConsultStatus) {
+    setFormError(null);
+    setBusy(`update:${consult.id}`);
+    try {
+      const advice = (adviceDrafts[consult.id] ?? consult.advice ?? '').trim();
+      await onUpdateConsult(consult.id, { status, advice });
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'อัปเดตการปรึกษาไม่สำเร็จ — ลองใหม่อีกครั้ง');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const noDoctors = doctors.length === 0;
+
+  return (
+    <SectionCard
+      title="ปรึกษาแพทย์ (Consult)"
+      description={
+        error
+          ? 'ดึงข้อมูลการปรึกษาไม่สำเร็จ — ข้อมูลส่วนอื่นยังใช้ได้ตามปกติ'
+          : `บันทึกการขอคำปรึกษาจากแพทย์ที่ปรึกษาได้ของโรงพยาบาล · ${consults.length} รายการ`
+      }
+      testId="consult-card"
+      actions={<Stethoscope aria-hidden="true" className="h-5 w-5 text-brand" />}
+    >
+      {isLoading && <p className="text-label text-ink-muted">กำลังโหลดข้อมูลการปรึกษา…</p>}
+
+      {!isLoading && Boolean(error) && (
+        <p role="alert" className="text-label text-danger-text">
+          ไม่สามารถแสดงรายการปรึกษาได้ — กด “ลองใหม่” ที่แถบแจ้งเตือนด้านบนเพื่อดึงข้อมูลอีกครั้ง
+        </p>
+      )}
+
+      {!isLoading && !error && (
+        <div className="flex flex-col gap-4">
+          {consults.length === 0 ? (
+            <EmptyState
+              title="ยังไม่มีการปรึกษา"
+              description="ยังไม่มีรายการขอปรึกษาแพทย์ในการเข้าพักครั้งนี้ — ใช้ฟอร์มด้านล่างเพื่อขอคำปรึกษา"
+            />
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {consults.map((consult) => {
+                const advice = adviceDrafts[consult.id] ?? consult.advice ?? '';
+                const updating = busy === `update:${consult.id}`;
+                return (
+                  <li
+                    key={consult.id}
+                    data-testid="consult-row"
+                    className="flex flex-col gap-2 rounded-xl border border-border bg-surface-card px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusChip
+                        tone={CONSULT_STATUS_TONE[consult.status]}
+                        label={CONSULT_STATUS_LABEL[consult.status]}
+                      />
+                      <span className="text-label font-semibold text-ink">{consult.doctorName}</span>
+                      {consult.doctorPosition && (
+                        <span className="text-caption text-ink-muted">{consult.doctorPosition}</span>
+                      )}
+                      {consult.doctorPhone && (
+                        <span className="text-caption text-ink-muted">โทร {consult.doctorPhone}</span>
+                      )}
+                      <span className="ml-auto text-caption text-ink-muted">
+                        ขอเมื่อ {fmtDateTimeTh(consult.createdAt)}
+                      </span>
+                    </div>
+
+                    <p className="text-caption text-ink">
+                      <span className="font-semibold">เหตุผล:</span> {consult.reason}
+                    </p>
+
+                    {consult.requestedByName && (
+                      <p className="text-caption text-ink-muted">
+                        ผู้ขอ: <span className="text-ink">{consult.requestedByName}</span>
+                      </p>
+                    )}
+
+                    {consult.consultedAt && (
+                      <p className="text-caption text-ink-muted">
+                        ปรึกษาเมื่อ {fmtDateTimeTh(consult.consultedAt)}
+                      </p>
+                    )}
+
+                    {consult.advice && (
+                      <p className="text-caption text-ink">
+                        <span className="font-semibold">คำแนะนำ:</span> {consult.advice}
+                      </p>
+                    )}
+
+                    {consult.status !== 'COMPLETED' && (
+                      <div className="flex flex-col gap-2 border-t border-border pt-2">
+                        <label
+                          htmlFor={`consult-advice-${consult.id}`}
+                          className="text-caption font-semibold text-ink"
+                        >
+                          คำแนะนำจากแพทย์
+                        </label>
+                        <textarea
+                          id={`consult-advice-${consult.id}`}
+                          value={advice}
+                          rows={2}
+                          placeholder="เช่น แนะนำเฝ้าระวังความดันและปรึกษาสูติแพทย์"
+                          onChange={(e) =>
+                            setAdviceDrafts((current) => ({ ...current, [consult.id]: e.target.value }))
+                          }
+                          className={fieldCls}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {consult.status === 'REQUESTED' && (
+                            <Button
+                              type="button"
+                              disabled={updating}
+                              onClick={() => void handleUpdate(consult, 'CONTACTED')}
+                              className="h-8 border-border bg-surface-card px-3 text-label text-brand hover:bg-brand-soft"
+                            >
+                              ติดต่อแล้ว
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            disabled={updating}
+                            onClick={() => void handleUpdate(consult, 'COMPLETED')}
+                            className="h-8 bg-brand px-3 text-label text-white hover:bg-brand-strong"
+                          >
+                            ตอบแล้ว
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {formError && (
+            <p role="alert" className="text-caption text-danger-text">
+              {formError}
+            </p>
+          )}
+
+          {noDoctors ? (
+            <p className="text-caption text-warn-text">
+              ยังไม่ได้เพิ่มรายชื่อแพทย์ที่ปรึกษาได้ — ให้ผู้ดูแลระบบเพิ่มที่หน้าโรงพยาบาล
+            </p>
+          ) : (
+            <form
+              onSubmit={(e) => void handleRequest(e)}
+              className="flex flex-col gap-2 rounded-xl border border-border bg-surface-muted px-3 py-3"
+            >
+              <h3 className="text-label font-semibold text-brand">ขอคำปรึกษา</h3>
+
+              <label htmlFor={doctorFieldId} className="text-caption font-semibold text-ink">
+                แพทย์ที่ต้องการปรึกษา
+              </label>
+              <select
+                id={doctorFieldId}
+                value={doctorId}
+                onChange={(e) => setDoctorId(e.target.value)}
+                className={fieldCls}
+              >
+                <option value="">— เลือกแพทย์ —</option>
+                {doctors.map((doctor) => (
+                  <option key={doctor.id} value={doctor.id}>
+                    {doctor.name}
+                    {doctor.position ? ` (${doctor.position})` : ''}
+                  </option>
+                ))}
+              </select>
+
+              <label htmlFor={reasonFieldId} className="text-caption font-semibold text-ink">
+                เหตุผลที่ขอปรึกษา
+              </label>
+              <textarea
+                id={reasonFieldId}
+                value={reason}
+                rows={2}
+                maxLength={500}
+                placeholder="เช่น ความดันสูงตลอด ขอคำแนะนำจากสูติแพทย์"
+                onChange={(e) => setReason(e.target.value)}
+                className={fieldCls}
+              />
+
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  disabled={busy === 'request'}
+                  className="h-8 bg-brand px-3 text-label text-white hover:bg-brand-strong"
+                >
+                  ขอปรึกษา
+                </Button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+    </SectionCard>
+  );
+}

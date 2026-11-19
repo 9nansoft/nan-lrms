@@ -13,6 +13,7 @@ import { debounceLeadingTrailing, SSE_REFRESH_DEBOUNCE_MS } from '@/lib/debounce
 import { usePatient } from '@/hooks/usePatient';
 import { usePartogram } from '@/hooks/usePartogram';
 import { useMaternityAssessments } from '@/hooks/useMaternityAssessments';
+import { usePatientConsults } from '@/hooks/usePatientConsults';
 import { useMaternalScreenings } from '@/hooks/useMaternalScreenings';
 import { useSSE } from '@/hooks/useSSE';
 import { useSetBreadcrumbs } from '@/components/layout/BreadcrumbContext';
@@ -32,6 +33,7 @@ import { ReferralHistoryCard } from '@/components/patient/detail/ReferralHistory
 import { NewbornOutcomesCard } from '@/components/patient/detail/NewbornOutcomesCard';
 import { PartographWorkspace, cdssTabBadge } from '@/components/patient/detail/PartographWorkspace';
 import { MaternityAssessmentCard } from '@/components/patient/detail/MaternityAssessmentCard';
+import { ConsultCard } from '@/components/patient/detail/ConsultCard';
 import { HighRiskAlert } from '@/components/shared/HighRiskAlert';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { ErrorState } from '@/components/shared/ErrorState';
@@ -89,6 +91,18 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
     error: assessmentsError,
     mutate: mutateAssessments,
   } = useMaternityAssessments(patientId);
+  // Consults — the care team asking one of the hospital's own doctors for
+  // advice about a patient who stays here (NOT a referral). Its own feed:
+  // a failed consult list never blocks the rest of the page.
+  const {
+    consults,
+    doctors: consultDoctors,
+    isLoading: consultsLoading,
+    error: consultsError,
+    mutate: mutateConsults,
+    requestConsult,
+    updateConsult,
+  } = usePatientConsults(patientId);
   // SEPARATE hook, not folded into usePatient's composite isLoading (GC-U4 /
   // plan Task U3) — this provisional, flag-gated feed must never block first
   // paint of the rest of the page.
@@ -148,6 +162,7 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
     { failed: Boolean(contractionsError), label: 'การหดรัดตัว', retry: mutateContractions },
     { failed: Boolean(partogramError), label: 'พาร์โทกราฟ', retry: mutatePartogram },
     { failed: Boolean(assessmentsError), label: 'แบบฟอร์มประเมิน', retry: mutateAssessments },
+    { failed: Boolean(consultsError), label: 'ปรึกษาแพทย์', retry: mutateConsults },
     { failed: screeningsFailed, label: 'การคัดกรองความเสี่ยงมารดา', retry: screenings.mutate },
   ]
     .filter((f) => f.failed)
@@ -395,6 +410,15 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
               assessments={assessments}
               isLoading={assessmentsLoading}
               error={assessmentsError}
+            />
+            <ConsultCard
+              patientId={patientId}
+              consults={consults}
+              doctors={consultDoctors}
+              isLoading={consultsLoading}
+              error={consultsError}
+              onRequestConsult={requestConsult}
+              onUpdateConsult={updateConsult}
             />
           </div>
         )}
