@@ -36,6 +36,13 @@ export const ApiErrors = {
     suggestedAction:
       'ใช้ hospitalCode ที่ตรงกับโรงพยาบาลของ API key หรือใช้ key ของโรงพยาบาลที่ถูกต้อง',
   },
+  HOSPITAL_PURGED: {
+    error: 'The hospital data was purged; the webhook is suspended',
+    code: 'HOSPITAL_PURGED',
+    message: 'ข้อมูลของโรงพยาบาลนี้ถูกลบแล้ว ระบบจึงไม่รับข้อมูลกลับ',
+    suggestedAction:
+      'ให้ผู้ดูแลระบบเปิดใช้งาน Sync อีกครั้ง (clear-purge) ที่หน้า /admin แล้วส่งข้อมูลใหม่',
+  },
   CID_REQUIRED: {
     error: '"cid" is required (string, 13 digits)',
     code: 'CID_REQUIRED',

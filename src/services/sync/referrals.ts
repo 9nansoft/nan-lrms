@@ -463,8 +463,8 @@ async function applyArrivalEvidence(
     evidence.arrivalIso,
   ];
   if (evidence.fromHospitalId) params.push(evidence.fromHospitalId);
-  const candidates = await db.query<{ id: string; journey_id: string }>(
-    `SELECT cr.id, cr.journey_id
+  const candidates = await db.query<{ id: string; journey_id: string; from_hospital_id: string }>(
+    `SELECT cr.id, cr.journey_id, cr.from_hospital_id
      FROM cached_referrals cr
      JOIN maternal_journeys mj ON mj.id = cr.journey_id
      WHERE cr.to_hospital_id = ?
@@ -519,4 +519,25 @@ async function applyArrivalEvidence(
     );
     result.ownershipMoves++;
   }
+
+  // The sender's copy of the admission must not stay ACTIVE: the patient is
+  // at the receiving hospital now. An ACTIVE row in the sender's roster shows
+  // a woman who is not there any more and inflates its active-labor count.
+  //
+  // The row is found by JOURNEY, not by AN — the AN is hospital-local, so
+  // the two hospitals number the same patient differently.
+  const journeyRows = await db.query<{ care_stage: string }>(
+    'SELECT care_stage FROM maternal_journeys WHERE id = ?',
+    [candidates[0].journey_id],
+  );
+  const senderStatus =
+    journeyRows[0]?.care_stage === 'DELIVERED' ? 'DELIVERED' : 'TRANSFERRED';
+  await db.execute(
+    `UPDATE cached_patients
+        SET labor_status = ?, updated_at = ?
+      WHERE journey_id = ?
+        AND hospital_id = ?
+        AND labor_status = 'ACTIVE'`,
+    [senderStatus, now, candidates[0].journey_id, candidates[0].from_hospital_id],
+  );
 }

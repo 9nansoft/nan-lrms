@@ -10,6 +10,47 @@ interface SseClient {
   // Set for authenticated per-user streams (/api/sse/calls); undefined for
   // anonymous broadcast streams (/api/sse/dashboard).
   userId?: string;
+  /**
+   * The hospitals this client may hear about. Undefined = no scope was
+   * registered (an internal stream) — the event is delivered as it is.
+   */
+  scope?: SseClientScope;
+}
+
+/**
+ * The hospitals a connected client may hear about.
+ *
+ * The dashboard stream is shared by every signed-in user, so an event must
+ * only reach the viewers whose scope covers the hospital it is about: an
+ * admission number of another hospital is patient data the viewer may not
+ * read. The pages enforce that rule on every request — the stream must not
+ * route around it.
+ */
+export interface SseClientScope {
+  /** The viewer reads every hospital's patients (the province, the centre). */
+  all: boolean;
+  /** The hospital ids in the viewer's scope. */
+  hospitalIds: string[];
+  /** The hospital codes in the viewer's scope. */
+  hcodes: string[];
+}
+
+/**
+ * The hospitals a broadcast payload speaks about.
+ *
+ * Payloads name their hospital as a code (`hcode`), as an id (`hospitalId`),
+ * or as the two parties of a referral or a transfer (`fromHcode` /
+ * `toHcode`). An event that names none cannot be attributed to a hospital —
+ * it goes to the province-wide viewers only.
+ */
+function payloadHospitals(data: unknown): { hospitalIds: string[]; hcodes: string[] } {
+  if (!data || typeof data !== 'object') return { hospitalIds: [], hcodes: [] };
+  const d = data as Record<string, unknown>;
+  const hospitalIds = typeof d.hospitalId === 'string' && d.hospitalId ? [d.hospitalId] : [];
+  const hcodes = ['hcode', 'fromHcode', 'toHcode']
+    .filter((key) => typeof d[key] === 'string' && d[key] !== '')
+    .map((key) => d[key] as string);
+  return { hospitalIds, hcodes };
 }
 
 // Next.js bundles route handlers separately and reloads modules on HMR, so a
@@ -43,8 +84,13 @@ export class SseManager {
     _global.__sseManager = undefined;
   }
 
-  addClient(id: string, controller: ReadableStreamDefaultController, userId?: string): void {
-    this.clients.set(id, { id, controller, userId });
+  addClient(
+    id: string,
+    controller: ReadableStreamDefaultController,
+    userId?: string,
+    scope?: SseClientScope,
+  ): void {
+    this.clients.set(id, { id, controller, userId, scope });
   }
 
   removeClient(id: string): void {
@@ -53,9 +99,37 @@ export class SseManager {
 
   broadcast(event: string, data: unknown): void {
     const encoded = encodeEvent(event, data);
+    const { hospitalIds, hcodes } = payloadHospitals(data);
     for (const [clientId, client] of this.clients) {
+      if (!this.eventReachesClient(client, hospitalIds, hcodes)) continue;
       this.enqueueOrDrop(clientId, client, encoded);
     }
+  }
+
+  /**
+   * True when the event is about a hospital this client may read.
+   *
+   * A client with no scope (an internal stream) hears everything. A
+   * province-wide client hears everything. A scoped client hears only the
+   * events about the hospitals in its scope — the same rule the pages apply
+   * to every request.
+   */
+  private eventReachesClient(
+    client: SseClient,
+    hospitalIds: string[],
+    hcodes: string[],
+  ): boolean {
+    const scope = client.scope;
+    if (!scope || scope.all) return true;
+    if (hospitalIds.length === 0 && hcodes.length === 0) {
+      // The event names no hospital: it cannot be attributed, so it cannot
+      // be the scoped viewer's business.
+      return false;
+    }
+    return (
+      hospitalIds.some((id) => scope.hospitalIds.includes(id)) ||
+      hcodes.some((code) => scope.hcodes.includes(code))
+    );
   }
 
   /**

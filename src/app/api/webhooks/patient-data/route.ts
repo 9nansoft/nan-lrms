@@ -48,6 +48,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(apiError('INVALID_API_KEY'), { status: 401 });
     }
 
+    // The purge guard. The admin deleted this hospital's data and suspended
+    // every sync path until the hospital is re-onboarded: a webhook must not
+    // put the data back. The sender is told the push was NOT stored — a
+    // silent 200 would have it report a successful sync of data the province
+    // erased.
+    const purged = await db.query<{ data_purged_at: string | null }>(
+      'SELECT data_purged_at FROM hospital_bms_config WHERE hospital_id = ?',
+      [keyInfo.hospitalId],
+    );
+    if (purged[0]?.data_purged_at) {
+      logger.warn('webhook_blocked_purged', { hospitalId: keyInfo.hospitalId });
+      return NextResponse.json(apiError('HOSPITAL_PURGED'), { status: 403 });
+    }
+
     // Parse body
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {

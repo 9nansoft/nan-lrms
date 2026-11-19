@@ -235,6 +235,26 @@ describe('processBrowserReferins (Phase 2 — destination gateway push)', () => 
     expect(journey[0].current_hospital_id).toBe(DEST_ID);
   });
 
+  it('closes the sender’s labor row — she is at the destination now', async () => {
+    // The sender's copy of the admission must not stay ACTIVE: the patient
+    // is at the receiving hospital now. An ACTIVE row there shows a woman
+    // who is not there any more and inflates the sender's active count.
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO cached_patients
+         (id, hospital_id, hn, an, name, age, admit_date, labor_status, journey_id, synced_at, created_at, updated_at)
+       VALUES ('p-origin-1', ?, 'HN001', 'AN-ORIGIN-1', 'enc-name', 28, '2026-07-18T00:00:00Z', 'ACTIVE', ?, ?, ?, ?)`,
+      [ORIGIN_ID, JOURNEY_ID, now, now, now],
+    );
+
+    await processBrowserReferins(db, DEST_ID, [referinRow()]);
+
+    const rows = await db.query<{ labor_status: string }>(
+      `SELECT labor_status FROM cached_patients WHERE id = 'p-origin-1'`,
+    );
+    expect(rows[0].labor_status).toBe('TRANSFERRED');
+  });
+
   it('carries the real refer_time into arrived_at (not a midnight stamp)', async () => {
     await processBrowserReferins(db, DEST_ID, [referinRow({ refer_time: '14:45:00' })]);
     const rows = await db.query<{ arrived_at: string | Date }>(

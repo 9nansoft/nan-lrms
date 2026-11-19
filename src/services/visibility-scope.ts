@@ -273,6 +273,30 @@ export function scopeCacheSuffix(scope: ViewerScope): string {
 }
 
 /**
+ * The hospital CODES a scoped viewer may see events about.
+ *
+ * The scope knows the hospitals by id; the broadcast payloads name them by
+ * code. This is the bridge for the SSE stream — the dashboard stream is
+ * shared by every signed-in user, so an event about another hospital's
+ * patient must not reach a viewer who may not read that patient.
+ *
+ * An ALL-scope viewer gets an empty list: it hears everything anyway.
+ */
+export async function scopeAllowedHcodes(
+  db: DatabaseAdapter,
+  scope: ViewerScope,
+): Promise<string[]> {
+  if (scope.mode === 'ALL') return [];
+  if (scope.allowedHospitalIds.length === 0) return [];
+  const placeholders = scope.allowedHospitalIds.map(() => '?').join(', ');
+  const rows = await db.query<{ hcode: string }>(
+    `SELECT hcode FROM hospitals WHERE id IN (${placeholders})`,
+    [...scope.allowedHospitalIds],
+  );
+  return rows.map((row) => row.hcode);
+}
+
+/**
  * True when the scope lets the viewer read the rows of `hcode`. Used by the
  * routes that take a hospital code in the URL — an unknown code is never
  * visible, so a guessed code cannot be used to read another hospital.
