@@ -7,6 +7,7 @@ import { cachedPatientsTable } from './cached-patients';
 import { cachedPartographObservationsTable } from './cached-partograph-observations';
 import { cachedMaternityAssessmentsTable } from './cached-maternity-assessments';
 import { cachedMaternityAssessmentCursorsTable } from './cached-maternity-assessment-cursors';
+import { cachedAssessmentFormMetadataTable } from './cached-assessment-form-metadata';
 import { cachedVitalSignsTable } from './cached-vital-signs';
 import { cpdScoresTable } from './cpd-scores';
 import { maternalScreeningAssessmentsTable } from './maternal-screening-assessments';
@@ -41,6 +42,7 @@ export {
   cachedPartographObservationsTable,
   cachedMaternityAssessmentsTable,
   cachedMaternityAssessmentCursorsTable,
+  cachedAssessmentFormMetadataTable,
   cachedVitalSignsTable,
   cpdScoresTable,
   maternalScreeningAssessmentsTable,
@@ -97,6 +99,8 @@ export const ALL_TABLES: TableDefinition[] = [
   cachedMaternityAssessmentsTable,
   // References hospitals (above).
   cachedMaternityAssessmentCursorsTable,
+  // The label cache of the assessment forms — references hospitals (above).
+  cachedAssessmentFormMetadataTable,
   cachedVitalSignsTable,
   cpdScoresTable,
   // References cached_patients, hospitals, maternal_journeys (all above) —

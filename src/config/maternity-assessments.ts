@@ -55,6 +55,17 @@ export const MATERNITY_ASSESSMENT_FORMS: readonly MaternityAssessmentForm[] = [
   },
 ];
 
+/**
+ * How long the label cache (`assessment_form` / `assessment_items`) may be
+ * reused before the pull reads it from HOSxP again.
+ *
+ * A form definition changes only when the SITE changes its form — a new
+ * version of a nursing form, a renamed field. That happens a few times a
+ * year at most, so a day is short enough to pick a customisation up
+ * quickly and long enough to keep the metadata queries off every cycle.
+ */
+export const ASSESSMENT_METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
 export function assessmentFormByKey(key: string): MaternityAssessmentForm | undefined {
   return MATERNITY_ASSESSMENT_FORMS.find((f) => f.key === key);
 }

@@ -27,6 +27,11 @@ import {
   pullMaternityAssessmentsFromHosxp,
 } from '@/services/sync/maternity-assessment';
 import { getPatientMaternityAssessments } from '@/services/maternity-assessments';
+import {
+  writeAssessmentMetadataCache,
+  UNUSED_FORM_ID,
+} from '@/services/assessment-metadata-cache';
+import { logger } from '@/lib/logger';
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
 
 const KEY = generateKey();
@@ -477,7 +482,17 @@ describe('pullMaternityAssessmentsFromHosxp', () => {
   }
 
   /** The three form queries answer with the same mock HOSxP does. */
-  function mockHosxp(options: { failTables?: string[] } = {}) {
+  function mockHosxp(
+    options: {
+      failTables?: string[];
+      failMetadata?: boolean;
+      /** HOSxP answers with no form at all (nothing was learned). */
+      emptyMetadata?: boolean;
+      forms?: Record<string, unknown>[];
+      items?: Record<string, unknown>[];
+      rows?: Record<string, unknown>[];
+    } = {},
+  ) {
     return vi.spyOn(BmsSessionClient.prototype, 'executeQuery').mockImplementation(
       async (sql: string) => {
         const wrap = (data: Record<string, unknown>[]) => ({
@@ -490,19 +505,36 @@ describe('pullMaternityAssessmentsFromHosxp', () => {
           if (sql.includes(`FROM ${table}`)) throw new Error(`query failed: ${table}`);
         }
         if (sql.includes('FROM assessment_form')) {
-          return wrap([
-            {
-              assessment_form_id: 309,
-              assessment_form_table: 'asm_lr_record_after_birth_nan',
-              assessment_form_name: '[LR]-แบบฟอร์มการบันทึกการพยาบาลระยะหลังคลอด',
-            },
-          ]);
+          if (options.failMetadata) throw new Error('metadata query failed');
+          if (options.emptyMetadata) return wrap([]);
+          return wrap(
+            options.forms ?? [
+              {
+                assessment_form_id: 309,
+                assessment_form_table: 'asm_lr_record_after_birth_nan',
+                assessment_form_name: '[LR]-แบบฟอร์มการบันทึกการพยาบาลระยะหลังคลอด',
+              },
+            ],
+          );
         }
-        if (sql.includes('FROM assessment_items')) return wrap([]);
-        if (sql.includes('FROM asm_lr_record_after_birth_nan')) return wrap([rawRow()]);
+        if (sql.includes('FROM assessment_items')) return wrap(options.items ?? []);
+        if (sql.includes('FROM asm_lr_record_after_birth_nan')) {
+          return wrap(options.rows ?? [rawRow()]);
+        }
         return wrap([]);
       },
     );
+  }
+
+  /**
+   * The metadata queries of a pull — the reads of `assessment_form` and
+   * `assessment_items`. The record query carries `assessment_form_id` in its
+   * SELECT list, so the table name has to be matched, not the substring.
+   */
+  function metadataQueries(spy: ReturnType<typeof mockHosxp>): string[] {
+    return spy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((sql) => /FROM\s+assessment_(form|items)\b/.test(sql));
   }
 
   afterEach(() => {
@@ -663,5 +695,284 @@ describe('pullMaternityAssessmentsFromHosxp', () => {
 
     expect(r.upserted).toBe(0);
     expect(r.error).toMatch(/no HOSxP session/);
+  });
+
+  // ─── The label cache ──────────────────────────────────────────────────────
+  //
+  // The labels of a form change only when the SITE changes its form, so the
+  // pull keeps them and reuses them instead of asking HOSxP on every cycle.
+  describe('assessment metadata cache', () => {
+    /** The cached forms of all three tables (the after-birth one is 309 — the
+     *  form id the raw row below carries). */
+    const CACHE_FORMS = [
+      {
+        assessment_form_id: 120,
+        assessment_form_table: 'asm_first_pregnant_pt_nan',
+        assessment_form_name: '[LR]-แรกรับ',
+      },
+      {
+        assessment_form_id: 210,
+        assessment_form_table: 'asm_lr_record_birth_period_nan',
+        assessment_form_name: '[LR]-ระยะคลอด',
+      },
+      {
+        assessment_form_id: 309,
+        assessment_form_table: 'asm_lr_record_after_birth_nan',
+        assessment_form_name: '[LR]-แบบฟอร์มการบันทึกการพยาบาลระยะหลังคลอด',
+      },
+    ];
+
+    async function storedFields(): Promise<string> {
+      const stored = await db.query<{ fields_json: string }>(
+        'SELECT fields_json FROM cached_maternity_assessments',
+      );
+      return JSON.stringify(stored[0]?.fields_json ?? '');
+    }
+
+    /** The labels of the stored row — what the UI shows. */
+    async function fieldLabels(): Promise<string[]> {
+      const stored = await db.query<{ fields_json: string }>(
+        'SELECT fields_json FROM cached_maternity_assessments',
+      );
+      const raw: unknown = stored[0]?.fields_json;
+      const parsed: unknown =
+        typeof raw === 'string' ? (JSON.parse(raw) as unknown) : raw;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((f) =>
+        String((f as { label?: unknown }).label ?? ''),
+      );
+    }
+
+    async function cachedRows(): Promise<{ form_table: string; form_id: number }[]> {
+      return db.query<{ form_table: string; form_id: number }>(
+        `SELECT form_table, form_id FROM cached_assessment_form_metadata
+          WHERE hospital_id = ? ORDER BY form_table`,
+        [HOSPITAL_ID],
+      );
+    }
+
+    it('uses a warm cache and never asks HOSxP for the metadata', async () => {
+      await seedBmsConfig();
+      const spy = mockHosxp();
+      await writeAssessmentMetadataCache(db, HOSPITAL_ID, CACHE_FORMS, ITEM_ROWS, new Date());
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(metadataQueries(spy)).toHaveLength(0);
+      expect(r.upserted).toBe(1);
+      // The rows are still labelled — from the cache.
+      expect(await storedFields()).toContain('Systolic');
+    });
+
+    it('reads the metadata from HOSxP on a cold cache and fills the cache', async () => {
+      await seedBmsConfig();
+      const spy = mockHosxp();
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(metadataQueries(spy).length).toBeGreaterThan(0);
+      expect(r.upserted).toBe(1);
+      const cached = await db.query<{ form_table: string; form_id: number }>(
+        'SELECT form_table, form_id FROM cached_assessment_form_metadata WHERE hospital_id = ? ORDER BY form_table',
+        [HOSPITAL_ID],
+      );
+      const real = cached.filter((row) => row.form_id > 0);
+      expect(real).toHaveLength(1);
+      expect(real[0].form_table).toBe('asm_lr_record_after_birth_nan');
+      expect(real[0].form_id).toBe(309);
+      // The forms this site does not use are recorded too, so the next pull
+      // knows it has seen everything without asking HOSxP again.
+      expect(
+        cached.filter((row) => row.form_id === UNUSED_FORM_ID).map((row) => row.form_table),
+      ).toEqual([
+        'asm_first_pregnant_pt_nan',
+        'asm_lr_record_birth_period_nan',
+      ]);
+    });
+
+    it('does not ask HOSxP for the metadata again at a site that uses one form', async () => {
+      await seedBmsConfig();
+      const spy = mockHosxp();
+      // The mock site answers with ONE form (asm_lr_record_after_birth_nan).
+      await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+      spy.mockClear();
+
+      await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(metadataQueries(spy)).toHaveLength(0);
+    });
+
+    it('labels the rows from a stale cache when HOSxP cannot be read', async () => {
+      await seedBmsConfig();
+      mockHosxp({ failMetadata: true });
+      // A cache that is older than the TTL — it must still label the rows.
+      await writeAssessmentMetadataCache(
+        db,
+        HOSPITAL_ID,
+        CACHE_FORMS,
+        ITEM_ROWS,
+        new Date(Date.now() - 25 * 60 * 60 * 1000),
+      );
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(r.upserted).toBe(1);
+      expect(r.error).toBeNull();
+      expect(await storedFields()).toContain('Systolic');
+    });
+
+    it('keeps the raw column names when HOSxP cannot be read and there is no cache', async () => {
+      await seedBmsConfig();
+      mockHosxp({ failMetadata: true });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(r.upserted).toBe(1);
+      expect(r.error).toBeNull();
+      const fields = await storedFields();
+      expect(fields).toContain('asm_text2');
+      expect(fields).not.toContain('Systolic');
+    });
+
+    it('re-reads the metadata when a row was recorded under a form version the cache does not know', async () => {
+      // The site published a NEW version of the form (999) after the cache
+      // was warmed. The cache must not label that row with the items of the
+      // version it knows — the labels would be wrong and the cursor would
+      // walk past the row for good.
+      await seedBmsConfig();
+      await writeAssessmentMetadataCache(db, HOSPITAL_ID, CACHE_FORMS, ITEM_ROWS, new Date());
+      const spy = mockHosxp({
+        forms: [
+          {
+            assessment_form_id: 309,
+            assessment_form_table: 'asm_lr_record_after_birth_nan',
+            assessment_form_name: 'after birth',
+          },
+          {
+            assessment_form_id: 999,
+            assessment_form_table: 'asm_lr_record_after_birth_nan',
+            assessment_form_name: 'after birth v2',
+          },
+        ],
+        items: [
+          {
+            assessment_form_id: 999,
+            assessment_items_column: 'asm_text2',
+            assessment_items_note: 'Systolic v2',
+            assessment_component_name: 'TextEdit',
+            assessment_data_type: 'VARCHAR(250)',
+          },
+        ],
+        rows: [rawRow({ head_form_id: 999 })],
+      });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      // The metadata was read again — the cache could not label the row.
+      expect(metadataQueries(spy).length).toBeGreaterThan(0);
+      expect(r.upserted).toBe(1);
+      // The row carries ITS OWN version's label, not the cached version's.
+      expect(await fieldLabels()).toContain('Systolic v2');
+      expect(await fieldLabels()).not.toContain('Systolic');
+    });
+
+    it('does not write the cache when HOSxP answers with no form at all', async () => {
+      // HOSxP answered, but with no form: nothing was learned. The cache must
+      // NOT be written (not even the sentinels) — a fresh cache without a
+      // single label would keep the pull from reading the metadata for a
+      // whole TTL.
+      await seedBmsConfig();
+      mockHosxp({ emptyMetadata: true });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(r.upserted).toBe(1);
+      expect(await cachedRows()).toHaveLength(0);
+      // The rows keep their raw column names.
+      expect(await fieldLabels()).toContain('asm_text2');
+    });
+
+    it('labels the rows from the stale cache when HOSxP answers with no form', async () => {
+      await seedBmsConfig();
+      mockHosxp({ emptyMetadata: true });
+      await writeAssessmentMetadataCache(
+        db,
+        HOSPITAL_ID,
+        CACHE_FORMS,
+        ITEM_ROWS,
+        new Date(Date.now() - 25 * 60 * 60 * 1000),
+      );
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(r.upserted).toBe(1);
+      expect(await fieldLabels()).toContain('Systolic');
+      // The stale cache is kept as it is — nothing new was learned.
+      expect((await cachedRows()).filter((row) => row.form_id === UNUSED_FORM_ID)).toHaveLength(0);
+    });
+
+    it('does not fall back to a cache that holds no label at all', async () => {
+      // A cache of sentinels only: it knows the tables but carries no label.
+      // Falling back to it would be the same as having no cache.
+      await seedBmsConfig();
+      mockHosxp({ failMetadata: true });
+      const now = new Date().toISOString();
+      await db.execute(
+        `INSERT INTO cached_assessment_form_metadata
+           (id, hospital_id, form_table, form_id, form_name, items_json,
+            synced_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'cam-sentinel-1',
+          HOSPITAL_ID,
+          'asm_lr_record_after_birth_nan',
+          UNUSED_FORM_ID,
+          null,
+          '[]',
+          now,
+          now,
+          now,
+        ],
+      );
+      const warn = vi.spyOn(logger, 'warn');
+
+      await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(warn.mock.calls.map((call) => call[0])).not.toContain(
+        'assessment_metadata_cache_stale_used',
+      );
+    });
+
+    it('keeps using the cache for an ORPHAN row — a version the site no longer lists', async () => {
+      // The site deleted the form version 205 and keeps the rows it recorded
+      // under it. HOSxP does not list 205 any more, so the row falls back to
+      // the current version's items — exactly as it did before the cache
+      // existed. That must NOT invalidate the cache (or the pull would read
+      // the metadata and rewrite the cache on every single round).
+      await seedBmsConfig();
+      await writeAssessmentMetadataCache(db, HOSPITAL_ID, CACHE_FORMS, ITEM_ROWS, new Date());
+      const spy = mockHosxp({ rows: [rawRow({ head_form_id: 205 })] });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(metadataQueries(spy)).toHaveLength(0);
+      expect(r.upserted).toBe(1);
+      // The cache still labels the row (with the current version's items).
+      expect(await fieldLabels()).toContain('Systolic');
+    });
+
+    it('keeps using the cache for a row that carries no form id at all', async () => {
+      // A row without a head_form_id falls back to the current version's
+      // items. It must not be read as the form id 0 and invalidate the cache.
+      await seedBmsConfig();
+      await writeAssessmentMetadataCache(db, HOSPITAL_ID, CACHE_FORMS, ITEM_ROWS, new Date());
+      const spy = mockHosxp({ rows: [rawRow({ head_form_id: null })] });
+
+      const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { now: new Date() });
+
+      expect(metadataQueries(spy)).toHaveLength(0);
+      expect(r.upserted).toBe(1);
+      expect(await fieldLabels()).toContain('Systolic');
+    });
   });
 });

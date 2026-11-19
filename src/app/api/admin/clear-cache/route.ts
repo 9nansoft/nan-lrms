@@ -27,6 +27,9 @@ export async function POST() {
     // The assessment forms reference a patient row — they go first.
     await db.execute('DELETE FROM cached_maternity_assessments');
 
+    // The label cache of those forms (a child of hospitals) goes with them.
+    await db.execute('DELETE FROM cached_assessment_form_metadata');
+
     const patientsDeleted = await db.query<{ cnt: number }>(
       'SELECT COUNT(*) as cnt FROM cached_patients',
     );

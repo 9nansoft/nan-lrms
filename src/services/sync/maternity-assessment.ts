@@ -34,10 +34,18 @@ import { logger } from '@/lib/logger';
 import { buildAssessmentItemsSql, buildAssessmentRecordsSqlFor } from '@/config/hosxp-queries';
 import {
   MATERNITY_ASSESSMENT_FORMS,
+  ASSESSMENT_METADATA_CACHE_TTL_MS,
   assessmentFormByTable,
   type MaternityAssessmentForm,
   type MaternityAssessmentKey,
 } from '@/config/maternity-assessments';
+import {
+  assessmentMetadataCoversAllForms,
+  isAssessmentMetadataCacheFresh,
+  readAssessmentMetadataCache,
+  writeAssessmentMetadataCache,
+  type AssessmentMetadata,
+} from '@/services/assessment-metadata-cache';
 import {
   assessmentFormName,
   assessmentItemsByColumn,
@@ -708,6 +716,15 @@ export async function pullMaternityAssessmentsFromHosxp(
      * the sync bundle — the server's only source of a fresh HOSxP session.
      */
     bmsSessionId?: string | null;
+    /**
+     * How long the label cache may be reused (defaults to
+     * ASSESSMENT_METADATA_CACHE_TTL_MS).
+     */
+    assessmentMetadataTtlMs?: number;
+    /**
+     * The clock the cache freshness is judged against (defaults to now).
+     */
+    now?: Date;
   } = {},
 ): Promise<AssessmentSyncResult> {
   const empty: AssessmentSyncResult = {
@@ -792,20 +809,110 @@ export async function pullMaternityAssessmentsFromHosxp(
     };
   }
 
-  // The labels come from the site's own form definition, read from HOSxP.
-  // A metadata hiccup must not throw the fetched rows away: without the
-  // labels the fields keep their HOSxP column names, which is still a form.
-  let metadata: { forms: HosxpAssessmentFormRow[]; items: HosxpAssessmentItemRow[] } = {
-    forms: [],
-    items: [],
-  };
+  // The labels come from the site's own form definition. A form definition
+  // changes only when the SITE changes its form, so the labels are kept in
+  // the cache and reused: a fresh cache that covers every form answers the
+  // pull without asking HOSxP at all.
+  //
+  // A metadata hiccup must not throw the fetched rows away: without labels
+  // the fields keep their HOSxP column names, which is still a form — and a
+  // stale cache still carries the labels of the last good read.
+  const metadataTtlMs = options.assessmentMetadataTtlMs ?? ASSESSMENT_METADATA_CACHE_TTL_MS;
+  const now = options.now ?? new Date();
+
+  let cached: AssessmentMetadata = { forms: [], items: [], coveredTables: [], syncedAt: null };
+  let cacheFresh = false;
   try {
-    metadata = await readAssessmentMetadata(client, session, queryOptions);
+    // ONE round trip: the rows carry their stamp, so the freshness of the
+    // cache is known without asking the database a second time.
+    cached = await readAssessmentMetadataCache(db, hospitalId);
+    cacheFresh = isAssessmentMetadataCacheFresh(cached.syncedAt, metadataTtlMs, now);
   } catch (error) {
-    logger.error('assessment_metadata_read_failed', {
+    logger.warn('assessment_metadata_cache_read_failed', {
       hospitalId,
       error: errorMessage(error),
     });
+  }
+
+  // The cache may only answer the pull when it knows the form version the
+  // pulled rows were recorded under. A site can publish a NEW version of a
+  // form at any time; labelling a row of that version with an older
+  // version's items would write the wrong label into the cache and the
+  // cursor would walk past the row for good.
+  //
+  // An OLDER version the site no longer lists is an ORPHAN row: it falls
+  // back to the current version's items, exactly as it did before the cache
+  // existed — so it must NOT invalidate the cache (the pull would read the
+  // metadata and rewrite the cache on every round, for ever).
+  const pulled = pulledFormVersions(records);
+  const newestCachedByTable = new Map<string, number>();
+  for (const form of cached.forms) {
+    const id = Number(form.assessment_form_id);
+    const table = form.assessment_form_table;
+    const current = newestCachedByTable.get(table);
+    if (current === undefined || id > current) newestCachedByTable.set(table, id);
+  }
+  let cacheKnowsEveryForm = true;
+  for (const [table, ids] of pulled) {
+    const newestCached = newestCachedByTable.get(table);
+    if (newestCached === undefined) {
+      // The cache knows no form of this table — the site may have just
+      // started using it, and the rows cannot be labelled from the cache.
+      cacheKnowsEveryForm = false;
+      break;
+    }
+    if (ids.some((id) => id > newestCached)) {
+      // The site published a version NEWER than the cache knows.
+      cacheKnowsEveryForm = false;
+      break;
+    }
+  }
+  // A cache of sentinels alone knows the tables but carries no label.
+  const cacheHasLabels = cached.forms.length > 0;
+
+  let metadata: Pick<AssessmentMetadata, 'forms' | 'items'> = { forms: [], items: [] };
+  if (
+    cacheFresh &&
+    cacheHasLabels &&
+    cacheKnowsEveryForm &&
+    assessmentMetadataCoversAllForms(cached.coveredTables)
+  ) {
+    metadata = cached;
+    logger.debug('assessment_metadata_cache_hit', { hospitalId });
+  } else {
+    let read = false;
+    try {
+      metadata = await readAssessmentMetadata(client, session, queryOptions);
+      read = true;
+    } catch (error) {
+      logger.error('assessment_metadata_read_failed', {
+        hospitalId,
+        error: errorMessage(error),
+      });
+    }
+
+    // HOSxP answered with no form at all: nothing was learned. The cache
+    // must NOT be written — a fresh cache that holds no label would keep the
+    // pull from reading the metadata for a whole TTL.
+    const learned = read && metadata.forms.length > 0;
+    if (read && !learned) {
+      logger.warn('assessment_metadata_empty', { hospitalId });
+    }
+    if (learned) {
+      try {
+        await writeAssessmentMetadataCache(db, hospitalId, metadata.forms, metadata.items, now);
+      } catch (error) {
+        // A cache that cannot be written must not cost the pull its labels.
+        logger.warn('assessment_metadata_cache_write_failed', {
+          hospitalId,
+          error: errorMessage(error),
+        });
+      }
+    } else if (cacheHasLabels) {
+      // The labels of the last good read are better than raw column names.
+      metadata = cached;
+      logger.warn('assessment_metadata_cache_stale_used', { hospitalId });
+    }
   }
 
   const result = await syncMaternityAssessments(db, hospitalId, {
@@ -838,6 +945,30 @@ export async function pullMaternityAssessmentsFromHosxp(
   await advanceAssessmentCursors(db, hospitalId, nextByTable);
 
   return result;
+}
+
+/**
+ * The form versions the pulled rows were recorded under, per table.
+ *
+ * A row without a form id is not a version at all — `Number(null)` would
+ * turn it into the id 0 and reject every cache that has no form 0.
+ */
+function pulledFormVersions(records: AssessmentRecordsByTable): Map<string, number[]> {
+  const byTable = new Map<string, number[]>();
+  for (const form of MATERNITY_ASSESSMENT_FORMS) {
+    const rows = records[form.table] ?? [];
+    if (rows.length === 0) continue;
+    const ids: number[] = [];
+    for (const raw of rows) {
+      const rawId = raw.head_form_id;
+      if (rawId === null || rawId === undefined || rawId === '') continue;
+      const id = Number(rawId);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      ids.push(id);
+    }
+    byTable.set(form.table, ids);
+  }
+  return byTable;
 }
 
 /** The form names and column labels of the three forms, read from HOSxP. */

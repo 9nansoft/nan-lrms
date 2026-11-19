@@ -216,6 +216,12 @@ export async function DELETE(
     await db.execute('DELETE FROM cached_maternity_assessment_cursors WHERE hospital_id = ?', [
       hospitalId,
     ]);
+    // The label cache goes with them: it is a child of hospitals, and a
+    // cache that survives the wipe would label the next rows with a form
+    // definition this hospital may no longer have.
+    await db.execute('DELETE FROM cached_assessment_form_metadata WHERE hospital_id = ?', [
+      hospitalId,
+    ]);
     await db.execute(
       `DELETE FROM cached_anc_visits
         WHERE hospital_id = ?

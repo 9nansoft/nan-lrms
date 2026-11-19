@@ -3,8 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2026-04-19
 
 ## Active Technologies
-- TypeScript 5.x / Node.js 20+ LTS + Next.js 15 (App Router), React 19, NextAuth.js v5, SWR, Recharts, shadcn/ui, Tailwind CSS 4, better-sqlite3, pg (001-kk-lrms-app)
-- PostgreSQL 16+ (production cache), SQLite in-memory (unit tests) (001-kk-lrms-app)
+- TypeScript 5.x / Node.js 20+ LTS + Next.js 15 (App Router), React 19, NextAuth.js v5, SWR, Recharts, shadcn/ui, Tailwind CSS 4, @electric-sql/pglite, pg (001-kk-lrms-app)
+- PostgreSQL 16+ (production cache), PGlite — embedded PostgreSQL in WASM (unit tests) (001-kk-lrms-app)
 
 ## Project Structure
 
@@ -19,7 +19,7 @@ src/
   config/        # Configuration (risk-levels, hospitals, database)
   hooks/         # SWR data fetching hooks
 tests/
-  unit/          # Vitest + SQLite in-memory
+  unit/          # Vitest + PGlite (embedded PostgreSQL)
   integration/   # Integration tests
   e2e/           # Playwright E2E tests
 ```
@@ -54,7 +54,7 @@ Full constitution: `.specify/memory/constitution.md`
 
 ### II. Test-Driven Development (NON-NEGOTIABLE)
 - Write tests FIRST — Red-Green-Refactor strictly enforced
-- Unit test each task before moving on (Vitest + SQLite in-memory)
+- Unit test each task before moving on (Vitest + PGlite — embedded PostgreSQL)
 - E2E tests MUST produce detailed debug logs (network, console, UI, errors)
 - Never suppress errors or bypass failures; investigate root causes
 - False-passing tests MUST be documented and investigated

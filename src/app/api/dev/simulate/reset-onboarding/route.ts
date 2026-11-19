@@ -37,6 +37,7 @@ const FK_DEPENDENT_TABLES = [
   'cached_partograph_observations',
   'cached_maternity_assessments',
   'cached_maternity_assessment_cursors',
+  'cached_assessment_form_metadata',
   'cached_anc_risks',
   'cached_anc_visits',
   'cached_anc_lab_results',
