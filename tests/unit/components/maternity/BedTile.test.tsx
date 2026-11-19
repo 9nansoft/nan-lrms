@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 // Task 23: BedTile component tests — TDD: write tests FIRST
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { BedTile } from '@/components/maternity/BedTile';
 import type { BedOccupancy } from '@/types/maternity-ward';
@@ -25,6 +25,18 @@ const occupant: BedOccupancy = {
   last_observation_at: '2026-04-19T08:00:00',
   last_cervix_cm: 4,
 };
+
+// The tile shows the age and the hours in labor — both read the clock. Freeze
+// it, or the hours chip eventually contains the same digits as the age and
+// the assertions below match two elements.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-06-15T09:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('BedTile', () => {
   it('renders empty state when no occupant', () => {

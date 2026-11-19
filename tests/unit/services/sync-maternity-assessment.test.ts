@@ -38,8 +38,12 @@ import {
 import { logger } from '@/lib/logger';
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
 
-const KEY = generateKey();
-process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? KEY;
+// The service decrypts the marketplace token with the ENVIRONMENT's key. A
+// worker that already ran another suite has its own key in the env, so a
+// locally generated one would not match it and the token would arrive
+// encrypted. Use the env's key when there is one.
+const KEY = process.env.ENCRYPTION_KEY ?? generateKey();
+process.env.ENCRYPTION_KEY = KEY;
 
 let db: DatabaseAdapter;
 const HOSPITAL_ID = 'h-asm-1';
