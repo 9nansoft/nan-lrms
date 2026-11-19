@@ -55,6 +55,22 @@ const HOSPITAL_SCOPE_DENIED_BODY = {
 };
 
 /**
+ * The viewer's own hospital is not in the registry.
+ *
+ * Without this the answer was "คุณไม่มีสิทธิ์ดูข้อมูลคนไข้ของโรงพยาบาลนี้" —
+ * a permission problem — for a hospital asking about ITSELF. The truth is
+ * that the hospital has never been registered, so nothing has been synced
+ * and there are no numbers to show yet.
+ */
+const HOSPITAL_NOT_REGISTERED_BODY = {
+  error: 'Forbidden',
+  code: 'HOSPITAL_NOT_REGISTERED',
+  message: 'โรงพยาบาลของคุณยังไม่ได้ลงทะเบียนกับระบบ จึงยังไม่มีข้อมูลคนไข้ให้แสดง',
+  suggestedAction:
+    'เปิดหน้าห้องคลอดของโรงพยาบาลเพื่อให้ระบบซิงก์ข้อมูลครั้งแรก แล้วกลับมาเปิดหน้านี้อีกครั้ง',
+};
+
+/**
  * Guard for the routes that take a hospital code (or a patient id that
  * carries one) in the URL. Returns the 403 response when the hospital is out
  * of the viewer's scope, or null when the request may proceed.
@@ -65,6 +81,12 @@ export async function denyIfHospitalOutOfScope(
   hcode: string,
 ): Promise<NextResponse | null> {
   if (await scopeAllowsHcode(db, scope, hcode)) return null;
+  // The viewer belongs to no registered hospital: the answer must say THAT,
+  // not "you may not read this hospital" — a hospital asking about its own
+  // console was told it had no permission to look at itself.
+  if (scope.mode === 'SCOPED' && scope.allowedHospitalIds.length === 0) {
+    return NextResponse.json(HOSPITAL_NOT_REGISTERED_BODY, { status: 403 });
+  }
   return NextResponse.json(HOSPITAL_SCOPE_DENIED_BODY, { status: 403 });
 }
 

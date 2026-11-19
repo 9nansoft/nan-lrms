@@ -162,8 +162,11 @@ function buildOrderBy(sort?: string): string {
   }
 }
 
-const DATA_SELECT = `SELECT mj.*, h.name as hospital_name, h.hcode
-  FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id`;
+const DATA_SELECT = `SELECT mj.*, h.name as hospital_name, h.hcode,
+       ch.name as current_hospital_name, ch.hcode as current_hcode
+  FROM maternal_journeys mj
+  JOIN hospitals h ON h.id = mj.hospital_id
+  LEFT JOIN hospitals ch ON ch.id = mj.current_hospital_id`;
 const COUNT_SELECT = `SELECT COUNT(*) as total
   FROM maternal_journeys mj JOIN hospitals h ON h.id = mj.hospital_id`;
 
@@ -203,6 +206,9 @@ function mapJourneyListItem(r: Record<string, unknown>, decryptedName?: string):
     lastAncDate: toIsoString(r.last_anc_date as string | Date | null),
     hospitalName: r.hospital_name as string,
     hcode: r.hcode as string,
+    currentHospitalName: (r.current_hospital_name as string | null) ?? null,
+    // She left: the pregnancy is registered here, another hospital holds her.
+    referredOut: !!r.current_hospital_id && r.current_hospital_id !== r.hospital_id,
     registeredAt: toIsoString(r.registered_at as string | Date) ?? '',
   };
 }
@@ -460,9 +466,19 @@ export async function listHospitalJourneys(
 
   const { page, perPage } = normalizePaging(filters);
   const now = new Date();
+  // The population of a hospital's ANC registry: the pregnancies it
+  // REGISTERED plus the ones it holds now.
+  //
+  // A woman A referred out to B is registered at A and held at B — she must
+  // stay on A's registry (marked "ส่งต่อไป รพ.บี"), or A loses track of her
+  // the moment she leaves. B's own women are not in it: they were never
+  // registered at A.
+  const population = '(mj.current_hospital_id = ? OR mj.hospital_id = ?)';
+  const populationParams = [hospitalId, hospitalId];
+
   const { clause, params } = buildJourneyWhere(
-    'mj.current_hospital_id = ?',
-    [hospitalId],
+    population,
+    populationParams,
     { stage: filters.stage, riskLevel: filters.riskLevel },
     now,
   );
@@ -476,7 +492,15 @@ export async function listHospitalJourneys(
   );
   const journeys = rows.map((row) => mapJourneyListItem(row));
 
-  const counts = await computeRiskCounts(db, '1=1', [], { stage: filters.stage, hospitalId }, now);
+  // The KPI strip counts the SAME women the table lists — a count that
+  // disagrees with its own list is the "no numbers" the ward staff sees.
+  const counts = await computeRiskCounts(
+    db,
+    population,
+    populationParams,
+    { stage: filters.stage },
+    now,
+  );
 
   return {
     journeys,
@@ -736,6 +760,7 @@ export async function getJourneyDetail(
       registeredAt: toIsoString(r.registered_at as string | Date) ?? '',
       currentHospitalName: r.current_hospital_name as string,
       currentHcode: r.current_hcode as string,
+      referredOut: !!r.current_hospital_id && r.current_hospital_id !== r.hospital_id,
       heightCm: r.height_cm as number | null,
       bloodGroup: (r.blood_group as string | null) ?? null,
       rhFactor: (r.rh_factor as string | null) ?? null,

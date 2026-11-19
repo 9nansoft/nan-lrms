@@ -46,6 +46,8 @@ function makeFixture(): JourneyListResponse {
         lastAncDate: iso(-52), // past critical threshold — near LTFU
         hospitalName: 'รพ.ชุมแพ',
         hcode: '10998',
+        currentHospitalName: null,
+        referredOut: false,
         registeredAt: iso(-200),
       },
       {
@@ -64,6 +66,8 @@ function makeFixture(): JourneyListResponse {
         lastAncDate: iso(-40), // warn window
         hospitalName: 'รพ.น้ำพอง',
         hcode: '11000',
+        currentHospitalName: null,
+        referredOut: false,
         registeredAt: iso(-150),
       },
       {
@@ -82,6 +86,8 @@ function makeFixture(): JourneyListResponse {
         lastAncDate: iso(-10),
         hospitalName: 'รพ.น้ำพอง',
         hcode: '11000',
+        currentHospitalName: null,
+        referredOut: false,
         registeredAt: iso(-100),
       },
     ],

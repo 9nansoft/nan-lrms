@@ -524,6 +524,20 @@ function AncRow({ j, isSelected, onSelect, onReveal, onOpen }: AncRowProps) {
           {concerns.slice(0, 2).map((c) => (
             <ConcernChip key={c.label} label={c.label} warn={c.warn} />
           ))}
+          {j.referredOut && (
+            // She left for another hospital — she stays on our registry so we
+            // can still track her, and the marker says where she went.
+            <span
+              className="ml-1.5 inline-block rounded-sm px-1.5 py-0.5 align-middle font-mono text-caption tracking-[0.06em]"
+              style={{
+                background: 'var(--accent-navy-soft)',
+                color: 'var(--ink-navy)',
+                fontWeight: 700,
+              }}
+            >
+              ส่งต่อไป {j.currentHospitalName ?? 'โรงพยาบาลอื่น'}
+            </span>
+          )}
         </div>
         <div className="mt-0.5 font-mono text-caption text-[var(--ink-navy-muted)]">
           {j.age}y · G{j.gravida ?? '-'}P{j.para ?? 0} · HN {j.hn}

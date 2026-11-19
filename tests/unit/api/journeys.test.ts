@@ -93,6 +93,8 @@ describe('Journey API Logic', () => {
         lastAncDate: r.last_anc_date as string | null,
         hospitalName: r.hospital_name as string,
         hcode: r.hcode as string,
+        currentHospitalName: null,
+        referredOut: false,
         registeredAt: r.registered_at as string,
       };
 

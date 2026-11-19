@@ -168,15 +168,18 @@ export function hospitalScopeFilter(
  */
 export function journeyScopeFilter(scope: ViewerScope, alias = 'mj'): ScopeFilter | null {
   if (scope.mode === 'ALL') return null;
-  const own =
-    scope.allowedHospitalIds.length > 0
-      ? {
-          clause: `(${alias}.hospital_id IN (${scope.allowedHospitalIds.map(() => '?').join(', ')}) OR ${alias}.current_hospital_id IN (${scope.allowedHospitalIds.map(() => '?').join(', ')}))`,
-          params: [...scope.allowedHospitalIds, ...scope.allowedHospitalIds],
-        }
-      : null;
+  if (scope.allowedHospitalIds.length === 0) {
+    // A scoped viewer with no hospital at all (an unknown account) gets
+    // `1 = 0`: no rows, not all rows. Falling through to the refer-in grant
+    // alone would leave the query UNFILTERED — the province's whole
+    // registry for an account that belongs to no hospital.
+    return { clause: '1 = 0', params: [] };
+  }
+  const own = {
+    clause: `(${alias}.hospital_id IN (${scope.allowedHospitalIds.map(() => '?').join(', ')}) OR ${alias}.current_hospital_id IN (${scope.allowedHospitalIds.map(() => '?').join(', ')}))`,
+    params: [...scope.allowedHospitalIds, ...scope.allowedHospitalIds],
+  };
   const grant = referGrantClause(scope, `${alias}.id`);
-  if (!own) return grant;
   if (!grant) return own;
   return {
     clause: `(${own.clause} OR ${grant.clause})`,

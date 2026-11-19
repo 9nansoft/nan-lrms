@@ -505,6 +505,14 @@ export interface JourneyListItem {
   lastAncDate: string | null;
   hospitalName: string;
   hcode: string;
+  /** The hospital that holds her NOW (null when the journey has no current
+   *  hospital). Different from `hospitalName`, which is where the pregnancy
+   *  was registered. */
+  currentHospitalName: string | null;
+  /** True when she left: the pregnancy is registered here but another
+   *  hospital holds her now (a referral out). The sending hospital keeps
+   *  tracking her — it must not lose her from its own registry. */
+  referredOut: boolean;
   registeredAt: string;
 }
 

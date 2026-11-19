@@ -369,13 +369,29 @@ describe('journey-list service', () => {
   });
 
   describe('listHospitalJourneys', () => {
-    it('scopes to the hospital by hcode', async () => {
-      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30 });
-      await insertJourney(db, { currentHospitalId: HOSP_B, gaWeeks: 30 });
+    it('lists the pregnancies it registered and the ones it holds now', async () => {
+      // Registered here, held here.
+      const here = await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30 });
+      // Registered here, referred out to another hospital: the sender keeps
+      // tracking her, so she stays on this registry.
+      const sentOut = await insertJourney(db, { currentHospitalId: HOSP_B, gaWeeks: 30 });
+      // Registered elsewhere, held here.
+      const heldHere = await insertJourney(db, {
+        hospitalId: HOSP_B,
+        currentHospitalId: HOSP_A,
+        gaWeeks: 30,
+      });
+      // Another hospital's own woman — never this hospital's.
+      const theirs = await insertJourney(db, {
+        hospitalId: HOSP_B,
+        currentHospitalId: HOSP_B,
+        gaWeeks: 30,
+      });
 
       const res = await listHospitalJourneys(db, '10670', { stage: 'PREGNANCY' });
       expect(res).not.toBeNull();
-      expect(res!.journeys).toHaveLength(1);
+      expect(res!.journeys.map((j) => j.id).sort()).toEqual([here, sentOut, heldHere].sort());
+      expect(res!.journeys.map((j) => j.id)).not.toContain(theirs);
     });
 
     // The hospital console KPI strip showed `journeys.length` from a capped
@@ -389,8 +405,14 @@ describe('journey-list service', () => {
       await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'HR2' });
       await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'HR3' });
       await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'HR3' });
-      // Out-of-population rows that must NOT leak into the counts:
-      await insertJourney(db, { currentHospitalId: HOSP_B, gaWeeks: 30, ancRiskLevel: 'HR3' });
+      // Out-of-population rows that must NOT leak into the counts — another
+      // hospital's own woman (registered AND held there):
+      await insertJourney(db, {
+        hospitalId: HOSP_B,
+        currentHospitalId: HOSP_B,
+        gaWeeks: 30,
+        ancRiskLevel: 'HR3',
+      });
       await insertJourney(db, {
         currentHospitalId: HOSP_A,
         careStage: 'DELIVERED',
@@ -401,6 +423,18 @@ describe('journey-list service', () => {
       expect(res!.journeys).toHaveLength(2);
       expect(res!.pagination.total).toBe(6);
       expect(res!.counts).toEqual({ low: 3, hr1: 0, hr2: 1, hr3: 2, total: 6 });
+    });
+
+    it('counts the women it referred out — the count must match the list', async () => {
+      // The KPI strip must count the same women the table lists: a woman
+      // referred away is still this hospital's to follow.
+      await insertJourney(db, { currentHospitalId: HOSP_A, gaWeeks: 30, ancRiskLevel: 'LOW' });
+      await insertJourney(db, { currentHospitalId: HOSP_B, gaWeeks: 30, ancRiskLevel: 'HR3' });
+
+      const res = await listHospitalJourneys(db, '10670', { stage: 'PREGNANCY' });
+
+      expect(res!.pagination.total).toBe(2);
+      expect(res!.counts?.total).toBe(res!.pagination.total);
     });
 
     it('counts ignore the riskLevel filter (stable KPI contract, same as province board)', async () => {
