@@ -1,0 +1,6 @@
+lr1_table=asm_first_pregnant_pt_nan
+lr1_name=[LR]-การบันทึกประวัติและประเมินสมรรถนะหญิงตั้งครรภ์ แรกรับ
+lr2_table=asm_lr_record_after_birth_nan
+lr2_name=[LR]-แบบฟอร์มการบันทึกการพยาบาลระยะหลังคลอด
+lr3_table=asm_lr_record_birth_period_nan
+lr3_name=[LR]-แบบฟอร์มการบันทึกการพยาบาลในระยะคลอด
