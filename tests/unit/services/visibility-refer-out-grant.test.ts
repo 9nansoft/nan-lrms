@@ -26,6 +26,7 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => undefined }));
 
 import { GET as hospitalJourneysRoute } from '@/app/api/hospitals/[hcode]/journeys/route';
+import { GET as dashboardRoute } from '@/app/api/dashboard/route';
 import { GET as hospitalPatientsRoute } from '@/app/api/hospitals/[hcode]/patients/route';
 import { GET as journeysRoute } from '@/app/api/journeys/route';
 import { GET as journeyDetailRoute } from '@/app/api/journeys/[journeyId]/route';
@@ -194,6 +195,21 @@ describe('refer-out: the sender keeps the woman it referred away', () => {
     const body = (await res.json()) as JourneyListResponse;
 
     expect(body.journeys.map((j) => j.id)).not.toContain(RECEIVER_JOURNEY);
+  });
+});
+
+describe('the numbers are aggregates and stay visible', () => {
+  it('shows the dashboard counts to a hospital user', async () => {
+    // A count carries no patient identity — the scope hides the DETAILS, not
+    // the numbers. A dashboard that shows no numbers at all is wrong.
+    signInAs(SENDER_HCODE);
+
+    const res = await dashboardRoute();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.summary.totalActive).toBeGreaterThan(0);
+    expect(body.hospitals.length).toBeGreaterThan(0);
   });
 });
 
