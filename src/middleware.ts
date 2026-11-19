@@ -26,6 +26,9 @@ const READONLY_BLOCKED_API_PREFIXES = [
   '/api/onboarding',
   '/api/sync/trigger',
   '/api/referrals',
+  // A consult is a clinical write of the patient's record — a read-only
+  // session must not be able to record one.
+  '/api/patients',
   '/api/hospital/audit-log',
   '/api/dev',
 ];

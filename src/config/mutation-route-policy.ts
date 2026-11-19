@@ -19,6 +19,8 @@ export type MutationRoutePolicy =
 
 export const MUTATION_ROUTE_POLICIES: Record<string, MutationRoutePolicy> = {
   'src/app/api/referrals/route.ts': 'session-origin-checked',
+  'src/app/api/patients/[an]/consults/route.ts': 'session-origin-checked',
+  'src/app/api/patients/[an]/consults/[consultId]/route.ts': 'session-origin-checked',
   'src/app/api/referrals/[id]/accept/route.ts': 'session-origin-checked',
   'src/app/api/referrals/[id]/reject/route.ts': 'session-origin-checked',
   'src/app/api/referrals/[id]/transit/route.ts': 'session-origin-checked',

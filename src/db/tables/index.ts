@@ -3,6 +3,7 @@ import { hospitalsTable } from './hospitals';
 import { hospitalNodesTable } from './hospital-nodes';
 import { hospitalBmsConfigTable } from './hospital-bms-config';
 import { hospitalConsultDoctorsTable } from './hospital-consult-doctors';
+import { patientConsultsTable } from './patient-consults';
 import { cachedPatientsTable } from './cached-patients';
 import { cachedPartographObservationsTable } from './cached-partograph-observations';
 import { cachedMaternityAssessmentsTable } from './cached-maternity-assessments';
@@ -38,6 +39,7 @@ export {
   hospitalNodesTable,
   hospitalBmsConfigTable,
   hospitalConsultDoctorsTable,
+  patientConsultsTable,
   cachedPatientsTable,
   cachedPartographObservationsTable,
   cachedMaternityAssessmentsTable,
@@ -101,6 +103,8 @@ export const ALL_TABLES: TableDefinition[] = [
   cachedMaternityAssessmentCursorsTable,
   // The label cache of the assessment forms — references hospitals (above).
   cachedAssessmentFormMetadataTable,
+  // Consult records — references hospitals + cached_patients (both above).
+  patientConsultsTable,
   cachedVitalSignsTable,
   cpdScoresTable,
   // References cached_patients, hospitals, maternal_journeys (all above) —

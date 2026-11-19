@@ -43,6 +43,8 @@ const FK_DEPENDENT_TABLES = [
   'cached_anc_lab_results',
   'cached_newborns',
   'cached_referrals',
+  // Consults hang off the patients — they go before them (FK).
+  'patient_consults',
   'cached_patients',
   'maternal_journeys',
   // direct hospital children

@@ -274,6 +274,8 @@ export async function DELETE(
     // later drain cannot send an alert for a case the admin has erased.
     await db.execute('DELETE FROM moph_alert_log WHERE hospital_id = ?', [hospitalId]);
     await db.execute('DELETE FROM moph_alert_event_queue WHERE hospital_id = ?', [hospitalId]);
+    // Consults are the patient's clinical records — they go with the patient.
+    await db.execute('DELETE FROM patient_consults WHERE hospital_id = ?', [hospitalId]);
     // cached_patients references maternal_journeys.id, so it must go before
     // maternal_journeys to satisfy the FK.
     await db.execute('DELETE FROM cached_patients WHERE hospital_id = ?', [hospitalId]);

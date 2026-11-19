@@ -929,3 +929,43 @@ export interface ReferralInsightsResponse {
   /** Destination hospitals with counts — feeds the TO filter dropdown. */
   destinations: Array<{ id: string; name: string; count: number }>;
 }
+
+// ─── Consults (ปรึกษาแพทย์ที่ปรึกษาได้จากรายชื่อแพทย์ของโรง) ──────────
+
+/** The state of a consult: asked for, reached the doctor, answered. */
+export type ConsultStatus = 'REQUESTED' | 'CONTACTED' | 'COMPLETED';
+
+/** A doctor from the hospital's consult list. */
+export interface ConsultDoctor {
+  id: string;
+  cid: string;
+  name: string;
+  position: string | null;
+  phoneNumber: string | null;
+}
+
+/** One consult record of one admission. */
+export interface PatientConsult {
+  id: string;
+  an: string;
+  hospitalId: string;
+  doctorId: string | null;
+  doctorCid: string;
+  doctorName: string;
+  doctorPosition: string | null;
+  doctorPhone: string | null;
+  reason: string;
+  status: ConsultStatus;
+  advice: string | null;
+  requestedByCid: string | null;
+  requestedByName: string | null;
+  consultedAt: string | null;
+  createdAt: string;
+}
+
+export interface PatientConsultsResponse {
+  /** The consults of this admission, newest first. */
+  consults: PatientConsult[];
+  /** The doctors of the patient's hospital that can be consulted. */
+  doctors: ConsultDoctor[];
+}
