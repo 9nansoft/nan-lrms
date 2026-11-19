@@ -142,6 +142,23 @@ export async function POST(request: NextRequest) {
     }
     hospitalId = rows[0].id;
 
+    // The purge guard. The admin deleted this hospital's data and suspended
+    // every sync path until the hospital is re-onboarded: a push must not
+    // put the data back. 403 is the permanent rejection the browser client
+    // already understands — it stops polling instead of pushing again every
+    // cycle.
+    const purged = await db.query<{ data_purged_at: string | null }>(
+      'SELECT data_purged_at FROM hospital_bms_config WHERE hospital_id = ?',
+      [hospitalId],
+    );
+    if (purged[0]?.data_purged_at) {
+      logger.info('browser_push_blocked_purged', { hcode, hospitalId });
+      return NextResponse.json(
+        { error: 'hospital_purged_pending_reonboard', hcode },
+        { status: 403 },
+      );
+    }
+
     const body = (await request.json().catch(() => null)) as BrowserPushBody | null;
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'invalid_json' }, { status: 400 });

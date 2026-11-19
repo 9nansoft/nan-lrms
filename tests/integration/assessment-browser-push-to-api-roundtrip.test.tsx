@@ -222,6 +222,24 @@ describe('maternity assessment browser push → cache → API → UI', () => {
     expect(screen.getByText('หลังคลอด')).toBeTruthy();
   });
 
+  it('refuses the push of a hospital whose data was purged', async () => {
+    // The admin wiped this hospital's data: every sync path is suspended
+    // until it is re-onboarded, so the push must not put the data back.
+    await db.execute(
+      'UPDATE hospital_bms_config SET data_purged_at = ? WHERE hospital_id = ?',
+      ['2026-11-01T00:00:00.000Z', hospitalId],
+    );
+
+    const res = await browserPush(jsonRequest({}) as never);
+
+    // 403 is the permanent rejection the browser client understands — it
+    // stops polling instead of pushing again every cycle.
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('hospital_purged_pending_reonboard');
+    const stored = await db.query('SELECT id FROM cached_maternity_assessments');
+    expect(stored).toHaveLength(0);
+  });
+
   it('shows nothing when the hospital recorded no form', async () => {
     // HOSxP has no row of the form: the cache stays empty and the ward says
     // so instead of showing an empty form.
