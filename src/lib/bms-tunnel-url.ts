@@ -71,7 +71,11 @@ export function tunnelHostBelongsToHospital(host: string, hcode: string): boolea
   const label = host.toLowerCase().split('.')[0] ?? '';
   const code = hcode.trim().toLowerCase();
   if (!code) return false;
-  return label.includes(code);
+  // EXACT comparison of the identifier before the first delimiter
+  // (`10716-saciw` → `10716`). A substring test would accept another
+  // hospital's tunnel (`110670-other` contains `10670`).
+  const identifier = label.split('-')[0];
+  return identifier === code;
 }
 
 /** True when the host matches an EXTRA allowlist entry (not the default). */

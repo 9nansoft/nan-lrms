@@ -58,6 +58,22 @@ describe('validateTunnelUrl', () => {
     expect(other.ok === false && other.reason).toBe('tunnel_host_not_belonging_to_hospital');
   });
 
+  it('does not accept another hospital whose code merely contains ours', () => {
+    // '110670' contains '10670' — a substring test would let it through.
+    const check = validateTunnelUrl('https://110670-other.tunnel.hosxp.net', {
+      requireTrustedHost: true,
+      hcode: '10670',
+    });
+    expect(check.ok).toBe(false);
+    expect(check.ok === false && check.reason).toBe('tunnel_host_not_belonging_to_hospital');
+
+    const prefix = validateTunnelUrl('https://x10670-other.tunnel.hosxp.net', {
+      requireTrustedHost: true,
+      hcode: '10670',
+    });
+    expect(prefix.ok).toBe(false);
+  });
+
   it('explains every rejection in Thai', () => {
     expect(tunnelUrlErrorMessage('https_required')).toContain('https');
     expect(tunnelUrlErrorMessage('untrusted_tunnel_host')).toContain('BMS_ALLOWED_TUNNEL_HOSTS');
