@@ -17,13 +17,17 @@
 const DEFAULT_TRUSTED_HOST_SUFFIXES = ['.tunnel.hosxp.net'];
 
 /** Extra trusted hosts/suffixes, comma separated. */
-export function trustedTunnelHostSuffixes(): string[] {
-  const extra = (process.env.BMS_ALLOWED_TUNNEL_HOSTS ?? '')
+/** Hosts an administrator allowed explicitly (beyond the marketplace's). */
+export function extraTunnelHostSuffixes(): string[] {
+  return (process.env.BMS_ALLOWED_TUNNEL_HOSTS ?? '')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter((s) => s.length > 0)
     .map((s) => (s.startsWith('.') ? s : `.${s}`));
-  return [...DEFAULT_TRUSTED_HOST_SUFFIXES, ...extra];
+}
+
+export function trustedTunnelHostSuffixes(): string[] {
+  return [...DEFAULT_TRUSTED_HOST_SUFFIXES, ...extraTunnelHostSuffixes()];
 }
 
 export function isTrustedTunnelHost(host: string): boolean {
@@ -52,6 +56,32 @@ function isPrivateHostLiteral(host: string): boolean {
 export type TunnelUrlCheck = { ok: true; url: URL } | { ok: false; reason: string };
 
 /**
+ * Does this tunnel host belong to THIS hospital?
+ *
+ * The marketplace names each hospital's tunnel after it
+ * (`10716-saciw.tunnel.hosxp.net`), so the first label carries the hospital
+ * code. Requiring it stops one hospital from pointing the server's
+ * credentials at another hospital's tunnel — a trusted host is not enough.
+ *
+ * A deployment that names its tunnels differently must list the host
+ * explicitly in BMS_ALLOWED_TUNNEL_HOSTS; that is an administrator's
+ * decision, not something a client can claim.
+ */
+export function tunnelHostBelongsToHospital(host: string, hcode: string): boolean {
+  const label = host.toLowerCase().split('.')[0] ?? '';
+  const code = hcode.trim().toLowerCase();
+  if (!code) return false;
+  return label.includes(code);
+}
+
+/** True when the host matches an EXTRA allowlist entry (not the default). */
+export function matchesExplicitTunnelHost(host: string): boolean {
+  const h = host.toLowerCase();
+  const extras = extraTunnelHostSuffixes();
+  return extras.some((suffix) => h === suffix.slice(1) || h.endsWith(suffix));
+}
+
+/**
  * Validate a tunnel URL.
  *
  * `requireTrustedHost` is on for every place the SERVER sends a bearer
@@ -59,7 +89,7 @@ export type TunnelUrlCheck = { ok: true; url: URL } | { ok: false; reason: strin
  */
 export function validateTunnelUrl(
   raw: string | null | undefined,
-  opts: { requireTrustedHost?: boolean } = {},
+  opts: { requireTrustedHost?: boolean; hcode?: string } = {},
 ): TunnelUrlCheck {
   if (!raw || raw.trim().length === 0) return { ok: false, reason: 'empty_url' };
   let url: URL;
@@ -73,6 +103,15 @@ export function validateTunnelUrl(
   if (isPrivateHostLiteral(url.hostname)) return { ok: false, reason: 'private_address_not_allowed' };
   if (opts.requireTrustedHost && !isTrustedTunnelHost(url.hostname)) {
     return { ok: false, reason: 'untrusted_tunnel_host' };
+  }
+  // The tunnel must be THIS hospital's: a trusted host alone would still let
+  // one site point the server's credentials at another site's tunnel.
+  if (
+    opts.hcode &&
+    !tunnelHostBelongsToHospital(url.hostname, opts.hcode) &&
+    !matchesExplicitTunnelHost(url.hostname)
+  ) {
+    return { ok: false, reason: 'tunnel_host_not_belonging_to_hospital' };
   }
   return { ok: true, url };
 }
@@ -90,6 +129,11 @@ export function tunnelUrlErrorMessage(reason: string): string {
       return 'URL ของ BMS tunnel ต้องไม่มี user:password ในตัว';
     case 'private_address_not_allowed':
       return 'URL ของ BMS tunnel ต้องไม่ชี้เข้าเครือข่ายภายใน (127.0.0.1 / 10.x / 192.168.x / 172.16-31.x)';
+    case 'tunnel_host_not_belonging_to_hospital':
+      return (
+        'โฮสต์ของ BMS tunnel ไม่ใช่ของโรงพยาบาลนี้ (ชื่อ tunnel ต้องมีรหัสโรงพยาบาล) — ' +
+        'ให้ผู้ดูแลระบบเพิ่มโฮสต์นี้ใน BMS_ALLOWED_TUNNEL_HOSTS ถ้าเป็นการตั้งค่าพิเศษ'
+      );
     case 'untrusted_tunnel_host':
       return (
         'โฮสต์ของ BMS tunnel ไม่อยู่ในรายการที่เชื่อถือได้ ' +

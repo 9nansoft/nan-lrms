@@ -20,6 +20,7 @@ import type { SyncRunTrigger } from '@/services/sync/progress-store';
 import { serverBmsSession } from '@/services/sync/maternity-assessment';
 import { applyHosxpConnectionFacts } from '@/services/sync/hosxp-connection';
 import { validateTunnelUrl } from '@/lib/bms-tunnel-url';
+import { API_KEY_SCOPES } from '@/services/webhook';
 import { SseManager } from '@/lib/sse';
 import {
   processBrowserNewborns,
@@ -139,6 +140,12 @@ export interface PushActor {
   trigger: SyncRunTrigger;
   /** 'readonly' clients never receive patient identifiers from the bootstrap. */
   accessMode: 'write' | 'readonly';
+  /**
+   * Capability scopes the caller holds. A browser session holds none — the
+   * agent capabilities (handing the server this hospital's tunnel URL) are
+   * API-key only, and a scope is written into the key when it is minted.
+   */
+  scopes: string[];
 }
 
 export async function handlePush(request: NextRequest, actor: PushActor): Promise<Response> {
@@ -182,8 +189,19 @@ export async function handlePush(request: NextRequest, actor: PushActor): Promis
     const hosxpBmsUrl = typeof body.hosxp?.bms_url === 'string' ? body.hosxp.bms_url : '';
     const hosxpToken =
       typeof body.hosxp?.marketplace_token === 'string' ? body.hosxp.marketplace_token : '';
-    if (hosxpBmsUrl) {
-      const tunnelCheck = validateTunnelUrl(hosxpBmsUrl, { requireTrustedHost: true });
+    // Only an AGENT with the `hosxp:configure` capability may hand the
+    // server connection facts. A browser session (any hospital staff member)
+    // has no scopes — the browser path onboards through
+    // /api/onboarding/hosxp-sync, which has its own gating.
+    const mayConfigureHosxp =
+      trigger === 'agent' && actor.scopes.includes(API_KEY_SCOPES.HOSXP_CONFIGURE);
+    if (hosxpBmsUrl && !mayConfigureHosxp) {
+      logger.warn('push_hosxp_facts_ignored', { hcode, trigger });
+    } else if (hosxpBmsUrl) {
+      const tunnelCheck = validateTunnelUrl(hosxpBmsUrl, {
+        requireTrustedHost: true,
+        hcode,
+      });
       if (!tunnelCheck.ok) {
         logger.warn('push_hosxp_tunnel_rejected', { hcode, reason: tunnelCheck.reason });
       } else {

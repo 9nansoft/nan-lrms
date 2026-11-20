@@ -86,6 +86,8 @@ export async function resolveSessionActor(
       hcode,
       trigger: 'browser',
       accessMode: user.accessMode === 'readonly' ? 'readonly' : 'write',
+      // A browser session carries no API-key capabilities.
+      scopes: [],
     },
   };
 }
@@ -135,6 +137,7 @@ export async function resolveApiKeyActor(
       hcode: rows[0].hcode,
       trigger: 'agent',
       accessMode: 'write',
+      scopes: keyInfo.scopes,
     },
   };
 }

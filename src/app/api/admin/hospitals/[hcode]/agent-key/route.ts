@@ -41,6 +41,7 @@ export async function POST(
       API_KEY_SCOPES.AGENT_PUSH,
       API_KEY_SCOPES.AGENT_HEARTBEAT,
       API_KEY_SCOPES.AGENT_AUTHENTICITY,
+      API_KEY_SCOPES.HOSXP_CONFIGURE,
     ]);
     logger.info('agent_key_minted', { hcode, keyPrefix: created.keyPrefix });
 

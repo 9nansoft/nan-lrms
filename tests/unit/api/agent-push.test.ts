@@ -31,6 +31,7 @@ const AGENT_SCOPES = [
   API_KEY_SCOPES.AGENT_PUSH,
   API_KEY_SCOPES.AGENT_HEARTBEAT,
   API_KEY_SCOPES.AGENT_AUTHENTICITY,
+  API_KEY_SCOPES.HOSXP_CONFIGURE,
 ];
 const OTHER_HCODE = '10998';
 
@@ -129,7 +130,7 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
     const res = await POST(
       jsonRequest(
         {
-          hosxp: { bms_url: 'https://10716-saciw.tunnel.hosxp.net' },
+          hosxp: { bms_url: 'https://10670-test.tunnel.hosxp.net' },
           labor: { patients: [laborPatient('AG-TUN-1')] },
         },
         key.rawKey,
@@ -141,7 +142,7 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
       'SELECT tunnel_url FROM hospital_bms_config WHERE hospital_id = ?',
       [id],
     );
-    expect(rows[0]?.tunnel_url).toBe('https://10716-saciw.tunnel.hosxp.net');
+    expect(rows[0]?.tunnel_url).toBe('https://10670-test.tunnel.hosxp.net');
   });
 
   it('refuses a tunnel URL outside the trusted host list', async () => {
@@ -206,7 +207,7 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
       jsonRequest(
         {
           hosxp: {
-            bms_url: 'https://10716-saciw.tunnel.hosxp.net',
+            bms_url: 'https://10670-test.tunnel.hosxp.net',
             marketplace_token: 'mkt-secret-value',
           },
           labor: { patients: [laborPatient('AG-MKT-1')] },
@@ -222,6 +223,53 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
     const stored = rows[0]?.marketplace_token ?? '';
     expect(stored).not.toBe('mkt-secret-value');
     expect(decryptSafe(stored)).toBe('mkt-secret-value');
+  });
+
+  it('ignores connection facts from a key without the configure capability', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', [
+      API_KEY_SCOPES.AGENT_PUSH,
+      API_KEY_SCOPES.AGENT_HEARTBEAT,
+      API_KEY_SCOPES.AGENT_AUTHENTICITY,
+    ]);
+
+    const res = await POST(
+      jsonRequest(
+        {
+          hosxp: { bms_url: 'https://10670-test.tunnel.hosxp.net' },
+          labor: { patients: [laborPatient('AG-NOCFG-1')] },
+        },
+        key.rawKey,
+      ) as never,
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await db.query<{ tunnel_url: string | null }>(
+      'SELECT tunnel_url FROM hospital_bms_config WHERE hospital_id = ?',
+      [id],
+    );
+    expect(rows[0]?.tunnel_url ?? null).toBeNull();
+  });
+
+  it('refuses a tunnel that belongs to another hospital', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+
+    await POST(
+      jsonRequest(
+        {
+          hosxp: { bms_url: 'https://10999-other.tunnel.hosxp.net' },
+          labor: { patients: [laborPatient('AG-OTHER-1')] },
+        },
+        key.rawKey,
+      ) as never,
+    );
+
+    const rows = await db.query<{ tunnel_url: string | null }>(
+      'SELECT tunnel_url FROM hospital_bms_config WHERE hospital_id = ?',
+      [id],
+    );
+    expect(rows[0]?.tunnel_url ?? null).toBeNull();
   });
 
   it('records the sync run with trigger=agent', async () => {

@@ -43,6 +43,21 @@ describe('validateTunnelUrl', () => {
     expect(check.ok === false && check.reason).toBe('untrusted_tunnel_host');
   });
 
+  it('binds the tunnel to the hospital when the code is given', () => {
+    const own = validateTunnelUrl('https://10670-saciw.tunnel.hosxp.net', {
+      requireTrustedHost: true,
+      hcode: '10670',
+    });
+    expect(own.ok).toBe(true);
+
+    const other = validateTunnelUrl('https://10999-other.tunnel.hosxp.net', {
+      requireTrustedHost: true,
+      hcode: '10670',
+    });
+    expect(other.ok).toBe(false);
+    expect(other.ok === false && other.reason).toBe('tunnel_host_not_belonging_to_hospital');
+  });
+
   it('explains every rejection in Thai', () => {
     expect(tunnelUrlErrorMessage('https_required')).toContain('https');
     expect(tunnelUrlErrorMessage('untrusted_tunnel_host')).toContain('BMS_ALLOWED_TUNNEL_HOSTS');

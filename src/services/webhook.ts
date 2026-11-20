@@ -592,6 +592,8 @@ export const API_KEY_SCOPES = {
   AGENT_HEARTBEAT: 'agent:heartbeat',
   /** Report the name-authenticity verdict — can purge recent rows. */
   AGENT_AUTHENTICITY: 'agent:authenticity',
+  /** Hand the server this hospital's tunnel URL + marketplace token. */
+  HOSXP_CONFIGURE: 'hosxp:configure',
 } as const;
 
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[keyof typeof API_KEY_SCOPES];
