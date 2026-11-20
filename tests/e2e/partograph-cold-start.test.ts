@@ -43,6 +43,27 @@ vi.mock('@/lib/ensure-init', () => ({
   ensureInit: async () => undefined,
 }));
 
+// The partogram GET resolves the viewer's visibility scope, which reads the
+// session. Calling a route handler directly has no Next request scope, so
+// next-auth's `headers()` throws — the session is faked here instead (the
+// webhook POSTs in this file are authenticated by Bearer key, untouched).
+vi.mock('@/lib/auth', () => ({
+  auth: async () => ({
+    user: {
+      id: 'u-e2e',
+      name: 'พว.ทดสอบ ระบบ',
+      userCid: '1100500090006',
+      role: 'NURSE',
+      hospitalCode: app.hcode,
+      hospitalName: 'รพ.ทดสอบ',
+      tunnelUrl: '',
+      databaseType: '',
+      authProvider: 'bms',
+      accessMode: 'readwrite',
+    },
+  }),
+}));
+
 vi.mock('@/lib/sse', () => ({
   SseManager: class MockSse {
     static getInstance() {
