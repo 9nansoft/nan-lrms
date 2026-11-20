@@ -1135,11 +1135,13 @@ export async function pullMaternityAssessmentsFromHosxp(
         continue;
       }
       // Any other failure must be named, or the sync log reports an empty
-      // pull as a healthy one.
+      // pull as a healthy one. The tunnel host is part of the name: a 502
+      // says WHICH tunnel is dead, which the hospitalId alone never does.
       failedForms.push(form.table);
       logger.error('assessment_form_query_failed', {
         hospitalId,
         formTable: form.table,
+        tunnel: urlHost(session.bmsUrl),
         error: errorMessage(error),
       });
     }
@@ -1196,6 +1198,7 @@ export async function pullMaternityAssessmentsFromHosxp(
       logger.error('assessment_reconcile_query_failed', {
         hospitalId,
         formTable: form.table,
+        tunnel: urlHost(session.bmsUrl),
         error: errorMessage(error),
       });
     }
