@@ -84,6 +84,13 @@ powershell -NoProfile -Command ^
 echo. >> %REPORT%
 
 echo [7] service >> %REPORT%
+echo -- sc query NN-LRMS-agent (ถาม Windows service manager ตรง ๆ) -- >> %REPORT%
+sc query NN-LRMS-agent >> %REPORT% 2>&1
+echo. >> %REPORT%
+echo -- Get-Service -- >> %REPORT%
+powershell -NoProfile -Command ^
+  "Get-Service | Where-Object { $_.Name -like '*NN-LRMS*' -or $_.DisplayName -like '*NN-LRMS*' } | Format-Table Name,DisplayName,Status,StartType -AutoSize | Out-String -Width 200" >> %REPORT% 2>&1
+echo -- WinSW status -- >> %REPORT%
 if exist NN-LRMS-agent-service.exe (
   NN-LRMS-agent-service.exe status >> %REPORT% 2>&1
 ) else (
