@@ -154,6 +154,13 @@ JWT ต่อได้เพราะ agent ส่ง `bms_session_id` สดม
 
 ติดตั้งเป็น service: `NN-LRMS-agent.exe install` + `start` (ดู `agent/README.md`)
 
+### แก้ตาม security review (รอบที่ 2)
+
+| ประเด็น | แก้ |
+| --- | --- |
+| API key ไม่มี scope — key ของ HOSxP webhook sender ใช้ขับ agent ได้ | `webhook_api_keys.scopes` + `API_KEY_SCOPES` (agent:push / agent:heartbeat / agent:authenticity); resolver fail closed |
+| tunnel URL ชี้ที่ผิด host → bearer + marketplace token หลั่ง | `src/lib/bms-tunnel-url.ts` — https เท่านั้น, ไม่มี userinfo, ไม่ชี้ LAN/loopback, host ต้องอยู่ใน allowlist (`*.tunnel.hosxp.net` + `BMS_ALLOWED_TUNNEL_HOSTS`); ตรวจตอนบันทึก (onboarding) และก่อนใช้ (backstop) |
+
 ### ยังไม่ทำ (ค่อยทำต่อ)
 
 1. **ปุ่มออกคีย์ agent ในหน้า /admin** — มี API แล้ว (`POST /api/admin/hospitals/<hcode>/agent-key`) แต่ยังต้องเรียกด้วย curl
