@@ -34,6 +34,13 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
+# The runtime writes into .next: the image optimizer keeps its cache in
+# .next/cache/images, and the server creates .next/cache on start. The
+# copies above land as root, so without this the app user cannot create or
+# write them and every optimized image 500s ("EACCES: permission denied,
+# mkdir '/app/.next/cache'").
+RUN mkdir -p /app/.next/cache && chown -R nextjs:nodejs /app/.next
+
 USER nextjs
 
 EXPOSE 3000
