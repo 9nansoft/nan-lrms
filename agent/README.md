@@ -19,8 +19,10 @@ agent ทำงานทุก 5 นาที (ตั้งค่าได้) �
 
 ## สิ่งที่ agent ทำต่อรอบ
 
-1. `GET http://127.0.0.1:45011/api/SessionID` — เอา session id สดจาก BMS gateway ในเครื่อง
-   (ชิ้นที่เซิร์ฟเวอร์กลางทำเองไม่ได้ เพราะ `/api/SessionID` มีแค่บน local gateway)
+1. `GET http://127.0.0.1:45011/api/GetBMSSessionID` (ส่ง `Authorization: Bearer <gateway token>`)
+   — เอา `bms_session_id` สด + `bms_url` + เวลาหมดอายุ จาก BMS gateway ในเครื่อง
+   (ชิ้นที่เซิร์ฟเวอร์กลางทำเองไม่ได้ เพราะ endpoint นี้มีแค่บน local gateway)
+   **ดึงใหม่ทุกรอบ** — gateway ต่ออายุ session เองแล้วหมดอายุตามเวลา
 2. แลก session id เป็น bearer token ผ่าน `https://hosxp.net/phapi/PasteJSON`
 3. ดึงชุดข้อมูลเดียวกับที่เบราว์เซอร์ดึง: ผู้คลอดในห้องคลอด, partograph, ANC, ANC lab,
    ข้อมูลทารกใหม่, ข้อมูลการส่งต่อ — ถ้า local gateway ตอบได้จะดึงจากมันตรง ๆ
@@ -58,11 +60,15 @@ cp agent.config.example.json agent.config.json
 #      apiKey            = คีย์จากข้อ 1
 #      intervalMinutes   = 5
 #      localGateway      = http://127.0.0.1:45011
+#      gatewayToken      = <gateway token ของเครื่องนี้>   (ต้องมี — ใช้เรียก GetBMSSessionID)
 #      marketplaceToken  = null (ถ้าใช้ local gateway ไม่ต้องใส่)
 
 # 3) ทดสอบก่อน — ต้องเห็น "cycle_done" ใน console
 node agent.mjs
 ```
+
+**gateway token** คืออะไร: โทเคนที่ BMS gateway บนเครื่องห้องคลอดถามก่อนจะให้ session id
+ขอจาก IT ของ รพ. (ดูไฟล์ตั้งค่า/คู่มือของ BMS gateway ที่ติดตั้งไว้) — ไม่ใช่ของจากเซิร์ฟเวอร์ NN-LRMS
 
 **ถ้าต้องใส่ marketplace token** (ต้องใช้เมื่อ local gateway ใช้ไม่ได้ แล้ว agent ต้องต่อผ่าน BMS tunnel
 — HOSxP จะสุ่ม CID/HN ให้ถ้าไม่มี token): เปิด NN-LRMS จากเมนูใน HOSxP ในเบราว์เซอร์ แล้วดู
@@ -122,13 +128,15 @@ Get-Content .\logs\NN-LRMS-agent.out.log -Tail 50
 | อาการใน log | ทำอะไร |
 |---|---|
 | `local gateway ... ตอบ ... — HOSxP/BMS gateway ต้องเปิดอยู่` | HOSxP/BMS gateway บนเครื่องไม่ทำงาน หรือพอร์ตไม่ใช่ 45011 |
+| `ไม่ได้ bms_session_id` | gateway ตอบแต่ไม่มี session — ดู `gateway_state` ใน log (ถ้าไม่ใช่ `running` ให้แก้ gateway) |
+| `ต้องมี "gatewayToken"` | ยังไม่ได้ใส่ gateway token ใน `agent.config.json` |
 | `PasteJSON` error | เครื่องนี้ต่ออินเทอร์เน็ตออกไม่ได้ หรือ session id หมดอายุ |
 | `browser-push HTTP 401` | API key ผิด/ถูกยกเลิก → ขอคีย์ใหม่ |
 | `permanently_blocked` | โรงพยาบาลถูกปิดใช้งาน หรือถูกลบข้อมูลแล้ว (purge) → ให้แอดมินตรวจ |
 
 ## ความปลอดภัย
 
-- ไฟล์ `agent.config.json` มี API key = ให้ถือเป็นรหัสผ่านของเครื่องนั้น
+- ไฟล์ `agent.config.json` มี API key + gateway token = ให้ถือเป็นรหัสผ่านของเครื่องนั้น
   (ปิดสิทธิ์อ่านไฟล์ให้เฉพาะบัญชีที่รัน agent)
 - agent พิมพ์เฉพาะจำนวนและสถานะ ออก log **ไม่พิมพ์ชื่อผู้ป่วย/CID**
 - ปิดคีย์ได้จากหน้า admin (ยกเลิก `webhook_api_keys` ของโรงพยาบาลนั้น)

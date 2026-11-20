@@ -31,7 +31,7 @@ npm run build:agent:win      # → agent/dist/agent.exe   (Windows x64, 37 MB, �
 | `agent.exe` | `agent/dist/agent.exe` จาก `npm run build:agent:win` |
 | `NN-LRMS-agent.exe` | WinSW — ดาวน์โหลด `winsw-x64.exe` จาก GitHub releases แล้วเปลี่ยนชื่อเป็น `NN-LRMS-agent.exe` |
 | `NN-LRMS-agent.xml` | `agent/install/NN-LRMS-agent.xml` (นิยาม service) |
-| `agent.config.json` | `agent/config.example.json` + แก้ `serverUrl` / `apiKey` / `intervalMinutes` |
+| `agent.config.json` | `agent/config.example.json` + แก้ `serverUrl` / `apiKey` / `intervalMinutes` / `gatewayToken` |
 
 ## ทดสอบก่อนส่ง
 
@@ -49,6 +49,7 @@ node dist/agent.mjs
 ```
 
 - `mode: "local"` = ดึงผ่าน local gateway บนเครื่องนั้น (ดีที่สุด) · `mode: "tunnel"` = ต่อผ่าน BMS tunnel
+- `sessionExpiresAt` / `gatewayState` = เวลาหมดอายุของ session ที่ gateway ให้มา กับสถานะ gateway (`running` = ปกติ)
 - `pushed: true` = ส่งข้อมูลเข้าเซิร์ฟเวอร์สำเร็จ
 - ไม่มี `cycle_done` แต่มี `cycle_failed` → ดูข้อความ error (ปกติคือ local gateway ไม่ตอบ หรือ API key ผิด)
 

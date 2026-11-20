@@ -71,7 +71,11 @@ async function cycle(): Promise<void> {
   const startedAt = Date.now();
   let mode: 'local' | 'tunnel' = 'local';
   try {
-    const session = await acquireSession(config.localGateway, config.marketplaceToken);
+    const session = await acquireSession(
+      config.localGateway,
+      config.gatewayToken,
+      config.marketplaceToken,
+    );
     mode = session.mode;
 
     const result = await runBrowserPoll({
@@ -89,6 +93,8 @@ async function cycle(): Promise<void> {
 
     log('cycle_done', {
       mode: session.mode,
+      sessionExpiresAt: session.expiresAt,
+      gatewayState: session.gatewayState,
       pushed: result.pushedToServer,
       laborRead: result.labor.read,
       laborSent: result.labor.sent,

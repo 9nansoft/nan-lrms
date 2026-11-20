@@ -3,5 +3,6 @@
   "apiKey": "kklrms_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "intervalMinutes": 5,
   "localGateway": "http://127.0.0.1:45011",
+  "gatewayToken": "ใส่ gateway token ของเครื่องนี้",
   "marketplaceToken": null
 }

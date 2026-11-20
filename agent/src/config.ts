@@ -16,6 +16,12 @@ export interface AgentConfig {
   /** The HOSxP BMS gateway on THIS machine. */
   localGateway: string;
   /**
+   * Gateway token — the credential the local gateway asks for before it
+   * hands out a live BMS session (GET /api/GetBMSSessionID). It belongs to
+   * THIS workstation; treat it like a password.
+   */
+  gatewayToken: string;
+  /**
    * Marketplace token — HOSxP randomises CID/HN for API calls that arrive
    * without it. Optional when the local gateway is used (the hospital's own
    * gateway serves the real rows).
@@ -85,10 +91,24 @@ export function loadConfig(path: string = configPath()): AgentConfig {
     typeof obj.localGateway === 'string' && obj.localGateway.trim().length > 0
       ? obj.localGateway.trim()
       : DEFAULT_LOCAL_GATEWAY;
+  const gatewayToken =
+    typeof obj.gatewayToken === 'string' ? obj.gatewayToken.trim() : '';
+  if (!gatewayToken) {
+    fail(
+      'ต้องมี "gatewayToken" (โทเคนของ BMS gateway บนเครื่องนี้ — ใช้เรียก /api/GetBMSSessionID)',
+    );
+  }
   const marketplaceToken =
     typeof obj.marketplaceToken === 'string' && obj.marketplaceToken.trim().length > 0
       ? obj.marketplaceToken.trim()
       : null;
 
-  return { serverUrl: serverUrl.replace(/\/+$/, ''), apiKey, intervalMinutes, localGateway, marketplaceToken };
+  return {
+    serverUrl: serverUrl.replace(/\/+$/, ''),
+    apiKey,
+    intervalMinutes,
+    localGateway,
+    gatewayToken,
+    marketplaceToken,
+  };
 }
