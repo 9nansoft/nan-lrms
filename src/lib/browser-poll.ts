@@ -1158,7 +1158,7 @@ let lastAncLabPullAt: number | null = null;
  * what lands in the cache is the hospital's own HOSxP content. The browser
  * only raises a flag — and its flag is a trigger, not a source of truth.
  */
-async function pullAssessmentHints(
+export async function pullAssessmentHints(
   opts: RunOptions,
   cursors: Record<string, string>,
 ): Promise<Record<string, number> | null> {
@@ -1171,10 +1171,18 @@ async function pullAssessmentHints(
           opts,
         );
         const max = rows[0]?.max_pk;
-        const maxPk = max === null || max === undefined ? 0 : Number(max);
-        if (!Number.isFinite(maxPk) || maxPk <= 0) return;
-        const cursor = Number(cursors[form.table] ?? '0');
-        if (Number.isFinite(cursor) && maxPk > cursor) hints[form.table] = maxPk;
+        if (max === null || max === undefined) return;
+        // HOSxP keys reach 18 digits — beyond Number's safe range — so the
+        // "is there anything new?" comparison is done on the digits, not on
+        // floats. (The hint is only a trigger; the server computes its own
+        // position, so the stored value's precision does not matter.)
+        const maxText = String(max).trim();
+        if (!/^\d+$/.test(maxText) || maxText === '0') return;
+        const cursorText = String(cursors[form.table] ?? '0').trim();
+        const isNewer = /^\d+$/.test(cursorText)
+          ? BigInt(maxText) > BigInt(cursorText)
+          : Number(maxText) > Number(cursorText);
+        if (isNewer) hints[form.table] = Number(maxText);
       } catch {
         // A site does not have to use all three forms.
       }

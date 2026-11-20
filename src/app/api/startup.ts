@@ -138,10 +138,13 @@ export async function initializeApp(): Promise<void> {
       await seedDemoData(db);
     }
 
-    // 5. Server-side scheduled polling is DISABLED. Pulls now happen in the
-    //    user's browser via the local 127.0.0.1:45011 HOSxP gateway and are
-    //    POSTed to /api/sync/browser-push. The webhook receiver
+    // 5. The legacy server-side PATIENT polling is disabled — patient rows
+    //    are pulled by the ward's browser tab (or the headless agent) via the
+    //    local 127.0.0.1:45011 HOSxP gateway and POSTed to
+    //    /api/sync/browser-push / agent-push. The webhook receiver
     //    (/api/webhooks/patient-data) still handles HOSxP-pushed data.
+    //    Two server-side timers DO remain (6a assessment forms, 6b agent
+    //    backstop) — they read HOSxP directly, they do not poll patients.
     //    See useBrowserPoll + browser-poll.ts.
     if (process.env.NODE_ENV !== 'test') {
       logger.info('hosxp_polling_disabled_browser_only_mode', {});

@@ -30,6 +30,7 @@ import {
 } from '@/services/sync/newborn';
 import {
   pullMaternityAssessmentsFromHosxp,
+  runAssessmentPullExclusively,
   readAssessmentCursors,
 } from '@/services/sync/maternity-assessment';
 import { autoArriveReferrals } from '@/services/referral';
@@ -688,27 +689,42 @@ export async function handlePush(request: NextRequest, actor: PushActor): Promis
         message: 'Pulling maternity assessment forms from HOSxP.',
       });
       try {
-        const r = await pullMaternityAssessmentsFromHosxp(db, hospitalId, { bmsSessionId });
-        result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
-        // A pull that fetched nothing because it could not run is NOT a
-        // successful pull of zero rows — say so, or the Sync Log reads as a
-        // healthy hospital while its forms sit empty. The same goes for a
-        // pull whose labels could not be read: the rows land with their raw
-        // HOSxP column names, and the admin has to see that.
-        const problems = [r.error, r.metadataError, r.reconcileError].filter(
-          (reason): reason is string => !!reason,
+        // Under the shared per-hospital lock: a scheduler reconcile (or a
+        // backstop pull) running for this hospital must not race this one —
+        // its prune could delete rows this pull just wrote. A busy lock is
+        // not an error: the scheduler retries within five minutes.
+        const r = await runAssessmentPullExclusively(hospitalId, () =>
+          pullMaternityAssessmentsFromHosxp(db, hospitalId, { bmsSessionId }),
         );
-        const failed = r.failed > 0 || r.failedForms.length > 0 || problems.length > 0;
-        if (failed) hadWarning = true;
-        await appendSyncStep(hospitalId, runId, {
-          name: 'persist_assessments',
-          status: failed ? 'warning' : 'success',
-          message: failed
-            ? `Assessment sync incomplete: ${r.upserted} stored, ${r.skipped} skipped, ${r.failed} refused by the database.`
-            : `Upserted ${r.upserted} assessment forms (${r.skipped} skipped, ${r.failed} refused by the database).`,
-          detail: problems.length > 0 ? problems.join(' · ') : undefined,
-          counts: { upserted: r.upserted, skipped: r.skipped, failed: r.failed },
-        });
+        if (r === null) {
+          await appendSyncStep(hospitalId, runId, {
+            name: 'persist_assessments',
+            status: 'info',
+            message:
+              'Skipped — another assessment pull for this hospital is already running; the scheduler catches up within 5 minutes.',
+          });
+        } else {
+          result.assessments = { upserted: r.upserted, skipped: r.skipped, failed: r.failed };
+          // A pull that fetched nothing because it could not run is NOT a
+          // successful pull of zero rows — say so, or the Sync Log reads as a
+          // healthy hospital while its forms sit empty. The same goes for a
+          // pull whose labels could not be read: the rows land with their raw
+          // HOSxP column names, and the admin has to see that.
+          const problems = [r.error, r.metadataError, r.reconcileError].filter(
+            (reason): reason is string => !!reason,
+          );
+          const failed = r.failed > 0 || r.failedForms.length > 0 || problems.length > 0;
+          if (failed) hadWarning = true;
+          await appendSyncStep(hospitalId, runId, {
+            name: 'persist_assessments',
+            status: failed ? 'warning' : 'success',
+            message: failed
+              ? `Assessment sync incomplete: ${r.upserted} stored, ${r.skipped} skipped, ${r.failed} refused by the database.`
+              : `Upserted ${r.upserted} assessment forms (${r.skipped} skipped, ${r.failed} refused by the database).`,
+            detail: problems.length > 0 ? problems.join(' · ') : undefined,
+            counts: { upserted: r.upserted, skipped: r.skipped, failed: r.failed },
+          });
+        }
       } catch (e) {
         hadWarning = true;
         await appendSyncStep(hospitalId, runId, {

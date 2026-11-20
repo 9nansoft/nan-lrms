@@ -76,7 +76,9 @@ export function assessmentComponent(name: string | null | undefined): MaternityA
  * The timestamp keeps HOSxP's local time but uses the ISO 'T' separator:
  * `new Date('2026-11-17 21:03:15')` is an Invalid Date in Safari, which
  * would break the newest-first ordering. A zoneless ISO string is parsed as
- * local time everywhere, so the ward's clock is what the reader sees.
+ * local time everywhere, so the ward's clock is what the reader sees. (The
+ * SYNC path is the exception: it labels the clock UTC explicitly before
+ * storing — see usableTimestamp in sync/maternity-assessment.ts.)
  */
 export function readAssessmentRowMeta(
   raw: Record<string, unknown>,

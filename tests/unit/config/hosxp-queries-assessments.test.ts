@@ -101,6 +101,8 @@ describe('maternity assessment queries', () => {
     );
     expect(sql).toContain("'2026-11-18'");
     expect(sql).not.toMatch(/\d{2}:\d{2}/);
+    // The window is paged by the primary key — the first page starts at 0.
+    expect(sql).toMatch(/AND t\.asm_first_pregnant_pt_nan_id > 0/);
     expect(() =>
       buildAssessmentReconcileSqlFor(
         'asm_first_pregnant_pt_nan',
@@ -112,6 +114,33 @@ describe('maternity assessment queries', () => {
       buildAssessmentReconcileSqlFor(
         'asm_first_pregnant_pt_nan',
         'asm_first_pregnant_pt_nan_id',
+        '1; DROP TABLE x',
+      ),
+    ).toThrow();
+  });
+
+  it('substitutes only a validated page key into the reconcile query', () => {
+    const sql = buildAssessmentReconcileSqlFor(
+      'asm_lr_record_after_birth_nan',
+      'asm_lr_record_after_birth_nan_id',
+      '2026-11-18',
+      1499,
+    );
+    expect(sql).toContain('> 1499');
+    expect(sql).not.toContain('{{AFTER_PK}}');
+    expect(() =>
+      buildAssessmentReconcileSqlFor(
+        'asm_lr_record_after_birth_nan',
+        'asm_lr_record_after_birth_nan_id',
+        '2026-11-18',
+        'x',
+      ),
+    ).toThrow();
+    expect(() =>
+      buildAssessmentReconcileSqlFor(
+        'asm_lr_record_after_birth_nan',
+        'asm_lr_record_after_birth_nan_id',
+        '2026-11-18',
         '1; DROP TABLE x',
       ),
     ).toThrow();

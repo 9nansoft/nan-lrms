@@ -41,6 +41,7 @@ import {
   MATERNITY_ASSESSMENT_FORMS,
   ASSESSMENT_METADATA_CACHE_TTL_MS,
   ASSESSMENT_RECONCILE_WINDOW_DAYS,
+  ASSESSMENT_RECONCILE_WINDOW_MAX_PAGES,
   assessmentFormByTable,
   type MaternityAssessmentForm,
   type MaternityAssessmentKey,
@@ -216,13 +217,23 @@ export async function isHospitalPurged(
   return !!rows[0]?.data_purged_at;
 }
 
-/** A timestamp we can store and order by — rejects HOSxP zero dates. */
+/**
+ * A timestamp we can store and order by — rejects HOSxP zero dates.
+ *
+ * HOSxP's clock carries no zone, so the value is labelled UTC EXPLICITLY
+ * (`...Z`) rather than left for the database session's TimeZone to decide:
+ * the stored instant then means "the HOSxP naive clock, pinned", whatever
+ * timezone a connection happens to run in. The prune comparison and the
+ * reconcile window compare against that same pinned clock — see
+ * {@link reconcileWindowStart} and `pruneDeletedAssessments`.
+ */
 function usableTimestamp(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(trimmed)) return null;
-  const parsed = new Date(trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T'));
-  return Number.isNaN(parsed.getTime()) ? null : trimmed;
+  const iso = `${trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T')}Z`;
+  const parsed = new Date(iso);
+  return Number.isNaN(parsed.getTime()) ? null : iso;
 }
 
 export interface NormalizeOptions {
@@ -380,6 +391,27 @@ export async function syncMaternityAssessments(
     hospitalId,
     normalized,
   );
+
+  // A form stored before its patient reached the cache keeps a null
+  // patient_id until the row happens to be re-pulled (below-cursor rows
+  // never are). One cheap statement links whatever has become linkable —
+  // it updates nothing on a normal cycle.
+  let backfilled = 0;
+  if (!purged) {
+    try {
+      backfilled = await backfillPatientIds(db, hospitalId);
+      if (backfilled > 0) {
+        logger.info('assessment_patient_backfilled', { hospitalId, backfilled });
+      }
+    } catch (error) {
+      // The rows are already stored; a failed backfill must not fail the sync.
+      logger.warn('assessment_patient_backfill_failed', {
+        hospitalId,
+        error: errorMessage(error),
+      });
+    }
+  }
+
   return {
     upserted,
     skipped,
@@ -500,6 +532,31 @@ export async function upsertMaternityAssessments(
   }
 
   return { upserted, failed, persistedPks, failedPks, purged };
+}
+
+/**
+ * Link cached forms to patients that have arrived since the form was stored.
+ *
+ * The upsert resolves `an → patient_id` for the rows it carries; a row whose
+ * patient was missing lands with a null patient_id and — once below the
+ * cursor and outside the reconcile window — is never re-pulled to fix that.
+ * This one statement links whatever has become linkable. `an` remains the
+ * read key, so this only restores the relational/indexed link.
+ */
+async function backfillPatientIds(db: DatabaseAdapter, hospitalId: string): Promise<number> {
+  const rows = await db.query<{ id: string }>(
+    `UPDATE cached_maternity_assessments a
+        SET patient_id = (SELECT p.id
+                            FROM cached_patients p
+                           WHERE p.hospital_id = a.hospital_id AND p.an = a.an
+                           ORDER BY p.created_at
+                           LIMIT 1),
+            updated_at = ?
+      WHERE a.hospital_id = ? AND a.patient_id IS NULL AND a.an IS NOT NULL
+      RETURNING a.id`,
+    [new Date().toISOString(), hospitalId],
+  );
+  return rows.length;
 }
 
 // ─── Cursors ────────────────────────────────────────────────────────────────
@@ -746,31 +803,42 @@ export async function advanceAssessmentCursors(
     );
     if (existing.length > 0) {
       if (BigInt(next) <= BigInt(existing[0].cursor_pk)) continue;
+      // The purge guard lives IN the write, like the row upsert's: a purge
+      // that landed while HOSxP was being read must leave no cursor behind
+      // ("keep no state"), or the re-onboarding would start mid-table.
       await db.execute(
         `UPDATE cached_maternity_assessment_cursors
             SET cursor_pk = ?, updated_at = ?
-          WHERE id = ?`,
-        [next, now, existing[0].id],
+          WHERE id = ?
+            AND NOT EXISTS (
+              SELECT 1 FROM hospital_bms_config
+               WHERE hospital_id = ? AND data_purged_at IS NOT NULL)`,
+        [next, now, existing[0].id, hospitalId],
       );
     } else {
       await db.execute(
         `INSERT INTO cached_maternity_assessment_cursors
            (id, hospital_id, form_table, cursor_pk, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [uuidv4(), hospitalId, table, next, now],
+         SELECT ?, ?, ?, ?, ?
+          WHERE NOT EXISTS (
+            SELECT 1 FROM hospital_bms_config
+             WHERE hospital_id = ? AND data_purged_at IS NOT NULL)`,
+        [uuidv4(), hospitalId, table, next, now, hospitalId],
       );
     }
   }
 }
 
 /**
- * The start of the reconciliation window, as the plain timestamp BOTH sides
+ * The start of the reconciliation window, as the plain date BOTH sides
  * compare against.
  *
- * HOSxP stores its clock as a local time without a zone, and the cache stores
- * that very string. The window read and the cache read therefore compare
- * NAIVE values — and they must compare against the SAME literal, or the two
- * sides would not agree on which rows are inside the window.
+ * HOSxP stores its clock as a local time without a zone; the sync pins that
+ * clock to UTC when it stores `recorded_at` (see `usableTimestamp`), and the
+ * prune reads it back with `AT TIME ZONE 'UTC'`. The window read and the
+ * cache read therefore compare the SAME naive clock against the SAME
+ * literal, whichever timezone the database session runs in — the two sides
+ * cannot disagree about which rows are inside the window.
  *
  * The literal is the UTC clock without a zone. The hospital's clock is a few
  * hours ahead of it; a window of days does not care, and both sides shift
@@ -783,7 +851,8 @@ function reconcileWindowStart(now: Date): string {
   // ("Forbidden — SENSITIVE_BLOCKED: ... parameter marker : not standing
   // alone"). 'YYYY-MM-DD HH:MM:SS' has two colons; 'YYYY-MM-DD' has none.
   // A day-granular window start is also what the prune step compares against
-  // (recorded_at >= since), where a plain date compares correctly.
+  // ((recorded_at AT TIME ZONE 'UTC') >= since), where a plain date compares
+  // correctly.
   return start.toISOString().slice(0, 10);
 }
 
@@ -823,10 +892,14 @@ export async function pruneDeletedAssessments(
   seenPks: Set<string>,
   since: string,
 ): Promise<number> {
+  // AT TIME ZONE 'UTC' reads back the pinned naive HOSxP clock (see
+  // usableTimestamp), so the comparison matches the HOSxP-side window read
+  // exactly — whatever timezone this database session runs in.
   const cached = await db.query<{ source_pk: string }>(
     `SELECT source_pk
        FROM cached_maternity_assessments
-      WHERE hospital_id = ? AND form_table = ? AND recorded_at >= ?`,
+      WHERE hospital_id = ? AND form_table = ?
+        AND (recorded_at AT TIME ZONE 'UTC') >= ?`,
     [hospitalId, table, since],
   );
   let deleted = 0;
@@ -882,6 +955,40 @@ export async function pruneReconciledAssessments(
     deleted,
     error: failed.length > 0 ? `could not prune stale forms of: ${failed.join(', ')}` : null,
   };
+}
+
+// ─── Pull exclusivity ───────────────────────────────────────────────────────
+//
+// THREE paths can start a pull for the same hospital — the 5-minute
+// scheduler (with its hourly reconcile), a browser/agent push, and the
+// agent backstop. Two pulls racing on one hospital race on the same cursor
+// and, worse, a reconcile's prune can delete a row a concurrent pull just
+// upserted inside the window. The lock below makes the pulls mutually
+// exclusive per hospital, whichever path started them; a busy hospital is
+// simply skipped (the scheduler retries within five minutes anyway).
+//
+// Pinned on globalThis for the same reason the schedule state is (see
+// assessment-schedule.ts): a Next.js reload/module split must not produce
+// two competing Sets.
+const _lockGlobal = globalThis as unknown as { __assessmentPullLocks?: Set<string> };
+
+/**
+ * Run one hospital's assessment pull exclusively. Returns null when a pull
+ * for that hospital is already in flight — the caller skips, it does not
+ * wait.
+ */
+export async function runAssessmentPullExclusively<T>(
+  hospitalId: string,
+  fn: () => Promise<T>,
+): Promise<T | null> {
+  const locks = (_lockGlobal.__assessmentPullLocks ??= new Set<string>());
+  if (locks.has(hospitalId)) return null;
+  locks.add(hospitalId);
+  try {
+    return await fn();
+  } finally {
+    locks.delete(hospitalId);
+  }
 }
 
 /**
@@ -1039,17 +1146,44 @@ export async function pullMaternityAssessmentsFromHosxp(
 
     if (!reconcile || !windowStart) continue;
     try {
-      const sql = buildAssessmentReconcileSqlFor(
-        form.table,
-        form.pkColumn,
-        windowStart,
-      );
-      const res = await client.executeQuery(sql, session.bmsUrl, session.jwt, undefined, queryOptions);
-      const rows = res.data as Record<string, unknown>[];
+      // The window is read in PAGES keyed by the primary key: a form with
+      // more rows in the window than one page holds would otherwise never
+      // look complete, and its deletes would never propagate (the prune
+      // steps aside for a form it has not seen whole).
+      const rows: Record<string, unknown>[] = [];
+      let afterPk = '0';
+      let complete = false;
+      for (let page = 0; page < ASSESSMENT_RECONCILE_WINDOW_MAX_PAGES; page += 1) {
+        const sql = buildAssessmentReconcileSqlFor(
+          form.table,
+          form.pkColumn,
+          windowStart,
+          afterPk,
+        );
+        const res = await client.executeQuery(
+          sql,
+          session.bmsUrl,
+          session.jwt,
+          undefined,
+          queryOptions,
+        );
+        const pageRows = res.data as Record<string, unknown>[];
+        rows.push(...pageRows);
+        // A read that hit the limit does not know what it did NOT see —
+        // only a final SHORT page proves the window was seen whole.
+        if (pageRows.length < ASSESSMENT_ROW_LIMIT) {
+          complete = true;
+          break;
+        }
+        const lastKey = String(pageRows[pageRows.length - 1]?.[form.pkColumn]);
+        if (!/^\d{1,18}$/.test(lastKey)) break;
+        afterPk = lastKey;
+      }
       windowRecords[form.table] = rows;
-      // A read that hit the limit does not know what it did NOT see — the
-      // window may hold more rows than it returned.
-      windowComplete[form.table] = rows.length < ASSESSMENT_ROW_LIMIT;
+      // Reaching the page cap without a short page leaves the form
+      // incomplete on purpose: the prune never deletes from a window it has
+      // not seen whole, and the rows read so far are still stored.
+      windowComplete[form.table] = complete;
     } catch (error) {
       windowRecords[form.table] = [];
       windowComplete[form.table] = false;

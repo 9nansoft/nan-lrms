@@ -176,6 +176,16 @@ export async function writeAssessmentMetadataCache(
   }
 
   await db.transaction(async (tx) => {
+    // The purge guard lives IN the write, like the row upsert's: a purge that
+    // landed while HOSxP was being read must leave no label rows behind
+    // ("keep no state").
+    const purged = await tx.query<{ one: number }>(
+      `SELECT 1 AS one FROM hospital_bms_config
+        WHERE hospital_id = ? AND data_purged_at IS NOT NULL`,
+      [hospitalId],
+    );
+    if (purged.length > 0) return;
+
     // The cache must reflect HOSxP's current form set: drop the rows of the
     // tables that are about to be written before writing them again.
     const tables = MATERNITY_ASSESSMENT_FORMS.map((f) => f.table);

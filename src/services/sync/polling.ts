@@ -12,7 +12,10 @@ import {
   LABOUR_INFANTS_SINCE,
   IPT_PREGNANCY_DELIVERIES_SINCE,
 } from '@/config/hosxp-queries';
-import { pullMaternityAssessmentsFromHosxp } from './maternity-assessment';
+import {
+  pullMaternityAssessmentsFromHosxp,
+  runAssessmentPullExclusively,
+} from './maternity-assessment';
 import type { HosxpAssessmentFormRow, HosxpAssessmentItemRow } from '@/types/maternity-assessments';
 import type { DatabaseDialect } from '@/config/hosxp-queries';
 import {
@@ -1299,48 +1302,63 @@ export async function pollHospital(
     // HOSxP content; the labels come from the site's own form definition.
     // Own try/catch: a failure here must not abort the rest of the cycle.
     try {
-      const syncResult = await pullMaternityAssessmentsFromHosxp(db, hospitalId, {
-        bmsUrl,
-        jwt,
-        marketplaceToken: options.marketplaceToken ?? null,
-      });
-      stats.assessmentRowsUpserted = syncResult.upserted;
+      // Under the shared per-hospital lock: a scheduler reconcile (or a
+      // push-triggered pull) running for this hospital must not race this
+      // one. A busy lock is not an error — the scheduler catches up.
+      const syncResult = await runAssessmentPullExclusively(hospitalId, () =>
+        pullMaternityAssessmentsFromHosxp(db, hospitalId, {
+          bmsUrl,
+          jwt,
+          marketplaceToken: options.marketplaceToken ?? null,
+        }),
+      );
+      if (syncResult === null) {
+        emitStep(options, {
+          name: 'query_assessments',
+          status: 'info',
+          message:
+            'Skipped — another assessment pull for this hospital is already running; the scheduler catches up within 5 minutes.',
+        });
+        logger.info('assessment_sync_skipped_busy', { hospitalId });
+      } else {
+        stats.assessmentRowsUpserted = syncResult.upserted;
 
-      // A pull that could not run is not a pull of zero rows — report it as
-      // a warning with the reason, so the Sync Log never shows a healthy
-      // cycle while the forms sit empty. The same goes for a pull whose
-      // labels could not be read: the rows land with their raw HOSxP column
-      // names, and the admin has to see that.
-      const problems = [
-        syncResult.error,
-        syncResult.metadataError,
-        syncResult.reconcileError,
-      ].filter((reason): reason is string => !!reason);
-      const incomplete =
-        problems.length > 0 || syncResult.failedForms.length > 0 || syncResult.failed > 0;
-      emitStep(options, {
-        name: 'query_assessments',
-        status: incomplete ? 'warning' : 'success',
-        message: incomplete
-          ? `Maternity assessment sync incomplete: ${syncResult.upserted} forms stored, ${syncResult.skipped} skipped, ${syncResult.failed} refused by the database.`
-          : `Upserted ${syncResult.upserted} maternity assessment forms.`,
-        detail: problems.length > 0 ? problems.join(' · ') : undefined,
-        counts: {
-          upserted: syncResult.upserted,
-          skipped: syncResult.skipped,
-          failed: syncResult.failed,
-        },
-      });
-      logger.info('assessment_sync_complete', {
-        hospitalId,
-        formsUpserted: syncResult.upserted,
-        formsSkipped: syncResult.skipped,
-        formsFailed: syncResult.failed,
-        failedForms: syncResult.failedForms,
-        error: syncResult.error,
-        metadataError: syncResult.metadataError,
-        reconcileError: syncResult.reconcileError,
-      });
+        // A pull that could not run is not a pull of zero rows — report it as
+        // a warning with the reason, so the Sync Log never shows a healthy
+        // cycle while the forms sit empty. The same goes for a pull whose
+        // labels could not be read: the rows land with their raw HOSxP column
+        // names, and the admin has to see that.
+        const problems = [
+          syncResult.error,
+          syncResult.metadataError,
+          syncResult.reconcileError,
+        ].filter((reason): reason is string => !!reason);
+        const incomplete =
+          problems.length > 0 || syncResult.failedForms.length > 0 || syncResult.failed > 0;
+        emitStep(options, {
+          name: 'query_assessments',
+          status: incomplete ? 'warning' : 'success',
+          message: incomplete
+            ? `Maternity assessment sync incomplete: ${syncResult.upserted} forms stored, ${syncResult.skipped} skipped, ${syncResult.failed} refused by the database.`
+            : `Upserted ${syncResult.upserted} maternity assessment forms.`,
+          detail: problems.length > 0 ? problems.join(' · ') : undefined,
+          counts: {
+            upserted: syncResult.upserted,
+            skipped: syncResult.skipped,
+            failed: syncResult.failed,
+          },
+        });
+        logger.info('assessment_sync_complete', {
+          hospitalId,
+          formsUpserted: syncResult.upserted,
+          formsSkipped: syncResult.skipped,
+          formsFailed: syncResult.failed,
+          failedForms: syncResult.failedForms,
+          error: syncResult.error,
+          metadataError: syncResult.metadataError,
+          reconcileError: syncResult.reconcileError,
+        });
+      }
     } catch (assessmentError) {
       emitStep(options, {
         name: 'query_assessments',

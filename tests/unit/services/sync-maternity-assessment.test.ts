@@ -26,6 +26,7 @@ import {
   resolveCursorAdvance,
   pullMaternityAssessmentsFromHosxp,
   pruneReconciledAssessments,
+  runAssessmentPullExclusively,
 } from '@/services/sync/maternity-assessment';
 import {
   getPatientMaternityAssessments,
@@ -36,7 +37,11 @@ import {
   UNUSED_FORM_ID,
 } from '@/services/assessment-metadata-cache';
 import { logger } from '@/lib/logger';
-import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
+import {
+  MATERNITY_ASSESSMENT_FORMS,
+  ASSESSMENT_RECONCILE_WINDOW_MAX_PAGES,
+} from '@/config/maternity-assessments';
+import { ASSESSMENT_ROW_LIMIT } from '@/config/hosxp-queries';
 
 // The service decrypts the marketplace token with the ENVIRONMENT's key. A
 // worker that already ran another suite has its own key in the env, so a
@@ -192,6 +197,20 @@ describe('normalizeAssessmentRows', () => {
     expect(rows[0].entryStaff).toBe('jcome');
     expect(rows[0].sourcePk).toBe('asm_lr_record_after_birth_nan:2418');
   });
+
+  it('labels the zoneless HOSxP clock as UTC', () => {
+    // HOSxP's datetime has no zone. The stored value must pin it ('Z') so
+    // the recorded instant — and the prune's window comparison — mean the
+    // same thing whichever timezone a database connection runs in.
+    const { rows } = normalizeAssessmentRows(
+      AFTER_BIRTH,
+      [rawRow({ head_datetime: '2026-11-17 21:03:15' })],
+      items,
+      null,
+      { encryptionKey: KEY },
+    );
+    expect(rows[0].recordedAt).toBe('2026-11-17T21:03:15Z');
+  });
 });
 
 describe('syncMaternityAssessments', () => {
@@ -243,6 +262,48 @@ describe('syncMaternityAssessments', () => {
     expect(stored[0].patient_id).toBeNull();
   });
 
+  it('backfills patient_id once the patient reaches the cache', async () => {
+    // The form was stored while its admission was not synced — patient_id
+    // null. The patient arrives later; a NEW form of the same admission is
+    // then pulled, and the backfill links the old row too (a below-cursor
+    // row is never re-pulled, so nothing else would).
+    await syncMaternityAssessments(db, HOSPITAL_ID, {
+      forms: FORM_ROWS,
+      items: ITEM_ROWS,
+      records: {
+        asm_lr_record_after_birth_nan: [
+          rawRow({ asm_lr_record_after_birth_nan_id: 2418, an: 'AN-LATE' }),
+        ],
+      },
+    });
+
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO cached_patients
+         (id, hospital_id, hn, an, name, age, admit_date,
+          labor_status, synced_at, created_at, updated_at)
+       VALUES ('p-asm-late', ?, '000285566', 'AN-LATE', 'enc-name', 28, ?, 'ACTIVE', ?, ?, ?)`,
+      [HOSPITAL_ID, '2026-11-17T14:21:00', now, now, now],
+    );
+
+    await syncMaternityAssessments(db, HOSPITAL_ID, {
+      forms: FORM_ROWS,
+      items: ITEM_ROWS,
+      records: {
+        asm_lr_record_after_birth_nan: [
+          rawRow({ asm_lr_record_after_birth_nan_id: 2419, an: 'AN-LATE' }),
+        ],
+      },
+    });
+
+    const stored = await db.query<{ source_pk: string; patient_id: string | null }>(
+      'SELECT source_pk, patient_id FROM cached_maternity_assessments ORDER BY source_pk',
+    );
+    expect(stored).toHaveLength(2);
+    expect(stored[0].patient_id).toBe('p-asm-late'); // the OLD row — backfilled
+    expect(stored[1].patient_id).toBe('p-asm-late'); // the new row — resolved on upsert
+  });
+
   it('writes nothing when the hospital data was purged', async () => {
     // The admin wiped this hospital's data: every sync path is suspended
     // until it is re-onboarded, so the forms must not come back.
@@ -264,6 +325,29 @@ describe('syncMaternityAssessments', () => {
     expect(r.upserted).toBe(0);
     const stored = await db.query('SELECT id FROM cached_maternity_assessments');
     expect(stored).toHaveLength(0);
+  });
+
+  it('leaves no cursor and no label cache behind a purge that landed mid-pull', async () => {
+    // The purge contract is "keep no state": the row writes already guard
+    // themselves in-statement, and the cursor/metadata writes must too — a
+    // purge that lands between the pull's checks and its writes must not
+    // leave either behind (a surviving cursor would resume mid-table on
+    // re-onboarding).
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO hospital_bms_config
+         (id, hospital_id, tunnel_url, data_purged_at, created_at, updated_at)
+       VALUES ('hbc-purged-asm-2', ?, 'https://tunnel.test', ?, ?, ?)`,
+      [HOSPITAL_ID, '2026-11-01T00:00:00.000Z', now, now],
+    );
+
+    await advanceAssessmentCursors(db, HOSPITAL_ID, { 'asm_lr_record_after_birth_nan': '500' });
+    await writeAssessmentMetadataCache(db, HOSPITAL_ID, FORM_ROWS, ITEM_ROWS, new Date());
+
+    const cursors = await db.query('SELECT id FROM cached_maternity_assessment_cursors');
+    expect(cursors).toHaveLength(0);
+    const labels = await db.query('SELECT id FROM cached_assessment_form_metadata');
+    expect(labels).toHaveLength(0);
   });
 });
 
@@ -983,6 +1067,84 @@ describe('pullMaternityAssessmentsFromHosxp', () => {
       expect(await cachedPks()).toContain('9');
     });
 
+    // ─── Window paging ─────────────────────────────────────────────────────
+    //
+    // A form with more rows in the window than one page holds used to look
+    // "incomplete" for ever — its deletes never propagated. The window is
+    // now read page by page keyed by the primary key.
+    describe('window paging', () => {
+      /** A window row that cannot be stored — the page shape is all that
+       * matters here, and unusable rows keep the test off the upsert path. */
+      const unusable = (pk: number): Record<string, unknown> =>
+        rawRow({ asm_lr_record_after_birth_nan_id: pk, head_datetime: null });
+
+      /** A mock whose window answers by PAGE: the after-key parsed from the SQL. */
+      function mockPagedWindow(windowPage: (after: number) => Record<string, unknown>[]) {
+        const windowSqls: string[] = [];
+        vi.spyOn(BmsSessionClient.prototype, 'executeQuery').mockImplementation(
+          async (sql: string) => {
+            const wrap = (data: Record<string, unknown>[]) => ({
+              data,
+              field: [],
+              field_name: [],
+              record_count: data.length,
+            });
+            if (sql.includes('FROM assessment_form')) return wrap([]);
+            if (sql.includes('FROM assessment_items')) return wrap([]);
+            if (sql.includes(`FROM ${TABLE}`)) {
+              if (sql.includes('assessment_head_datetime >=')) {
+                windowSqls.push(sql);
+                const after = Number(
+                  /AND t\.asm_lr_record_after_birth_nan_id > (\d+)/.exec(sql)?.[1] ?? '0',
+                );
+                return wrap(windowPage(after));
+              }
+              return wrap([]);
+            }
+            return wrap([]);
+          },
+        );
+        return { windowSqls };
+      }
+
+      it('reads a busy form page by page until a short page, then prunes', async () => {
+        await seedBmsConfig();
+        await insertCached('9', stamp(INSIDE_WINDOW));
+        const { windowSqls } = mockPagedWindow((after) => {
+          if (after === 0) {
+            // A FULL first page — there is more behind it.
+            return Array.from({ length: ASSESSMENT_ROW_LIMIT }, (_, i) => unusable(1000 + i));
+          }
+          // The second page is short: the window has been seen whole.
+          return [unusable(1000 + ASSESSMENT_ROW_LIMIT)];
+        });
+
+        const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { reconcile: true });
+
+        expect(windowSqls).toHaveLength(2);
+        // The second page continues after the LAST key of the first page.
+        expect(windowSqls[1]).toContain(`> ${999 + ASSESSMENT_ROW_LIMIT}`);
+        // The whole window was seen — the row HOSxP no longer has is dropped.
+        expect(r.deleted).toBe(1);
+        expect(await cachedPks()).not.toContain('9');
+      });
+
+      it('stops at the page cap and prunes nothing of a form it has not seen whole', async () => {
+        await seedBmsConfig();
+        await insertCached('9', stamp(INSIDE_WINDOW));
+        const { windowSqls } = mockPagedWindow((after) =>
+          // A window that always has one more full page.
+          Array.from({ length: ASSESSMENT_ROW_LIMIT }, (_, i) => unusable(10_000 + after + i)),
+        );
+
+        const r = await pullMaternityAssessmentsFromHosxp(db, HOSPITAL_ID, { reconcile: true });
+
+        expect(windowSqls).toHaveLength(ASSESSMENT_RECONCILE_WINDOW_MAX_PAGES);
+        expect(r.deleted).toBe(0);
+        expect(await cachedPks()).toContain('9');
+      });
+    });
+
     it('drops the cached rows of a window HOSxP emptied', async () => {
       // HOSxP has no row of the form any more: every cached row of the
       // window is gone and must not stay behind.
@@ -1308,5 +1470,48 @@ describe('pullMaternityAssessmentsFromHosxp', () => {
       expect(r.upserted).toBe(1);
       expect(await fieldLabels()).toContain('Systolic');
     });
+  });
+});
+
+describe('runAssessmentPullExclusively', () => {
+  // Three paths can start a pull for one hospital (scheduler, push,
+  // backstop); two of them racing race the cursor and the reconcile prune.
+  // The lock is per hospital and does not wait — a busy hospital is skipped.
+
+  it('returns null while a pull for the same hospital is in flight', async () => {
+    let release!: (value: string) => void;
+    const gate = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const first = runAssessmentPullExclusively('h-lock', async () => gate);
+    // The first pull is now parked on the gate and holds the lock.
+    const second = await runAssessmentPullExclusively('h-lock', async () => 'ran');
+    expect(second).toBeNull();
+    release('done');
+    await expect(first).resolves.toBe('done');
+  });
+
+  it('releases the lock when the pull finishes, and after a throw', async () => {
+    await expect(
+      runAssessmentPullExclusively('h-lock-2', async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    // The failed pull must not leak its lock — the next one runs.
+    await expect(runAssessmentPullExclusively('h-lock-2', async () => 'ok')).resolves.toBe('ok');
+  });
+
+  it('holds one hospital without blocking another', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = runAssessmentPullExclusively('h-a', async () => {
+      await gate;
+      return 'a';
+    });
+    await expect(runAssessmentPullExclusively('h-b', async () => 'b')).resolves.toBe('b');
+    release();
+    await expect(first).resolves.toBe('a');
   });
 });

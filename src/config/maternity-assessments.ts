@@ -80,6 +80,18 @@ export const ASSESSMENT_METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const ASSESSMENT_RECONCILE_WINDOW_DAYS = 7;
 
 /**
+ * How many pages of ASSESSMENT_ROW_LIMIT the reconciliation pass may read of
+ * ONE form's window (20 × 500 = 10,000 rows).
+ *
+ * A busy form's window is read page by page keyed by the primary key, so a
+ * form with more rows than one page still gets its deletes propagated. The
+ * cap keeps a pathologically busy form from reading for ever: past the cap
+ * the form is treated as an incomplete window (no prune — the safe side) and
+ * the rows read so far are still stored.
+ */
+export const ASSESSMENT_RECONCILE_WINDOW_MAX_PAGES = 20;
+
+/**
  * How often one hospital's reconciliation pass runs.
  *
  * The pass re-reads a window of rows and rewrites them — far more work than

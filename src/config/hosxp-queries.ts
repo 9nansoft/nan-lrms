@@ -1207,7 +1207,10 @@ export function buildAssessmentRecordsSqlFor(
  * days: the pass compares them with the cache and drops what HOSxP no longer
  * has.
  *
- * {{SINCE}} is substituted in app code with a validated plain timestamp (see
+ * The read is PAGED by the primary key ({{AFTER_PK}}, first page 0): a form
+ * with more rows in the window than one page holds would otherwise look
+ * "incomplete" for ever, and its deletes would never propagate. Both
+ * placeholders are substituted in app code with validated plain values (see
  * buildAssessmentReconcileSqlFor).
  */
 export function buildAssessmentReconcileSql(table: string, pkColumn: string): SqlQueryTemplate {
@@ -1221,16 +1224,18 @@ export function buildAssessmentReconcileSql(table: string, pkColumn: string): Sq
       JOIN assessment_head h ON h.assessment_head_id = t.assessment_head_id
       LEFT JOIN ipt i ON i.an = t.an
      WHERE h.assessment_head_datetime >= {{SINCE}}
+       AND t.${pkColumn} > {{AFTER_PK}}
      ORDER BY t.${pkColumn} ASC
      LIMIT ${ASSESSMENT_ROW_LIMIT}`;
   return { postgresql: body, mysql: body };
 }
 
-/** {{SINCE}} substitution with a strict plain-timestamp guard. */
+/** {{SINCE}}/{{AFTER_PK}} substitution with strict plain-value guards. */
 export function buildAssessmentReconcileSqlFor(
   table: string,
   pkColumn: string,
   since: string,
+  afterPk: string | number = '0',
 ): string {
   const safe = String(since).trim();
   // A plain local DATE — the same shape HOSxP stores its own clock in, but
@@ -1241,12 +1246,15 @@ export function buildAssessmentReconcileSqlFor(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(safe)) {
     throw new Error(`invalid assessment reconcile date: ${safe}`);
   }
+  const safePk = String(afterPk).trim();
+  if (!/^\d{1,18}$/.test(safePk)) {
+    throw new Error(`invalid assessment reconcile after pk: ${safePk}`);
+  }
   // Quoted: the literal is a value, not SQL. (An unquoted date made the
   // marketplace's classifier give up on the statement entirely.)
-  return getQuery(buildAssessmentReconcileSql(table, pkColumn), 'postgresql').replace(
-    '{{SINCE}}',
-    `'${safe}'`,
-  );
+  return getQuery(buildAssessmentReconcileSql(table, pkColumn), 'postgresql')
+    .replace('{{SINCE}}', `'${safe}'`)
+    .replace('{{AFTER_PK}}', safePk);
 }
 
 /**

@@ -15,7 +15,11 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import type { AssessmentSyncResult } from '@/services/sync/maternity-assessment';
 import { logger } from '@/lib/logger';
 
-vi.mock('@/services/sync/maternity-assessment', () => ({
+// Only the PULL is mocked. The shared per-hospital lock stays real: the
+// scheduler now runs its pulls through it, and rule 3 below ("a running pull
+// is never started twice") is only meaningful against the real lock.
+vi.mock('@/services/sync/maternity-assessment', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   pullMaternityAssessmentsFromHosxp: vi.fn(),
 }));
 

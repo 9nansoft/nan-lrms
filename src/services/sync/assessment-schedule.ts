@@ -18,7 +18,10 @@
 //     then be pulled twice at once, and the two pulls would race on the same
 //     cursor.
 import type { DatabaseAdapter } from '@/db/adapter';
-import { pullMaternityAssessmentsFromHosxp } from './maternity-assessment';
+import {
+  pullMaternityAssessmentsFromHosxp,
+  runAssessmentPullExclusively,
+} from './maternity-assessment';
 import { ASSESSMENT_RECONCILE_INTERVAL_MS } from '@/config/maternity-assessments';
 import { logger } from '@/lib/logger';
 
@@ -31,14 +34,6 @@ import { logger } from '@/lib/logger';
  * almost nothing and keeps the cache warm instead of catching up in a burst.
  */
 export const ASSESSMENT_SYNC_INTERVAL_MS = 5 * 60 * 1000;
-
-/**
- * The hospitals whose pull is running right now.
- *
- * A pull holds its hospital until it finishes; the next tick skips a hospital
- * that is still in flight instead of starting a second pull beside it.
- */
-const inFlightHospitals = new Set<string>();
 
 /**
  * When each hospital's reconciliation pass last ran.
@@ -92,40 +87,47 @@ async function selectPullableHospitals(db: DatabaseAdapter): Promise<string[]> {
 /**
  * Pull one hospital's forms. Never throws — a failure is logged and the
  * other hospitals carry on.
+ *
+ * The pull runs under the SHARED per-hospital lock (see
+ * runAssessmentPullExclusively), so it also steps aside for a browser/agent
+ * push or a backstop pull that is mid-flight — not only for the scheduler's
+ * own previous tick.
  */
 async function pullHospital(db: DatabaseAdapter, hospitalId: string): Promise<void> {
-  if (inFlightHospitals.has(hospitalId)) {
-    // The previous pull is still running. Starting a second one would race
-    // it on the same cursor.
-    logger.debug('assessment_scheduled_sync_skipped', { hospitalId });
-    return;
-  }
-  inFlightHospitals.add(hospitalId);
+  const reconcile = isReconcileDue(hospitalId, Date.now());
+  let result: Awaited<ReturnType<typeof pullMaternityAssessmentsFromHosxp>> | null;
   try {
-    const reconcile = isReconcileDue(hospitalId, Date.now());
-    const result = await pullMaternityAssessmentsFromHosxp(db, hospitalId, { reconcile });
-    if (reconcile && result.reconcileError === null) {
-      // The pass ran and did not fail — the next one is an hour away. A pass
-      // that failed is NOT marked as done: the next tick tries again.
-      lastReconcileAt.set(hospitalId, Date.now());
-    }
-    logger.info('assessment_scheduled_sync', {
-      hospitalId,
-      upserted: result.upserted,
-      deleted: result.deleted,
-      purged: result.purged,
-      failedForms: result.failedForms,
-      metadataError: result.metadataError,
-      reconcileError: result.reconcileError,
-    });
+    result = await runAssessmentPullExclusively(hospitalId, () =>
+      pullMaternityAssessmentsFromHosxp(db, hospitalId, { reconcile }),
+    );
   } catch (error) {
     logger.error('assessment_scheduled_sync_failed', {
       hospitalId,
       error: errorMessage(error),
     });
-  } finally {
-    inFlightHospitals.delete(hospitalId);
+    return;
   }
+  if (result === null) {
+    // Another pull for this hospital is still running — the scheduler's own
+    // previous tick, a push, or the backstop. Starting a second one would
+    // race it on the same cursor.
+    logger.debug('assessment_scheduled_sync_skipped', { hospitalId });
+    return;
+  }
+  if (reconcile && result.reconcileError === null) {
+    // The pass ran and did not fail — the next one is an hour away. A pass
+    // that failed is NOT marked as done: the next tick tries again.
+    lastReconcileAt.set(hospitalId, Date.now());
+  }
+  logger.info('assessment_scheduled_sync', {
+    hospitalId,
+    upserted: result.upserted,
+    deleted: result.deleted,
+    purged: result.purged,
+    failedForms: result.failedForms,
+    metadataError: result.metadataError,
+    reconcileError: result.reconcileError,
+  });
 }
 
 /**
