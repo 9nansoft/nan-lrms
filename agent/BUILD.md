@@ -7,11 +7,22 @@
 
 | ของ | เวอร์ชัน | หมายเหตุ |
 | --- | --- | --- |
-| Node.js | 20 ขึ้นไป | ใช้ build + ทดสอบ |
-| npm | 10 ขึ้นไป | `npm i` ในโค้ดระบบ (มี `pkg` เป็น devDependency แล้ว) |
-| อินเทอร์เน็ต | ตอน build `.exe` | `pkg` ดาวน์โหลด Node runtime ครั้งแรก (เก็บใน cache) |
+| Node.js | 20 ขึ้นไป | ใช้รันเทสต์/เครื่องมือของโค้ดระบบ |
+| bun | 1.4 ขึ้นไป | cross-compile เป็น `.exe` (ครั้งแรกจะดาวน์โหลด runtime ของ bun เอง) |
+| npm | 10 ขึ้นไป | `npm ci` ในโค้ดระบบ |
+| อินเทอร์เน็ต | ตอน build | ดาวน์โหลด bun runtime ครั้งแรก (เก็บใน cache ของ bun) |
 
-## สร้างแพ็กเกจ (สิ่งที่ส่งให้ รพ.)
+## ส่ง รพ. = คำสั่งเดียว
+
+```bash
+npm run agent:package
+```
+
+ได้โฟลเดอร์ `dist/agent/nn-lrms-agent-<version>-win-x64/` (+ `.zip`) — **นี่คือของที่ส่งให้ รพ.**
+ไม่ต้อง build แยก ไม่ต้องแก้ไฟล์ในโฟลเดอร์นั้น (คำสั่งเดียวจัดได้ทั้ง exe, WinSW, xml,
+cmd helpers, คู่มือ, VERSION และ checksum)
+
+## สร้างแพ็กเกจ
 
 ```bash
 npm ci                       # ครั้งแรกเท่านั้น
@@ -38,11 +49,10 @@ npm run agent:package
 | `INSTALL-GUIDE.html` | `docs/agent-install.html` |
 | `VERSION.txt` / `SHA256SUMS.txt` | เขียนตอนแพ็ก |
 
-## build แบบอื่น (ไม่ใช้ตอนส่ง รพ.)
+## build แบบอื่น (ไม่ใช่ของส่ง รพ. — ใช้ตอนพัฒนาเท่านั้น)
 
 ```bash
 npm run build:agent          # → agent/dist/agent.mjs  (Node 20+, ไม่มี dependency — ใช้ทดสอบบน Linux/macOS)
-npm run build:agent:win      # → agent/dist/agent.exe  (Node runtime ฝัง, 37 MB — เล็กกว่าของ bun)
 ```
 
 ผลลัพธ์ทั้งหมดถูก gitignore ไว้ (`dist/`, `vendor/winsw/`) — มาจากการ build เสมอ ไม่มีใคร commit ของ binary
@@ -82,8 +92,8 @@ node dist/agent.mjs
 
 | อาการ | ทำอะไร |
 | --- | --- |
-| `Error! No available node version satisfies 'node20'` | `pkg` 5.8.1 มี runtime แค่ถึง node18 — ใช้ `--target node18-win-x64` (ค่าเริ่มต้นใน `build-windows.mjs` แล้ว) |
-| `pkg` ดาวน์โหลดไม่ผ่าน | ต้องต่ออินเทอร์เน็ตตอน build ครั้งแรก หรือใช้ `PKG_CACHE_PATH` เพื่อ cache ไว้ |
+| `bun: command not found` | ต้องมี [bun](https://bun.sh) เพื่อ cross-compile (ครั้งแรกจะดาวน์โหลด runtime ของตัวเอง) |
+| bun ดาวน์โหลด runtime ไม่ผ่าน | ต้องต่ออินเทอร์เน็ตตอน build ครั้งแรก |
 | `.exe` รันแล้วไม่ขึ้น | ตรวจว่า `agent.config.json` อยู่ข้าง `agent.exe` และอ่านได้ (WinSW ใช้บัญชี `LocalService`) |
 | agent ขึ้น `fetch failed` ทุกรอบ | ต้องต่อเน็ตออกจากเครื่องนั้นได้ (ไปหาเซิร์ฟเวอร์) และ local gateway ต้องเปิด |
 
