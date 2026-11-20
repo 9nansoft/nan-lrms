@@ -15,6 +15,14 @@ export const PUBLIC_PATHS = [
   '/api/health',
   '/api/webhooks',
   '/api/referrals/check',
+  // The headless agent runs on the hospital's workstation with NO browser
+  // session — it authenticates with a hospital-scoped API key. These paths
+  // must stay outside the cookie-session gate (and outside the browser
+  // Origin check) or the agent can never push. Same trust model as
+  // /api/webhooks.
+  '/api/sync/agent-push',
+  '/api/sync/agent-heartbeat',
+  '/api/sync/agent-authenticity',
 ];
 
 // /illustrations is public decorative art (login hero, EmptyState images);

@@ -27,7 +27,10 @@ function loadCache(): Promise<CacheModule> {
 export type SyncRunOutcome = 'running' | 'success' | 'partial' | 'failed';
 // 'browser' = user's tab pulled HOSxP data via local-127.0.0.1 gateway and
 // pushed it to /api/sync/browser-push (avoids the rate-limited tunnel).
-export type SyncRunTrigger = 'scheduled' | 'immediate' | 'onboarding' | 'browser';
+// 'agent'   = the headless agent on the hospital's own workstation pulled the
+// same way and pushed it to /api/sync/agent-push — the path that keeps a
+// hospital visible when nobody has a browser tab open.
+export type SyncRunTrigger = 'scheduled' | 'immediate' | 'onboarding' | 'browser' | 'agent';
 
 export interface SyncProgressStep extends PollHospitalStep {
   at: string;

@@ -45,7 +45,7 @@ interface SyncRun {
   runId: string;
   hospitalId: string;
   hcode: string;
-  trigger: 'scheduled' | 'immediate' | 'onboarding';
+  trigger: 'scheduled' | 'immediate' | 'onboarding' | 'browser' | 'agent';
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;

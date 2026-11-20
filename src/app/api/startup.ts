@@ -17,6 +17,7 @@ import {
   stopAuditLogRetentionSchedule,
 } from '@/services/audit-retention';
 import { scheduleAssessmentSync, stopAssessmentSync } from '@/services/sync/assessment-schedule';
+import { scheduleAgentBackstop, stopAgentBackstop } from '@/services/sync/agent-backstop';
 import { backfillActiveConsultDoctorPrefs } from '@/services/notification-preference';
 import { logger } from '@/lib/logger';
 
@@ -172,6 +173,16 @@ export async function initializeApp(): Promise<void> {
       scheduleAssessmentSync(db);
     }
 
+    // 6b. Agent backstop. The headless agent on each hospital's workstation
+    //     is the primary source (no browser tab needed). When an agent stops
+    //     reporting, this timer pulls that hospital over the BMS tunnel so
+    //     the province dashboard does not silently go stale. It only touches
+    //     hospitals whose agent heartbeat has gone quiet — see
+    //     src/services/sync/agent-backstop.ts.
+    if (process.env.NODE_ENV !== 'test') {
+      scheduleAgentBackstop(db);
+    }
+
     _flag.done = true;
     const elapsed = Date.now() - startTime;
     logger.info('initialization_completed', { elapsedMs: elapsed });
@@ -186,6 +197,7 @@ export async function shutdownApp(): Promise<void> {
   stopPolling();
   stopAuditLogRetentionSchedule();
   stopAssessmentSync();
+  stopAgentBackstop();
   await closeDatabase();
   SseManager.getInstance().destroy();
   _flag.done = false;

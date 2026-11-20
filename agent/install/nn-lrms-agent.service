@@ -1,0 +1,25 @@
+[Unit]
+Description=NN-LRMS agent — pulls HOSxP data and pushes it to the NN-LRMS server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nnlrms
+Group=nnlrms
+WorkingDirectory=/opt/nn-lrms-agent
+ExecStart=/usr/bin/node /opt/nn-lrms-agent/agent.mjs
+Restart=always
+RestartSec=30
+StandardOutput=append:/var/log/nn-lrms-agent.log
+StandardError=append:/var/log/nn-lrms-agent.log
+# The agent only needs to READ its own config and talk to the local HOSxP
+# gateway (127.0.0.1:45011) and the NN-LRMS server.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log
+
+[Install]
+WantedBy=multi-user.target

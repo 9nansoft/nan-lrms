@@ -849,6 +849,20 @@ interface RunOptions {
   /** BMS PasteJSON session id — attached to the push body when available. */
   bmsSessionId?: string | null;
   signal?: AbortSignal;
+  /**
+   * Where the pulled bundle is pushed. Defaults to the browser's own
+   * relative path; the headless agent points it at the server's absolute
+   * agent-push URL instead.
+   */
+  pushUrl?: string;
+  /** Extra headers on every push call (the agent sends its API key here). */
+  pushHeaders?: Record<string, string>;
+  /**
+   * Where the name-authenticity verdict is posted. Separate from pushUrl:
+   * the verdict has its own endpoint (it must reach the server even when
+   * the data push is refused).
+   */
+  authenticityUrl?: string;
 }
 
 async function runQuery<T>(sql: string, opts: RunOptions): Promise<T[]> {
@@ -1047,14 +1061,14 @@ async function probeAllPatientsNames(
 async function reportAuthenticityVerdict(
   status: 'authentic' | 'name_unstable' | 'no_data',
   reason: string | null,
-  signal?: AbortSignal,
+  opts: Pick<RunOptions, 'signal' | 'authenticityUrl' | 'pushHeaders'>,
 ): Promise<{ permanentBlock: boolean }> {
   try {
-    const res = await fetch('/api/sync/browser-authenticity', {
+    const res = await fetch(opts.authenticityUrl ?? '/api/sync/browser-authenticity', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(opts.pushHeaders ?? {}) },
       body: JSON.stringify({ status, reason }),
-      signal,
+      signal: opts.signal,
       credentials: 'same-origin',
     });
     if (res.status === 403) return { permanentBlock: true };
@@ -1252,7 +1266,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
         const r = await reportAuthenticityVerdict(
           'name_unstable',
           probe.reason ?? null,
-          opts.signal,
+          opts,
         );
         if (r.permanentBlock) result.permanentBlock = true;
         result.error = 'authenticity_failed_name_unstable';
@@ -1269,7 +1283,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
         const r = await reportAuthenticityVerdict(
           'authentic',
           result.authenticity.detail,
-          opts.signal,
+          opts,
         );
         if (r.permanentBlock) {
           // /api/sync/browser-authenticity 403'd — the hospital is
@@ -1397,10 +1411,11 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       referralArrivalProbe?: { cid?: unknown; since?: unknown }[];
     } = {};
     try {
-      const bootRes = await fetch('/api/sync/browser-push', {
+      const bootRes = await fetch(opts.pushUrl ?? '/api/sync/browser-push', {
         method: 'GET',
         signal: opts.signal,
         credentials: 'same-origin',
+        ...(opts.pushHeaders ? { headers: opts.pushHeaders } : {}),
       });
       if (bootRes.ok) {
         boot = (await bootRes.json()) as typeof boot;
@@ -1549,9 +1564,9 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     if (referralsSection) body.referrals = referralsSection;
     if (assessmentHints) body.assessments = { hints: assessmentHints };
 
-    const pushRes = await fetch('/api/sync/browser-push', {
+    const pushRes = await fetch(opts.pushUrl ?? '/api/sync/browser-push', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(opts.pushHeaders ?? {}) },
       body: JSON.stringify(body),
       signal: opts.signal,
       credentials: 'same-origin',

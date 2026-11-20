@@ -38,6 +38,14 @@ export const MUTATION_ROUTE_POLICIES: Record<string, MutationRoutePolicy> = {
   'src/app/api/sync/trigger/route.ts': 'session-origin-checked',
   'src/app/api/sync/browser-push/route.ts': 'session-origin-checked',
   'src/app/api/sync/browser-authenticity/route.ts': 'session-origin-checked',
+  // The agent endpoints authenticate with a hospital-scoped API key (a
+  // machine credential, no cookie session) — the same trust model as the
+  // webhook receiver, so there is no browser CSRF surface to protect.
+  'src/app/api/sync/agent-push/route.ts': 'bearer-api-key',
+  'src/app/api/sync/agent-heartbeat/route.ts': 'bearer-api-key',
+  'src/app/api/sync/agent-authenticity/route.ts': 'bearer-api-key',
+  // Admin-gated (requireAdmin) — a session route like the rest of /admin.
+  'src/app/api/admin/hospitals/[hcode]/agent-key/route.ts': 'session-origin-checked',
   'src/app/api/onboarding/confirm-push/route.ts': 'session-origin-checked',
   'src/app/api/onboarding/hosxp-sync/route.ts': 'session-origin-checked',
   'src/app/api/onboarding/webhook-key/route.ts': 'session-origin-checked',

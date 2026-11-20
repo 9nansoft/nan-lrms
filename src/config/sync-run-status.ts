@@ -7,7 +7,7 @@ import type { StatusTone } from '@/config/status-tone';
 export type SyncRunOutcome = 'running' | 'success' | 'partial' | 'failed';
 export type SyncOverviewOutcome = SyncRunOutcome | 'never';
 export type SyncStepStatus = 'running' | 'success' | 'warning' | 'error' | 'info';
-export type SyncTrigger = 'scheduled' | 'immediate' | 'onboarding';
+export type SyncTrigger = 'scheduled' | 'immediate' | 'onboarding' | 'browser' | 'agent';
 
 export const SYNC_OUTCOME_META: Record<SyncOverviewOutcome, { labelTh: string; tone: StatusTone }> = {
   success: { labelTh: 'สำเร็จ', tone: 'ok' },
@@ -23,6 +23,7 @@ export const SYNC_STEP_TONE: Record<SyncStepStatus, StatusTone> = {
 
 export const SYNC_TRIGGER_TH: Record<SyncTrigger, string> = {
   scheduled: 'ตามรอบ', immediate: 'สั่งทันที', onboarding: 'เริ่มใช้งาน',
+  browser: 'เบราว์เซอร์', agent: 'agent ที่ รพ.',
 };
 
 export function syncTriggerLabel(trigger: string | null | undefined): string {

@@ -61,8 +61,11 @@ Maternal screening ยังอยู่ในสถานะ `PROVISIONAL_UNAPP
 ```mermaid
 flowchart LR
     H[HOSxP] <--> B[Browser ที่มี BMS Session<br/>Local gateway / BMS tunnel]
+    H <--> G[agent บนเครื่อง รพ.<br/>local gateway]
     W[ระบบภายนอก] -->|Webhook + API key| A[Next.js API]
     B -->|browser push| A
+    G -->|agent push| A
+    A -->|backstop (ไม่มี agent)| P2[(HOSxP ผ่าน BMS tunnel)]
     A --> P[(PostgreSQL หรือ PGlite)]
     A <--> R[(Redis cache / presence<br/>หรือ memory fallback)]
     A -->|SSE| U[Dashboard / ANC / Referral / Outcomes]
@@ -71,16 +74,24 @@ flowchart LR
     U <-->|media| J[Jitsi ภายนอก]
 ```
 
-### การ sync ที่ใช้อยู่จริง
+### การ sync ที่ใช้อยู่จริง — 3 ชั้น
 
-- ไม่มี scheduled polling จาก HOSxP ฝั่ง server
+| ชั้น | ผู้ดึง | เมื่อไหร่ | ถึง server ทาง |
+| --- | --- | --- | --- |
+| 1. browser tab | เบราว์เซอร์ที่ล็อกอินด้วย BMS Session | มีคนเปิดหน้า NN-LRMS ค้างไว้ (ทุก 60 วินาที) | `POST /api/sync/browser-push` (session) |
+| 2. **agent** | โปรแกรมบนเครื่องห้องคลอดของ รพ. (`agent/`) | ตลอด 24 ชม. (ทุก 5 นาที) | `POST /api/sync/agent-push` (API key) |
+| 3. backstop | เซิร์ฟเวอร์ NN-LRMS | ทุก 15 นาที เฉพาะ รพ. ที่ agent เงียบไปเกิน 20 นาที | ดึงตรงจาก HOSxP ผ่าน BMS tunnel |
+
 - browser tab ที่ authenticated ด้วย BMS Session แบบ read/write, มี marketplace token และสังกัดโรงพยาบาลที่ active จะดึง HOSxP ครั้งแรกทันที แล้วทำซ้ำทุก 60 วินาทีโดยค่าเริ่มต้น
 - browser อ่านผ่าน local gateway ที่ `127.0.0.1:45011` หรือ BMS tunnel fallback แล้วส่งชุดข้อมูลไป `/api/sync/browser-push`
+- **agent** คือ browser tab แบบไม่ต้องมีคนเปิดเบราว์เซอร์: รันบนเครื่องเดียวกับ HOSxP, ดึงด้วยโค้ดชุดเดียวกัน (`src/lib/browser-poll.ts`) แล้วส่งเข้า `/api/sync/agent-push` ด้วย API key ที่ผูกกับโรงพยาบาลนั้น — ติดตั้ง/ใช้งาน: [`agent/README.md`](agent/README.md)
+- agent ส่ง heartbeat ทุกรอบ (`POST /api/sync/agent-heartbeat`) → ชั้น 3 จะไม่ไปดึงซ้ำให้ รพ. ที่ agent ยังทำงาน
+- ชั้น 3 ดึงผ่าน BMS tunnel ซึ่งต้องมี session ที่ยังใช้ได้ — ทุก push แนบ session id มาให้เซิร์ฟเวอร์ refresh ได้ (ถ้าไม่มี push มาเลย เช่น ทั้งเครื่อง รพ. และเบราว์เซอร์ดับพร้อมกัน ชั้น 3 จะข้าม รพ. นั้น เพราะเซิร์ฟเวอร์หา session เองไม่ได้)
 - ProviderID เป็น read-only และไม่ทำ browser push
 - ระบบภายนอกส่งข้อมูลได้ที่ `POST /api/webhooks/patient-data` ด้วย Bearer API key; รองรับ labor, `anc_data`, `referral`, `referral_update` และ `partograph` ตามสัญญา Webhook
 - SSE แจ้ง client เมื่อข้อมูลเปลี่ยน ส่วนแต่ละหน้ามีรอบ SWR refresh ของตนเอง จึงไม่ควรตีความว่าทุกหน้าสดในรอบเวลาเดียวกัน
 
-หากไม่มี browser tab ที่ผ่านเงื่อนไขและไม่มี Webhook sender ระบบจะไม่มีแหล่งดึง HOSxP ตามเวลาเอง ข้อมูลผลลัพธ์และ KPI ต่าง ๆ สะท้อนเฉพาะรายการที่ sync เข้ามาแล้ว
+ถ้าไม่มี browser tab ไม่มี agent และไม่มี Webhook sender ระบบจะไม่มีแหล่งดึง HOSxP ตามเวลาเอง ข้อมูลผลลัพธ์และ KPI ต่าง ๆ สะท้อนเฉพาะรายการที่ sync เข้ามาแล้ว — ดู "เริ่มโดย" ในหน้า `/admin` → สถานะการซิงค์ เพื่อรู้ว่าข้อมูลมาจากทางไหน
 
 ## การเข้าสู่ระบบและสิทธิ์
 
@@ -350,7 +361,7 @@ Redis cache บางรายการอาจมี display data ที่ถ
 
 ## ข้อจำกัดปัจจุบัน
 
-- ระบบเป็น near-real-time ที่ขึ้นกับ browser poll หรือ Webhook ไม่ใช่ hard real-time และไม่มี server-side HOSxP polling
+- ระบบเป็น near-real-time ที่ขึ้นกับ browser poll, agent หรือ Webhook ไม่ใช่ hard real-time; ชั้น backstop ดึงทุก 15 นาที และต้องมี session ที่ยังใช้ได้
 - ไม่มี service worker, offline queue หรือ PWA; payload ล่าสุดอาจยังแสดงเมื่อการเชื่อมต่อสะดุด แต่ mutation และ sync ต้องใช้เครือข่าย
 - ข้อมูลโรงพยาบาล/ภูมิศาสตร์เป็น snapshot ที่ bundle มากับ source ไม่ใช่ live MOPH API
 - KPI ANC และ outcomes ครอบคลุมเฉพาะข้อมูลที่ ingest สำเร็จ ไม่ใช่การรับรอง coverage ทั้งจังหวัด

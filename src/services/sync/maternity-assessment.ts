@@ -609,7 +609,7 @@ export interface HospitalBmsSession {
  *
  * The bearer token is stored back, so the next cycle starts from (1) again.
  */
-async function serverBmsSession(
+export async function serverBmsSession(
   db: DatabaseAdapter,
   hospitalId: string,
   options: { bmsSessionId?: string | null } = {},

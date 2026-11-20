@@ -34,6 +34,32 @@ const DONE_STORAGE_KEY = 'nn-lrms:hosxp-webhook-onboarded';
 const PENDING_STORAGE_KEY = 'nn-lrms:hosxp-webhook-pending-key';
 const WEBHOOK_MODULE_ID = 3;
 const WEBHOOK_SETTING_CODE = 'NN-LRMS';
+// HOSxP's webhook_setting.webhook_setting_description is NOT NULL.
+const WEBHOOK_SETTING_DESCRIPTION = 'NN-LRMS (ส่งข้อมูลเข้าระบบ NN-LRMS)';
+
+/**
+ * The row HOSxP posts to.
+ *
+ * HOSxP's `webhook_setting` has `webhook_setting_url` — there is NO
+ * `webhook_url` column — and both `webhook_setting_description` and
+ * `webhook_active` are NOT NULL. The old payload used the wrong column
+ * name and left the NOT NULL columns out, so every INSERT was rejected by
+ * the database and every UPDATE failed with an unknown-column error: the
+ * row HOSxP is supposed to post to never existed.
+ */
+export function webhookSettingPayload(args: {
+  apiKey: string;
+  url: string;
+}): Record<string, unknown> {
+  return {
+    webhook_module_id: WEBHOOK_MODULE_ID,
+    webhook_setting_code: WEBHOOK_SETTING_CODE,
+    webhook_setting_description: WEBHOOK_SETTING_DESCRIPTION,
+    webhook_authorization_key: args.apiKey,
+    webhook_setting_url: args.url,
+    webhook_active: 'Y',
+  };
+}
 
 function resolveNnLrmsWebhookUrl(): string {
   if (typeof window === 'undefined') return '';
@@ -245,12 +271,7 @@ export function useOnboardHosxpWebhook(): {
           await restUpdate(
             'webhook_setting',
             webhookSettingId,
-            {
-              webhook_module_id: WEBHOOK_MODULE_ID,
-              webhook_setting_code: WEBHOOK_SETTING_CODE,
-              webhook_authorization_key: minted.apiKey,
-              webhook_url: webhookUrl,
-            },
+            webhookSettingPayload({ apiKey: minted.apiKey, url: webhookUrl }),
             config,
             marketplaceToken,
           );
@@ -289,10 +310,7 @@ export function useOnboardHosxpWebhook(): {
             'webhook_setting',
             {
               webhook_setting_id: webhookSettingId,
-              webhook_module_id: WEBHOOK_MODULE_ID,
-              webhook_setting_code: WEBHOOK_SETTING_CODE,
-              webhook_authorization_key: minted.apiKey,
-              webhook_url: webhookUrl,
+              ...webhookSettingPayload({ apiKey: minted.apiKey, url: webhookUrl }),
             },
             config,
             marketplaceToken,
