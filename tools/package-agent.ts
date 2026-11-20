@@ -29,6 +29,7 @@ export const PACKAGE_FILES = [
   'check.cmd',
   'install-service.cmd',
   'uninstall-service.cmd',
+  'diagnose.cmd',
   'INSTALL-GUIDE.html',
   'VERSION.txt',
   'SHA256SUMS.txt',
@@ -46,6 +47,7 @@ export const TEMPLATE_FILES = [
   'check.cmd',
   'install-service.cmd',
   'uninstall-service.cmd',
+  'diagnose.cmd',
 ] as const;
 
 const sha256 = async (file: string): Promise<string> =>

@@ -36,7 +36,7 @@ curl -L -o vendor/winsw/WinSW-x64.exe \
 npm run agent:package
 ```
 
-ผลลัพธ์: `dist/agent/nn-lrms-agent-<version>-win-x64/` (10 ไฟล์) + `.zip` ถ้าเครื่องมีคำสั่ง `zip`
+ผลลัพธ์: `dist/agent/nn-lrms-agent-<version>-win-x64/` (11 ไฟล์) + `.zip` ถ้าเครื่องมีคำสั่ง `zip`
 พร้อม `SHA256SUMS.txt` ให้ รพ. ตรวจว่าไฟล์ตรงกับที่ส่ง
 
 | ไฟล์ในแพ็กเกจ | มาจาก |
