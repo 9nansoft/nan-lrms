@@ -1584,14 +1584,19 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     if (newbornsSection) body.newborns = newbornsSection;
     if (referralsSection) body.referrals = referralsSection;
     if (assessmentHints) body.assessments = { hints: assessmentHints };
-    // The agent's connection facts. The server stores them ONLY when it is
+    // HOSxP connection facts. The server stores them ONLY when it is
     // missing them, so a repeat push is a no-op on the server side.
-    if (opts.hosxpFacts?.bmsUrl) {
+    //   * the tunnel URL: the AGENT only (it needs the `hosxp:configure`
+    //     capability) — the server picks where it pulls from;
+    //   * the marketplace token: the hospital's own credential, handed over
+    //     by whoever holds it (a browser session or the agent). Without it
+    //     the server's own pulls get randomised identifiers.
+    const marketplaceToken =
+      opts.hosxpFacts?.marketplaceToken ?? opts.marketplaceToken ?? null;
+    if (opts.hosxpFacts?.bmsUrl || marketplaceToken) {
       body.hosxp = {
-        bms_url: opts.hosxpFacts.bmsUrl,
-        ...(opts.hosxpFacts.marketplaceToken
-          ? { marketplace_token: opts.hosxpFacts.marketplaceToken }
-          : {}),
+        ...(opts.hosxpFacts?.bmsUrl ? { bms_url: opts.hosxpFacts.bmsUrl } : {}),
+        ...(marketplaceToken ? { marketplace_token: marketplaceToken } : {}),
       };
     }
 

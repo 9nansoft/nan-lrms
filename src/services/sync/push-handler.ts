@@ -193,32 +193,44 @@ export async function handlePush(request: NextRequest, actor: PushActor): Promis
     const hosxpBmsUrl = typeof body.hosxp?.bms_url === 'string' ? body.hosxp.bms_url : '';
     const hosxpToken =
       typeof body.hosxp?.marketplace_token === 'string' ? body.hosxp.marketplace_token : '';
-    // Only an AGENT with the `hosxp:configure` capability may hand the
-    // server connection facts. A browser session (any hospital staff member)
-    // has no scopes — the browser path onboards through
-    // /api/onboarding/hosxp-sync, which has its own gating.
-    const mayConfigureHosxp =
+    // Two different rules for the two facts:
+    //
+    //   * the TUNNEL URL — the server decides where it pulls from, so only
+    //     an AGENT with the `hosxp:configure` capability may set it (a
+    //     browser session has no scopes), and it must be this hospital's
+    //     tunnel on the trusted host list.
+    //   * the MARKETPLACE TOKEN — the hospital's own credential, which the
+    //     hospital's own staff session (or its agent) hands over. The
+    //     onboarding route already accepts it from a browser, and without it
+    //     the server's own pulls get randomised identifiers.
+    const maySetTunnel =
       trigger === 'agent' && actor.scopes.includes(API_KEY_SCOPES.HOSXP_CONFIGURE);
-    if (hosxpBmsUrl && !mayConfigureHosxp) {
-      logger.warn('push_hosxp_facts_ignored', { hcode, trigger });
-    } else if (hosxpBmsUrl) {
-      const tunnelCheck = validateTunnelUrl(hosxpBmsUrl, {
-        requireTrustedHost: true,
-        hcode,
-      });
-      if (!tunnelCheck.ok) {
-        logger.warn('push_hosxp_tunnel_rejected', { hcode, reason: tunnelCheck.reason });
+    let tunnelUrl: string | null = null;
+    if (hosxpBmsUrl) {
+      if (!maySetTunnel) {
+        logger.warn('push_hosxp_tunnel_ignored', { hcode, trigger });
       } else {
-        try {
-          await applyHosxpConnectionFacts(db, hospitalId, {
-            // The gateway's own string (not URL.toString(), which appends a
-            // trailing slash to a bare origin).
-            bmsUrl: hosxpBmsUrl.trim(),
-            marketplaceToken: hosxpToken.length > 0 ? hosxpToken : null,
-          });
-        } catch (e) {
-          logger.warn('push_hosxp_connection_failed', { hcode, error: e });
+        const tunnelCheck = validateTunnelUrl(hosxpBmsUrl, {
+          requireTrustedHost: true,
+          hcode,
+        });
+        if (!tunnelCheck.ok) {
+          logger.warn('push_hosxp_tunnel_rejected', { hcode, reason: tunnelCheck.reason });
+        } else {
+          // The gateway's own string (not URL.toString(), which appends a
+          // trailing slash to a bare origin).
+          tunnelUrl = hosxpBmsUrl.trim();
         }
+      }
+    }
+    if (tunnelUrl || hosxpToken) {
+      try {
+        await applyHosxpConnectionFacts(db, hospitalId, {
+          bmsUrl: tunnelUrl,
+          marketplaceToken: hosxpToken.length > 0 ? hosxpToken : null,
+        });
+      } catch (e) {
+        logger.warn('push_hosxp_connection_failed', { hcode, error: e });
       }
     }
 

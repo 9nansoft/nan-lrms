@@ -1233,14 +1233,19 @@ export function buildAssessmentReconcileSqlFor(
   since: string,
 ): string {
   const safe = String(since).trim();
-  // A plain local timestamp — the same shape HOSxP stores its own clock in.
+  // A plain local DATE — the same shape HOSxP stores its own clock in, but
+  // without a clock: the marketplace's SQL classifier reads a ':' as a
+  // parameter marker and refuses a statement it cannot classify
+  // ("SENSITIVE_BLOCKED ... parameter marker : not standing alone").
   // Nothing but digits and separators may reach the query.
-  if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(safe)) {
-    throw new Error(`invalid assessment reconcile timestamp: ${safe}`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(safe)) {
+    throw new Error(`invalid assessment reconcile date: ${safe}`);
   }
+  // Quoted: the literal is a value, not SQL. (An unquoted date made the
+  // marketplace's classifier give up on the statement entirely.)
   return getQuery(buildAssessmentReconcileSql(table, pkColumn), 'postgresql').replace(
     '{{SINCE}}',
-    safe,
+    `'${safe}'`,
   );
 }
 

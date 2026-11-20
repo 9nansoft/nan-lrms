@@ -272,6 +272,44 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
     expect(rows[0]?.tunnel_url ?? null).toBeNull();
   });
 
+  it('takes the marketplace token from a push even without the tunnel capability', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', [
+      API_KEY_SCOPES.AGENT_PUSH,
+      API_KEY_SCOPES.AGENT_HEARTBEAT,
+      API_KEY_SCOPES.AGENT_AUTHENTICITY,
+    ]);
+    // The hospital already has a tunnel (from onboarding); the token is what
+    // is still missing.
+    await db.execute(
+      `INSERT INTO hospital_bms_config (id, hospital_id, tunnel_url, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        randomUUID(),
+        id,
+        'https://10670-test.tunnel.hosxp.net',
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ],
+    );
+
+    await POST(
+      jsonRequest(
+        {
+          hosxp: { marketplace_token: 'mkt-from-push' },
+          labor: { patients: [laborPatient('AG-MKT2-1')] },
+        },
+        key.rawKey,
+      ) as never,
+    );
+
+    const rows = await db.query<{ marketplace_token: string | null }>(
+      'SELECT marketplace_token FROM hospital_bms_config WHERE hospital_id = ?',
+      [id],
+    );
+    expect(decryptSafe(rows[0]?.marketplace_token ?? '')).toBe('mkt-from-push');
+  });
+
   it('records the sync run with trigger=agent', async () => {
     const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent', AGENT_SCOPES);
     await POST(

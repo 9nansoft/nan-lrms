@@ -61,6 +61,11 @@ export async function applyHosxpConnectionFacts(
 
   if (!needTunnel && !needToken) return applied;
 
+  // A hospital_bms_config row needs a tunnel URL (the column is NOT NULL in
+  // the live schema). Without one there is no row to update — the token waits
+  // until the agent hands over the tunnel as well.
+  if (!current && !needTunnel) return applied;
+
   const now = new Date().toISOString();
   if (current) {
     await db.execute(

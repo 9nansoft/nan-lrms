@@ -8,6 +8,7 @@ import {
   buildAssessmentItemsSql,
   buildAssessmentRecordsSql,
   buildAssessmentRecordsSqlFor,
+  buildAssessmentReconcileSqlFor,
   ASSESSMENT_ROW_LIMIT,
 } from '@/config/hosxp-queries';
 
@@ -82,6 +83,33 @@ describe('maternity assessment queries', () => {
     ).toThrow();
     expect(() =>
       buildAssessmentRecordsSqlFor(
+        'asm_first_pregnant_pt_nan',
+        'asm_first_pregnant_pt_nan_id',
+        '1; DROP TABLE x',
+      ),
+    ).toThrow();
+  });
+
+  it('builds the reconcile query without a colon in the literal', () => {
+    // The marketplace's SQL classifier reads a ':' as a parameter marker and
+    // refuses a statement it cannot classify ("SENSITIVE_BLOCKED ...
+    // parameter marker : not standing alone"). A clock literal has two.
+    const sql = buildAssessmentReconcileSqlFor(
+      'asm_first_pregnant_pt_nan',
+      'asm_first_pregnant_pt_nan_id',
+      '2026-11-18',
+    );
+    expect(sql).toContain("'2026-11-18'");
+    expect(sql).not.toMatch(/\d{2}:\d{2}/);
+    expect(() =>
+      buildAssessmentReconcileSqlFor(
+        'asm_first_pregnant_pt_nan',
+        'asm_first_pregnant_pt_nan_id',
+        '2026-11-18 09:00:00',
+      ),
+    ).toThrow();
+    expect(() =>
+      buildAssessmentReconcileSqlFor(
         'asm_first_pregnant_pt_nan',
         'asm_first_pregnant_pt_nan_id',
         '1; DROP TABLE x',

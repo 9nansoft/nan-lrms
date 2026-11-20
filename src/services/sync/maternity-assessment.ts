@@ -778,7 +778,13 @@ export async function advanceAssessmentCursors(
  */
 function reconcileWindowStart(now: Date): string {
   const start = new Date(now.getTime() - ASSESSMENT_RECONCILE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  return start.toISOString().slice(0, 19).replace('T', ' ');
+  // DATE ONLY, no clock. The marketplace's SQL classifier reads a ':' as a
+  // parameter marker, and a statement it cannot classify is refused outright
+  // ("Forbidden — SENSITIVE_BLOCKED: ... parameter marker : not standing
+  // alone"). 'YYYY-MM-DD HH:MM:SS' has two colons; 'YYYY-MM-DD' has none.
+  // A day-granular window start is also what the prune step compares against
+  // (recorded_at >= since), where a plain date compares correctly.
+  return start.toISOString().slice(0, 10);
 }
 
 /**
