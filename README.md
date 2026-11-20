@@ -65,7 +65,7 @@ flowchart LR
     W[ระบบภายนอก] -->|Webhook + API key| A[Next.js API]
     B -->|browser push| A
     G -->|agent push| A
-    A -->|backstop (ไม่มี agent)| P2[(HOSxP ผ่าน BMS tunnel)]
+    A -->|backstop ไม่มี agent| P2[(HOSxP ผ่าน BMS tunnel)]
     A --> P[(PostgreSQL หรือ PGlite)]
     A <--> R[(Redis cache / presence<br/>หรือ memory fallback)]
     A -->|SSE| U[Dashboard / ANC / Referral / Outcomes]
