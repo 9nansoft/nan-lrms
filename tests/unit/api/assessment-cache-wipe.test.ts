@@ -1,12 +1,13 @@
 // The assessment label cache is a CHILD of `hospitals` — every wipe path
 // that removes hospital data has to remove it too, or the DELETE FROM
-// hospitals fails on the foreign key and the wipe rolls back.
+// `hospitals` fails on the foreign key and the wipe rolls back.
 //
 // The rules under test:
 //   1. /api/dev/simulate/clear empties the label cache (the hospital stays).
 //   2. /api/dev/simulate/reset-onboarding empties it AND deletes the
 //      hospital — no foreign-key error.
-//   3. /api/admin/clear-cache empties it.
+//   3. /api/admin/clear-cache empties it — and the pull CURSORS with it: a
+//      surviving cursor would make the next pull skip every row below it.
 //   4. /api/admin/hospitals/[hcode]/data removes the cache of THAT hospital
 //      only.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -65,6 +66,23 @@ async function cacheRowCount(): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
+async function seedCursorRow(hospitalId: string, id: string): Promise<void> {
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO cached_maternity_assessment_cursors
+       (id, hospital_id, form_table, cursor_pk, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [id, hospitalId, 'asm_first_pregnant_pt_nan', '4242', now],
+  );
+}
+
+async function cursorRowCount(): Promise<number> {
+  const rows = await db.query<{ n: number }>(
+    'SELECT COUNT(*) AS n FROM cached_maternity_assessment_cursors',
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
 beforeEach(async () => {
   db = await createTestDb();
   await new SeedOrchestrator().run(db);
@@ -104,13 +122,18 @@ describe('the assessment label cache is wiped with the hospital data', () => {
     expect(await hospitalIdOf(HCODE)).toBe('');
   });
 
-  it('empties the cache on /api/admin/clear-cache', async () => {
+  it('empties the cache and the pull cursors on /api/admin/clear-cache', async () => {
     await seedCacheRow(await hospitalIdOf(HCODE), 'cam-admin-clear-1');
+    await seedCursorRow(await hospitalIdOf(HCODE), 'cursor-admin-clear-1');
 
     const res = await clearCacheRoute();
 
     expect(res.status).toBe(200);
     expect(await cacheRowCount()).toBe(0);
+    // A cursor that survives the clear would skip every row below it on the
+    // next pull — the rows older than the reconcile window would never come
+    // back after the clear.
+    expect(await cursorRowCount()).toBe(0);
   });
 
   it('removes the cache of ONE hospital on /api/admin/hospitals/[hcode]/data', async () => {

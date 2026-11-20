@@ -30,6 +30,11 @@ export async function POST() {
     // The label cache of those forms (a child of hospitals) goes with them.
     await db.execute('DELETE FROM cached_assessment_form_metadata');
 
+    // The pull cursors go too: a surviving cursor would make the next pull
+    // skip every row below it, and the rows older than the reconcile window
+    // would never come back after the clear.
+    await db.execute('DELETE FROM cached_maternity_assessment_cursors');
+
     const patientsDeleted = await db.query<{ cnt: number }>(
       'SELECT COUNT(*) as cnt FROM cached_patients',
     );
