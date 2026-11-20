@@ -110,3 +110,5 @@ e2e-private/
 # Python bytecode (scripts/illustrations/generate.py)
 __pycache__/
 sync-bms.sh
+# WinSW binary — placed by hand, never committed (tools/package-agent.ts)
+vendor/winsw/

@@ -11,27 +11,45 @@
 | npm | 10 ขึ้นไป | `npm i` ในโค้ดระบบ (มี `pkg` เป็น devDependency แล้ว) |
 | อินเทอร์เน็ต | ตอน build `.exe` | `pkg` ดาวน์โหลด Node runtime ครั้งแรก (เก็บใน cache) |
 
-## สร้างไฟล์
+## สร้างแพ็กเกจ (สิ่งที่ส่งให้ รพ.)
 
 ```bash
 npm ci                       # ครั้งแรกเท่านั้น
-npm run build:agent          # → agent/dist/agent.mjs   (Node 20+, ไม่มี dependency)
-npm run build:agent:win      # → agent/dist/agent.exe   (Windows x64, 37 MB, ไม่ต้องมี Node ในเครื่อง รพ.)
+
+# 1) วาง WinSW ไว้ครั้งเดียว (ไฟล์ exe ห้าม commit — gitignore ไว้แล้ว)
+mkdir -p vendor/winsw
+curl -L -o vendor/winsw/WinSW-x64.exe \
+  https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe
+
+# 2) build + แพ็ก
+npm run agent:package
 ```
 
-- `agent.mjs` — ใช้ตอนทดสอบบน Linux/macOS หรือบนเครื่องที่มี Node อยู่แล้ว
-- `agent.exe` — ของจริงที่ส่งให้ รพ. (Node runtime ฝังอยู่ในไฟล์)
+ผลลัพธ์: `dist/agent/nn-lrms-agent-<version>-win-x64/` (10 ไฟล์) + `.zip` ถ้าเครื่องมีคำสั่ง `zip`
+พร้อม `SHA256SUMS.txt` ให้ รพ. ตรวจว่าไฟล์ตรงกับที่ส่ง
 
-ทั้งสองไฟล์ถูก gitignore ไว้ (`dist/`) — ผลลัพธ์มาจากการ build เสมอ ไม่มีใคร commit ของ binary
-
-## สิ่งที่ต้องส่งให้โรงพยาบาล (3 ไฟล์ + config)
-
-| ไฟล์ | ที่มา |
+| ไฟล์ในแพ็กเกจ | มาจาก |
 | --- | --- |
-| `agent.exe` | `agent/dist/agent.exe` จาก `npm run build:agent:win` |
-| `NN-LRMS-agent.exe` | WinSW — ดาวน์โหลด `winsw-x64.exe` จาก GitHub releases แล้วเปลี่ยนชื่อเป็น `NN-LRMS-agent.exe` |
-| `NN-LRMS-agent.xml` | `agent/install/NN-LRMS-agent.xml` (นิยาม service) |
-| `agent.config.json` | `agent/config.example.json` + แก้ `serverUrl` / `apiKey` / `intervalMinutes` / `gatewayToken` |
+| `nn-lrms-agent.exe` | cross-compile ด้วย bun (runtime ฝังอยู่ในไฟล์ — 110 MB) |
+| `NN-LRMS-agent-service.exe` | WinSW ที่วางไว้ (เปลี่ยนชื่อ) |
+| `NN-LRMS-agent-service.xml` | `agent/package/NN-LRMS-agent-service.xml` |
+| `agent.example.json` | `agent/package/agent.example.json` |
+| `check.cmd` / `install-service.cmd` / `uninstall-service.cmd` | `agent/package/` |
+| `INSTALL-GUIDE.html` | `docs/agent-install.html` |
+| `VERSION.txt` / `SHA256SUMS.txt` | เขียนตอนแพ็ก |
+
+## build แบบอื่น (ไม่ใช้ตอนส่ง รพ.)
+
+```bash
+npm run build:agent          # → agent/dist/agent.mjs  (Node 20+, ไม่มี dependency — ใช้ทดสอบบน Linux/macOS)
+npm run build:agent:win      # → agent/dist/agent.exe  (Node runtime ฝัง, 37 MB — เล็กกว่าของ bun)
+```
+
+ผลลัพธ์ทั้งหมดถูก gitignore ไว้ (`dist/`, `vendor/winsw/`) — มาจากการ build เสมอ ไม่มีใคร commit ของ binary
+
+## สิ่งที่ รพ. แก้เอง
+
+`agent.config.json` — คัดลอกจาก `agent.example.json` แล้วใส่ `serverUrl` / `apiKey` / `gatewayToken`
 
 ## ทดสอบก่อนส่ง
 

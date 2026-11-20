@@ -45,75 +45,66 @@ curl -X POST "https://kk-lrms.bmscloud.in.th/api/admin/hospitals/<hcode>/agent-k
 
 ### 2. ติดตั้งบนเครื่องห้องคลอด
 
-Windows: ใช้ `agent.exe` (ไฟล์เดียว ไม่ต้องติดตั้งอะไร) — ดูข้อ 3
-Linux/macOS หรืออยากดีบักด้วย Node: ต้องมี Node.js 20 ขึ้นไป (https://nodejs.org)
+ได้**โฟลเดอร์แพ็กเกจ**จากผู้ดูแลส่วนกลาง (10 ไฟล์) แล้ววางไว้ เช่น `C:\NN-LRMS-agent\`
 
-```bash
-# 1) ได้ไฟล์ agent.mjs จากผู้ดูแลส่วนกลาง (ไฟล์เดียว ไม่มี dependency) แล้ววางที่
-#    C:\NN-LRMS-agent\agent.mjs  (หรือ /opt/nn-lrms-agent/agent.mjs บน Linux)
-#    — ไฟล์นี้ได้จาก `npm run build:agent` ในโค้ดระบบ (ได้ agent/dist/agent.mjs)
-
-# 2) สร้างไฟล์ตั้งค่า
-cp agent.config.example.json agent.config.json
-#    แก้ agent.config.json:
-#      serverUrl         = https://kk-lrms.bmscloud.in.th
-#      apiKey            = คีย์จากข้อ 1
-#      intervalMinutes   = 5
-#      localGateway      = http://127.0.0.1:45011
-#      gatewayToken      = <gateway token ของเครื่องนี้>   (ต้องมี — ใช้เรียก GetBMSSessionID)
-#      marketplaceToken  = null (ถ้าใช้ local gateway ไม่ต้องใส่)
-
-# 3) ทดสอบก่อน — ต้องเห็น "cycle_done" ใน console
-node agent.mjs
+```
+nn-lrms-agent.exe            ตัว agent (ไฟล์เดี่ยว ไม่ต้องติดตั้งอะไรเพิ่ม)
+NN-LRMS-agent-service.exe    WinSW (ตัวห่อให้เป็น service)
+NN-LRMS-agent-service.xml    นิยาม service
+agent.example.json           แม่แบบไฟล์ตั้งค่า
+check.cmd                    ตรวจว่าเครื่องพร้อม
+install-service.cmd           ติดตั้ง service
+uninstall-service.cmd        ถอน service
+INSTALL-GUIDE.html           คู่มือฉบับเต็ม
+VERSION.txt / SHA256SUMS.txt เวอร์ชัน + checksum
 ```
 
-**gateway token** คืออะไร: โทเคนที่ BMS gateway บนเครื่องห้องคลอดถามก่อนจะให้ session id
-ขอจาก IT ของ รพ. (ดูไฟล์ตั้งค่า/คู่มือของ BMS gateway ที่ติดตั้งไว้) — ไม่ใช่ของจากเซิร์ฟเวอร์ NN-LRMS
+สร้างไฟล์ตั้งค่า (แก้ 3 ค่า):
 
-**ถ้าต้องใส่ marketplace token** (ต้องใช้เมื่อ local gateway ใช้ไม่ได้ แล้ว agent ต้องต่อผ่าน BMS tunnel
-— HOSxP จะสุ่ม CID/HN ให้ถ้าไม่มี token): เปิด NN-LRMS จากเมนูใน HOSxP ในเบราว์เซอร์ แล้วดู
-DevTools → Application → Local Storage → คีย์ `marketplace_token` แล้วคัดลอกค่ามาใส่ในไฟล์ตั้งค่า
-(ค่านี้ผูกกับโรงพยาบาลนั้น ให้ถือเป็นความลับเหมือนกัน)
+```
+copy agent.example.json agent.config.json
+   serverUrl         = https://kk-lrms.bmscloud.in.th
+   apiKey            = คีย์จากข้อ 1
+   gatewayToken      = <gateway token ของเครื่องนี้>   (ต้องมี — ใช้เรียก GetBMSSessionID)
+   intervalMinutes   = 5
+   localGateway      = http://127.0.0.1:45011
+   marketplaceToken  = null (ถ้าใช้ local gateway ไม่ต้องใส่)
+```
+
+ทดสอบก่อน — รัน `nn-lrms-agent.exe` ตรง ๆ ต้องเห็น `cycle_done` ใน console
+(หรือรัน `check.cmd` ซึ่งเช็คทั้งไฟล์ตั้งค่า, gateway, และเซิร์ฟเวอร์)
 
 ### 3. รันเป็น service (Windows + WinSW)
 
-`agent.exe` เป็นไฟล์เดียวจบ (มี Node runtime ฝังอยู่ข้างใน) — เครื่อง รพ. **ไม่ต้องติดตั้ง Node.js**
+`nn-lrms-agent.exe` เป็นไฟล์เดียวจบ (มี runtime ฝังอยู่ข้างใน) — เครื่อง รพ. **ไม่ต้องติดตั้งอะไรเพิ่ม**
 
-ไฟล์ที่ต้องมีในโฟลเดอร์เดียวกัน เช่น `C:\NN-LRMS-agent\`
-
-| ไฟล์ | ที่มา |
-| --- | --- |
-| `agent.exe` | ไฟล์เดียว 37 MB — ส่งจากผู้ดูแลส่วนกลาง (สร้างจาก `npm run build:agent:win`) |
-| `NN-LRMS-agent.exe` | WinSW (ดาวน์โหลด `winsw-x64.exe` จาก GitHub releases แล้วเปลี่ยนชื่อ) |
-| `NN-LRMS-agent.xml` | ไฟล์นี้ (`agent/install/NN-LRMS-agent.xml`) |
-| `agent.config.json` | ไฟล์ตั้งค่าจากข้อ 2 |
-
-ติดตั้ง (เปิด PowerShell แบบ Administrator ในโฟลเดอร์นั้น):
+ติดตั้ง (คลิกขวา `install-service.cmd` → Run as administrator):
 
 ```powershell
 # ทดสอบก่อนว่า agent เดินได้ (ดูว่าขึ้น "cycle_done")
-.\agent.exe
+.\nn-lrms-agent.exe
 
 # ติดตั้งเป็น service (เริ่มอัตโนมัติตอนเปิดเครื่อง)
-.\NN-LRMS-agent.exe install
-.\NN-LRMS-agent.exe start
+.\NN-LRMS-agent-service.exe install
+.\NN-LRMS-agent-service.exe start
 
 # ดูสถานะ / log
-.\NN-LRMS-agent.exe status
-Get-Content .\logs\NN-LRMS-agent.out.log -Tail 50
+.\NN-LRMS-agent-service.exe status
+Get-Content .\logs\NN-LRMS-agent-service.out.log -Tail 50
 ```
 
 หยุด/ถอนการติดตั้ง:
 
 ```powershell
-.\NN-LRMS-agent.exe stop
-.\NN-LRMS-agent.exe uninstall
+.\NN-LRMS-agent-service.exe stop
+.\NN-LRMS-agent-service.exe uninstall
 ```
 
 - service จะ restart เอง 2 ครั้งถ้าตัว agent ล้ม (30 วิ และ 60 วิ) แล้วหยุด ให้ IT รพ. ดู log
-- log อยู่ที่ `logs\NN-LRMS-agent.out.log` (หมุนวง ดูได้ 8 ไฟล์)
+- log อยู่ที่ `logs\NN-LRMS-agent-service.out.log` (หมุนวง ดูได้ 8 ไฟล์)
 - บัญชีที่ service ใช้คือ `NT AUTHORITY\LocalService` → ต้องให้สิทธิ์**อ่าน** `agent.config.json` และเข้าถึง `127.0.0.1:45011` ได้
-  (ถ้าเครื่องเปิด HOSxP ด้วยสิทธิ์ผู้ใช้เฉพาะ ให้เปลี่ยน `<serviceaccount>` ใน XML เป็นบัญชีที่ใช้จริง)
+  (ถ้าเครื่องเปิด HOSxP ด้วยสิทธิ์ผู้ใช้เฉพาะ ให้แก้ `<serviceaccount>` ใน XML เป็นบัญชีที่ใช้จริง)
+
 
 **Linux (systemd)** — ดู `install/nn-lrms-agent.service` (ใช้ `agent.mjs` + Node 20)
 

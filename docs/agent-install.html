@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ติดตั้ง NN-LRMS agent บนเครื่องห้องคลอด</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: "Leelawadee UI", "Noto Sans Thai", system-ui, sans-serif; line-height: 1.7; color: #16233a; background: #f5f7fb; margin: 0; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 28px 0 8px; padding-left: 10px; border-left: 4px solid #1f6feb; }
+  .sub { color: #5a6a85; margin: 0 0 20px; }
+  .card { background: #fff; border: 1px solid #e2e7f0; border-radius: 12px; padding: 18px 20px; margin: 14px 0; }
+  ol, ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  code { background: #eef2f8; padding: 1px 6px; border-radius: 5px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  pre { background: #16233a; color: #e6edf7; padding: 14px 16px; border-radius: 10px; overflow-x: auto; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  pre code { background: none; padding: 0; color: inherit; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  th, td { text-align: left; border-bottom: 1px solid #e2e7f0; padding: 7px 8px; vertical-align: top; font-size: 14px; }
+  th { background: #eef2f8; }
+  .note { border-left: 4px solid #1f6feb; background: #eef4ff; padding: 10px 14px; border-radius: 8px; margin: 12px 0; }
+  .warn { border-left-color: #d97706; background: #fff7ed; }
+  .danger { border-left-color: #dc2626; background: #fef2f2; }
+  .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .files div { background: #f8fafc; border: 1px solid #e2e7f0; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .files b { display: block; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ติดตั้ง NN-LRMS agent บนเครื่องห้องคลอด</h1>
+  <p class="sub">โปรแกรมเล็ก ๆ ที่ดึงข้อมูลห้องคลอดจาก HOSxP ของโรงพยาบาล แล้วส่งเข้าเซิร์ฟเวอร์
+    NN-LRMS — ทำงานอัตโนมัติตลอด 24 ชั่วโมง โดยไม่ต้องมีคนเปิดเบราว์เซอร์</p>
+
+  <div class="card">
+    <h2 style="margin-top:0">ทำไมต้องมี</h2>
+    <p>โดยค่าเริ่มต้น NN-LRMS ดึงข้อมูลจาก HOSxP ผ่าน <b>เบราว์เซอร์</b> ของคนที่เปิดหน้า NN-LRMS ไว้
+      ถ้าไม่มีใครเปิดหน้าจอ (กลางคืน วันหยุด หรือไม่มีใครใช้เครื่อง) แดชบอร์ดภาพรวมจังหวัดจะไม่มีตัวเลขใหม่
+      ส่วน <b>หน้าห้องคลอด</b> ที่เปิดจาก HOSxP ยังเห็นข้อมูลสดเสมอ เพราะอ่าน HOSxP โดยตรง</p>
+    <p>agent คือเบราว์เซอร์แบบไม่ต้องมีคนเปิด — รันบนเครื่องห้องคลอดตลอด เชื่อมต่อผ่าน BMS gateway ในเครื่อง
+      (ไม่โดนจำกัดจำนวนครั้งต่อวินาที และได้ข้อมูลจริง ไม่ถูกสุ่ม CID/HN) ดึงทุก 5 นาที</p>
+  </div>
+
+  <h2>1. ไฟล์ที่ได้รับ</h2>
+  <div class="card">
+    <div class="files">
+      <div><b>nn-lrms-agent.exe</b>ตัว agent (ไฟล์เดียวจบ ไม่ต้องติดตั้งอะไร)</div>
+      <div><b>NN-LRMS-agent-service.exe</b>WinSW (ตัวห่อให้เป็น service)</div>
+      <div><b>NN-LRMS-agent-service.xml</b>นิยาม service</div>
+      <div><b>agent.example.json</b>แม่แบบไฟล์ตั้งค่า</div>
+      <div><b>check.cmd</b>ตรวจว่าเครื่องพร้อม</div>
+      <div><b>install-service.cmd</b>ติดตั้ง service</div>
+      <div><b>uninstall-service.cmd</b>ถอน service</div>
+      <div><b>INSTALL-GUIDE.html</b>คู่มือนี้</div>
+      <div><b>VERSION.txt</b>เวอร์ชัน</div>
+      <div><b>SHA256SUMS.txt</b>checksum ของไฟล์ทุกไฟล์</div>
+    </div>
+    <p>คัดลอกทั้งโฟลเดอร์ไปไว้ที่ เช่น <code>C:\NN-LRMS-agent\</code> (ต้องเป็น path ที่ไม่มีชื่อผู้ใช้ปนอยู่)</p>
+  </div>
+
+  <h2>2. ใส่ค่าตั้ง</h2>
+  <div class="card">
+    <p>คัดลอก <code>agent.example.json</code> เป็น <code>agent.config.json</code> แล้วแก้ 3 ค่านี้</p>
+    <table>
+      <tr><th>คีย์</th><th>ค่า</th><th>หมายเหตุ</th></tr>
+      <tr><td><code>serverUrl</code></td><td>เช่น <code>https://kk-lrms.bmscloud.in.th</code></td><td>เซิร์ฟเวอร์ NN-LRMS</td></tr>
+      <tr><td><code>apiKey</code></td><td><code>kklrms_...</code></td><td>ขอจากผู้ดูแลระบบส่วนกลาง (คีย์แสดงครั้งเดียว)</td></tr>
+      <tr><td><code>gatewayToken</code></td><td>โทเคนของ BMS gateway บนเครื่องนี้</td><td>ขอจาก IT ของ รพ. — เป็นของเครื่องนี้ ไม่ใช่ของจากเซิร์ฟเวอร์</td></tr>
+      <tr><td><code>intervalMinutes</code></td><td><code>5</code></td><td>ดึงทุกกี่นาที</td></tr>
+    </table>
+    <div class="note warn"><b>ไฟล์นี้มีความลับ</b> — ปิดสิทธิ์อ่านไฟล์ให้เฉพาะบัญชีที่จะรัน service เท่านั้น</div>
+  </div>
+
+  <h2>3. ตรวจว่าเครื่องพร้อม</h2>
+  <div class="card">
+    <p>คลิกขวา <code>check.cmd</code> → Run as administrator</p>
+    <pre><code>== 1/4 ไฟล์ตั้งค่า ==     OK — พบ agent.config.json
+== 2/4 ตัว agent ==          OK — พบ nn-lrms-agent.exe
+== 3/4 BMS gateway ==        OK — gateway_state=running expires_at=2026-11-20T21:07:51
+== 4/4 เซิร์ฟเวอร์ NN-LRMS ==  OK — HTTP 200</code></pre>
+    <p>ผ่านทุกข้อจึงไปขั้นตอนถัดไปได้ ถ้าข้อไหน FAIL ให้ดูหัวข้อ "เจอปัญหา" ท้ายคู่มือ</p>
+  </div>
+
+  <h2>4. ติดตั้งเป็น service</h2>
+  <div class="card">
+    <p>คลิกขวา <code>install-service.cmd</code> → Run as administrator จะสั่ง install + start ให้</p>
+    <p>service จะเริ่มอัตโนมัติเมื่อเปิดเครื่อง และ restart เอง 2 ครั้งถ้าตัว agent ล้ม (30 วินาที และ 60 วินาที)
+      แล้วหยุดให้ IT ตรวจจาก log</p>
+    <pre><code>NN-LRMS-agent-service.exe status
+Get-Content .\logs\NN-LRMS-agent-service.out.log -Tail 50</code></pre>
+    <p>ในหน้า NN-LRMS: <b>ตั้งค่า → สถานะการซิงค์</b> คอลัมน์ "เริ่มโดย" ของโรงพยาบาลนี้ต้องขึ้น
+      <code>agent ที่ รพ.</code> และเวลา "ซิงค์ล่าสุด" ต้องเดินเรื่อย</p>
+  </div>
+
+  <h2>5. ถอนการติดตั้ง</h2>
+  <div class="card">
+    <p>คลิกขวา <code>uninstall-service.cmd</code> → Run as administrator</p>
+  </div>
+
+  <h2>เจอปัญหา</h2>
+  <div class="card">
+    <table>
+      <tr><th>อาการ</th><th>ทำอะไร</th></tr>
+      <tr><td>check.cmd: "ยังไม่มี agent.config.json"</td><td>คัดลอก agent.example.json → agent.config.json แล้วกรอก</td></tr>
+      <tr><td>check.cmd ข้อ 3 FAIL — gateway ไม่ตอบ</td><td>BMS gateway บนเครื่องไม่ทำงาน หรือพอร์ตไม่ใช่ 45011 หรือ gateway token ไม่ถูก</td></tr>
+      <tr><td>check.cmd ข้อ 3 FAIL — gateway_state ไม่ใช่ running</td><td>ให้ IT ตรวจสถานะ BMS gateway ของ รพ.</td></tr>
+      <tr><td>agent log: "ไม่ได้ bms_session_id"</td><td>gateway ตอบแต่ไม่มี session — ดู gateway_state ใน log</td></tr>
+      <tr><td>agent log: "fetch failed" ทุกรอบ</td><td>เครื่องนี้ต่อเน็ตออกไปยังเซิร์ฟเวอร์ไม่ได้</td></tr>
+      <tr><td>agent log: "browser-push HTTP 401" / 403</td><td>API key ผิดหรือถูกยกเลิก → ขอคีย์ใหม่</td></tr>
+      <tr><td>service ไม่ขึ้นสถานะ Running</td><td>ดู log ใน logs\ แล้วลองรัน nn-lrms-agent.exe โดยตรงเพื่อดูข้อความ</td></tr>
+    </table>
+    <div class="note danger"><b>ห้ามแก้ข้อมูลคนไข้ใน HOSxP</b> เพื่อให้แดชบอร์ดมีตัวเลข — ถ้าผู้คลอดรับเข้าด้วยประเภทการรับเข้าที่ไม่ใช่
+      "คลอดบุตร" ระบบจะไม่นับให้ ให้แก้ <b>ประเภทการรับเข้า</b> ใน HOSxP ให้ถูกต้องแทน</div>
+  </div>
+
+  <p class="sub" style="margin-top:28px">NN-LRMS · สำนักงานสาธารณสุขจังหวัดน่าน</p>
+</main>
+</body>
+</html>

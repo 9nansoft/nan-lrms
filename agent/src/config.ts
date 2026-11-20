@@ -60,7 +60,13 @@ export function configPath(): string {
 /** Directory of the running script (the .mjs, or the packaged .exe). */
 function scriptDir(): string {
   const entry = process.argv[1];
-  if (entry && entry.length > 0) return dirname(resolve(entry));
+  // A compiled binary reports its own path inside the runtime's virtual
+  // filesystem (/$bunfs/...), which is NOT where the config sits — the
+  // config lives next to the .exe on disk, and process.execPath is that
+  // path. A plain script (node agent.mjs) has a real path in argv[1].
+  const fromEntry = entry && !entry.startsWith('/$bunfs/') ? entry : null;
+  const target = fromEntry ?? process.execPath;
+  if (target && target.length > 0) return dirname(resolve(target));
   return process.cwd();
 }
 
