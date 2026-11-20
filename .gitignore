@@ -23,6 +23,7 @@ playwright-report/
 # Hand-made backups carry the same secrets as .env itself.
 .env.bak.*
 .env.*.bak
+package-lock.json
 
 # IDE
 .vscode/
