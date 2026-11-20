@@ -89,6 +89,13 @@ async function cycle(): Promise<void> {
       pushUrl: `${config.serverUrl}/api/sync/agent-push`,
       authenticityUrl: `${config.serverUrl}/api/sync/agent-authenticity`,
       pushHeaders: { authorization: `Bearer ${config.apiKey}` },
+      // The gateway reports the hospital's tunnel URL on every cycle; the
+      // server needs it to pull this hospital's data itself (assessments,
+      // the backstop) instead of waiting for a browser tab.
+      hosxpFacts: {
+        bmsUrl: session.bmsUrl,
+        marketplaceToken: config.marketplaceToken,
+      },
     });
 
     log('cycle_done', {

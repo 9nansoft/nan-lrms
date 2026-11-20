@@ -71,8 +71,17 @@ copy agent.example.json agent.config.json
    gatewayToken      = <gateway token ของเครื่องนี้>   (ต้องมี — ใช้เรียก GetBMSSessionID)
    intervalMinutes   = 5
    localGateway      = http://127.0.0.1:45011
-   marketplaceToken  = null (ถ้าใช้ local gateway ไม่ต้องใส่)
+   marketplaceToken  = <marketplace token ของ รพ.>  (แนะนำให้ใส่ — ดูหัวข้อถัดไป)
 ```
+
+**marketplace token** คืออะไร: โทเคนที่ HOSxP ใช้ปลดล็อกการอ่านข้อมูลจริงผ่าน BMS tunnel
+(ไม่มี token → เลขบัตร/HN ถูกสุ่ม → ข้อมูลที่เซิร์ฟเวอร์ดึงมาผูกกับคนไข้ไม่ได้)
+หาได้จาก: เปิด NN-LRMS จากเมนูใน HOSxP ในเบราว์เซอร์ → DevTools → Application → Local Storage
+→ คีย์ `marketplace_token` → คัดลอกมาใส่ (ผูกกับโรงพยาบาลนั้น ให้ถือเป็นความลับ)
+
+agent จะส่ง tunnel URL + marketplace token ขึ้นเซิร์ฟเวอร์ในรอบแรกที่มี
+→ เซิร์ฟเวอร์ตั้ง tunnel เองได้ → ตัวดึง assessment ฝั่งเซิร์ฟเวอร์ (ทุก 5 นาที) ทำงานได้
+โดยไม่ต้องมีใครเปิดเบราว์เซอร์
 
 ทดสอบก่อน — รัน `nn-lrms-agent.exe` ตรง ๆ ต้องเห็น `cycle_done` ใน console
 (หรือรัน `check.cmd` ซึ่งเช็คทั้งไฟล์ตั้งค่า, gateway, และเซิร์ฟเวอร์)

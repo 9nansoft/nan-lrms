@@ -28,6 +28,9 @@ export interface HosxpSession {
   sessionId: string;
   apiUrl: string;
   bearerToken: string;
+  /** The hospital's BMS tunnel URL as the gateway reported it — the server
+   *  needs it to pull this hospital's data itself. */
+  bmsUrl: string | null;
   /** Which transport answered — 'local' is the good one. */
   mode: 'local' | 'tunnel';
   /** When the gateway says this session expires (ISO). */
@@ -123,6 +126,7 @@ export async function acquireSession(
     sessionId: gateway.bmsSessionId,
     apiUrl: config.apiUrl,
     bearerToken: config.bearerToken,
+    bmsUrl: gateway.bmsUrl,
     mode: isLocal ? 'local' : 'tunnel',
     expiresAt: gateway.expiresAt,
     gatewayState: gateway.gatewayState,

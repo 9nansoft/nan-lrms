@@ -7,6 +7,7 @@
 // must keep a push from putting back purged data.
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { randomUUID } from 'crypto';
+import { decryptSafe } from '@/lib/encryption';
 import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
@@ -119,6 +120,108 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
       'AG-NOSCOPE-1',
     ]);
     expect(rows).toHaveLength(0);
+  });
+
+  it('takes the hospital\'s tunnel URL from the agent when it is missing', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+
+    const res = await POST(
+      jsonRequest(
+        {
+          hosxp: { bms_url: 'https://10716-saciw.tunnel.hosxp.net' },
+          labor: { patients: [laborPatient('AG-TUN-1')] },
+        },
+        key.rawKey,
+      ) as never,
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await db.query<{ tunnel_url: string | null }>(
+      'SELECT tunnel_url FROM hospital_bms_config WHERE hospital_id = ?',
+      [id],
+    );
+    expect(rows[0]?.tunnel_url).toBe('https://10716-saciw.tunnel.hosxp.net');
+  });
+
+  it('refuses a tunnel URL outside the trusted host list', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+
+    const res = await POST(
+      jsonRequest(
+        {
+          hosxp: { bms_url: 'https://evil.example.com' },
+          labor: { patients: [laborPatient('AG-EVIL-1')] },
+        },
+        key.rawKey,
+      ) as never,
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await db.query<{ tunnel_url: string | null }>(
+      'SELECT tunnel_url FROM hospital_bms_config WHERE hospital_id = ?',
+      [id],
+    );
+    expect(rows[0]?.tunnel_url ?? null).toBeNull();
+  });
+
+  it('never overwrites a tunnel URL the hospital already has', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+    await db.execute(
+      `INSERT INTO hospital_bms_config (id, hospital_id, tunnel_url, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        randomUUID(),
+        id,
+        'https://existing.tunnel.hosxp.net',
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ],
+    );
+
+    await POST(
+      jsonRequest(
+        {
+          hosxp: { bms_url: 'https://other.tunnel.hosxp.net' },
+          labor: { patients: [laborPatient('AG-KEEP-1')] },
+        },
+        key.rawKey,
+      ) as never,
+    );
+
+    const rows = await db.query<{ tunnel_url: string | null }>(
+      'SELECT tunnel_url FROM hospital_bms_config WHERE hospital_id = ?',
+      [id],
+    );
+    expect(rows[0]?.tunnel_url).toBe('https://existing.tunnel.hosxp.net');
+  });
+
+  it('stores the marketplace token encrypted', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+
+    await POST(
+      jsonRequest(
+        {
+          hosxp: {
+            bms_url: 'https://10716-saciw.tunnel.hosxp.net',
+            marketplace_token: 'mkt-secret-value',
+          },
+          labor: { patients: [laborPatient('AG-MKT-1')] },
+        },
+        key.rawKey,
+      ) as never,
+    );
+
+    const rows = await db.query<{ marketplace_token: string | null }>(
+      'SELECT marketplace_token FROM hospital_bms_config WHERE hospital_id = ?',
+      [id],
+    );
+    const stored = rows[0]?.marketplace_token ?? '';
+    expect(stored).not.toBe('mkt-secret-value');
+    expect(decryptSafe(stored)).toBe('mkt-secret-value');
   });
 
   it('records the sync run with trigger=agent', async () => {

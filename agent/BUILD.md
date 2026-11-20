@@ -59,6 +59,8 @@ npm run build:agent          # → agent/dist/agent.mjs  (Node 20+, ไม่ม
 ## สิ่งที่ รพ. แก้เอง
 
 `agent.config.json` — คัดลอกจาก `agent.example.json` แล้วใส่ `serverUrl` / `apiKey` / `gatewayToken`
+และ `marketplaceToken` (ถ้ามี — ดูวิธีหาใน `agent/README.md`; agent จะส่งค่านี้ขึ้นเซิร์ฟเวอร์ให้
+เซิร์ฟเวอร์ตั้ง tunnel เอง → ตัวดึง assessment ฝั่งเซิร์ฟเวอร์ทำงานได้โดยไม่ต้องมีแท็บเปิด)
 
 ## ทดสอบก่อนส่ง
 

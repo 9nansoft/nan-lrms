@@ -190,6 +190,17 @@ export interface BrowserPushBody {
   /** Maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด):
    *  a TRIGGER only — the server reads the rows from HOSxP itself. */
   assessments?: { hints: Record<string, number> };
+  /**
+   * HOSxP connection facts the AGENT may hand the server. The browser never
+   * sends these — it onboards through /api/onboarding/hosxp-sync — but an
+   * agent knows the tunnel URL (its gateway reports it every cycle) and can
+   * carry the marketplace token, so a hospital that never opens a browser
+   * still gets a server-side tunnel.
+   */
+  hosxp?: {
+    bms_url?: string;
+    marketplace_token?: string;
+  };
 }
 
 export interface BrowserPollResult {
@@ -863,6 +874,16 @@ interface RunOptions {
    * the data push is refused).
    */
   authenticityUrl?: string;
+  /**
+   * HOSxP connection facts to hand the server with the bundle. The agent
+   * fills these in (its gateway reports the tunnel URL every cycle); the
+   * server uses them to set up its own tunnel so a hospital that never opens
+   * a browser can still be pulled.
+   */
+  hosxpFacts?: {
+    bmsUrl: string | null;
+    marketplaceToken: string | null;
+  };
 }
 
 async function runQuery<T>(sql: string, opts: RunOptions): Promise<T[]> {
@@ -1563,6 +1584,16 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     if (newbornsSection) body.newborns = newbornsSection;
     if (referralsSection) body.referrals = referralsSection;
     if (assessmentHints) body.assessments = { hints: assessmentHints };
+    // The agent's connection facts. The server stores them ONLY when it is
+    // missing them, so a repeat push is a no-op on the server side.
+    if (opts.hosxpFacts?.bmsUrl) {
+      body.hosxp = {
+        bms_url: opts.hosxpFacts.bmsUrl,
+        ...(opts.hosxpFacts.marketplaceToken
+          ? { marketplace_token: opts.hosxpFacts.marketplaceToken }
+          : {}),
+      };
+    }
 
     const pushRes = await fetch(opts.pushUrl ?? '/api/sync/browser-push', {
       method: 'POST',

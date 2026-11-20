@@ -18,6 +18,8 @@ import { getDatabase } from '@/db/connection';
 import { logger } from '@/lib/logger';
 import type { SyncRunTrigger } from '@/services/sync/progress-store';
 import { serverBmsSession } from '@/services/sync/maternity-assessment';
+import { applyHosxpConnectionFacts } from '@/services/sync/hosxp-connection';
+import { validateTunnelUrl } from '@/lib/bms-tunnel-url';
 import { SseManager } from '@/lib/sse';
 import {
   processBrowserNewborns,
@@ -97,6 +99,17 @@ interface BrowserPushBody {
   assessments?: {
     hints?: Record<string, number>;
   };
+  /** HOSxP connection facts the AGENT may hand the server: its gateway
+   *  reports the tunnel URL on every cycle, and the marketplace token can be
+   *  configured for it. Without a tunnel the server-side pulls (the
+   *  assessment timer, the backstop) skip this hospital entirely — so an
+   *  agent lets a hospital that never opens a browser still be pulled.
+   *  Typed `unknown` like the rest of this body: it crosses the trust
+   *  boundary and is narrowed where it is read. */
+  hosxp?: {
+    bms_url?: unknown;
+    marketplace_token?: unknown;
+  };
 }
 
 // Validate the optional client-supplied BMS session id: non-empty string,
@@ -158,6 +171,32 @@ export async function handlePush(request: NextRequest, actor: PushActor): Promis
         await serverBmsSession(db, hospitalId, { bmsSessionId });
       } catch (e) {
         logger.warn('push_session_refresh_failed', { hcode, error: e });
+      }
+    }
+
+    // The agent may hand the server the HOSxP connection facts it knows
+    // (its gateway reports the tunnel URL every cycle). Without a tunnel the
+    // server-side pulls — the 5-minute assessment timer, the backstop — skip
+    // this hospital entirely. The tunnel URL is validated against the trusted
+    // host allowlist first: it is where the hospital's credentials go.
+    const hosxpBmsUrl = typeof body.hosxp?.bms_url === 'string' ? body.hosxp.bms_url : '';
+    const hosxpToken =
+      typeof body.hosxp?.marketplace_token === 'string' ? body.hosxp.marketplace_token : '';
+    if (hosxpBmsUrl) {
+      const tunnelCheck = validateTunnelUrl(hosxpBmsUrl, { requireTrustedHost: true });
+      if (!tunnelCheck.ok) {
+        logger.warn('push_hosxp_tunnel_rejected', { hcode, reason: tunnelCheck.reason });
+      } else {
+        try {
+          await applyHosxpConnectionFacts(db, hospitalId, {
+            // The gateway's own string (not URL.toString(), which appends a
+            // trailing slash to a bare origin).
+            bmsUrl: hosxpBmsUrl.trim(),
+            marketplaceToken: hosxpToken.length > 0 ? hosxpToken : null,
+          });
+        } catch (e) {
+          logger.warn('push_hosxp_connection_failed', { hcode, error: e });
+        }
       }
     }
 
