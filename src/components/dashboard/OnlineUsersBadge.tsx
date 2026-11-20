@@ -77,12 +77,18 @@ export function OnlineUsersBadge() {
       {open && total > 0 && (
         <div
           role="tooltip"
-          className="absolute z-50 mt-1"
+          className="absolute z-50"
           style={{
-            top: '100%',
+            // Open below whichever is lower: the badge's own drop point, or
+            // the patient sticky bar's bottom edge (--patient-sticky-bottom,
+            // 0px on pages without one) — the preview never covers the
+            // AN/HN context bar while a nurse is reading it.
+            top: 'max(calc(100% + 4px), var(--patient-sticky-bottom, 0px))',
             right: 0,
             minWidth: 280,
             maxWidth: 360,
+            maxHeight: 320,
+            overflowY: 'auto',
             background: '#0b1b2e',
             color: '#e6ecf5',
             border: '1px solid rgba(107,167,229,0.3)',
