@@ -1,4 +1,4 @@
-// T-602: build the Windows package of the NN-LRMS site agent.
+// Build the Windows package of the NN-LRMS site agent.
 //
 //   npm run agent:package
 //     -> dist/agent/nn-lrms-agent-<version>-win-x64/   (+ .zip when `zip` exists)
@@ -7,15 +7,14 @@
 // release) at vendor/winsw/WinSW-x64.exe before packaging. The script never
 // downloads it.
 //
-// Only Node APIs are used here so the assembler can be unit-tested with
-// vitest (the CLI itself runs under node or bun).
+// Plain Node (no build step, no bun): the agent exe itself comes from
+// `npm run build:agent:win`, which cross-compiles it with esbuild + pkg.
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AGENT_VERSION } from '../agent/src/version';
 
 /** where the build expects the WinSW binary */
 export const WINSW_PATH = 'vendor/winsw/WinSW-x64.exe';
@@ -33,12 +32,7 @@ export const PACKAGE_FILES = [
   'INSTALL-GUIDE.html',
   'VERSION.txt',
   'SHA256SUMS.txt',
-] as const;
-
-/** repo root (tools/ sits one level under it) */
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const TEMPLATES = join(ROOT, 'agent/package');
-const GUIDE = join(ROOT, 'docs/agent-install.html');
+];
 
 /** template files copied 1:1 into the package (the other PACKAGE_FILES come from elsewhere) */
 export const TEMPLATE_FILES = [
@@ -48,17 +42,28 @@ export const TEMPLATE_FILES = [
   'install-service.cmd',
   'uninstall-service.cmd',
   'diagnose.cmd',
-] as const;
+];
 
-const sha256 = async (file: string): Promise<string> =>
+/** repo root (tools/ sits one level under it) */
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const TEMPLATES = join(ROOT, 'agent/package');
+const GUIDE = join(ROOT, 'docs/agent-install.html');
+
+const sha256 = async (file) =>
   createHash('sha256').update(new Uint8Array(await readFile(file))).digest('hex');
 
+/** the agent version — one source of truth, shared with the agent itself */
+export async function readAgentVersion() {
+  const raw = await readFile(join(ROOT, 'agent/version.json'), 'utf8');
+  return JSON.parse(raw).version;
+}
+
 /** one shared message for the hand-placed WinSW binary */
-export const winswHint = (): string =>
+export const winswHint = () =>
   `หาไม่พบ ${WINSW_PATH} — ดาวน์โหลด WinSW v2.12.0 (WinSW-x64.exe) จากหน้า Releases ทางการของ winsw/winsw เอง` +
   ` แล้ววางไว้ตาม path นั้น (สคริปต์ไม่ดาวน์โหลดให้ และห้าม commit ไฟล์ exe)`;
 
-const exists = async (path: string): Promise<boolean> => {
+const exists = async (path) => {
   try {
     await stat(path);
     return true;
@@ -67,24 +72,11 @@ const exists = async (path: string): Promise<boolean> => {
   }
 };
 
-export interface AssembleOptions {
-  /** the compiled agent exe */
-  exePath: string;
-  /** WinSW-x64.exe; null = missing -> error */
-  winswPath: string | null;
-  /** package folder to create (must not exist yet) */
-  outDir: string;
-  version: string;
-}
-
 /**
  * Copy the exe, WinSW (renamed), templates and the guide into outDir; write
  * VERSION.txt + SHA256SUMS.txt.
  */
-export async function assembleAgentPackage(opts: AssembleOptions): Promise<{
-  dir: string;
-  files: string[];
-}> {
+export async function assembleAgentPackage(opts) {
   const { exePath, winswPath, outDir, version } = opts;
 
   // WinSW is placed by hand — the script never downloads it and git never holds it
@@ -107,7 +99,7 @@ export async function assembleAgentPackage(opts: AssembleOptions): Promise<{
   await writeFile(join(outDir, 'VERSION.txt'), `${version}\n`, 'utf8');
 
   // "<sha256>  <file>" for every other file, in PACKAGE_FILES order
-  const sums: string[] = [];
+  const sums = [];
   for (const f of PACKAGE_FILES) {
     if (f === 'SHA256SUMS.txt') continue;
     sums.push(`${await sha256(join(outDir, f))}  ${f}`);
@@ -117,28 +109,20 @@ export async function assembleAgentPackage(opts: AssembleOptions): Promise<{
   return { dir: outDir, files: [...PACKAGE_FILES] };
 }
 
-/** cross-compile the single-file agent exe (bun embeds its own runtime) */
-function buildWindowsExe(): string {
-  const out = join(ROOT, 'dist', 'agent', 'build', 'nn-lrms-agent.exe');
-  mkdirSync(dirname(out), { recursive: true });
-  console.log(`• bun build --compile --target=bun-windows-x64 (agent ${AGENT_VERSION}) …`);
-  execFileSync(
-    'bun',
-    [
-      'build',
-      'agent/src/index.ts',
-      '--compile',
-      '--target=bun-windows-x64',
-      '--outfile',
-      out,
-    ],
-    { cwd: ROOT, stdio: 'inherit' },
-  );
-  return out;
+/** build the single-file Windows exe (esbuild + pkg, Node runtime embedded) */
+function buildWindowsExe() {
+  console.log('• npm run build:agent:win (esbuild → pkg, node18-win-x64) …');
+  execFileSync(process.execPath, [join(ROOT, 'agent/build-windows.mjs')], {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
+  return join(ROOT, 'agent/dist/agent.exe');
 }
 
 /** the CLI: npm run agent:package */
-async function main(): Promise<void> {
+async function main() {
+  const version = await readAgentVersion();
+
   // fast, clear failure before spending time on the cross-compile
   const winswPath = join(ROOT, WINSW_PATH);
   if (!(await exists(winswPath))) {
@@ -148,19 +132,16 @@ async function main(): Promise<void> {
 
   const exePath = buildWindowsExe();
 
-  const outDir = join(ROOT, 'dist', 'agent', `nn-lrms-agent-${AGENT_VERSION}-win-x64`);
+  const outDir = join(ROOT, 'dist', 'agent', `nn-lrms-agent-${version}-win-x64`);
   await rm(outDir, { recursive: true, force: true });
-  const res = await assembleAgentPackage({ exePath, winswPath, outDir, version: AGENT_VERSION });
+  const res = await assembleAgentPackage({ exePath, winswPath, outDir, version });
 
   // zip when the command exists; otherwise tell the packer how to do it by hand
-  let zipPath: string | null = null;
-  try {
-    execFileSync('zip', ['-v'], { stdio: 'ignore' });
+  let zipPath = null;
+  if (existsSync('/usr/bin/zip') || existsSync('/bin/zip')) {
     zipPath = `${outDir}.zip`;
     await rm(zipPath, { force: true });
     execFileSync('zip', ['-r', '-q', zipPath, '.'], { cwd: outDir, stdio: 'inherit' });
-  } catch {
-    zipPath = null;
   }
 
   const exeSize = (await stat(exePath)).size;
@@ -183,7 +164,7 @@ async function main(): Promise<void> {
 const isMain =
   process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
-  main().catch((error: unknown) => {
+  main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   });

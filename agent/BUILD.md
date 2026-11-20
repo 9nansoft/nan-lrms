@@ -7,10 +7,9 @@
 
 | ของ | เวอร์ชัน | หมายเหตุ |
 | --- | --- | --- |
-| Node.js | 20 ขึ้นไป | ใช้รันเทสต์/เครื่องมือของโค้ดระบบ |
-| bun | 1.4 ขึ้นไป | cross-compile เป็น `.exe` (ครั้งแรกจะดาวน์โหลด runtime ของ bun เอง) |
-| npm | 10 ขึ้นไป | `npm ci` ในโค้ดระบบ |
-| อินเทอร์เน็ต | ตอน build | ดาวน์โหลด bun runtime ครั้งแรก (เก็บใน cache ของ bun) |
+| Node.js | 20 ขึ้นไป | ใช้รันเทสต์/เครื่องมือของโค้ดระบบ และ build แพ็กเกจ |
+| npm | 10 ขึ้นไป | `npm ci` ในโค้ดระบบ (`pkg` เป็น devDependency แล้ว) |
+| อินเทอร์เน็ต | ตอน build | `pkg` ดาวน์โหลด Node runtime ครั้งแรก (เก็บใน cache) |
 
 ## ส่ง รพ. = คำสั่งเดียว
 
@@ -41,7 +40,7 @@ npm run agent:package
 
 | ไฟล์ในแพ็กเกจ | มาจาก |
 | --- | --- |
-| `nn-lrms-agent.exe` | cross-compile ด้วย bun (runtime ฝังอยู่ในไฟล์ — 110 MB) |
+| `nn-lrms-agent.exe` | cross-compile ด้วย esbuild + pkg (Node runtime ฝังอยู่ในไฟล์ — 37 MB) |
 | `NN-LRMS-agent-service.exe` | WinSW ที่วางไว้ (เปลี่ยนชื่อ) |
 | `NN-LRMS-agent-service.xml` | `agent/package/NN-LRMS-agent-service.xml` |
 | `agent.example.json` | `agent/package/agent.example.json` |
@@ -92,7 +91,8 @@ node dist/agent.mjs
 
 | อาการ | ทำอะไร |
 | --- | --- |
-| `bun: command not found` | ต้องมี [bun](https://bun.sh) เพื่อ cross-compile (ครั้งแรกจะดาวน์โหลด runtime ของตัวเอง) |
+| `Error! No available node version satisfies 'node20'` | `pkg` 5.8.1 มี runtime แค่ถึง node18 — ใช้ `--target node18-win-x64` (ค่าเริ่มต้นใน `build-windows.mjs` แล้ว) |
+| `pkg` ดาวน์โหลดไม่ผ่าน | ต้องต่ออินเทอร์เน็ตตอน build ครั้งแรก หรือใช้ `PKG_CACHE_PATH` เพื่อ cache ไว้ |
 | bun ดาวน์โหลด runtime ไม่ผ่าน | ต้องต่ออินเทอร์เน็ตตอน build ครั้งแรก |
 | `.exe` รันแล้วไม่ขึ้น | ตรวจว่า `agent.config.json` อยู่ข้าง `agent.exe` และอ่านได้ (WinSW ใช้บัญชี `LocalService`) |
 | agent ขึ้น `fetch failed` ทุกรอบ | ต้องต่อเน็ตออกจากเครื่องนั้นได้ (ไปหาเซิร์ฟเวอร์) และ local gateway ต้องเปิด |

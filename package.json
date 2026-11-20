@@ -6,7 +6,8 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "build:agent": "node agent/build.mjs",
-    "agent:package": "bun run tools/package-agent.ts",
+    "build:agent:win": "node agent/build-windows.mjs",
+    "agent:package": "node tools/package-agent.mjs",
     "start": "next start --hostname 0.0.0.0",
     "start:prod": "npm run build && next start --hostname 0.0.0.0",
     "lint": "eslint . --ignore-pattern 'postgres-data/' --ignore-pattern 'redis-data/' --ignore-pattern '.pglite-data/'",
@@ -61,6 +62,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "jsdom": "^28.1.0",
+    "pkg": "^5.8.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.0.18"

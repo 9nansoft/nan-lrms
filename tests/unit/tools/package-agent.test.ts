@@ -15,7 +15,7 @@ import {
   PACKAGE_FILES,
   TEMPLATE_FILES,
   winswHint,
-} from '../../../tools/package-agent';
+} from '../../../tools/package-agent.mjs';
 
 let work: string;
 
