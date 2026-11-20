@@ -2,8 +2,8 @@
 # Stage 1: Install ALL dependencies (dev included for build)
 FROM node:24-alpine AS deps
 WORKDIR /app
-#COPY package.json package-lock.json ./
-COPY package.json
+# npm ci REQUIRES the lockfile — copy both manifests, never just package.json.
+COPY package.json package-lock.json ./
 RUN npm ci
 
 # Stage 2: Build

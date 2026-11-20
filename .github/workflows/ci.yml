@@ -10,19 +10,19 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 # The deploy job publishes the production image to GitHub Container Registry.
 permissions:
   contents: read
   packages: write
 
 jobs:
-  test:
-    name: Lint, typecheck, test, build
+  quality:
+    name: Typecheck, lint, build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The suite of unit/integration tests is far heavier than these three
+    # steps — they live in their own job below so neither half waits behind
+    # the other, and each gets a timeout that fits its own runtime.
+    timeout-minutes: 20
 
     env:
       # 32 bytes encoded as 64 hexadecimal characters. Several route tests
@@ -32,12 +32,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          # Matches the Dockerfile (node:24-alpine) and local development.
+          # Node 20 is EOL; the v5 actions run on the Node 24 runtime, so
+          # the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 pin is gone too.
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -49,9 +52,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit + integration tests
-        run: npx vitest run --exclude="tests/e2e/**"
-
       - name: Build (Next.js production)
         run: npm run build
 
@@ -59,15 +59,43 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
         continue-on-error: true
 
+  test:
+    name: Unit + integration tests
+    runs-on: ubuntu-latest
+    # ~4,500 tests on a shared runner: CPU-time is well over an hour, wall
+    # time on two cores lands in the 20–35 minute range. The old single job
+    # held everything under one 15-minute budget and timed out.
+    timeout-minutes: 45
+
+    env:
+      ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit + integration tests
+        run: npx vitest run --exclude="tests/e2e/**"
+
   deploy:
     name: Build and push Docker image
     runs-on: ubuntu-latest
-    needs: test
+    needs: [quality, test]
     if: github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
