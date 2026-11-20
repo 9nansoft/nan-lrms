@@ -65,8 +65,11 @@ describe('MaternityAssessmentCard', () => {
 
   it('says a checkbox in words instead of showing Y/N', () => {
     render(<MaternityAssessmentCard assessments={[dto()]} />);
-    expect(screen.getByText('✓ ใช่')).toBeTruthy();
-    expect(screen.getByText('✗ ไม่ใช่')).toBeTruthy();
+    // The checkbox line carries the tick and the site's own sentence.
+    expect(screen.getByText('ได้ให้อาหารทางปาก')).toBeTruthy();
+    expect(screen.getByText('ไม่ได้ให้อาหารทางปาก')).toBeTruthy();
+    expect(screen.getAllByText('✓').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('✗').length).toBeGreaterThan(0);
   });
 
   it('says so when nothing has been synced yet', () => {
@@ -83,6 +86,7 @@ describe('MaternityAssessmentCard', () => {
     const two = dto();
     const older = dto({ id: 'a-0', recordedAt: '2026-11-16T21:03:15.000Z' });
     render(<MaternityAssessmentCard assessments={[two, older]} />);
-    expect(screen.getByText('2 ครั้ง')).toBeTruthy();
+    // The count badge on the หลังคลอด tab (two records of that form).
+    expect(screen.getByText('2')).toBeTruthy();
   });
 });

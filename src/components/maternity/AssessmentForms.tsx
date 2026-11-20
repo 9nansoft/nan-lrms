@@ -1,48 +1,26 @@
-// The maternity assessment forms ([LR] แรกรับ / ระยะคลอด / หลังคลอด) as a
-// list of labelled fields.
+// The maternity assessment forms ([LR]) as THREE tabs — แรกรับ / ระยะคลอด /
+// หลังคลอด — each tab drawing its form the way HOSxP does (see
+// src/config/assessment-form-layouts.ts and the lr*-from.png reference
+// images).
 //
-// Shared by the hospital console (live from HOSxP) and the provincial
-// patient detail (from the cache) — both render the same DTO shape.
+// Tab titles come from the config (MATERNITY_ASSESSMENT_FORMS), so there is
+// ONE source of truth for them. Shared by the hospital console (live from
+// HOSxP) and the provincial patient detail (from the cache) — both render
+// the same DTO shape.
 'use client';
 
+import { useMemo, useState } from 'react';
 import { MATERNITY_ASSESSMENT_FORMS } from '@/config/maternity-assessments';
-import type {
-  MaternityAssessmentDto,
-  MaternityAssessmentField,
-} from '@/types/maternity-assessments';
+import type { MaternityAssessmentDto, MaternityAssessmentKey } from '@/types/maternity-assessments';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import { FirstPregnantFormView } from './assessments/FirstPregnantFormView';
+import { TimeRowFormView } from './assessments/TimeRowFormView';
+import { fmtDateTh, fmtDateTimeTh, renderAssessmentValue } from './assessments/assessment-field-ui';
 
-export function fmtDateTimeTh(value: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('th-TH', {
-    day: '2-digit',
-    month: '2-digit',
-    year: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-export function fmtDateTh(value: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit' });
-}
-
-/** Checkboxes carry 'Y'/'N' — say it in words instead of showing the code. */
-export function renderAssessmentValue(field: MaternityAssessmentField): React.ReactNode {
-  if (field.component === 'CheckBox') {
-    if (field.value === 'Y') return <span className="font-semibold text-ok-text">✓ ใช่</span>;
-    if (field.value === 'N') return <span className="text-ink-muted">✗ ไม่ใช่</span>;
-  }
-  if (field.component === 'Memo') {
-    return <span className="whitespace-pre-wrap break-words">{field.value}</span>;
-  }
-  return <span className="break-words">{field.value}</span>;
-}
+// The old flat list exposed these; they stay exported so any consumer of
+// the module keeps working.
+export { fmtDateTh, fmtDateTimeTh, renderAssessmentValue };
 
 export interface AssessmentFormsProps {
   assessments: MaternityAssessmentDto[];
@@ -51,67 +29,119 @@ export interface AssessmentFormsProps {
   className?: string;
 }
 
+/** One tab's records: the record picker, the record header and the form view. */
+function FormTabPanel({
+  formKey,
+  records,
+  emptyMessage,
+}: {
+  formKey: MaternityAssessmentKey;
+  records: MaternityAssessmentDto[];
+  emptyMessage: string;
+}) {
+  const [index, setIndex] = useState(0);
+
+  if (records.length === 0) {
+    return <p className="text-label text-ink-muted">{emptyMessage}</p>;
+  }
+
+  const record = records[Math.min(index, records.length - 1)];
+
+  return (
+    <div className="flex flex-col gap-3">
+      {records.length > 1 && (
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="เลือกรายการบันทึก">
+          {records.map((item, i) => (
+            <button
+              key={item.id}
+              type="button"
+              aria-pressed={i === index}
+              onClick={() => setIndex(i)}
+              className={cn(
+                'rounded-full border px-2.5 py-1 text-caption tabular-nums',
+                i === index
+                  ? 'border-brand bg-brand-soft font-semibold text-brand-strong'
+                  : 'border-border bg-surface-card text-ink-muted hover:bg-surface-muted',
+              )}
+            >
+              {fmtDateTimeTh(item.recordedAt)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <article className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/40 p-3">
+        <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-caption text-ink-muted">
+          {record.formName && <span className="font-medium text-ink">{record.formName}</span>}
+          <span className="tabular-nums">บันทึก {fmtDateTimeTh(record.recordedAt)}</span>
+          {record.recordedDate && (
+            <span className="tabular-nums">วันที่ในแบบฟอร์ม {fmtDateTh(record.recordedDate)}</span>
+          )}
+          {record.entryStaff && <span>ผู้บันทึก {record.entryStaff}</span>}
+        </header>
+
+        {record.fields.length === 0 ? (
+          <p className="text-caption text-ink-muted">ไม่มีรายการข้อมูลในแบบฟอร์มนี้</p>
+        ) : formKey === 'first_pregnant' ? (
+          <FirstPregnantFormView record={record} />
+        ) : (
+          <TimeRowFormView record={record} />
+        )}
+      </article>
+    </div>
+  );
+}
+
 export function AssessmentForms({
   assessments,
   emptyMessage = 'ยังไม่มีแบบฟอร์มประเมินที่ซิงก์เข้ามา',
   className,
 }: AssessmentFormsProps) {
-  // Newest form of each kind first — a nurse reads the latest record.
-  const grouped = MATERNITY_ASSESSMENT_FORMS.map((form) => ({
-    form,
-    records: assessments
-      .filter((a) => a.formKey === form.key)
-      .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()),
-  })).filter((group) => group.records.length > 0);
+  // Newest record of each kind first — a nurse reads the latest one. The
+  // tab order follows the config (แรกรับ → ระยะคลอด → หลังคลอด).
+  const groups = useMemo(
+    () =>
+      MATERNITY_ASSESSMENT_FORMS.map((form) => ({
+        form,
+        records: assessments
+          .filter((a) => a.formKey === form.key)
+          .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()),
+      })),
+    [assessments],
+  );
 
-  if (grouped.length === 0) {
-    return <p className="text-label text-ink-muted">{emptyMessage}</p>;
+  const initialKey =
+    groups.find((group) => group.records.length > 0)?.form.key ?? MATERNITY_ASSESSMENT_FORMS[0].key;
+  const [active, setActive] = useState<MaternityAssessmentKey>(initialKey);
+
+  if (assessments.length === 0) {
+    return <p className={cn('text-label text-ink-muted', className)}>{emptyMessage}</p>;
   }
 
   return (
-    <div className={cn('flex flex-col gap-4', className)}>
-      {grouped.map(({ form, records }) => (
-        <div key={form.key} className="flex flex-col gap-2">
-          <h3 className="text-label font-semibold text-brand">
+    <Tabs
+      value={active}
+      onValueChange={(value) => setActive(value as MaternityAssessmentKey)}
+      className={cn('flex flex-col gap-3', className)}
+    >
+      <TabsList variant="line" className="h-auto w-full flex-wrap justify-start gap-1">
+        {groups.map(({ form, records }) => (
+          <TabsTrigger key={form.key} value={form.key} className="h-8 flex-none gap-1.5 px-2 text-label">
             {form.titleTh}
             {records.length > 1 && (
-              <span className="ml-2 text-caption font-normal text-ink-muted">
-                {records.length} ครั้ง
+              <span className="rounded-full bg-brand-soft px-1.5 text-caption font-semibold leading-4 text-brand-strong tabular-nums">
+                {records.length}
               </span>
             )}
-          </h3>
+          </TabsTrigger>
+        ))}
+      </TabsList>
 
-          {records.map((record) => (
-            <article
-              key={record.id}
-              className="rounded-xl border border-border bg-surface-muted/40 p-3"
-            >
-              <header className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-muted">
-                <span className="tabular-nums">บันทึก {fmtDateTimeTh(record.recordedAt)}</span>
-                {record.recordedDate && (
-                  <span className="tabular-nums">
-                    วันที่ในแบบฟอร์ม {fmtDateTh(record.recordedDate)}
-                  </span>
-                )}
-                {record.entryStaff && <span>ผู้บันทึก {record.entryStaff}</span>}
-              </header>
-
-              {record.fields.length === 0 ? (
-                <p className="text-caption text-ink-muted">ไม่มีรายการข้อมูลในแบบฟอร์มนี้</p>
-              ) : (
-                <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
-                  {record.fields.map((field) => (
-                    <div key={`${record.id}-${field.column}`} className="min-w-0 text-label">
-                      <dt className="text-caption text-ink-muted">{field.label}</dt>
-                      <dd className="text-ink">{renderAssessmentValue(field)}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-            </article>
-          ))}
-        </div>
+      {groups.map(({ form, records }) => (
+        <TabsContent key={form.key} value={form.key} keepMounted className="min-w-0">
+          <FormTabPanel formKey={form.key} records={records} emptyMessage={emptyMessage} />
+        </TabsContent>
       ))}
-    </div>
+    </Tabs>
   );
 }
