@@ -13,6 +13,12 @@ export const webhookApiKeysTable: TableDefinition = {
     { name: 'key_hash', type: 'string', maxLength: 64 }, // SHA-256 of the raw API key
     { name: 'key_prefix', type: 'string', maxLength: 8 }, // First 8 chars for identification (e.g. "kklrms_a")
     { name: 'label', type: 'string', maxLength: 100 }, // Human-readable label
+    // Capability list, comma-separated (e.g. 'agent:push,agent:heartbeat').
+    // NULL = an ordinary webhook key with no extra capability. The label is
+    // free text an admin can retype — this column is the security boundary:
+    // an agent key is minted WITH scopes, and the agent endpoints refuse a
+    // key that lacks the scope they need.
+    { name: 'scopes', type: 'string', maxLength: 200, nullable: true },
     { name: 'is_active', type: 'boolean', defaultValue: true },
     { name: 'last_used_at', type: 'datetime', nullable: true },
     { name: 'created_at', type: 'datetime' },

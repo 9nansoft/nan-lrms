@@ -21,6 +21,7 @@
 // hammering the tunnel.
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
+import { validateTunnelUrl } from '@/lib/bms-tunnel-url';
 import { SseManager } from '@/lib/sse';
 import { pollHospital } from '@/services/sync/polling';
 import { getAgentHeartbeat, isAgentHeartbeatFresh } from '@/services/sync/agent-heartbeat';
@@ -45,6 +46,8 @@ export interface BackstopResult {
   polled: number;
   skippedNoAgent: number;
   skippedNoSession: number;
+  /** Tunnel host is not on the trusted list — no credentials were sent. */
+  skippedUntrustedTunnel: number;
   failed: number;
 }
 
@@ -74,6 +77,7 @@ export async function runAgentBackstop(
     polled: 0,
     skippedNoAgent: 0,
     skippedNoSession: 0,
+    skippedUntrustedTunnel: 0,
     failed: 0,
   };
 
@@ -83,6 +87,19 @@ export async function runAgentBackstop(
     if (isAgentHeartbeatFresh(heartbeat, now)) {
       // The agent is alive and pulling — do not touch the tunnel.
       result.skippedNoAgent++;
+      continue;
+    }
+
+    // Re-validate the tunnel host immediately before the server sends this
+    // hospital's bearer token and marketplace token to it. The stored value
+    // was checked when it was written, but it can be changed since.
+    const tunnelCheck = validateTunnelUrl(h.tunnel_url, { requireTrustedHost: true });
+    if (!tunnelCheck.ok) {
+      result.skippedUntrustedTunnel++;
+      logger.warn('agent_backstop_untrusted_tunnel', {
+        hcode: h.hcode,
+        reason: tunnelCheck.reason,
+      });
       continue;
     }
 

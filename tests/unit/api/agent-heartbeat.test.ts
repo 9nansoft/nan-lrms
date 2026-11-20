@@ -9,7 +9,7 @@ import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey } from '@/lib/encryption';
-import { createApiKey } from '@/services/webhook';
+import { createApiKey, API_KEY_SCOPES } from '@/services/webhook';
 import {
   getAgentHeartbeat,
   isAgentHeartbeatFresh,
@@ -26,6 +26,13 @@ vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 import { POST } from '@/app/api/sync/agent-heartbeat/route';
 
 const HCODE = '10670';
+
+/** Every scope the agent endpoints need — minted together. */
+const AGENT_SCOPES = [
+  API_KEY_SCOPES.AGENT_PUSH,
+  API_KEY_SCOPES.AGENT_HEARTBEAT,
+  API_KEY_SCOPES.AGENT_AUTHENTICITY,
+];
 
 function request(body: unknown, rawKey?: string): Request {
   return new Request('http://test/api/sync/agent-heartbeat', {
@@ -60,7 +67,7 @@ describe('POST /api/sync/agent-heartbeat', () => {
 
   it('records the heartbeat for the key\'s hospital', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
 
     const res = await POST(
       request({ version: '1.2.3', mode: 'local', pushed: true }, key.rawKey) as never,
@@ -76,7 +83,7 @@ describe('POST /api/sync/agent-heartbeat', () => {
 
   it('keeps a failed cycle visible (pushed=false + detail)', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
 
     await POST(
       request(
@@ -93,7 +100,7 @@ describe('POST /api/sync/agent-heartbeat', () => {
 
   it('treats a heartbeat as stale once it is older than the window', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
     await POST(request({ version: '1.0.0', mode: 'local', pushed: true }, key.rawKey) as never);
 
     const beat = await getAgentHeartbeat(id);
@@ -109,7 +116,7 @@ describe('POST /api/sync/agent-heartbeat', () => {
 
   it('does not write a heartbeat for a hospital the admin purged', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
     await db.execute(
       `INSERT INTO hospital_bms_config (id, hospital_id, tunnel_url, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?)`,

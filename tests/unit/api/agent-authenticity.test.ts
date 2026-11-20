@@ -11,7 +11,7 @@ import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey } from '@/lib/encryption';
-import { createApiKey } from '@/services/webhook';
+import { createApiKey, API_KEY_SCOPES } from '@/services/webhook';
 
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
 
@@ -23,6 +23,13 @@ vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 import { POST } from '@/app/api/sync/agent-authenticity/route';
 
 const HCODE = '10670';
+
+/** Every scope the agent endpoints need — minted together. */
+const AGENT_SCOPES = [
+  API_KEY_SCOPES.AGENT_PUSH,
+  API_KEY_SCOPES.AGENT_HEARTBEAT,
+  API_KEY_SCOPES.AGENT_AUTHENTICITY,
+];
 
 function request(body: unknown, rawKey?: string): Request {
   return new Request('http://test/api/sync/agent-authenticity', {
@@ -71,7 +78,7 @@ describe('POST /api/sync/agent-authenticity', () => {
 
   it('records the verdict for the key\'s hospital', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
 
     const res = await POST(request({ status: 'authentic', reason: '3/3 matched' }, key.rawKey) as never);
     expect(res.status).toBe(200);
@@ -84,14 +91,14 @@ describe('POST /api/sync/agent-authenticity', () => {
   });
 
   it('refuses an unsupported verdict', async () => {
-    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent');
+    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent', AGENT_SCOPES);
     const res = await POST(request({ status: 'something_else' }, key.rawKey) as never);
     expect(res.status).toBe(400);
   });
 
   it('refuses a verdict for a deactivated hospital', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
     await db.execute('UPDATE hospitals SET is_active = false WHERE id = ?', [id]);
 
     const res = await POST(request({ status: 'name_unstable' }, key.rawKey) as never);
@@ -100,7 +107,7 @@ describe('POST /api/sync/agent-authenticity', () => {
 
   it('refuses a verdict for a hospital the admin purged', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
     await db.execute('UPDATE hospital_bms_config SET data_purged_at = ? WHERE hospital_id = ?', [
       new Date().toISOString(),
       id,

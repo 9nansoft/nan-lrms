@@ -26,6 +26,7 @@ import { ensureInit } from '@/lib/ensure-init';
 import { auth } from '@/lib/auth';
 import { logger } from '@/lib/logger';
 import { readBearer, resolveApiKeyActor } from '@/services/sync/push-auth';
+import { API_KEY_SCOPES } from '@/services/webhook';
 import {
   applyAuthenticityVerdict,
   parseVerdictBody,
@@ -44,7 +45,9 @@ export async function POST(request: NextRequest) {
     let hcode: string | null = null;
     if (rawKey) {
       const keyDb = await getDatabase();
-      const resolution = await resolveApiKeyActor(keyDb, rawKey);
+      const resolution = await resolveApiKeyActor(keyDb, rawKey, {
+        requireScope: API_KEY_SCOPES.AGENT_AUTHENTICITY,
+      });
       if (!resolution.ok) {
         return NextResponse.json({ error: resolution.error }, { status: resolution.status });
       }

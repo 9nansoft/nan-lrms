@@ -12,7 +12,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { requireAdmin } from '@/lib/admin-guard';
 import { logger } from '@/lib/logger';
-import { createApiKey } from '@/services/webhook';
+import { createApiKey, API_KEY_SCOPES } from '@/services/webhook';
 
 const AGENT_KEY_LABEL = 'NN-LRMS agent';
 
@@ -37,7 +37,11 @@ export async function POST(
       );
     }
 
-    const created = await createApiKey(db, rows[0].id, AGENT_KEY_LABEL);
+    const created = await createApiKey(db, rows[0].id, AGENT_KEY_LABEL, [
+      API_KEY_SCOPES.AGENT_PUSH,
+      API_KEY_SCOPES.AGENT_HEARTBEAT,
+      API_KEY_SCOPES.AGENT_AUTHENTICITY,
+    ]);
     logger.info('agent_key_minted', { hcode, keyPrefix: created.keyPrefix });
 
     return NextResponse.json({

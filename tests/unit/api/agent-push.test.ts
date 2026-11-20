@@ -11,7 +11,7 @@ import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { generateKey } from '@/lib/encryption';
-import { createApiKey } from '@/services/webhook';
+import { createApiKey, API_KEY_SCOPES } from '@/services/webhook';
 import { getLatestSyncRun } from '@/services/sync/progress-store';
 
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? generateKey();
@@ -24,6 +24,13 @@ vi.mock('@/lib/ensure-init', () => ({ ensureInit: async () => {} }));
 import { POST, GET } from '@/app/api/sync/agent-push/route';
 
 const HCODE = '10670';
+
+/** Every scope the agent endpoints need — minted together. */
+const AGENT_SCOPES = [
+  API_KEY_SCOPES.AGENT_PUSH,
+  API_KEY_SCOPES.AGENT_HEARTBEAT,
+  API_KEY_SCOPES.AGENT_AUTHENTICITY,
+];
 const OTHER_HCODE = '10998';
 
 function jsonRequest(body: unknown, rawKey?: string): Request {
@@ -85,7 +92,7 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
   });
 
   it('stores the pushed labour row under the key\'s own hospital', async () => {
-    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent');
+    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent', AGENT_SCOPES);
     const res = await POST(
       jsonRequest({ labor: { patients: [laborPatient('AG-OK-1')] } }, key.rawKey) as never,
     );
@@ -99,8 +106,23 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
     expect(rows[0].hospital_id).toBe(await hospitalId());
   });
 
+  it('refuses an ordinary webhook key — the agent scope is required', async () => {
+    // A key minted for the HOSxP webhook sender (no scopes) must not be
+    // able to drive the agent endpoints.
+    const key = await createApiKey(db, await hospitalId(), 'HOSxP webhook sender');
+    const res = await POST(
+      jsonRequest({ labor: { patients: [laborPatient('AG-NOSCOPE-1')] } }, key.rawKey) as never,
+    );
+    expect(res.status).toBe(403);
+
+    const rows = await db.query<{ an: string }>('SELECT an FROM cached_patients WHERE an = ?', [
+      'AG-NOSCOPE-1',
+    ]);
+    expect(rows).toHaveLength(0);
+  });
+
   it('records the sync run with trigger=agent', async () => {
-    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent');
+    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent', AGENT_SCOPES);
     await POST(
       jsonRequest({ labor: { patients: [laborPatient('AG-TRIG-1')] } }, key.rawKey) as never,
     );
@@ -111,7 +133,7 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
   });
 
   it('ignores a hospital code in the body — the key decides the hospital', async () => {
-    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent');
+    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent', AGENT_SCOPES);
     const res = await POST(
       jsonRequest(
         {
@@ -138,7 +160,7 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
 
   it('refuses a push for a hospital the admin purged', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
     const existing = await db.query<{ id: string }>(
       'SELECT id FROM hospital_bms_config WHERE hospital_id = ?',
       [id],
@@ -174,7 +196,7 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
 
   it('refuses a push for a deactivated hospital', async () => {
     const id = await hospitalId();
-    const key = await createApiKey(db, id, 'NN-LRMS agent');
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
     await db.execute('UPDATE hospitals SET is_active = false WHERE id = ?', [id]);
 
     const res = await POST(
@@ -184,7 +206,7 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
   });
 
   it('serves the sync bootstrap (newborn cutoff) to a key holder', async () => {
-    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent');
+    const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent', AGENT_SCOPES);
     const res = await GET(bootstrapRequest(key.rawKey) as never);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { newbornCutoff?: string };

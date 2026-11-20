@@ -542,15 +542,21 @@ export function summarizeWebhookDeletes(body: unknown): WebhookDeleteSummary | n
 export async function validateApiKey(
   db: DatabaseAdapter,
   rawKey: string,
-): Promise<{ hospitalId: string; keyId: string; sender: WebhookSender } | null> {
+): Promise<{
+  hospitalId: string;
+  keyId: string;
+  sender: WebhookSender;
+  scopes: string[];
+} | null> {
   const keyHash = hashApiKey(rawKey);
 
   const rows = await db.query<{
     id: string;
     hospital_id: string;
     pushed_to_hosxp_at: string | null;
+    scopes: string | null;
   }>(
-    'SELECT id, hospital_id, pushed_to_hosxp_at FROM webhook_api_keys WHERE key_hash = ? AND is_active = true AND revoked_at IS NULL',
+    'SELECT id, hospital_id, pushed_to_hosxp_at, scopes FROM webhook_api_keys WHERE key_hash = ? AND is_active = true AND revoked_at IS NULL',
     [keyHash],
   );
 
@@ -566,13 +572,43 @@ export async function validateApiKey(
     hospitalId: rows[0].hospital_id,
     keyId: rows[0].id,
     sender: rows[0].pushed_to_hosxp_at !== null ? 'hosxp' : 'external',
+    /** Capability list — empty for an ordinary webhook key. */
+    scopes: parseScopes(rows[0].scopes),
   };
+}
+
+/**
+ * Capability scopes a key may carry. NULL/empty = an ordinary webhook key
+ * (the HOSxP sender, an external system) with no extra reach.
+ *
+ * The scopes are the SECURITY BOUNDARY, not the label: the label is free
+ * text an admin can retype, the scope list is written at mint time and
+ * checked by the endpoint that needs the capability.
+ */
+export const API_KEY_SCOPES = {
+  /** Push a HOSxP data bundle into the central cache (agent-push). */
+  AGENT_PUSH: 'agent:push',
+  /** Report "the agent is alive" (agent-heartbeat). */
+  AGENT_HEARTBEAT: 'agent:heartbeat',
+  /** Report the name-authenticity verdict — can purge recent rows. */
+  AGENT_AUTHENTICITY: 'agent:authenticity',
+} as const;
+
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[keyof typeof API_KEY_SCOPES];
+
+export function parseScopes(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 export async function createApiKey(
   db: DatabaseAdapter,
   hospitalId: string,
   label: string,
+  scopes: ApiKeyScope[] = [],
 ): Promise<{ id: string; rawKey: string; keyPrefix: string }> {
   const rawKey = generateApiKey();
   const keyHash = hashApiKey(rawKey);
@@ -581,9 +617,17 @@ export async function createApiKey(
   const now = new Date().toISOString();
 
   await db.execute(
-    `INSERT INTO webhook_api_keys (id, hospital_id, key_hash, key_prefix, label, is_active, created_at)
-     VALUES (?, ?, ?, ?, ?, true, ?)`,
-    [id, hospitalId, keyHash, keyPrefix, label, now],
+    `INSERT INTO webhook_api_keys (id, hospital_id, key_hash, key_prefix, label, scopes, is_active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, true, ?)`,
+    [
+      id,
+      hospitalId,
+      keyHash,
+      keyPrefix,
+      label,
+      scopes.length > 0 ? scopes.join(',') : null,
+      now,
+    ],
   );
 
   return { id, rawKey, keyPrefix };

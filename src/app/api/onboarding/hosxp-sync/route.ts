@@ -12,6 +12,7 @@ import {
   startOnboardingHosxpSync,
 } from '@/services/sync/onboarding-session';
 import { logger } from '@/lib/logger';
+import { validateTunnelUrl, tunnelUrlErrorMessage } from '@/lib/bms-tunnel-url';
 import { EXEMPT_HCODES } from '@/lib/hospital-access-guard';
 import { exemptHospitalName } from '@/config/hospital-network';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
@@ -159,14 +160,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    try {
-      new URL(apiUrl);
-    } catch {
+    // The tunnel URL is where the server sends this hospital's bearer token
+    // and marketplace token. It is validated BEFORE it is stored, so a
+    // client cannot point the server's credentials at a host of its choice.
+    const tunnelCheck = validateTunnelUrl(apiUrl, { requireTrustedHost: true });
+    if (!tunnelCheck.ok) {
       return NextResponse.json(
         {
           error: 'invalid_bms_url',
           stage: 'validate_bms_url',
-          detail: `The BMS API URL is not a valid URL: ${apiUrl}`,
+          detail: `${tunnelUrlErrorMessage(tunnelCheck.reason)} — ${apiUrl}`,
         },
         { status: 400 },
       );

@@ -92,18 +92,28 @@ export async function resolveSessionActor(
 
 /**
  * Agent path. The API key is hospital-scoped (webhook_api_keys.hospital_id),
- * so a key can only ever write to its own hospital. The key is the same
- * credential the HOSxP webhook sender uses — a key holder can already push
- * labour data through /api/webhooks/patient-data, so this grants no new
- * reach.
+ * so a key can only ever write to its own hospital.
+ *
+ * `requireScope` is the capability check: the key must carry the scope the
+ * endpoint needs (agent:push / agent:heartbeat / agent:authenticity). The
+ * scopes are written when the key is minted (see the admin agent-key
+ * endpoint) and are NOT the label — the label is free text. An ordinary
+ * HOSxP webhook key therefore cannot drive the agent endpoints, and an
+ * agent:push key cannot drive the destructive authenticity verdict.
  */
 export async function resolveApiKeyActor(
   db: DatabaseAdapter,
   rawKey: string,
+  opts: { requireScope: string },
 ): Promise<ActorResolution> {
   const keyInfo = await validateApiKey(db, rawKey);
   if (!keyInfo) {
     return { ok: false, error: 'invalid_api_key', status: 401 };
+  }
+  // Fail closed: a key without the capability this endpoint needs is
+  // refused, whatever else it may be allowed to do.
+  if (!keyInfo.scopes.includes(opts.requireScope)) {
+    return { ok: false, error: 'api_key_missing_scope', status: 403 };
   }
   const rows = await db.query<{ id: string; hcode: string; is_active: boolean | number }>(
     'SELECT id, hcode, is_active FROM hospitals WHERE id = ?',

@@ -13,6 +13,7 @@ import { getDatabase } from '@/db/connection';
 import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { readBearer, resolveApiKeyActor } from '@/services/sync/push-auth';
+import { API_KEY_SCOPES } from '@/services/webhook';
 import { recordAgentHeartbeat } from '@/services/sync/agent-heartbeat';
 
 const MAX_DETAIL_LEN = 300;
@@ -32,7 +33,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'missing_api_key' }, { status: 401 });
     }
     const db = await getDatabase();
-    const resolution = await resolveApiKeyActor(db, rawKey);
+    const resolution = await resolveApiKeyActor(db, rawKey, {
+      requireScope: API_KEY_SCOPES.AGENT_HEARTBEAT,
+    });
     if (!resolution.ok) {
       return NextResponse.json({ error: resolution.error }, { status: resolution.status });
     }

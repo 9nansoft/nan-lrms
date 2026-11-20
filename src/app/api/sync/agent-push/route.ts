@@ -20,6 +20,7 @@ import { ensureInit } from '@/lib/ensure-init';
 import { logger } from '@/lib/logger';
 import { handlePush, handlePushBootstrap } from '@/services/sync/push-handler';
 import { readBearer, resolveApiKeyActor } from '@/services/sync/push-auth';
+import { API_KEY_SCOPES } from '@/services/webhook';
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,7 +30,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'missing_api_key' }, { status: 401 });
     }
     const db = await getDatabase();
-    const resolution = await resolveApiKeyActor(db, rawKey);
+    const resolution = await resolveApiKeyActor(db, rawKey, {
+      requireScope: API_KEY_SCOPES.AGENT_PUSH,
+    });
     if (!resolution.ok) {
       return NextResponse.json({ error: resolution.error }, { status: resolution.status });
     }
@@ -51,7 +54,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'missing_api_key' }, { status: 401 });
     }
     const db = await getDatabase();
-    const resolution = await resolveApiKeyActor(db, rawKey);
+    const resolution = await resolveApiKeyActor(db, rawKey, {
+      requireScope: API_KEY_SCOPES.AGENT_PUSH,
+    });
     if (!resolution.ok) {
       return NextResponse.json({ error: resolution.error }, { status: resolution.status });
     }
