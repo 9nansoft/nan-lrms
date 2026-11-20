@@ -84,7 +84,7 @@ flowchart LR
 
 - browser tab ที่ authenticated ด้วย BMS Session แบบ read/write, มี marketplace token และสังกัดโรงพยาบาลที่ active จะดึง HOSxP ครั้งแรกทันที แล้วทำซ้ำทุก 60 วินาทีโดยค่าเริ่มต้น
 - browser อ่านผ่าน local gateway ที่ `127.0.0.1:45011` หรือ BMS tunnel fallback แล้วส่งชุดข้อมูลไป `/api/sync/browser-push`
-- **agent** คือ browser tab แบบไม่ต้องมีคนเปิดเบราว์เซอร์: รันบนเครื่องเดียวกับ HOSxP, ดึงด้วยโค้ดชุดเดียวกัน (`src/lib/browser-poll.ts`) แล้วส่งเข้า `/api/sync/agent-push` ด้วย API key ที่ผูกกับโรงพยาบาลนั้น — ติดตั้ง/ใช้งาน: [`agent/README.md`](agent/README.md)
+- **agent** คือ browser tab แบบไม่ต้องมีคนเปิดเบราว์เซอร์: รันบนเครื่องเดียวกับ HOSxP, ดึงด้วยโค้ดชุดเดียวกัน (`src/lib/browser-poll.ts`) แล้วส่งเข้า `/api/sync/agent-push` ด้วย API key ที่ผูกกับโรงพยาบาลนั้น — ติดตั้ง/ใช้งาน: [`agent/README.md`](agent/README.md) · สร้างไฟล์: [`agent/BUILD.md`](agent/BUILD.md)
 - agent ส่ง heartbeat ทุกรอบ (`POST /api/sync/agent-heartbeat`) → ชั้น 3 จะไม่ไปดึงซ้ำให้ รพ. ที่ agent ยังทำงาน
 - ชั้น 3 ดึงผ่าน BMS tunnel ซึ่งต้องมี session ที่ยังใช้ได้ — ทุก push แนบ session id มาให้เซิร์ฟเวอร์ refresh ได้ (ถ้าไม่มี push มาเลย เช่น ทั้งเครื่อง รพ. และเบราว์เซอร์ดับพร้อมกัน ชั้น 3 จะข้าม รพ. นั้น เพราะเซิร์ฟเวอร์หา session เองไม่ได้)
 - ProviderID เป็น read-only และไม่ทำ browser push
