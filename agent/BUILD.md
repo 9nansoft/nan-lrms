@@ -103,4 +103,5 @@ node dist/agent.mjs
 
 ส่ง 4 ไฟล์ข้างบนให้ผู้ดูแล IT ของ รพ. (ไม่ผ่านแชทสาธารณะ — มี API key อยู่ในไฟล์ config)
 คีย์ agent ขอจาก `POST /api/admin/hospitals/<hcode>/agent-key` (admin session) — คีย์แสดงครั้งเดียว
-และมาพร้อม scope ครบ (`agent:push`, `agent:heartbeat`, `agent:authenticity`)
+และมาพร้อม scope ครบ (`agent:push`, `agent:heartbeat`, `agent:authenticity`, `hosxp:configure` —
+scope สุดท้ายคือสิทธิ์ส่ง tunnel URL ของ รพ. ให้เซิร์ฟเวอร์ เพื่อให้เซิร์ฟเวอร์ดึงข้อมูลเองได้)
