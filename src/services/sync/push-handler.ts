@@ -19,6 +19,7 @@ import { logger } from '@/lib/logger';
 import type { SyncRunTrigger } from '@/services/sync/progress-store';
 import { serverBmsSession } from '@/services/sync/maternity-assessment';
 import { applyHosxpConnectionFacts } from '@/services/sync/hosxp-connection';
+import { decryptSafe } from '@/lib/encryption';
 import { validateTunnelUrl } from '@/lib/bms-tunnel-url';
 import { API_KEY_SCOPES } from '@/services/webhook';
 import { SseManager } from '@/lib/sse';
@@ -956,6 +957,19 @@ export async function handlePushBootstrap(actor: PushActor): Promise<Response> {
     const db = await getDatabase();
     const hcode = actor.hcode;
     const newbornCutoff = await newbornSyncCutoffDate(db, actor.hospitalId);
+    // Does the server still need this hospital's marketplace token? The
+    // client sends it ONCE, only when it is missing — a credential does not
+    // need to travel on every push.
+    let hasMarketplaceToken = false;
+    try {
+      const tokenRows = await db.query<{ marketplace_token: string | null }>(
+        'SELECT marketplace_token FROM hospital_bms_config WHERE hospital_id = ?',
+        [actor.hospitalId],
+      );
+      hasMarketplaceToken = decryptSafe(tokenRows[0]?.marketplace_token).length > 0;
+    } catch {
+      hasMarketplaceToken = false;
+    }
     // Maternity assessment forms — the pull position of each form. The client
     // asks HOSxP for everything ABOVE these keys, so a form that holds
     // hundreds of rows on one day still advances. Its own try/catch: a
@@ -978,7 +992,12 @@ export async function handlePushBootstrap(actor: PushActor): Promise<Response> {
         logger.warn('referral_arrival_probe_failed', { hcode, error: String(e) });
       }
     }
-    return NextResponse.json({ newbornCutoff, assessmentCursors, referralArrivalProbe });
+    return NextResponse.json({
+      newbornCutoff,
+      assessmentCursors,
+      referralArrivalProbe,
+      hosxp: { hasMarketplaceToken },
+    });
   } catch (error) {
     logger.error('browser_push_bootstrap_failed', { error });
     return NextResponse.json({ error: 'internal_error' }, { status: 500 });

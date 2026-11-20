@@ -394,6 +394,33 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
     expect(res.status).toBe(403);
   });
 
+  it('tells the client the server still needs a marketplace token', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+
+    const res = await GET(bootstrapRequest(key.rawKey) as never);
+    const body = (await res.json()) as { hosxp?: { hasMarketplaceToken?: boolean } };
+    expect(body.hosxp?.hasMarketplaceToken).toBe(false);
+
+    // …and once the server has one, it says so — the client then stops
+    // sending it.
+    await db.execute(
+      `INSERT INTO hospital_bms_config (id, hospital_id, tunnel_url, marketplace_token, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        randomUUID(),
+        id,
+        'https://10670-test.tunnel.hosxp.net',
+        'encrypted-token',
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ],
+    );
+    const res2 = await GET(bootstrapRequest(key.rawKey) as never);
+    const body2 = (await res2.json()) as { hosxp?: { hasMarketplaceToken?: boolean } };
+    expect(body2.hosxp?.hasMarketplaceToken).toBe(true);
+  });
+
   it('serves the sync bootstrap (newborn cutoff) to a key holder', async () => {
     const key = await createApiKey(db, await hospitalId(), 'NN-LRMS agent', AGENT_SCOPES);
     const res = await GET(bootstrapRequest(key.rawKey) as never);

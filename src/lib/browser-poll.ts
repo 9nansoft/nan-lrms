@@ -1430,6 +1430,7 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
       newbornCutoff?: string;
       assessmentCursors?: Record<string, string>;
       referralArrivalProbe?: { cid?: unknown; since?: unknown }[];
+      hosxp?: { hasMarketplaceToken?: boolean };
     } = {};
     try {
       const bootRes = await fetch(opts.pushUrl ?? '/api/sync/browser-push', {
@@ -1591,8 +1592,13 @@ export async function runBrowserPoll(opts: RunOptions): Promise<BrowserPollResul
     //   * the marketplace token: the hospital's own credential, handed over
     //     by whoever holds it (a browser session or the agent). Without it
     //     the server's own pulls get randomised identifiers.
-    const marketplaceToken =
-      opts.hosxpFacts?.marketplaceToken ?? opts.marketplaceToken ?? null;
+    // The marketplace token travels ONCE: the bootstrap tells the client
+    // whether the server already has it, so a credential is not on every
+    // push (and not in every request body the server ever sees).
+    const serverHasToken = boot.hosxp?.hasMarketplaceToken === true;
+    const marketplaceToken = serverHasToken
+      ? null
+      : (opts.hosxpFacts?.marketplaceToken ?? opts.marketplaceToken ?? null);
     if (opts.hosxpFacts?.bmsUrl || marketplaceToken) {
       body.hosxp = {
         ...(opts.hosxpFacts?.bmsUrl ? { bms_url: opts.hosxpFacts.bmsUrl } : {}),
