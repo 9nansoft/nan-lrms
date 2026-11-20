@@ -612,7 +612,7 @@ export interface HospitalBmsSession {
 export async function serverBmsSession(
   db: DatabaseAdapter,
   hospitalId: string,
-  options: { bmsSessionId?: string | null } = {},
+  options: { bmsSessionId?: string | null; forceRefresh?: boolean } = {},
 ): Promise<HospitalBmsSession | null> {
   const configs = await db.query<{
     tunnel_url: string | null;
@@ -636,8 +636,13 @@ export async function serverBmsSession(
     : null;
 
   const expiresAt = config.session_expires_at ? new Date(config.session_expires_at).getTime() : 0;
+  // A stored session can be unexpired and still refused by the gateway
+  // ("Not Implemented — Authorization Error"): the marketplace rotated the
+  // bearer behind our back. When the caller hands us a LIVE session id (a
+  // browser or an agent push), exchange it now instead of trusting the
+  // stored one — otherwise the server keeps pulling with a dead bearer.
   const expired = !config.session_jwt || expiresAt <= Date.now();
-  if (!expired) {
+  if (!expired && !options.forceRefresh) {
     return {
       bmsUrl: config.tunnel_url,
       jwt: config.session_jwt as string,

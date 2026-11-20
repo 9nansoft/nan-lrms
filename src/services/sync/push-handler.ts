@@ -175,7 +175,11 @@ export async function handlePush(request: NextRequest, actor: PushActor): Promis
     // must not fail the push.
     if (bmsSessionId) {
       try {
-        await serverBmsSession(db, hospitalId, { bmsSessionId });
+        // forceRefresh: the stored session may still be unexpired and still
+        // refused by the gateway. The client just proved a live session
+        // exists — exchange it now so the server-side pulls use a bearer
+        // that actually works.
+        await serverBmsSession(db, hospitalId, { bmsSessionId, forceRefresh: true });
       } catch (e) {
         logger.warn('push_session_refresh_failed', { hcode, error: e });
       }
