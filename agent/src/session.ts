@@ -121,7 +121,10 @@ export async function acquireSession(
   if (gateway.bmsUrl) {
     connection.apiUrl = gateway.bmsUrl;
   }
-  const { config, isLocal } = await probeLocalApi(connection, marketplaceToken);
+  // Probe the gateway THIS agent is configured with (agent.config.json may
+  // name a non-default port) — not the compile-time default. A reachable
+  // gateway on another port must still win over the tunnel.
+  const { config, isLocal } = await probeLocalApi(connection, marketplaceToken, localGateway);
   return {
     sessionId: gateway.bmsSessionId,
     apiUrl: config.apiUrl,

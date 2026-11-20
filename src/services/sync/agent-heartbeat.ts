@@ -16,8 +16,9 @@ export interface AgentHeartbeat {
   at: string;
   /** Agent build version, so an outdated install is visible in the admin UI. */
   version: string;
-  /** Which transport the agent used to reach HOSxP. */
-  mode: 'local' | 'tunnel';
+  /** Which transport the agent used to reach HOSxP ('unknown' when the
+   * cycle failed before the transport was decided). */
+  mode: 'local' | 'tunnel' | 'unknown';
   /** Did the cycle actually deliver data to the server? */
   pushed: boolean;
   /** PHI-free note — e.g. the error a failed cycle ended with. */

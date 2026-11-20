@@ -786,13 +786,18 @@ export async function restDelete(
 }
 
 /**
- * Probe the local HOSxP API gateway at {@link LOCAL_API_URL}. When reachable,
- * returns a new {@link ConnectionConfig} pointing at the local URL so
- * subsequent SQL/REST calls bypass the remote tunnel.
+ * Probe the local HOSxP API gateway. When reachable, returns a new
+ * {@link ConnectionConfig} pointing at the local URL so subsequent SQL/REST
+ * calls bypass the remote tunnel.
  *
  * The probe POSTs `SELECT 1` with the same auth headers the real
  * {@link executeSql} uses — same shape, same MessageCode contract — so a
  * 200 success here proves the local gateway can also serve real queries.
+ *
+ * `localApiUrl` overrides {@link LOCAL_API_URL} — the agent does this with
+ * the gateway its `agent.config.json` names, so a site whose gateway listens
+ * on another port still gets the local (non-tunnel) path. Callers that don't
+ * pass one keep the default 127.0.0.1:45011.
  *
  * Timeout is short (3s) and any error path (network, CORS preflight,
  * abort, body parse) silently falls back to the remote config. Callers
@@ -803,6 +808,7 @@ export async function restDelete(
 export async function probeLocalApi(
   config: ConnectionConfig,
   marketplaceToken?: string | null,
+  localApiUrl: string = LOCAL_API_URL,
 ): Promise<{ config: ConnectionConfig; isLocal: boolean }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), LOCAL_PROBE_TIMEOUT_MS);
@@ -818,7 +824,7 @@ export async function probeLocalApi(
     const mkt = resolveMarketplaceToken(marketplaceToken);
     if (mkt) body['marketplace-token'] = mkt;
 
-    const response = await fetch(`${LOCAL_API_URL}/api/sql`, {
+    const response = await fetch(`${localApiUrl}/api/sql`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.bearerToken}`,
@@ -832,10 +838,10 @@ export async function probeLocalApi(
       const data = (await response.json()) as SqlApiResponse;
       if (data.MessageCode === 200) {
         console.info(
-          `[bms-browser-client] Local API detected at ${LOCAL_API_URL} — swapping apiUrl for browser-side calls`,
+          `[bms-browser-client] Local API detected at ${localApiUrl} — swapping apiUrl for browser-side calls`,
         );
         return {
-          config: { ...config, apiUrl: LOCAL_API_URL },
+          config: { ...config, apiUrl: localApiUrl },
           isLocal: true,
         };
       }

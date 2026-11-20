@@ -113,7 +113,7 @@ export function loadConfig(path: string = configPath()): AgentConfig {
     serverUrl: serverUrl.replace(/\/+$/, ''),
     apiKey,
     intervalMinutes,
-    localGateway,
+    localGateway: localGateway.replace(/\/+$/, ''),
     gatewayToken,
     marketplaceToken,
   };

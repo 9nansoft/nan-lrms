@@ -15,6 +15,7 @@ import { runBrowserPoll } from '@/lib/browser-poll';
 import { loadConfig } from './config';
 import { acquireSession } from './session';
 import { AGENT_VERSION } from './version';
+import { nextWait, isAuthRefusal } from './backoff';
 
 const config = loadConfig();
 
@@ -40,7 +41,7 @@ function logError(message: string, error: unknown): void {
 
 /** Tell the server the agent is alive — even when there was nothing to send. */
 async function sendHeartbeat(
-  mode: 'local' | 'tunnel',
+  mode: 'local' | 'tunnel' | 'unknown',
   pushed: boolean,
   detail?: string,
 ): Promise<void> {
@@ -67,9 +68,16 @@ async function sendHeartbeat(
 
 let stopping = false;
 
-async function cycle(): Promise<void> {
+/**
+ * One pull-push cycle.
+ *
+ * Returns whether the server refused this agent in a way a retry cannot fix
+ * (403 permanentBlock, or a 401 from a revoked key) — the main loop then
+ * backs off instead of re-sending a doomed push every intervalMinutes.
+ */
+async function cycle(): Promise<{ blocked: boolean }> {
   const startedAt = Date.now();
-  let mode: 'local' | 'tunnel' = 'local';
+  let mode: 'local' | 'tunnel' | 'unknown' = 'unknown';
   try {
     const session = await acquireSession(
       config.localGateway,
@@ -113,9 +121,11 @@ async function cycle(): Promise<void> {
     });
 
     await sendHeartbeat(session.mode, result.pushedToServer, result.error);
+    return { blocked: result.permanentBlock === true };
   } catch (error) {
     logError('cycle_failed', error);
     await sendHeartbeat(mode, false, error instanceof Error ? error.message : String(error));
+    return { blocked: isAuthRefusal(error) };
   }
 }
 
@@ -136,10 +146,22 @@ async function main(): Promise<void> {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
+  // A cycle the server keeps refusing (revoked key, purged hospital) grows
+  // the wait instead of re-sending a doomed push every intervalMinutes; any
+  // clean cycle puts the normal interval back. See backoff.ts.
+  let backoffMinutes = 0;
   while (!stopping) {
-    await cycle();
+    const outcome = await cycle();
     if (stopping) break;
-    const waitMs = config.intervalMinutes * 60_000;
+    const { waitMs, backoffMinutes: nextBackoff } = nextWait(
+      config.intervalMinutes,
+      backoffMinutes,
+      outcome.blocked,
+    );
+    if (outcome.blocked) {
+      log('agent_backoff', { waitMinutes: nextBackoff });
+    }
+    backoffMinutes = nextBackoff;
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
 }

@@ -46,7 +46,10 @@ export async function POST(request: NextRequest) {
     }
 
     const version = typeof body.version === 'string' ? body.version.slice(0, 32) : 'unknown';
-    const mode: 'local' | 'tunnel' = body.mode === 'tunnel' ? 'tunnel' : 'local';
+    // 'unknown' is the agent's honest answer when its cycle failed before
+    // the transport (local vs tunnel) had been decided.
+    const mode: 'local' | 'tunnel' | 'unknown' =
+      body.mode === 'tunnel' ? 'tunnel' : body.mode === 'unknown' ? 'unknown' : 'local';
     const pushed = body.pushed === true;
     const detail =
       typeof body.detail === 'string' && body.detail.length > 0

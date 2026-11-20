@@ -10,6 +10,7 @@ import {
   restInsert,
   restUpdate,
   restDelete,
+  probeLocalApi,
   setActiveMarketplaceToken,
   APP_IDENTIFIER,
 } from '@/lib/bms-browser-client';
@@ -60,6 +61,53 @@ describe('bms-browser-client.retrieveBmsSession', () => {
       text: async () => 'session expired',
     });
     await expect(retrieveBmsSession('SID-X')).rejects.toThrow();
+  });
+});
+
+describe('probeLocalApi', () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  const remote: ConnectionConfig = {
+    apiUrl: 'https://10716-saciw.tunnel.hosxp.net/api',
+    bearerToken: 'eyJ-remote',
+    appIdentifier: APP_IDENTIFIER,
+  };
+  const probeOk = {
+    ok: true,
+    status: 200,
+    json: async () => ({ MessageCode: 200 }),
+  };
+
+  it('probes the DEFAULT local URL when no override is passed', async () => {
+    mockFetch.mockResolvedValueOnce(probeOk);
+
+    const { config, isLocal } = await probeLocalApi(remote, null);
+
+    expect(isLocal).toBe(true);
+    expect(mockFetch.mock.calls[0][0]).toBe('http://127.0.0.1:45011/api/sql');
+    expect(config.apiUrl).toBe('http://127.0.0.1:45011');
+  });
+
+  it('probes the PASSED gateway URL (the agent names its own local gateway)', async () => {
+    mockFetch.mockResolvedValueOnce(probeOk);
+
+    const { config, isLocal } = await probeLocalApi(remote, null, 'http://127.0.0.1:45111');
+
+    // A site whose gateway listens on another port still gets the local
+    // (non-tunnel) path — the config knob must decide where we probe.
+    expect(isLocal).toBe(true);
+    expect(mockFetch.mock.calls[0][0]).toBe('http://127.0.0.1:45111/api/sql');
+    expect(config.apiUrl).toBe('http://127.0.0.1:45111');
+    expect(config.bearerToken).toBe(remote.bearerToken);
+  });
+
+  it('falls back to the remote config when the probe cannot answer', async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const { config, isLocal } = await probeLocalApi(remote, null, 'http://127.0.0.1:45111');
+
+    expect(isLocal).toBe(false);
+    expect(config).toEqual(remote);
   });
 });
 
