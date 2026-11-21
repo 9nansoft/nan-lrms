@@ -61,10 +61,18 @@ function viewerSide(consult: PatientConsult, viewer: ConsultViewer | null | unde
   return 'requester';
 }
 
-function messageSide(message: ConsultMessage, consult: PatientConsult): ThreadSide {
-  // Only the two sides ever post: the sender's hospital is either the
-  // patient's hospital or the hub.
-  return message.senderHospitalId === consult.hospitalId ? 'requester' : 'hub';
+// HUB: a bubble's side is the hospital that sent it. INTERNAL: everyone is
+// the same hospital, so a bubble is "mine" when the sender's CID is the
+// viewer's own — the other bubbles sit across the aisle.
+function messageSide(
+  message: ConsultMessage,
+  consult: PatientConsult,
+  viewer: ConsultViewer | null | undefined,
+): ThreadSide {
+  if (consult.consultScope === 'HUB') {
+    return message.senderHospitalId === consult.hospitalId ? 'requester' : 'hub';
+  }
+  return viewer?.userCid && message.senderCid === viewer.userCid ? 'requester' : 'hub';
 }
 
 /** The client mirror of the server's write rule — what the UI offers. */
@@ -73,12 +81,13 @@ function canWriteThread(
   viewer: ConsultViewer | null | undefined,
   requesterHcode: string,
 ): boolean {
-  if (consult.consultScope !== 'HUB' || consult.status === 'COMPLETED') return false;
+  if (consult.status === 'COMPLETED') return false;
   if (!viewer?.hospitalCode) return false;
   if (viewer.hospitalCode === consult.targetHospitalHcode) {
     return viewer.role === 'OBSTETRICIAN' || viewer.role === 'ADMIN';
   }
-  // The requesting side: the viewer is signed into the patient's hospital.
+  // The requesting side (and every INTERNAL consult): the viewer is signed
+  // into the patient's hospital.
   return viewer.hospitalCode === requesterHcode;
 }
 
@@ -180,7 +189,7 @@ export function ConsultThread({
               </p>
             );
           }
-          const mine = messageSide(message, consult) === mySide;
+          const mine = messageSide(message, consult, viewer) === mySide;
           return (
             <div
               key={message.id}

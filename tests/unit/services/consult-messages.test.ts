@@ -168,7 +168,7 @@ describe('createConsultMessage', () => {
     );
   });
 
-  it('refuses to open a thread on an INTERNAL consult — that flow is a phone call', async () => {
+  it('lets the team talk an INTERNAL consult through among themselves', async () => {
     await seedDoctor(A, 'doc-a-1');
     const internal = await createPatientConsult(db, {
       an: AN,
@@ -183,10 +183,14 @@ describe('createConsultMessage', () => {
     expect(internal.ok).toBe(true);
     if (!internal.ok) return;
 
-    assertRejected(
-      await createConsultMessage(db, internal.consult.id, requesterActor, { body: 'ข้อความ' }),
-      400,
-    );
+    const sent = await createConsultMessage(db, internal.consult.id, requesterActor, {
+      body: 'ห้องคลอดเตรียมของเรียบร้อยค่ะ',
+    });
+    expect(sent.ok).toBe(true);
+
+    const messages = await listConsultMessages(db, internal.consult.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].body).toBe('ห้องคลอดเตรียมของเรียบร้อยค่ะ');
   });
 
   it('closes the thread with the consult — completed means read-only', async () => {

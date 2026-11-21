@@ -326,16 +326,15 @@ describe('ConsultCard — HUB consults (ปรึกษาขึ้นสู่�
     expect(within(row).queryByRole('button', { name: 'ติดต่อแล้ว' })).toBeNull();
   });
 
-  it('offers the thread only on HUB consults, with its message count', () => {
+  it('offers the thread on every consult, with its message count', () => {
     renderCard({
-      consults: [consult(), hubConsult({ messageCount: 2 })],
+      consults: [consult({ messageCount: 1 }), hubConsult({ messageCount: 2 })],
       hub,
       viewer: REQUESTER_VIEWER,
     });
 
     const rows = screen.getAllByTestId('consult-row');
-    // INTERNAL consults are a phone call — no thread.
-    expect(within(rows[0]).queryByTestId('consult-thread-toggle')).toBeNull();
+    expect(within(rows[0]).getByTestId('consult-thread-toggle')).toHaveTextContent('บทสนทนา (1)');
     expect(within(rows[1]).getByTestId('consult-thread-toggle')).toHaveTextContent('บทสนทนา (2)');
   });
 

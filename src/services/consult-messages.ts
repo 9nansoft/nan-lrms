@@ -1,25 +1,25 @@
-// Consult messages — the thread two teams talk in while a HUB consult is
-// open.
+// Consult messages — the thread teams talk in while a consult is open.
 //
-// The care team of the patient's hospital and the provincial hub's OB-GYN
-// team see the SAME conversation, bound to the consult, which is bound to
-// the admission's AN — the threads of one patient never mix with another's.
+// HUB consults: the care team of the patient's hospital and the provincial
+// hub's OB-GYN team see the SAME conversation. INTERNAL consults: the
+// hospital's own team (including the consulted doctor, when their session
+// CID is on the roster) talks among themselves. Either way the thread is
+// bound to the consult, which is bound to the admission's AN — the threads
+// of one patient never mix with another's.
 //
 // The rules this service owns:
-//   1. Only HUB consults carry a thread. The INTERNAL flow is a phone call
-//      the team records itself; its doctors are a contact list, not users.
-//   2. The side rule the consult itself uses (see updatePatientConsult):
-//      the requesting hospital's care team and the TARGET hospital's team
-//      may READ the thread; WRITING additionally requires the hub's side to
-//      be a clinician (OBSTETRICIAN / ADMIN) and the consult to still be
-//      open. Once the consult is COMPLETED the thread is a record — read
-//      only.
-//   3. A message is clinical data of the patient. It is read and written
+//   1. The side rule the consult itself uses (see updatePatientConsult):
+//      the requesting hospital's care team and — for HUB consults — the
+//      TARGET hospital's team may READ the thread; WRITING additionally
+//      requires the hub's side to be a clinician (OBSTETRICIAN / ADMIN)
+//      and the consult to still be open. Once the consult is COMPLETED the
+//      thread is a record — read only.
+//   2. A message is clinical data of the patient. It is read and written
 //      through the same patient-visibility scope as every other patient
 //      resource — the service never decides who may SEE it; it does decide
 //      who may join the conversation.
-//   4. Every write is announced over SSE, naming BOTH hospitals, so the
-//      other side sees the message arrive live (SWR polling is the
+//   3. Every write is announced over SSE, naming the hospital(s) involved,
+//      so the other side sees the message arrive live (SWR polling is the
 //      fallback).
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
@@ -134,13 +134,13 @@ export type CreateMessageResult =
   | { ok: false; error: string; status: number };
 
 /**
- * Send one message into a HUB consult's thread.
+ * Send one message into a consult's thread — HUB (two hospitals talking) or
+ * INTERNAL (the hospital's own team and its consulted doctor).
  *
- * INTERNAL consults refuse (no thread — the classic flow is a phone call),
- * closed consults refuse (the thread is the record now), and anyone who is
- * not one of the two sides refuses. The sender is SNAPSHOTTED from the
- * actor: identity comes from the session at send time, the message stays
- * truthful forever after.
+ * Closed consults refuse (the thread is the record now), and anyone who is
+ * not one of the sides refuses. The sender is SNAPSHOTTED from the actor:
+ * identity comes from the session at send time, the message stays truthful
+ * forever after.
  */
 export async function createConsultMessage(
   db: DatabaseAdapter,
@@ -151,14 +151,6 @@ export async function createConsultMessage(
   const consult = await loadConsultById(db, consultId);
   if (!consult) {
     return { ok: false, error: 'ไม่พบรายการปรึกษานี้', status: 404 };
-  }
-  if (consult.consultScope !== 'HUB') {
-    return {
-      ok: false,
-      error:
-        'บทสนทนามีเฉพาะคำปรึกษาที่ส่งขึ้นโรงพยาบาลแม่ข่าย — คำปรึกษาภายในโรงพยาบาลติดต่อกันทางโทรศัพท์ตามเดิม',
-      status: 400,
-    };
   }
 
   const { mayRead, mayWrite } = consultThreadAccess(consult, actor);

@@ -288,26 +288,25 @@ export function ConsultCard({
                       </p>
                     )}
 
-                    {/* HUB consults carry a thread: both teams talk it
-                        through here, bound to this admission's AN. */}
-                    {isHub && (
-                      <button
-                        type="button"
-                        data-testid="consult-thread-toggle"
-                        onClick={() =>
-                          setThreadOpen((current) => ({
-                            ...current,
-                            [consult.id]: !current[consult.id],
-                          }))
-                        }
-                        className="w-fit text-caption text-brand underline"
-                      >
-                        {threadOpenFor
-                          ? 'ซ่อนบทสนทนา'
-                          : `บทสนทนา${consult.messageCount > 0 ? ` (${consult.messageCount})` : ''}`}
-                      </button>
-                    )}
-                    {isHub && threadOpenFor && (
+                    {/* Every consult carries a thread: HUB consults are the
+                        two teams talking, INTERNAL consults are the team and
+                        its consulted doctor — bound to this admission's AN. */}
+                    <button
+                      type="button"
+                      data-testid="consult-thread-toggle"
+                      onClick={() =>
+                        setThreadOpen((current) => ({
+                          ...current,
+                          [consult.id]: !current[consult.id],
+                        }))
+                      }
+                      className="w-fit text-caption text-brand underline"
+                    >
+                      {threadOpenFor
+                        ? 'ซ่อนบทสนทนา'
+                        : `บทสนทนา${consult.messageCount > 0 ? ` (${consult.messageCount})` : ''}`}
+                    </button>
+                    {threadOpenFor && (
                       <ConsultThread patientId={patientId} consult={consult} viewer={viewer} />
                     )}
 

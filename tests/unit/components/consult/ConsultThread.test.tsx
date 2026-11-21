@@ -188,6 +188,29 @@ describe('ConsultThread', () => {
     ).toBeInTheDocument();
   });
 
+  it('lets the hospital team write on an INTERNAL consult, bubbles split by sender CID', async () => {
+    const internal = hubConsult({
+      consultScope: 'INTERNAL',
+      targetHospitalId: null,
+      targetHospitalName: null,
+      targetHospitalHcode: null,
+    });
+    renderThread(REQUESTER_VIEWER, {
+      consult: internal,
+      messages: [
+        message(),
+        message({ id: 'msg-2', senderCid: '3333333333333', senderName: 'พย.อีกคนหนึ่ง' }),
+      ],
+    });
+
+    // The same-hospital team writes while the consult is open.
+    expect(await screen.findByTestId('consult-thread-input')).toBeInTheDocument();
+    const bubbles = await screen.findAllByTestId('consult-thread-message');
+    // One hospital only — the viewer's own CID sits right, colleagues left.
+    expect(bubbles[0]).toHaveClass('self-end');
+    expect(bubbles[1]).toHaveClass('self-start');
+  });
+
   it('shows a closed consult as a read-only record, even to its answerer', async () => {
     renderThread(HUB_CLINICIAN, {
       consult: hubConsult({ status: 'COMPLETED' }),
