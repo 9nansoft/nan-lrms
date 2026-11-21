@@ -59,6 +59,9 @@ export interface ConsultInboxListProps {
 export function ConsultInboxList({ consults, viewer, onAnswer, onProgress }: ConsultInboxListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [adviceDrafts, setAdviceDrafts] = useState<Record<string, string>>({});
+  // Which consult's thread is open — independent of the answer expansion, so
+  // a thread stays readable even after the consult is COMPLETED.
+  const [threadOpen, setThreadOpen] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -102,11 +105,18 @@ export function ConsultInboxList({ consults, viewer, onAnswer, onProgress }: Con
               {consult.doctorPosition && (
                 <span className="text-caption text-ink-muted">{consult.doctorPosition}</span>
               )}
-              {consult.messageCount > 0 && (
-                <span className="text-caption text-ink-muted">
-                  บทสนทนา ({consult.messageCount})
-                </span>
-              )}
+              <button
+                type="button"
+                data-testid="consult-thread-toggle"
+                onClick={() =>
+                  setThreadOpen((current) => ({ ...current, [consult.id]: !current[consult.id] }))
+                }
+                className="text-caption text-brand underline"
+              >
+                {threadOpen[consult.id]
+                  ? 'ซ่อนบทสนทนา'
+                  : `บทสนทนา${consult.messageCount > 0 ? ` (${consult.messageCount})` : ''}`}
+              </button>
               <span className="ml-auto text-caption text-ink-muted">
                 ขอเมื่อ {fmtDateTimeTh(consult.createdAt)}
               </span>
@@ -145,6 +155,19 @@ export function ConsultInboxList({ consults, viewer, onAnswer, onProgress }: Con
               </p>
             )}
 
+            {/* The conversation with the asking team — openable on every
+                row, COMPLETED included (the thread itself goes read-only
+                once the consult is answered). */}
+            {threadOpen[consult.id] && (
+              <ConsultThread
+                patientId={consult.patientUrlId}
+                consult={consult}
+                viewer={viewer}
+                patientName={consult.patientName}
+                requesterHospitalName={consult.requesterHospitalName}
+              />
+            )}
+
             {consult.status !== 'COMPLETED' && (
               <div className="flex flex-col gap-2 border-t border-border pt-2">
                 <button
@@ -156,15 +179,6 @@ export function ConsultInboxList({ consults, viewer, onAnswer, onProgress }: Con
                 </button>
                 {expanded && (
                   <>
-                    {/* The conversation with the asking team — the advice
-                        below stays the formal final answer. */}
-                    <ConsultThread
-                      patientId={consult.patientUrlId}
-                      consult={consult}
-                      viewer={viewer}
-                      patientName={consult.patientName}
-                      requesterHospitalName={consult.requesterHospitalName}
-                    />
                     <label
                       htmlFor={`inbox-advice-${consult.id}`}
                       className="text-caption font-semibold text-ink"
