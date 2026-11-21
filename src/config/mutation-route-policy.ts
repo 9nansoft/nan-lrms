@@ -55,6 +55,9 @@ export const MUTATION_ROUTE_POLICIES: Record<string, MutationRoutePolicy> = {
   'src/app/api/hospital/audit-log/route.ts': 'session-origin-checked',
   'src/app/api/chat/route.ts': 'session-origin-checked',
   'src/app/api/profile/notification-preference/route.ts': 'session-origin-checked',
+  // The profile self-test sends one LINE to the session user's own CID —
+  // same cookie-session trust model as the preference routes above.
+  'src/app/api/profile/notification-test/route.ts': 'session-origin-checked',
   'src/app/api/dev/simulate/start/route.ts': 'dev-simulation-guard',
   'src/app/api/dev/simulate/stop/route.ts': 'dev-simulation-guard',
   'src/app/api/dev/simulate/clear/route.ts': 'dev-simulation-guard',
