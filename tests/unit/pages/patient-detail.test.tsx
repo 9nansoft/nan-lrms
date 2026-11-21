@@ -15,6 +15,15 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
 
+// The page reads the session to gate the HUB consult answer box. The stub
+// viewer is a nurse of the patient's hospital, so HUB advice boxes stay
+// closed unless a test renders a HUB consult with its own viewer.
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({
+    data: { user: { role: 'NURSE', hospitalCode: '10670', userCid: '2222222222222' } },
+  }),
+}));
+
 // Task U3 — mock the shadow-mode screening hook. `vi.mock` factories are
 // hoisted above all other module code, so the mock fn itself must be created
 // via `vi.hoisted` to avoid a temporal-dead-zone ReferenceError. Default is
