@@ -291,21 +291,28 @@ export function ConsultCard({
                     {/* Every consult carries a thread: HUB consults are the
                         two teams talking, INTERNAL consults are the team and
                         its consulted doctor — bound to this admission's AN. */}
-                    <button
-                      type="button"
-                      data-testid="consult-thread-toggle"
-                      onClick={() =>
-                        setThreadOpen((current) => ({
-                          ...current,
-                          [consult.id]: !current[consult.id],
-                        }))
-                      }
-                      className="w-fit text-caption text-brand underline"
-                    >
-                      {threadOpenFor
-                        ? 'ซ่อนบทสนทนา'
-                        : `บทสนทนา${consult.messageCount > 0 ? ` (${consult.messageCount})` : ''}`}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        data-testid="consult-thread-toggle"
+                        onClick={() =>
+                          setThreadOpen((current) => ({
+                            ...current,
+                            [consult.id]: !current[consult.id],
+                          }))
+                        }
+                        className="w-fit text-caption text-brand underline"
+                      >
+                        {threadOpenFor
+                          ? 'ซ่อนบทสนทนา'
+                          : `บทสนทนา${consult.messageCount > 0 ? ` (${consult.messageCount})` : ''}`}
+                      </button>
+                      {consult.unreadCount > 0 && !threadOpenFor && (
+                        <span data-testid="consult-unread-badge">
+                          <StatusChip tone="warn" label={`มีใหม่ ${consult.unreadCount}`} />
+                        </span>
+                      )}
+                    </div>
                     {threadOpenFor && (
                       <ConsultThread patientId={patientId} consult={consult} viewer={viewer} />
                     )}

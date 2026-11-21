@@ -62,7 +62,7 @@ export async function GET(
     });
 
     const [consults, doctors, hub] = await Promise.all([
-      listPatientConsults(db, an, patient.hospital_id),
+      listPatientConsults(db, an, patient.hospital_id, session.user.userCid ?? null),
       listConsultDoctors(db, patient.hospital_id),
       consultHubInfoFor(db, patient.hospital_id),
     ]);

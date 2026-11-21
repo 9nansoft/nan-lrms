@@ -1002,8 +1002,10 @@ export interface PatientConsult {
   urgencyLevel: ConsultUrgency;
   /** The hub clinician who wrote the answer (HUB consults only). */
   answeredByName: string | null;
-  /** How many messages the consult's thread carries (HUB consults only). */
+  /** How many messages the consult's thread carries. */
   messageCount: number;
+  /** How many of those the signed-in person has not seen yet. */
+  unreadCount: number;
 }
 
 export interface PatientConsultsResponse {

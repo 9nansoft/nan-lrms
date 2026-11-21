@@ -102,7 +102,7 @@ export function ConsultThread({
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { messages, isLoading, error, mutate, sendMessage } = useConsultMessages(
+  const { messages, isLoading, error, mutate, sendMessage, markRead } = useConsultMessages(
     patientId,
     consult.id,
   );
@@ -126,6 +126,13 @@ export function ConsultThread({
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
+
+  // Open = read: everything in the thread has been seen while it stays
+  // mounted, so the lists' "มีใหม่" badge clears for this person.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    void markRead();
+  }, [messages.length, markRead]);
 
   const requesterHcode = parsePatientId(patientId)?.hcode ?? '';
   const mySide = viewerSide(consult, viewer);

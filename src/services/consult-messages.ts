@@ -21,6 +21,7 @@
 //   3. Every write is announced over SSE, naming the hospital(s) involved,
 //      so the other side sees the message arrive live (SWR polling is the
 //      fallback).
+import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 import type { ConsultMessage, PatientConsult } from '@/types/api';
@@ -132,6 +133,47 @@ export function consultThreadAccess(
 export type CreateMessageResult =
   | { ok: true; message: ConsultMessage }
   | { ok: false; error: string; status: number };
+
+export type MarkReadResult =
+  | { ok: true }
+  | { ok: false; error: string; status: number };
+
+/**
+ * Stamp one person's read receipt on a consult's thread — the moment they
+ * last had it open. The consult lists join against it to compute their
+ * unread counts; a thread nobody opened simply counts everything.
+ *
+ * Reading is the same right as seeing the thread (mayRead); accounts
+ * without a CID (province / system) have no identity to stamp, and marking
+ * nothing for them is correct.
+ */
+export async function markConsultThreadRead(
+  db: DatabaseAdapter,
+  consultId: string,
+  actor: ConsultActor,
+): Promise<MarkReadResult> {
+  const consult = await loadConsultById(db, consultId);
+  if (!consult) {
+    return { ok: false, error: 'ไม่พบรายการปรึกษานี้', status: 404 };
+  }
+  if (!consultThreadAccess(consult, actor).mayRead) {
+    return { ok: false, error: 'ไม่มีสิทธิ์เข้าบทสนทนาของคำปรึกษานี้', status: 403 };
+  }
+  if (!actor.userCid) {
+    return { ok: true };
+  }
+
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO consult_thread_reads
+       (id, consult_id, user_cid, last_read_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (consult_id, user_cid)
+       DO UPDATE SET last_read_at = EXCLUDED.last_read_at, updated_at = EXCLUDED.updated_at`,
+    [uuidv4(), consultId, actor.userCid, now, now, now],
+  );
+  return { ok: true };
+}
 
 /**
  * Send one message into a consult's thread — HUB (two hospitals talking) or

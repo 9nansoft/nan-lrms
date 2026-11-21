@@ -18,6 +18,7 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import {
   createConsultMessage,
   listConsultMessages,
+  markConsultThreadRead,
 } from '@/services/consult-messages';
 import {
   createPatientConsult,
@@ -258,6 +259,29 @@ describe('the thread as the record of the case', () => {
 
     const inbox = await listHubConsultInbox(db, await hospitalId(HUB));
     expect(inbox[0].messageCount).toBe(2);
+  });
+
+  it('counts the messages a person has not seen, per their own read receipt', async () => {
+    await createConsultMessage(db, consultId, hubClinicianActor, { body: 'ข้อความแรก' });
+    await createConsultMessage(db, consultId, hubClinicianActor, { body: 'ข้อความสอง' });
+
+    // Nobody has read anything — every viewer counts the whole thread.
+    const before = await listPatientConsults(db, AN, await hospitalId(A), requesterActor.userCid);
+    expect(before[0].unreadCount).toBe(2);
+
+    // The requester opens the thread: their receipt stamps, the count
+    // clears for them — the hub clinician still owes themselves a read.
+    await markConsultThreadRead(db, consultId, requesterActor);
+    const after = await listPatientConsults(db, AN, await hospitalId(A), requesterActor.userCid);
+    expect(after[0].unreadCount).toBe(0);
+
+    const hubView = await listHubConsultInbox(db, await hospitalId(HUB), hubClinicianActor.userCid);
+    expect(hubView[0].unreadCount).toBe(2);
+
+    // A message after the receipt counts only from that moment.
+    await createConsultMessage(db, consultId, hubClinicianActor, { body: 'ข้อความสาม' });
+    const later = await listPatientConsults(db, AN, await hospitalId(A), requesterActor.userCid);
+    expect(later[0].unreadCount).toBe(1);
   });
 
   it('keeps one patient’s thread out of another consult’s id', async () => {

@@ -92,6 +92,8 @@ interface ConsultRow {
   // Subquery in CONSULT_COLUMNS — the thread's human message count. COUNT
   // may arrive as a string depending on the driver, so it is normalized.
   message_count: string | number | null;
+  // Appended by consultUnreadSubquery when a viewer CID is given.
+  unread_count: string | number | null;
 }
 
 interface DoctorRow {
@@ -131,6 +133,7 @@ function toConsult(row: ConsultRow): PatientConsult {
     consultedAt: toIso(row.consulted_at),
     createdAt: toIso(row.created_at) ?? '',
     messageCount: Number(row.message_count ?? 0),
+    unreadCount: Number(row.unread_count ?? 0),
   };
 }
 
@@ -153,6 +156,22 @@ const CONSULT_COLUMNS = `
 const CONSULT_FROM = `
       FROM patient_consults pc
       LEFT JOIN hospitals th ON th.id = pc.target_hospital_id`;
+
+/**
+ * The per-viewer unread count, appended to CONSULT_COLUMNS when the viewer
+ * has a CID: TEXT messages newer than that person's last visit to the
+ * thread (a read receipt nobody wrote yet means everything counts).
+ */
+function consultUnreadSubquery(viewerCid: string | null): string {
+  if (!viewerCid) return ', 0 AS unread_count';
+  return `,
+    (SELECT COUNT(*) FROM consult_messages cm
+      WHERE cm.consult_id = pc.id AND cm.message_type = 'TEXT'
+        AND cm.created_at > COALESCE(
+          (SELECT r.last_read_at FROM consult_thread_reads r
+            WHERE r.consult_id = pc.id AND r.user_cid = ?),
+          '1970-01-01')) AS unread_count`;
+}
 
 /**
  * One consult by id — the shared read the service re-selects through after
@@ -272,13 +291,14 @@ export async function listPatientConsults(
   db: DatabaseAdapter,
   an: string,
   hospitalId: string,
+  viewerCid: string | null = null,
 ): Promise<PatientConsult[]> {
   const rows = await db.query<ConsultRow>(
-    `SELECT ${CONSULT_COLUMNS}
+    `SELECT ${CONSULT_COLUMNS}${consultUnreadSubquery(viewerCid)}
        ${CONSULT_FROM}
      WHERE pc.an = ? AND pc.hospital_id = ?
      ORDER BY pc.created_at DESC`,
-    [an, hospitalId],
+    viewerCid ? [viewerCid, an, hospitalId] : [an, hospitalId],
   );
   return rows.map(toConsult);
 }
@@ -657,10 +677,12 @@ export async function announceConsult(
 }
 
 /** The HUB consults addressed to one hospital's OB team, newest first, with
- *  the requesting context joined in. */
+ *  the requesting context joined in. `viewerCid` makes each row carry that
+ *  person's unread count. */
 export async function listHubConsultInbox(
   db: DatabaseAdapter,
   targetHospitalId: string,
+  viewerCid: string | null = null,
 ): Promise<HubConsultInboxItem[]> {
   const rows = await db.query<
     ConsultRow & {
@@ -669,7 +691,7 @@ export async function listHubConsultInbox(
       patient_name_encrypted: string | null;
     }
   >(
-    `SELECT ${CONSULT_COLUMNS},
+    `SELECT ${CONSULT_COLUMNS}${consultUnreadSubquery(viewerCid)},
            h.name AS requester_hospital_name,
            h.hcode AS requester_hospital_hcode,
            cp.name AS patient_name_encrypted
@@ -680,7 +702,7 @@ export async function listHubConsultInbox(
       WHERE pc.consult_scope = 'HUB' AND pc.target_hospital_id = ?
       ORDER BY pc.created_at DESC
       LIMIT 200`,
-    [targetHospitalId],
+    viewerCid ? [viewerCid, targetHospitalId] : [targetHospitalId],
   );
   return rows.map((row) => {
     const consult = toConsult(row);

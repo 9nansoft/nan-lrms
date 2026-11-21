@@ -55,6 +55,7 @@ function hubConsult(over: Partial<PatientConsult> = {}): PatientConsult {
     urgencyLevel: 'URGENT',
     answeredByName: null,
     messageCount: 0,
+    unreadCount: 0,
     ...over,
   };
 }

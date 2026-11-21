@@ -5,6 +5,7 @@ import { hospitalBmsConfigTable } from './hospital-bms-config';
 import { hospitalConsultDoctorsTable } from './hospital-consult-doctors';
 import { patientConsultsTable } from './patient-consults';
 import { consultMessagesTable } from './consult-messages';
+import { consultThreadReadsTable } from './consult-thread-reads';
 import { cachedPatientsTable } from './cached-patients';
 import { cachedPartographObservationsTable } from './cached-partograph-observations';
 import { cachedMaternityAssessmentsTable } from './cached-maternity-assessments';
@@ -42,6 +43,7 @@ export {
   hospitalConsultDoctorsTable,
   patientConsultsTable,
   consultMessagesTable,
+  consultThreadReadsTable,
   cachedPatientsTable,
   cachedPartographObservationsTable,
   cachedMaternityAssessmentsTable,
@@ -109,6 +111,8 @@ export const ALL_TABLES: TableDefinition[] = [
   patientConsultsTable,
   // The consult thread — references patient_consults + hospitals (above).
   consultMessagesTable,
+  // Per-user read receipts for consult threads — after the thread table.
+  consultThreadReadsTable,
   cachedVitalSignsTable,
   cpdScoresTable,
   // References cached_patients, hospitals, maternal_journeys (all above) —

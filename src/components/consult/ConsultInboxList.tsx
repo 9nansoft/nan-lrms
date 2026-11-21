@@ -117,6 +117,11 @@ export function ConsultInboxList({ consults, viewer, onAnswer, onProgress }: Con
                   ? 'ซ่อนบทสนทนา'
                   : `บทสนทนา${consult.messageCount > 0 ? ` (${consult.messageCount})` : ''}`}
               </button>
+              {consult.unreadCount > 0 && !threadOpen[consult.id] && (
+                <span data-testid="consult-unread-badge">
+                  <StatusChip tone="warn" label={`มีใหม่ ${consult.unreadCount}`} />
+                </span>
+              )}
               <span className="ml-auto text-caption text-ink-muted">
                 ขอเมื่อ {fmtDateTimeTh(consult.createdAt)}
               </span>

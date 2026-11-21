@@ -53,7 +53,7 @@ export async function GET() {
     }
 
     const [consults, pendingCount] = await Promise.all([
-      listHubConsultInbox(db, targetHospitalId),
+      listHubConsultInbox(db, targetHospitalId, session.user.userCid ?? null),
       countPendingHubConsults(db, targetHospitalId),
     ]);
 

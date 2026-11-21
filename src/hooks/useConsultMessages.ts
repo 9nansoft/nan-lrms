@@ -75,11 +75,27 @@ export function useConsultMessages(patientId: string | null, consultId: string |
     [patientId, consultId, mutate],
   );
 
+  /** Stamps this person's read receipt so the lists' "มีใหม่" badge
+   *  clears — the thread is open, so everything in it has been seen.
+   *  Never throws (a failed receipt must not break the open thread). */
+  const markRead = useCallback(async (): Promise<void> => {
+    if (!patientId || !consultId) return;
+    try {
+      await fetch(`/api/patients/${patientId}/consults/${consultId}/messages/read`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+    } catch {
+      // The badge refreshes on the next poll anyway.
+    }
+  }, [patientId, consultId]);
+
   return {
     messages: data?.messages ?? [],
     isLoading,
     error,
     mutate,
     sendMessage,
+    markRead,
   };
 }
