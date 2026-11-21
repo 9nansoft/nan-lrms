@@ -54,6 +54,8 @@ export interface MophTemplateAlertResponse {
   messageId: string | null;
   /** True when the API accepted the send (2xx, no explicit failure flag). */
   success: boolean;
+  /** Provider's own failure reason when success=false — shown to the tester. */
+  reason: string | null;
 }
 
 interface RawTemplateResponse {
@@ -63,15 +65,33 @@ interface RawTemplateResponse {
   success?: boolean;
   status?: string;
   message?: string;
+  Message?: string;
+  /** BMS-ecosystem envelope (hosxp.net PasteJSON, bmscloud): MessageCode 200
+   *  = ok, anything else = failure — regardless of the HTTP status. */
+  MessageCode?: number | string;
 }
 
 function parseResponse(raw: RawTemplateResponse): MophTemplateAlertResponse {
-  // Body-level failure flag (defensive — no documented failure shape).
+  const bodyMessage = raw.message ?? raw.Message;
+  // Body-level failure detection (defensive — no documented failure shape):
+  // explicit success:false, a status string that reads like a failure, or a
+  // BMS-style MessageCode envelope carrying a non-200 code on HTTP 2xx.
+  const messageCodeFail =
+    raw.MessageCode !== undefined && raw.MessageCode !== null && String(raw.MessageCode) !== '200';
   const explicitFail =
-    raw.success === false || (typeof raw.status === 'string' && /fail|error/i.test(raw.status));
+    raw.success === false ||
+    messageCodeFail ||
+    (typeof raw.status === 'string' && /fail|error|invalid|not_found|not found/i.test(raw.status));
+  const reason = explicitFail
+    ? (bodyMessage ??
+      (messageCodeFail ? `MessageCode ${raw.MessageCode}` : null) ??
+      (typeof raw.status === 'string' ? raw.status : null) ??
+      'unknown')
+    : null;
   return {
     messageId: raw.message_id ?? raw.data?.message_id ?? raw.id ?? null,
     success: !explicitFail,
+    reason,
   };
 }
 
@@ -153,7 +173,20 @@ export async function sendMophTemplateAlert(
     }
 
     if (resp.status >= 200 && resp.status < 300) {
-      const raw = (await resp.json().catch(() => ({}))) as RawTemplateResponse;
+      // The collection documents no response shape — keep the raw body in the
+      // logs (truncated, no patient data) so a "2xx but nothing delivered"
+      // report has evidence instead of a silent dead end.
+      const rawText = await resp.text();
+      logger.info('moph_alert_v31_response', {
+        httpStatus: resp.status,
+        body: rawText.slice(0, 300),
+      });
+      let raw: RawTemplateResponse = {};
+      try {
+        raw = JSON.parse(rawText) as RawTemplateResponse;
+      } catch {
+        // Non-JSON 2xx body — parseResponse sees an empty object (success).
+      }
       return parseResponse(raw);
     }
 

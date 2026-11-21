@@ -113,7 +113,9 @@ export async function sendSelfTestNotification(
         return {
           ok: false,
           transport,
-          detail: 'API ตอบรับ แต่แจ้งว่าส่งไม่สำเร็จ — แจ้งผู้ดูแลระบบพร้อมเวลาที่ทดสอบ',
+          detail:
+            `API ตอบรับคำขอ แต่แจ้งว่ายังไม่ส่ง${res.reason ? ` — เหตุผล: ${res.reason}` : ''}. ` +
+            'ตรวจชื่อ template และ CID กับ MOPH หรือดู log moph_alert_v31_response บนเซิร์ฟเวอร์',
           messageId: res.messageId,
         };
       }

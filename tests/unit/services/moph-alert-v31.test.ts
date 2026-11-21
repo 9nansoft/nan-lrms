@@ -185,6 +185,7 @@ describe('sendMophTemplateAlert', () => {
       [201, { data: { message_id: 'b' } }, 'b'],
       [202, { id: 'c' }, 'c'],
       [200, {}, null],
+      [200, { MessageCode: 200, Message: 'OK' }, null],
       // Explicit failure flag in the body → not a success even on 2xx.
       [200, { success: false }, null],
     ] as const) {
@@ -193,6 +194,19 @@ describe('sendMophTemplateAlert', () => {
       expect(res.messageId).toBe(expectedId);
       expect(res.success).toBe(expectedId !== null ? true : raw.success !== false);
     }
+  });
+
+  it('treats a BMS-style MessageCode ≠ 200 envelope as failure with its Message', async () => {
+    // hosxp.net/bmscloud endpoints return {MessageCode, Message} on HTTP 200 —
+    // a non-200 code means the template/cid was rejected even though the HTTP
+    // layer succeeded (the "ส่งสำเร็จ but nothing delivered" trap).
+    mockFetchSeq([
+      jsonResponse(200, { MessageCode: 400, Message: 'template not found', message_id: null }),
+    ]);
+    const res = await sendMophTemplateAlert(BASE_INPUT);
+    expect(res.success).toBe(false);
+    expect(res.reason).toBe('template not found');
+    expect(res.messageId).toBeNull();
   });
 });
 
