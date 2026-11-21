@@ -22,6 +22,10 @@ import { fmtDateTh, fmtDateTimeTh, renderAssessmentValue } from './assessments/a
 // the module keeps working.
 export { fmtDateTh, fmtDateTimeTh, renderAssessmentValue };
 
+/** Where staff download the original LR1–LR3 form files (a Google Drive
+ *  folder the province maintains — linked under the tab list). */
+const FORM_DOWNLOAD_URL = 'https://nansoft.app/v1/s/lrms';
+
 export interface AssessmentFormsProps {
   assessments: MaternityAssessmentDto[];
   /** Shown when nothing was recorded. */
@@ -92,6 +96,23 @@ function FormTabPanel({
   );
 }
 
+/** The download link for the original form files — shown on every card. */
+function DownloadFormsLink() {
+  return (
+    <p className="text-caption text-ink-muted">
+      ดาวน์โหลดแบบฟอร์มต้นฉบับ (แรกรับ · ระยะคลอด · หลังคลอด):{' '}
+      <a
+        href={FORM_DOWNLOAD_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-brand underline"
+      >
+        nansoft.app/v1/s/lrms
+      </a>
+    </p>
+  );
+}
+
 export function AssessmentForms({
   assessments,
   emptyMessage = 'ยังไม่มีแบบฟอร์มประเมินที่ซิงก์เข้ามา',
@@ -115,7 +136,12 @@ export function AssessmentForms({
   const [active, setActive] = useState<MaternityAssessmentKey>(initialKey);
 
   if (assessments.length === 0) {
-    return <p className={cn('text-label text-ink-muted', className)}>{emptyMessage}</p>;
+    return (
+      <div className={cn('flex flex-col gap-3', className)}>
+        <p className="text-label text-ink-muted">{emptyMessage}</p>
+        <DownloadFormsLink />
+      </div>
+    );
   }
 
   return (
@@ -142,6 +168,8 @@ export function AssessmentForms({
           <FormTabPanel formKey={form.key} records={records} emptyMessage={emptyMessage} />
         </TabsContent>
       ))}
+
+      <DownloadFormsLink />
     </Tabs>
   );
 }
