@@ -207,8 +207,10 @@ describe('multi-hospital preference API', () => {
     };
     // Only events with a live producer are offered — an unimplemented one
     // rendered as a checkbox would promise a notification that cannot fire.
+    // consult_message rides the consult thread (consult-messages.ts).
     expect(body.events.map((e) => e.key).sort()).toEqual([
       'anc_hr3',
+      'consult_message',
       'cpd_high',
       'maternal_triage',
       'partograph_critical',
