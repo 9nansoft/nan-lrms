@@ -6,7 +6,7 @@
 // Optimistic with revert on error and an actionable Thai message — the same
 // contract the single-switch version had (constitution §V).
 import { useEffect, useState, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SectionCard } from '@/components/shared/SectionCard';
 import { EmptyState } from '@/components/shared/EmptyState';
@@ -56,6 +56,8 @@ export function NotificationPreferenceCard() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [addCode, setAddCode] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,6 +166,41 @@ export function NotificationPreferenceCard() {
     return row.mophLineEnabled ? row.events : [];
   }
 
+  /**
+   * Self-test: send one LINE to the session user's own CID and show the
+   * outcome inline. The consult ping excludes its sender by design, so this
+   * button is the only way to prove delivery works without a second account —
+   * and the server's detail tells a config gap (template/key) from a
+   * delivery-side one (sent but LINE never lands).
+   */
+  async function sendTestMessage() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/profile/notification-test', { method: 'POST' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: unknown };
+        setTestResult({
+          ok: false,
+          detail:
+            typeof body.error === 'string'
+              ? body.error
+              : 'ทดสอบไม่สำเร็จ — ต้องเข้าสู่ระบบด้วยบัญชีที่มี CID ครบ 13 หลัก',
+        });
+        return;
+      }
+      const body = (await res.json()) as { ok?: unknown; detail?: unknown };
+      setTestResult({
+        ok: body.ok === true,
+        detail: typeof body.detail === 'string' ? body.detail : 'ไม่ทราบผลการส่ง — ลองอีกครั้ง',
+      });
+    } catch {
+      setTestResult({ ok: false, detail: 'เครือข่ายขัดข้อง — ลองอีกครั้ง' });
+    } finally {
+      setTesting(false);
+    }
+  }
+
   function toggleEvent(row: PreferenceDto, key: string) {
     const current = effectiveEvents(row);
     const nextEvents = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
@@ -189,6 +226,45 @@ export function NotificationPreferenceCard() {
   return (
     <SectionCard title="การแจ้งเตือนทาง LINE (MOPH Prompt)" description="เลือกเหตุการณ์ที่ต้องการรับ และโรงพยาบาลที่ต้องการติดตาม">
       <div className="space-y-4">
+        {/* Self-test row — above everything, because "is my LINE connected?"
+            is the first question a new subscriber asks. */}
+        <div className="rounded-xl border border-border bg-surface-muted p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <p className="text-label text-ink">ทดสอบการแจ้งเตือน</p>
+              <p className="text-caption text-ink-muted">
+                ส่งข้อความทดสอบถึง LINE ของคุณตามระบบที่ตั้งค่าไว้ปัจจุบัน
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void sendTestMessage()}
+              disabled={testing}
+              className="h-9 border-border text-label"
+            >
+              {testing ? (
+                <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send aria-hidden="true" className="h-4 w-4" />
+              )}
+              ทดสอบส่งข้อความ
+            </Button>
+          </div>
+          {testResult && (
+            <p
+              role="status"
+              className={cn(
+                'mt-2 text-caption font-semibold',
+                testResult.ok ? 'text-ok-text' : 'text-danger-text',
+              )}
+            >
+              {testResult.ok ? '✓ ' : '✕ '}
+              {testResult.detail}
+            </p>
+          )}
+        </div>
+
         {loading && <LoadingState message="กำลังโหลดการตั้งค่า…" className="py-4" />}
         {busy && (
           <p role="status" className="flex items-center gap-2 text-label text-ink-muted">
