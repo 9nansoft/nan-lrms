@@ -41,10 +41,10 @@ vi.mock('@/lib/bms-session', async () => {
   };
 });
 
-// Mock the v3.1 template sender — the drain picks it via MOPH_TRANSPORT='v3.1'.
-const mockSendTemplate = vi.fn();
+// Mock the v3.1 free-form sender — the drain picks it via MOPH_TRANSPORT='v3.1'.
+const mockSendFreeForm = vi.fn();
 vi.mock('@/services/moph-alert-v31', () => ({
-  sendMophTemplateAlert: (...args: unknown[]) => mockSendTemplate(...args),
+  sendMophFreeFormAlert: (...args: unknown[]) => mockSendFreeForm(...args),
 }));
 
 async function seedPendingRow(
@@ -100,12 +100,11 @@ async function seedPendingRow(
   return id;
 }
 
-/** Point the drain at the v3.1 template transport with a fully-configured env. */
+/** Point the drain at the v3.1 free-form transport with a fully-configured env. */
 function useV31Transport(): void {
   process.env.MOPH_TRANSPORT = 'v3.1';
   process.env.MOPH_ALERT_CLIENT_KEY = 'ck-test';
   process.env.MOPH_ALERT_SECRET_KEY = 'sk-test';
-  process.env.MOPH_ALERT_TEMPLATE = 'แจ้งเตือนLRMS';
 }
 
 describe('drainMophAlerts', () => {
@@ -126,19 +125,14 @@ describe('drainMophAlerts', () => {
       messageId: 'msg-ok',
       line: { success: true, status: 'success' },
     });
-    mockSendTemplate.mockResolvedValue({ messageId: 'msg-ok', success: true });
+    mockSendFreeForm.mockResolvedValue({ messageId: 'msg-ok', success: true });
     // Default env is the bms transport — v3.1 tests opt in via useV31Transport().
     delete process.env.MOPH_TRANSPORT;
   });
   afterEach(async () => {
     await db.close();
     vi.clearAllMocks();
-    for (const k of [
-      'MOPH_TRANSPORT',
-      'MOPH_ALERT_CLIENT_KEY',
-      'MOPH_ALERT_SECRET_KEY',
-      'MOPH_ALERT_TEMPLATE',
-    ]) {
+    for (const k of ['MOPH_TRANSPORT', 'MOPH_ALERT_CLIENT_KEY', 'MOPH_ALERT_SECRET_KEY']) {
       delete process.env[k];
     }
   });
@@ -539,8 +533,8 @@ describe('drainMophAlerts', () => {
     }
   });
 
-  // ---- v3.1 template transport (docs/API MOPH Alert Template V3.1) ----------
-  it('v3.1: sends the template message WITHOUT any BMS session resolution', async () => {
+  // ---- v3.1 free-form transport (docs/API MOPH Alert Free Form version 3.1) --
+  it('v3.1: sends the LINE flex bubble WITHOUT any BMS session resolution', async () => {
     useV31Transport();
     const id = await seedPendingRow(db, hospitalId, { recipientName: 'นพ. ก' });
     const summary = await drainMophAlerts(db, hospitalId, {
@@ -552,20 +546,31 @@ describe('drainMophAlerts', () => {
     // The v3.1 transport authenticates with static keys — no session, no BMS sender.
     expect(mockResolveSession).not.toHaveBeenCalled();
     expect(mockSend).not.toHaveBeenCalled();
-    expect(mockSendTemplate).toHaveBeenCalledTimes(1);
-    const arg = mockSendTemplate.mock.calls[0][0];
+    expect(mockSendFreeForm).toHaveBeenCalledTimes(1);
+    const arg = mockSendFreeForm.mock.calls[0][0];
     expect(arg.cid).toBe('3320500282121');
-    expect(arg.name).toBe('นพ. ก'); // persisted recipient name
-    expect(arg.messageTitle).toBe('แจ้งเตือน');
+    // Free form dropped the template API's name/messageDatetime fields.
+    expect(arg.name).toBeUndefined();
+    expect(arg.messageDatetime).toBeUndefined();
+    // The LINE side is a wrapped buildAlertFlex bubble: {type:'flex'} with the
+    // stored title as altText (lock-screen text) — same builder as the bms path.
+    expect(arg.messages).toHaveLength(1);
+    expect(arg.messages[0].type).toBe('flex');
+    expect(arg.messages[0].altText).toBe('แจ้งเตือน');
+    const flexJson = JSON.stringify(arg.messages[0].contents);
     // Full-detail staff row: severity label, hospital, case ref, patient name.
+    expect(flexJson).toContain('เสี่ยงสูง');
+    expect(flexJson).toContain('รพ.น่าน');
+    expect(flexJson).toContain('case-high');
+    expect(flexJson).toContain('น.ส. A');
+    // The app-inbox fields ride along (message_title/html/text).
+    expect(arg.messageTitle).toBe('แจ้งเตือน');
     expect(arg.messageHtml).toContain('เสี่ยงสูง');
-    expect(arg.messageHtml).toContain('รพ.น่าน');
     expect(arg.messageHtml).toContain('case-high');
     expect(arg.messageHtml).toContain('น.ส. A');
     // text twin has the same content without markup.
     expect(arg.messageText).toContain('case-high');
     expect(arg.messageText).not.toContain('<');
-    expect(arg.messageDatetime).toBeTruthy();
     const rows = await db.query<{ status: string; message_id: string; api_status: string }>(
       `SELECT status, message_id, api_status FROM moph_alert_log WHERE id = $1`,
       [id],
@@ -575,7 +580,7 @@ describe('drainMophAlerts', () => {
     expect(rows[0].api_status).toBe('success');
   });
 
-  it('v3.1: aggregate row strips the case ref and patient name from the message (PDPA)', async () => {
+  it('v3.1: aggregate row strips the case ref and patient name from bubble AND inbox fields (PDPA)', async () => {
     useV31Transport();
     await seedPendingRow(db, hospitalId, {
       recipientScope: 'self_subscribed',
@@ -587,8 +592,14 @@ describe('drainMophAlerts', () => {
       perSendTimeoutMs: 1000,
       budgetMs: 5000,
     });
-    expect(mockSendTemplate).toHaveBeenCalledTimes(1);
-    const html = String(mockSendTemplate.mock.calls[0][0].messageHtml);
+    expect(mockSendFreeForm).toHaveBeenCalledTimes(1);
+    const arg = mockSendFreeForm.mock.calls[0][0];
+    const flexJson = JSON.stringify(arg.messages[0].contents);
+    expect(flexJson).not.toContain('case-high');
+    expect(flexJson).not.toContain('น.ส. A');
+    expect(flexJson).toContain('เสี่ยงสูง');
+    expect(flexJson).toContain('รพ.น่าน');
+    const html = String(arg.messageHtml);
     expect(html).not.toContain('case-high');
     expect(html).not.toContain('น.ส. A');
     expect(html).toContain('เสี่ยงสูง');
@@ -598,7 +609,7 @@ describe('drainMophAlerts', () => {
   it('v3.1: retryable failure keeps the row pending under the same policy as bms', async () => {
     useV31Transport();
     const id = await seedPendingRow(db, hospitalId);
-    mockSendTemplate.mockRejectedValueOnce(
+    mockSendFreeForm.mockRejectedValueOnce(
       Object.assign(new Error('502'), { code: 'RETRYABLE_EXHAUSTED', statusCode: 502 }),
     );
     const summary = await drainMophAlerts(db, hospitalId, {
@@ -616,8 +627,8 @@ describe('drainMophAlerts', () => {
     expect(rows[0].attempts).toBe(1);
   });
 
-  it('v3.1: missing key/template configuration dead-letters claimed rows with a config last_error', async () => {
-    process.env.MOPH_TRANSPORT = 'v3.1'; // no keys, no MOPH_ALERT_TEMPLATE
+  it('v3.1: missing key configuration dead-letters claimed rows with a config last_error', async () => {
+    process.env.MOPH_TRANSPORT = 'v3.1'; // no MOPH_ALERT_CLIENT_KEY / SECRET_KEY
     const id = await seedPendingRow(db, hospitalId);
     const summary = await drainMophAlerts(db, hospitalId, {
       maxAlerts: 5,
@@ -626,12 +637,12 @@ describe('drainMophAlerts', () => {
     });
     expect(summary.sent).toBe(0);
     expect(summary.failed).toBe(1);
-    expect(mockSendTemplate).not.toHaveBeenCalled();
+    expect(mockSendFreeForm).not.toHaveBeenCalled();
     const rows = await db.query<{ status: string; last_error: string | null }>(
       `SELECT status, last_error FROM moph_alert_log WHERE id = $1`,
       [id],
     );
     expect(rows[0].status).toBe('failed');
-    expect(rows[0].last_error).toMatch(/MOPH_ALERT_TEMPLATE|configured/i);
+    expect(rows[0].last_error).toMatch(/MOPH_ALERT_CLIENT_KEY|configured/i);
   });
 });

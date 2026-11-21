@@ -155,12 +155,14 @@ export function buildAlertFlex(input: BuildAlertFlexInput): Record<string, unkno
 }
 
 // ---------------------------------------------------------------------------
-// MOPH Alert Template API v3.1 rendering (docs/API MOPH Alert Template
-// V3.1.postman_collection.json). The v3.1 endpoint takes message_html /
-// message_text instead of a LINE Flex bubble, so buildAlertMessage renders the
-// SAME scope-aware content as buildAlertFlex in the API's simple HTML style
-// (<div><strong>…</strong></div> — the only markup its samples show). Values
-// are HTML-escaped: patient names are user-controlled text, not trusted markup.
+// Free Form API v3.1 app-inbox rendering (docs/API MOPH Alert Free Form
+// version 3.1.postman_collection.json). The v3.1 free-form endpoint's optional
+// message_title / message_html / message_text fields feed the หมอพร้อม app
+// inbox, so buildAlertMessage renders the SAME scope-aware content as
+// buildAlertFlex in the API's simple HTML style (<div><strong>…</strong></div>
+// — the only markup its samples show). The LINE side itself is the raw
+// buildAlertFlex bubble wrapped as {type:'flex'} at the send site. Values are
+// HTML-escaped: patient names are user-controlled text, not trusted markup.
 // ---------------------------------------------------------------------------
 
 function escapeHtml(s: string): string {

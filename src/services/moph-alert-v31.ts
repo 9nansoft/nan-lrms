@@ -1,27 +1,33 @@
-// MOPH Alert Template API v3.1 sender client (LINE notify via morpromt2c).
+// MOPH Alert Free Form API v3.1 sender client (LINE notify via morpromt2c).
 //
-// Thin typed wrapper around the external template endpoint (wire contract from
-// docs/API MOPH Alert Template V3.1.postman_collection.json):
-//   POST <origin>/alert/v3.1/template
+// Thin typed wrapper around the free-form endpoint (wire contract from
+// docs/API MOPH Alert Free Form version 3.1.postman_collection.json and
+// docs/API Alert Free Form JSON 3.1.pdf):
+//   POST <origin>/alert/v3.1/messages
 //   headers: client-key + secret-key  (static credentials — NO Bearer session)
-//   body: { cid, name, template, header, message_title, message_html,
-//           message_text, message_type, url?, message_confirm_url?, message_datetime? }
-// The registered `template` name and the key pair are issued by MOPH per app and
-// are therefore env-configured (moph-alert-config.ts) — never hardcoded.
+//   body: { cid: string[], messages: LINE-message-objects (max 5 bubbles),
+//           message_title?, message_html?, message_text?, message_type? }
+//   documented response: { message, message_code } — 200 ok, 401 bad keys /
+//   "No Cid" (in the BODY — check message_code even on HTTP 2xx).
+// This replaces the earlier registered-template endpoint (/alert/v3.1/template,
+// docs/API MOPH Alert Template V3.1.postman_collection.json — kept for
+// history): the free-form API needs NO MOPH-registered template, which removes
+// the "Error template" render failure that transport never escaped. The keys
+// are issued by MOPH per app and are therefore env-configured
+// (moph-alert-config.ts) — never hardcoded.
+//
+// `cid` stays a single string in the interface even though the API accepts an
+// array: the alert pipeline is a per-recipient audit (one moph_alert_log row
+// per recipient), so one wire call carries exactly one recipient and the body
+// array-wraps it. The `messages` array is caller-built LINE Messaging API
+// content — a flex bubble for real alerts (buildAlertFlex + {type:'flex'}
+// wrapper at the call site), so URL buttons live INSIDE the message instead of
+// the template API's url/message_confirm_url fields.
 //
 // Retry policy mirrors sendMophPrompt (moph-prompt.ts): 5xx/timeouts retry with
 // exponential backoff up to MOPH_MAX_502_RETRIES; 4xx is terminal. The error
 // type and codes are REUSED from moph-prompt so the drain's send/finalize path
 // is transport-agnostic (it duck-types on `.code`).
-//
-// The v3.1 API's success response shape is not documented (the collection saves
-// no responses). Observed live envelope: {app_message, line_message,
-// message_code} with message_code 200 = accepted — but message_code 200 does
-// NOT guarantee delivery: a failed template render comes back as line_message
-// "Error template" (sentinel, see parseResponse). 2xx is parsed defensively:
-// any 2xx counts as success unless the body explicitly says failure, and the
-// message id is extracted from the common `message_id` / `data.message_id` /
-// `id` fields.
 //
 // This module performs NO audit write — the authoritative per-recipient record
 // lives in moph_alert_log (same rule as moph-prompt.ts: no dual-audit).
@@ -30,30 +36,28 @@ import { logger } from '@/lib/logger';
 import {
   mophAlertApiUrl,
   mophAlertKeys,
-  mophAlertTemplate,
   mophAlertMessageType,
   mophAlertLimits,
 } from '@/config/moph-alert-config';
 import { isValidCid, MophPromptError } from '@/services/moph-prompt';
 
-export interface SendMophTemplateAlertInput {
-  /** Recipient Thai Citizen ID — exactly 13 digits, validated before send. */
+export interface SendMophFreeFormAlertInput {
+  /** Recipient Thai Citizen ID — exactly 13 digits, validated before send.
+   *  Wire body wraps it as the single element of the API's cid array. */
   cid: string;
-  /** Recipient display name (the API samples always carry one; '' allowed). */
-  name: string;
-  /** LINE message title (stored alert `title`). */
-  messageTitle: string;
-  /** Message body HTML (collection samples: simple <div><strong>…</strong></div>). */
-  messageHtml: string;
-  /** Message body plain text. */
-  messageText: string;
-  /** Optional action URL — sent as both `url` and `message_confirm_url`. */
-  confirmUrl?: string | null;
-  /** Optional ISO timestamp for the template's message_datetime field. */
-  messageDatetime?: string | null;
+  /** LINE Messaging API message objects (≤5) — the alert's actual content.
+   *  Real alerts send one {type:'flex', altText, contents} bubble; any
+   *  spec-valid message object ({type:'text',...} included) passes through. */
+  messages: unknown[];
+  /** Title for the หมอพร้อม app inbox (message_title — optional per spec). */
+  messageTitle?: string;
+  /** HTML body for the app inbox (message_html — optional per spec). */
+  messageHtml?: string;
+  /** Plain text / inbox list-item name (message_text — optional per spec). */
+  messageText?: string;
 }
 
-export interface MophTemplateAlertResponse {
+export interface MophFreeFormAlertResponse {
   /** Provider message id, when the response carries one. */
   messageId: string | null;
   /** True when the API accepted the send (2xx, no explicit failure flag). */
@@ -62,7 +66,7 @@ export interface MophTemplateAlertResponse {
   reason: string | null;
 }
 
-interface RawTemplateResponse {
+interface RawMessagesResponse {
   message_id?: string | null;
   id?: string | null;
   data?: { message_id?: string | null } | null;
@@ -70,26 +74,26 @@ interface RawTemplateResponse {
   status?: string;
   message?: string;
   Message?: string;
-  /** BMS-ecosystem envelope (hosxp.net PasteJSON, bmscloud): MessageCode 200
-   *  = ok, anything else = failure — regardless of the HTTP status. */
-  MessageCode?: number | string;
-  /** The v3.1 endpoint's own envelope (observed live): lowercase
-   *  {app_message, line_message, message_code} — same contract as MessageCode,
-   *  200 = ok. line_message carries the RENDERED LINE content, and MOPH
-   *  substitutes the sentinel "Error template" when its template render fails
-   *  (wrong/missing registered template name or variables) while still
-   *  returning message_code 200. */
+  /** The free-form API's own documented envelope: message_code 200 = ok,
+   *  401 = client-key/secret-key incorrect or "No Cid" — regardless of the
+   *  HTTP status. */
   message_code?: number | string;
+  /** BMS-ecosystem envelope (hosxp.net PasteJSON, bmscloud): MessageCode 200
+   *  = ok, anything else = failure — defensive, not documented here. */
+  MessageCode?: number | string;
+  /** Defensive: a template-era echo of a failed render. Not produced by the
+   *  free-form endpoint, but a body that literally says this is never a
+   *  delivered message. */
   line_message?: string | null;
   app_message?: string | null;
 }
 
-function parseResponse(raw: RawTemplateResponse): MophTemplateAlertResponse {
+function parseResponse(raw: RawMessagesResponse): MophFreeFormAlertResponse {
   const bodyMessage = raw.message ?? raw.Message;
-  // Body-level failure detection (defensive — no documented failure shape):
-  // explicit success:false, a status string that reads like a failure, a
-  // MessageCode/message_code envelope carrying a non-200 code on HTTP 2xx, or
-  // the v3.1 "Error template" render-failure sentinel in line_message.
+  // Body-level failure detection: the documented message_code ≠ 200 (401 bad
+  // keys / No Cid arrives this way), explicit success:false, a status string
+  // that reads like a failure, or a literal "Error template" line_message
+  // (defensive carry-over from the template endpoint).
   const code = raw.message_code ?? raw.MessageCode;
   const messageCodeFail = code !== undefined && code !== null && String(code) !== '200';
   const lineMessageError =
@@ -103,7 +107,7 @@ function parseResponse(raw: RawTemplateResponse): MophTemplateAlertResponse {
   const reason = explicitFail
     ? (bodyMessage ??
       (lineMessageError
-        ? `template render failed: line_message "${raw.line_message}" — ตรวจ MOPH_ALERT_TEMPLATE กับชื่อที่ MOPH จดทะเบียน`
+        ? `template render failed: line_message "${raw.line_message}"`
         : null) ??
       (messageCodeFail ? `message_code ${code}` : null) ??
       (typeof raw.status === 'string' ? raw.status : null) ??
@@ -116,23 +120,16 @@ function parseResponse(raw: RawTemplateResponse): MophTemplateAlertResponse {
   };
 }
 
-function buildBody(input: SendMophTemplateAlertInput): Record<string, unknown> {
-  const template = mophAlertTemplate();
+function buildBody(input: SendMophFreeFormAlertInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    cid: input.cid,
-    name: input.name ?? '',
-    template: template.template,
-    header: template.header,
-    message_title: input.messageTitle,
-    message_html: input.messageHtml,
-    message_text: input.messageText,
+    cid: [input.cid],
+    messages: input.messages,
     message_type: mophAlertMessageType(),
   };
-  if (input.confirmUrl) {
-    body.url = input.confirmUrl;
-    body.message_confirm_url = input.confirmUrl;
-  }
-  if (input.messageDatetime) body.message_datetime = input.messageDatetime;
+  // The app-inbox fields are optional per the PDF — send only what we have.
+  if (input.messageTitle) body.message_title = input.messageTitle;
+  if (input.messageHtml) body.message_html = input.messageHtml;
+  if (input.messageText) body.message_text = input.messageText;
   return body;
 }
 
@@ -141,14 +138,15 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Send one alert through the MOPH Alert Template API v3.1. Resolves with the
- * parsed outcome on any 2xx (body `success` may still downgrade it — check
- * `res.success`). Rejects with {@link MophPromptError} for 4xx (terminal) or
- * exhausted 5xx/timeout retries, exactly like sendMophPrompt.
+ * Send one alert through the MOPH Alert Free Form API v3.1. Resolves with the
+ * parsed outcome on any 2xx (the documented message_code envelope may still
+ * downgrade it — check `res.success`). Rejects with {@link MophPromptError}
+ * for 4xx (terminal) or exhausted 5xx/timeout retries, exactly like
+ * sendMophPrompt.
  */
-export async function sendMophTemplateAlert(
-  input: SendMophTemplateAlertInput,
-): Promise<MophTemplateAlertResponse> {
+export async function sendMophFreeFormAlert(
+  input: SendMophFreeFormAlertInput,
+): Promise<MophFreeFormAlertResponse> {
   if (!isValidCid(input.cid)) {
     throw new MophPromptError(
       'INVALID_CID',
@@ -156,7 +154,19 @@ export async function sendMophTemplateAlert(
       400,
     );
   }
-  const url = `${mophAlertApiUrl().replace(/\/+$/, '')}/alert/v3.1/template`;
+  if (!Array.isArray(input.messages) || input.messages.length === 0) {
+    throw new MophPromptError('VALIDATION', 'messages must be a non-empty array', 400);
+  }
+  if (input.messages.length > 5) {
+    // The PDF caps messages at 5 bubbles — reject early instead of shipping a
+    // body the provider will bounce.
+    throw new MophPromptError(
+      'VALIDATION',
+      `messages must not exceed 5 (got ${input.messages.length})`,
+      400,
+    );
+  }
+  const url = `${mophAlertApiUrl().replace(/\/+$/, '')}/alert/v3.1/messages`;
   const { clientKey, secretKey } = mophAlertKeys();
   const { max502Retries, retryBackoffMs, perSendTimeoutMs } = mophAlertLimits();
   const body = buildBody(input);
@@ -194,17 +204,17 @@ export async function sendMophTemplateAlert(
     }
 
     if (resp.status >= 200 && resp.status < 300) {
-      // The collection documents no response shape — keep the raw body in the
-      // logs (truncated, no patient data) so a "2xx but nothing delivered"
-      // report has evidence instead of a silent dead end.
+      // The documented success body is {message, message_code}; keep the raw
+      // body in the logs (truncated, no patient data) so a "2xx but nothing
+      // delivered" report has evidence instead of a silent dead end.
       const rawText = await resp.text();
       logger.info('moph_alert_v31_response', {
         httpStatus: resp.status,
         body: rawText.slice(0, 300),
       });
-      let raw: RawTemplateResponse = {};
+      let raw: RawMessagesResponse = {};
       try {
-        raw = JSON.parse(rawText) as RawTemplateResponse;
+        raw = JSON.parse(rawText) as RawMessagesResponse;
       } catch {
         // Non-JSON 2xx body — parseResponse sees an empty object (success).
       }
@@ -220,7 +230,7 @@ export async function sendMophTemplateAlert(
       );
     }
     if (resp.status === 422) {
-      throw new MophPromptError('VALIDATION', `422 body/template validation error`, 422);
+      throw new MophPromptError('VALIDATION', `422 body validation error`, 422);
     }
     if (resp.status >= 400 && resp.status < 500) {
       throw new MophPromptError('CLIENT_ERROR', `${resp.status} client error`, resp.status);

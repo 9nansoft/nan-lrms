@@ -26,9 +26,9 @@ const mockSendPrompt = vi.fn();
 vi.mock('@/services/moph-prompt', () => ({
   sendMophPrompt: (...args: unknown[]) => mockSendPrompt(...args),
 }));
-const mockSendTemplate = vi.fn();
+const mockSendFreeForm = vi.fn();
 vi.mock('@/services/moph-alert-v31', () => ({
-  sendMophTemplateAlert: (...args: unknown[]) => mockSendTemplate(...args),
+  sendMophFreeFormAlert: (...args: unknown[]) => mockSendFreeForm(...args),
 }));
 
 // bms transport resolves a per-hospital session — never hit a real tunnel.
@@ -47,11 +47,10 @@ function req(): Request {
   return new Request('http://test/api/profile/notification-test', { method: 'POST' });
 }
 
-function setV31Env(template = 'แจ้งเตือนLRMS'): void {
+function setV31Env(): void {
   process.env.MOPH_TRANSPORT = 'v3.1';
   process.env.MOPH_ALERT_CLIENT_KEY = 'ck-test';
   process.env.MOPH_ALERT_SECRET_KEY = 'sk-test';
-  process.env.MOPH_ALERT_TEMPLATE = template;
 }
 
 describe('POST /api/profile/notification-test', () => {
@@ -59,14 +58,13 @@ describe('POST /api/profile/notification-test', () => {
     db = await createTestDb();
     await new SeedOrchestrator().run(db);
     mockSessionUser = testSessionUser({ hospitalCode: '10670' });
-    mockSendTemplate.mockResolvedValue({ messageId: 'msg-1', success: true });
+    mockSendFreeForm.mockResolvedValue({ messageId: 'msg-1', success: true });
     mockSendPrompt.mockResolvedValue({
       messageId: 'msg-bms',
       line: { success: true, status: 'success' },
     });
     mockResolveSession.mockResolvedValue('SESS-OK');
     delete process.env.MOPH_TRANSPORT;
-    delete process.env.MOPH_ALERT_TEMPLATE;
     delete process.env.MOPH_ALERT_CLIENT_KEY;
     delete process.env.MOPH_ALERT_SECRET_KEY;
   });
@@ -77,7 +75,6 @@ describe('POST /api/profile/notification-test', () => {
     vi.clearAllMocks();
     for (const k of [
       'MOPH_TRANSPORT',
-      'MOPH_ALERT_TEMPLATE',
       'MOPH_ALERT_CLIENT_KEY',
       'MOPH_ALERT_SECRET_KEY',
     ]) {
@@ -89,7 +86,7 @@ describe('POST /api/profile/notification-test', () => {
     mockSessionUser = null;
     const res = await POST(req() as never);
     expect(res.status).toBeGreaterThanOrEqual(401);
-    expect(mockSendTemplate).not.toHaveBeenCalled();
+    expect(mockSendFreeForm).not.toHaveBeenCalled();
     expect(mockSendPrompt).not.toHaveBeenCalled();
   });
 
@@ -97,10 +94,10 @@ describe('POST /api/profile/notification-test', () => {
     mockSessionUser = testSessionUser({ hospitalCode: '10670', userCid: '' });
     const res = await POST(req() as never);
     expect(res.status).toBe(400);
-    expect(mockSendTemplate).not.toHaveBeenCalled();
+    expect(mockSendFreeForm).not.toHaveBeenCalled();
   });
 
-  it('v3.1: sends the test message to the session CID and reports ok with message id', async () => {
+  it('v3.1: sends the flex-bubble test message to the session CID and reports ok', async () => {
     setV31Env();
     const res = await POST(req() as never);
     expect(res.status).toBe(200);
@@ -108,37 +105,40 @@ describe('POST /api/profile/notification-test', () => {
     expect(body.ok).toBe(true);
     expect(body.transport).toBe('v3.1');
     expect(body.messageId).toBe('msg-1');
-    expect(mockSendTemplate).toHaveBeenCalledTimes(1);
-    const arg = mockSendTemplate.mock.calls[0][0] as Record<string, unknown>;
+    expect(mockSendFreeForm).toHaveBeenCalledTimes(1);
+    const arg = mockSendFreeForm.mock.calls[0][0] as Record<string, unknown>;
     expect(arg.cid).toBe('1100500090006'); // session identity, not client-supplied
-    expect(arg.name).toBe('พว.ทดสอบ ระบบ');
+    // The self-test exercises the REAL wire content: a wrapped flex bubble.
+    expect(arg.messages).toHaveLength(1);
+    expect((arg.messages as Record<string, unknown>[])[0].type).toBe('flex');
+    expect(String((arg.messages as Record<string, unknown>[])[0].altText)).toContain('ทดสอบ');
     expect(String(arg.messageHtml)).toContain('ทดสอบ');
     expect(String(arg.messageText)).toContain('ทดสอบ');
     expect(mockSendPrompt).not.toHaveBeenCalled();
   });
 
-  it('v3.1: unconfigured template → ok:false with a config detail, no send', async () => {
-    process.env.MOPH_TRANSPORT = 'v3.1';
-    process.env.MOPH_ALERT_CLIENT_KEY = 'ck-test';
-    process.env.MOPH_ALERT_SECRET_KEY = 'sk-test';
-    process.env.MOPH_ALERT_TEMPLATE = ''; // ← the exact state that ate the PRD test
+  it('v3.1: missing keys → ok:false with a config detail, no send', async () => {
+    process.env.MOPH_TRANSPORT = 'v3.1'; // no MOPH_ALERT_CLIENT_KEY / SECRET_KEY
     const res = await POST(req() as never);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; detail: string };
     expect(body.ok).toBe(false);
-    expect(body.detail).toMatch(/template|MOPH_ALERT_TEMPLATE/i);
-    expect(mockSendTemplate).not.toHaveBeenCalled();
+    expect(body.detail).toMatch(/MOPH_ALERT_CLIENT_KEY/i);
+    expect(mockSendFreeForm).not.toHaveBeenCalled();
   });
 
   it('v3.1: sender maps 422 to a Thai validation detail', async () => {
     setV31Env();
-    mockSendTemplate.mockRejectedValue(
-      Object.assign(new Error('template not found'), { code: 'VALIDATION', statusCode: 422 }),
+    mockSendFreeForm.mockRejectedValue(
+      Object.assign(new Error('messages validation failed'), {
+        code: 'VALIDATION',
+        statusCode: 422,
+      }),
     );
     const res = await POST(req() as never);
     const body = (await res.json()) as { ok: boolean; detail: string };
     expect(body.ok).toBe(false);
-    expect(body.detail).toMatch(/template/);
+    expect(body.detail).toMatch(/API ปฏิเสธข้อมูลที่ส่ง/);
   });
 
   it('bms: resolves the hospital session then sends, ok on line.success', async () => {

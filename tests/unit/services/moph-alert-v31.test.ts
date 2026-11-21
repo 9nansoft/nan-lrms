@@ -1,17 +1,35 @@
-// TDD (Red→Green) for the MOPH Alert Template API v3.1 sender.
-// Pins the wire contract from docs/API MOPH Alert Template V3.1.postman_collection.json:
-//   POST {{prod}}/alert/v3.1/template
+// TDD (Red→Green) for the MOPH Alert Free Form API v3.1 sender.
+// Pins the wire contract from docs/API MOPH Alert Free Form version 3.1
+// .postman_collection.json + docs/API Alert Free Form JSON 3.1.pdf:
+//   POST {{prod}}/alert/v3.1/messages
 //   headers: client-key + secret-key (static — no Bearer session)
-//   body: { cid, name, template, header, message_title, message_html,
-//           message_text, message_type, url?, message_confirm_url?, message_datetime? }
-// The registered `template` name is MOPH-approved per app → env-configured;
-// unset config is a terminal misconfiguration (mophTemplateConfigured=false).
+//   body: { cid: string[], messages: LINE-message-objects (≤5),
+//           message_title?, message_html?, message_text?, message_type? }
+//   documented response: { message, message_code } — 200 ok / 401 bad keys /
+//   "No Cid", in the BODY regardless of the HTTP status.
+// The static key pair is issued per hospital app by MOPH → env-configured;
+// unset keys are a terminal misconfiguration (mophFreeFormConfigured=false).
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { sendMophTemplateAlert, type MophTemplateAlertResponse } from '@/services/moph-alert-v31';
-import { mophTemplateConfigured } from '@/config/moph-alert-config';
+import { sendMophFreeFormAlert, type MophFreeFormAlertResponse } from '@/services/moph-alert-v31';
+import { mophFreeFormConfigured } from '@/config/moph-alert-config';
 
 // ---- helpers --------------------------------------------------------------
 const CID_13 = '3320500282121'; // synthetic 13-digit placeholder
+
+/** A spec-valid LINE flex message — the shape real alerts send. */
+const FLEX_MESSAGE = {
+  type: 'flex',
+  altText: 'แจ้งเตือนกรณีเสี่ยงสูง — รพ.ทดสอบ',
+  contents: { type: 'bubble', body: { type: 'box', layout: 'vertical', contents: [] } },
+};
+
+const BASE_INPUT = {
+  cid: CID_13,
+  messages: [FLEX_MESSAGE],
+  messageTitle: 'แจ้งเตือนกรณีเสี่ยงสูง — รพ.ทดสอบ',
+  messageHtml: '<div><strong>แจ้งเตือนกรณีเสี่ยงสูง</strong></div>',
+  messageText: 'แจ้งเตือนกรณีเสี่ยงสูง',
+};
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -40,21 +58,11 @@ function setConfigEnv(): void {
   process.env.MOPH_ALERT_API_URL = 'https://alert.test';
   process.env.MOPH_ALERT_CLIENT_KEY = 'ck-test';
   process.env.MOPH_ALERT_SECRET_KEY = 'sk-test';
-  process.env.MOPH_ALERT_TEMPLATE = 'แจ้งเตือนLRMS';
-  delete process.env.MOPH_ALERT_HEADER;
   delete process.env.MOPH_ALERT_MESSAGE_TYPE;
 }
 
-const BASE_INPUT = {
-  cid: CID_13,
-  name: 'ดร. ทดสอบ',
-  messageTitle: 'แจ้งเตือนกรณีเสี่ยงสูง — รพ.ทดสอบ',
-  messageHtml: '<div><strong>แจ้งเตือนกรณีเสี่ยงสูง</strong></div>',
-  messageText: 'แจ้งเตือนกรณีเสี่ยงสูง',
-};
-
 // ---- tests ----------------------------------------------------------------
-describe('sendMophTemplateAlert', () => {
+describe('sendMophFreeFormAlert', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     setConfigEnv();
@@ -68,8 +76,6 @@ describe('sendMophTemplateAlert', () => {
       'MOPH_ALERT_API_URL',
       'MOPH_ALERT_CLIENT_KEY',
       'MOPH_ALERT_SECRET_KEY',
-      'MOPH_ALERT_TEMPLATE',
-      'MOPH_ALERT_HEADER',
       'MOPH_ALERT_MESSAGE_TYPE',
       'MOPH_MAX_502_RETRIES',
       'MOPH_RETRY_BACKOFF_MS',
@@ -78,13 +84,13 @@ describe('sendMophTemplateAlert', () => {
     }
   });
 
-  it('sends a POST with client-key/secret-key headers and the template body', async () => {
-    const { calls } = mockFetchSeq([jsonResponse(200, { message_id: 'msg-1' })]);
+  it('sends a POST with client-key/secret-key headers and the free-form body', async () => {
+    const { calls } = mockFetchSeq([jsonResponse(200, { message: 'Success', message_code: 200 })]);
 
-    const res = await sendMophTemplateAlert(BASE_INPUT);
+    const res = await sendMophFreeFormAlert(BASE_INPUT);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('https://alert.test/alert/v3.1/template');
+    expect(calls[0].url).toBe('https://alert.test/alert/v3.1/messages');
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers['client-key']).toBe('ck-test');
     expect(headers['secret-key']).toBe('sk-test');
@@ -93,63 +99,74 @@ describe('sendMophTemplateAlert', () => {
     expect(headers.Authorization).toBeUndefined();
 
     const body = JSON.parse(calls[0].init.body as string);
-    expect(body.cid).toBe(CID_13);
-    expect(body.name).toBe('ดร. ทดสอบ');
-    expect(body.template).toBe('แจ้งเตือนLRMS');
-    expect(body.header).toBe('แจ้งเตือนLRMS'); // header falls back to template
+    // cid is the API's array type, but carries exactly ONE recipient — the
+    // pipeline is a per-recipient audit (one moph_alert_log row per send).
+    expect(body.cid).toEqual([CID_13]);
+    expect(body.messages).toEqual([FLEX_MESSAGE]);
     expect(body.message_title).toBe(BASE_INPUT.messageTitle);
     expect(body.message_html).toBe(BASE_INPUT.messageHtml);
     expect(body.message_text).toBe(BASE_INPUT.messageText);
     expect(body.message_type).toBe('HPT'); // collection default
-    // Optional fields absent when not provided.
-    expect(body.url).toBeUndefined();
-    expect(body.message_confirm_url).toBeUndefined();
-    expect(body.message_datetime).toBeUndefined();
 
     expect(res.success).toBe(true);
-    expect(res.messageId).toBe('msg-1');
+    expect(res.messageId).toBeNull();
+    expect(res.reason).toBeNull();
   });
 
-  it('includes url / message_confirm_url / message_datetime when provided', async () => {
-    const { calls } = mockFetchSeq([jsonResponse(200, { message_id: 'm' })]);
-    await sendMophTemplateAlert({
-      ...BASE_INPUT,
-      confirmUrl: 'https://app/case/1',
-      messageDatetime: '2026-11-21T03:00:00.000Z',
-    });
+  it('omits the optional app-inbox fields when not provided', async () => {
+    const { calls } = mockFetchSeq([jsonResponse(200, { message: 'Success', message_code: 200 })]);
+    await sendMophFreeFormAlert({ cid: CID_13, messages: [FLEX_MESSAGE] });
     const body = JSON.parse(calls[0].init.body as string);
-    expect(body.url).toBe('https://app/case/1');
-    expect(body.message_confirm_url).toBe('https://app/case/1');
-    expect(body.message_datetime).toBe('2026-11-21T03:00:00.000Z');
+    expect(body.cid).toEqual([CID_13]);
+    expect(body.messages).toEqual([FLEX_MESSAGE]);
+    expect(body.message_type).toBe('HPT');
+    expect(body.message_title).toBeUndefined();
+    expect(body.message_html).toBeUndefined();
+    expect(body.message_text).toBeUndefined();
   });
 
-  it('uses MOPH_ALERT_HEADER for header when set separately from template', async () => {
-    process.env.MOPH_ALERT_HEADER = 'หัวข้อเฉพาะ';
-    const { calls } = mockFetchSeq([jsonResponse(200, {})]);
-    await sendMophTemplateAlert(BASE_INPUT);
+  it('uses MOPH_ALERT_MESSAGE_TYPE when set', async () => {
+    process.env.MOPH_ALERT_MESSAGE_TYPE = 'XYZ';
+    const { calls } = mockFetchSeq([jsonResponse(200, { message: 'Success', message_code: 200 })]);
+    await sendMophFreeFormAlert({ cid: CID_13, messages: [FLEX_MESSAGE] });
     const body = JSON.parse(calls[0].init.body as string);
-    expect(body.template).toBe('แจ้งเตือนLRMS');
-    expect(body.header).toBe('หัวข้อเฉพาะ');
+    expect(body.message_type).toBe('XYZ');
   });
 
   it('validates cid is exactly 13 digits before calling fetch', async () => {
-    mockFetchSeq([jsonResponse(200, {})]);
+    mockFetchSeq([jsonResponse(200, { message: 'Success', message_code: 200 })]);
     await expect(
-      sendMophTemplateAlert({ ...BASE_INPUT, cid: '123' }),
+      sendMophFreeFormAlert({ ...BASE_INPUT, cid: '123' }),
     ).rejects.toMatchObject({ code: 'INVALID_CID' });
     await expect(
-      sendMophTemplateAlert({ ...BASE_INPUT, cid: '12345678901234' }),
+      sendMophFreeFormAlert({ ...BASE_INPUT, cid: '12345678901234' }),
     ).rejects.toMatchObject({ code: 'INVALID_CID' });
+  });
+
+  it('validates messages is a non-empty array of at most 5', async () => {
+    mockFetchSeq([jsonResponse(200, { message: 'Success', message_code: 200 })]);
+    await expect(
+      sendMophFreeFormAlert({ cid: CID_13, messages: [] }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(
+      sendMophFreeFormAlert({ cid: CID_13, messages: [1, 2, 3, 4, 5, 6] }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    // Exactly 5 — the PDF's cap — passes.
+    const res = await sendMophFreeFormAlert({
+      cid: CID_13,
+      messages: [{ type: 'text', text: 'x' }, 2, 3, 4, 5].map(() => FLEX_MESSAGE),
+    });
+    expect(res.success).toBe(true);
   });
 
   it('maps 401 → AUTH error (non-retryable)', async () => {
     mockFetchSeq([jsonResponse(401, { message: 'invalid client-key' })]);
-    await expect(sendMophTemplateAlert(BASE_INPUT)).rejects.toMatchObject({ code: 'AUTH' });
+    await expect(sendMophFreeFormAlert(BASE_INPUT)).rejects.toMatchObject({ code: 'AUTH' });
   });
 
   it('maps 422 → VALIDATION error (non-retryable)', async () => {
-    mockFetchSeq([jsonResponse(422, { message: 'template not found' })]);
-    await expect(sendMophTemplateAlert(BASE_INPUT)).rejects.toMatchObject({ code: 'VALIDATION' });
+    mockFetchSeq([jsonResponse(422, { message: 'messages validation failed' })]);
+    await expect(sendMophFreeFormAlert(BASE_INPUT)).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 
   it('retries only on 5xx with backoff, then gives up as RETRYABLE_EXHAUSTED', async () => {
@@ -158,7 +175,7 @@ describe('sendMophTemplateAlert', () => {
       jsonResponse(502, {}),
       jsonResponse(502, {}),
     ]);
-    const p = sendMophTemplateAlert(BASE_INPUT);
+    const p = sendMophFreeFormAlert(BASE_INPUT);
     const expectation = expect(p).rejects.toMatchObject({ code: 'RETRYABLE_EXHAUSTED' });
     await vi.advanceTimersByTimeAsync(1000);
     await expectation;
@@ -166,64 +183,67 @@ describe('sendMophTemplateAlert', () => {
   });
 
   it('succeeds after a transient 502', async () => {
-    mockFetchSeq([jsonResponse(502, {}), jsonResponse(200, { message_id: 'm2' })]);
-    const p = sendMophTemplateAlert(BASE_INPUT).then((r) => r);
+    mockFetchSeq([
+      jsonResponse(502, {}),
+      jsonResponse(200, { message: 'Success', message_code: 200, message_id: 'm2' }),
+    ]);
+    const p = sendMophFreeFormAlert(BASE_INPUT).then((r) => r);
     await vi.advanceTimersByTimeAsync(1000);
-    const res: MophTemplateAlertResponse = await p;
+    const res: MophFreeFormAlertResponse = await p;
     expect(res.messageId).toBe('m2');
+    expect(res.success).toBe(true);
   });
 
   it('does not retry on 400 (terminal CLIENT_ERROR)', async () => {
     const { calls } = mockFetchSeq([jsonResponse(400, { message: 'bad cid' })]);
-    await expect(sendMophTemplateAlert(BASE_INPUT)).rejects.toMatchObject({ code: 'CLIENT_ERROR' });
+    await expect(sendMophFreeFormAlert(BASE_INPUT)).rejects.toMatchObject({
+      code: 'CLIENT_ERROR',
+    });
     expect(calls).toHaveLength(1);
   });
 
   it('accepts any 2xx as success and extracts the message id defensively', async () => {
     for (const [status, raw, expectedId] of [
-      [200, { message_id: 'a' }, 'a'],
-      [201, { data: { message_id: 'b' } }, 'b'],
-      [202, { id: 'c' }, 'c'],
+      [200, { message: 'Success', message_code: 200 }, null],
+      [201, { message_id: 'a' }, 'a'],
+      [202, { data: { message_id: 'b' } }, 'b'],
+      [200, { id: 'c' }, 'c'],
       [200, {}, null],
       [200, { MessageCode: 200, Message: 'OK' }, null],
       // Explicit failure flag in the body → not a success even on 2xx.
       [200, { success: false }, null],
     ] as const) {
       mockFetchSeq([jsonResponse(status, raw)]);
-      const res = await sendMophTemplateAlert(BASE_INPUT);
+      const res = await sendMophFreeFormAlert(BASE_INPUT);
       expect(res.messageId).toBe(expectedId);
       expect(res.success).toBe(expectedId !== null ? true : raw.success !== false);
     }
   });
 
-  it('treats a BMS-style MessageCode ≠ 200 envelope as failure with its Message', async () => {
-    // hosxp.net/bmscloud endpoints return {MessageCode, Message} on HTTP 200 —
-    // a non-200 code means the template/cid was rejected even though the HTTP
-    // layer succeeded (the "ส่งสำเร็จ but nothing delivered" trap).
+  it('treats the documented message_code ≠ 200 envelope as failure with its message', async () => {
+    // The PDF documents 401-in-body shapes: a non-200 message_code means the
+    // send was rejected even though the HTTP layer succeeded (the
+    // "ส่งสำเร็จ but nothing delivered" trap).
     mockFetchSeq([
-      jsonResponse(200, { MessageCode: 400, Message: 'template not found', message_id: null }),
+      jsonResponse(200, {
+        message_code: 401,
+        message: 'client-key or secret-key incorrect',
+      }),
     ]);
-    const res = await sendMophTemplateAlert(BASE_INPUT);
+    const res = await sendMophFreeFormAlert(BASE_INPUT);
     expect(res.success).toBe(false);
-    expect(res.reason).toBe('template not found');
+    expect(res.reason).toBe('client-key or secret-key incorrect');
     expect(res.messageId).toBeNull();
-  });
 
-  it('treats the v3.1 lowercase message_code ≠ 200 envelope as failure', async () => {
-    // The live v3.1 endpoint's own envelope is lowercase {app_message,
-    // line_message, message_code} — a non-200 code there is the same trap as
-    // the PascalCase BMS one and must not pass as success.
-    mockFetchSeq([jsonResponse(200, { app_message: '', line_message: '', message_code: 400 })]);
-    const res = await sendMophTemplateAlert(BASE_INPUT);
-    expect(res.success).toBe(false);
-    expect(res.reason).toBe('message_code 400');
-    expect(res.messageId).toBeNull();
+    mockFetchSeq([jsonResponse(200, { message_code: 401, message: 'No Cid' })]);
+    const res2 = await sendMophFreeFormAlert(BASE_INPUT);
+    expect(res2.success).toBe(false);
+    expect(res2.reason).toBe('No Cid');
   });
 
   it('treats line_message "Error template" as failure even with message_code 200', async () => {
-    // Observed live body: MOPH accepts the request (message_code 200) but its
-    // template render failed and it substitutes the sentinel line_message
-    // "Error template" — nothing usable reaches LINE. Must NOT count as sent.
+    // Defensive carry-over from the template endpoint: a body that literally
+    // says this is never a delivered message.
     mockFetchSeq([
       jsonResponse(200, {
         app_message: '',
@@ -231,53 +251,33 @@ describe('sendMophTemplateAlert', () => {
         message_code: 200,
       }),
     ]);
-    const res = await sendMophTemplateAlert(BASE_INPUT);
+    const res = await sendMophFreeFormAlert(BASE_INPUT);
     expect(res.success).toBe(false);
     expect(res.reason).toContain('Error template');
     expect(res.messageId).toBeNull();
   });
-
-  it('still succeeds on the v3.1 envelope when line_message carries real content', async () => {
-    // Guard against over-flagging: a rendered line_message (any real text) with
-    // message_code 200 is a genuine success, not the sentinel.
-    mockFetchSeq([
-      jsonResponse(200, {
-        app_message: '',
-        line_message: 'แจ้งเตือนกรณีเสี่ยงสูง — รพ.ทดสอบ',
-        message_code: 200,
-      }),
-    ]);
-    const res = await sendMophTemplateAlert(BASE_INPUT);
-    expect(res.success).toBe(true);
-    expect(res.reason).toBeNull();
-  });
 });
 
-describe('mophTemplateConfigured', () => {
-  const ENV_KEYS = [
-    'MOPH_ALERT_CLIENT_KEY',
-    'MOPH_ALERT_SECRET_KEY',
-    'MOPH_ALERT_TEMPLATE',
-  ] as const;
+describe('mophFreeFormConfigured', () => {
+  const ENV_KEYS = ['MOPH_ALERT_CLIENT_KEY', 'MOPH_ALERT_SECRET_KEY'] as const;
   afterEach(() => {
     for (const k of ENV_KEYS) delete process.env[k];
   });
 
-  it('is true only when keys AND template are all set', () => {
+  it('is true when the key pair is set — no template name required anymore', () => {
     process.env.MOPH_ALERT_CLIENT_KEY = 'ck';
     process.env.MOPH_ALERT_SECRET_KEY = 'sk';
-    process.env.MOPH_ALERT_TEMPLATE = 'แจ้งเตือนLRMS';
-    expect(mophTemplateConfigured()).toBe(true);
+    expect(mophFreeFormConfigured()).toBe(true);
 
-    process.env.MOPH_ALERT_TEMPLATE = '';
-    expect(mophTemplateConfigured()).toBe(false); // template name missing
-
-    process.env.MOPH_ALERT_TEMPLATE = 'แจ้งเตือนLRMS';
     process.env.MOPH_ALERT_SECRET_KEY = '';
-    expect(mophTemplateConfigured()).toBe(false); // secret missing
+    expect(mophFreeFormConfigured()).toBe(false); // secret missing
+
+    process.env.MOPH_ALERT_SECRET_KEY = 'sk';
+    process.env.MOPH_ALERT_CLIENT_KEY = '';
+    expect(mophFreeFormConfigured()).toBe(false); // client key missing
   });
 
   it('is false when nothing is configured', () => {
-    expect(mophTemplateConfigured()).toBe(false);
+    expect(mophFreeFormConfigured()).toBe(false);
   });
 });

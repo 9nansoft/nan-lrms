@@ -1,0 +1,57 @@
+{
+	"info": {
+		"_postman_id": "17febce4-9c4f-4845-a698-0b8edf960f76",
+		"name": "API MOPH Alert Free Form version 3.1",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "20159153",
+		"_collection_link": "https://yellow-idea.postman.co/workspace/CMS-MOPH~7a1231c0-d334-4807-8023-50351b906b1e/collection/20159153-17febce4-9c4f-4845-a698-0b8edf960f76?action=share&source=collection_link&creator=20159153"
+	},
+	"item": [
+		{
+			"name": "API MOPH Alert version 3.1",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "client-key",
+						"value": "d849eaf2240c8d1a683280c73234fce075e2xxxx",
+						"type": "text"
+					},
+					{
+						"key": "secret-key",
+						"value": "QALRPFAANQESLIQRJKYNYE4Lxxxx",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"cid\": [\n        \"120970046xxxx\",\n        \"152990033xxxx\"\n    ],\n    \"messages\": [\n        {\n            \"text\": \"ทดสอบ API MOPH Alert version 3.1\",\n            \"type\": \"text\"\n        }\n    ],\n    \"message_title\": \"ทดสอบระบบ Alert 3.1\", //หัวข้อความตอนแจ้งเตือน\n    \"message_html\": \"<div><strong>สวัสดีครับ ยินดีต้อนรับสู่สำนักสุขภาพดิจิทัล เราใส่ใจในสุขภาพและความสบายใจของคุณทุกขั้น ตอน หากมีข้อสงสัยหรือสิ่งใดที่เราสามารถช่วยเหลือได้ กรุณาแจ้งเจ้าหน้าที่ได้เลยนะครับ</strong></div>\", //ข้อความข้างใน\n    \"message_text\": \"ทดสอบระบบ Alert 3.1\", //ชื่อในกล่องข้อความ,\n    \"message_type\": \"HPT\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://morpromt2c.moph.go.th/alert/v3.1/messages",
+					"protocol": "https",
+					"host": [
+						"morpromt2c",
+						"moph",
+						"go",
+						"th"
+					],
+					"path": [
+						"alert",
+						"v3.1",
+						"messages"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

@@ -50,7 +50,7 @@ services:
       NEXT_PUBLIC_PROVIDER_API_URL: ${NEXT_PUBLIC_PROVIDER_API_URL:-https://provider.id.th}
       # MOPH Prompt (LINE) alerts. The container only sees what THIS block
       # passes through — without these lines the app runs the pipeline on
-      # defaults (transport bms, no keys/template) no matter what the host
+      # defaults (transport bms, no keys) no matter what the host
       # .env says, which is why PRD alerts silently never delivered.
       MOPH_ALERTS_ENABLED: ${MOPH_ALERTS_ENABLED:-true}
       MOPH_PROMPT_API_URL: ${MOPH_PROMPT_API_URL:-https://sms.bmscloud.in.th/v1/moph/send-via-bms-session}
@@ -58,7 +58,6 @@ services:
       MOPH_ALERT_API_URL: ${MOPH_ALERT_API_URL:-https://morpromt2c.moph.go.th}
       MOPH_ALERT_CLIENT_KEY: ${MOPH_ALERT_CLIENT_KEY:-}
       MOPH_ALERT_SECRET_KEY: ${MOPH_ALERT_SECRET_KEY:-}
-      MOPH_ALERT_TEMPLATE: ${MOPH_ALERT_TEMPLATE:-}
       MOPH_ALERT_MESSAGE_TYPE: ${MOPH_ALERT_MESSAGE_TYPE:-HPT}
       MOPH_MAX_ALERTS_PER_DRAIN: ${MOPH_MAX_ALERTS_PER_DRAIN:-5}
       MOPH_PER_SEND_TIMEOUT_MS: ${MOPH_PER_SEND_TIMEOUT_MS:-3000}

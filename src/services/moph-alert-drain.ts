@@ -29,14 +29,14 @@
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 import { sendMophPrompt } from '@/services/moph-prompt';
-import { sendMophTemplateAlert } from '@/services/moph-alert-v31';
+import { sendMophFreeFormAlert } from '@/services/moph-alert-v31';
 import { resolveSessionIdForHospital } from '@/lib/bms-session';
 import {
   mophAlertsEnabled,
   mophAlertLimits,
   mophAlertLocalDate,
   mophAlertTransport,
-  mophTemplateConfigured,
+  mophFreeFormConfigured,
 } from '@/config/moph-alert-config';
 import { decryptSafe } from '@/lib/encryption';
 import { materializeDeferredAlertEvents } from '@/services/risk-alert';
@@ -46,6 +46,7 @@ import {
   alertTitle,
   type AlertSeverity,
   type AlertRecipientScope,
+  type BuildAlertFlexInput,
 } from '@/config/moph-alert-templates';
 
 export interface DrainOptions {
@@ -181,7 +182,7 @@ export async function drainMophAlerts(
 
   // Transport-specific pre-flight. Both paths are terminal on failure here:
   //   - bms: re-derive the per-hospital session once per drain (codex #6a).
-  //   - v3.1: static keys + the MOPH-approved template name MUST be configured.
+  //   - v3.1: the static client-key/secret-key pair MUST be configured.
   //     A config gap cannot heal by retrying, so claimed rows are dead-lettered
   //     with a config last_error the admin MOPH Alerts tab surfaces.
   const transport = mophAlertTransport();
@@ -207,11 +208,11 @@ export async function drainMophAlerts(
       logger.info('moph_alert_drain_done', { hospitalId, ...summary });
       return summary;
     }
-  } else if (!mophTemplateConfigured()) {
+  } else if (!mophFreeFormConfigured()) {
     logger.error('moph_alert_v31_not_configured', { hospitalId });
     const msg =
-      'v3.1 transport not configured: set MOPH_ALERT_TEMPLATE (MOPH-approved name) ' +
-      'and MOPH_ALERT_CLIENT_KEY / MOPH_ALERT_SECRET_KEY';
+      'v3.1 free-form transport not configured: set MOPH_ALERT_CLIENT_KEY ' +
+      'and MOPH_ALERT_SECRET_KEY';
     await db.query(
       `UPDATE moph_alert_log
        SET status = 'failed', claimed_at = NULL, attempts = attempts + 1,
@@ -341,10 +342,11 @@ async function sendOne(
   }
 }
 
-/** Send one claimed row through the MOPH Alert Template API v3.1. Same claim,
- *  budget, and error policy as the bms path — only the sender and the message
- *  rendering differ (message_html/message_text instead of a Flex bubble), with
- *  IDENTICAL PDPA scope rules via buildAlertMessage. */
+/** Send one claimed row through the MOPH Alert Free Form API v3.1. Same claim,
+ *  budget, and error policy as the bms path — only the sender differs. The
+ *  LINE side carries a Flex bubble built by the SAME builder as bms
+ *  (buildAlertFlex, IDENTICAL PDPA scope rules); message_title/html/text ride
+ *  along as the API's optional หมอพร้อม app-inbox fields. */
 async function sendOneTemplate(
   db: DatabaseAdapter,
   row: ClaimedRow,
@@ -356,10 +358,12 @@ async function sendOneTemplate(
     const scope = row.recipient_scope as AlertRecipientScope;
     const hospitalName = row.hospital_name ?? row.origin_hcode;
     // Patient name decrypts ONLY for hospital_staff scope (PDPA); center/self
-    // rows store none. Aggregate detail strips identifiers inside the builder.
+    // rows store none. Aggregate detail strips identifiers inside the builders.
     const patientName = scope === 'hospital_staff' ? decryptSafe(row.patient_name_enc) : null;
     const detailLevel = row.detail_level === 'full' ? 'full' : 'aggregate';
-    const { html, text } = buildAlertMessage({
+    // Annotated: without the contextual type the ternary widens to `string`
+    // and both builders reject the literal-union detailLevel.
+    const flexInput: BuildAlertFlexInput = {
       severity,
       recipientScope: scope,
       detailLevel,
@@ -367,15 +371,21 @@ async function sendOneTemplate(
       caseRef: row.case_id,
       patientName,
       confirmUrl: row.confirm_url ?? null,
-    });
-    const res = await sendMophTemplateAlert({
+    };
+    // buildAlertFlex returns a BARE bubble; the free-form `messages` array
+    // needs a full LINE message object, so wrap it here (the bms path's
+    // send-via-bms-session endpoint does the same wrap with `title` as
+    // altText). altText is what LINE shows on the lock screen / in chats
+    // that can't render flex.
+    const bubble = buildAlertFlex(flexInput);
+    const flexMessage = { type: 'flex', altText: row.title, contents: bubble };
+    const { html, text } = buildAlertMessage(flexInput);
+    const res = await sendMophFreeFormAlert({
       cid: row.recipient_cid,
-      name: row.recipient_name ?? '',
+      messages: [flexMessage],
       messageTitle: row.title,
       messageHtml: html,
       messageText: text,
-      confirmUrl: row.confirm_url ?? null,
-      messageDatetime: row.created_at ? new Date(row.created_at).toISOString() : null,
     });
     const finalStatus = res.success ? 'sent' : 'failed';
     await db.query(

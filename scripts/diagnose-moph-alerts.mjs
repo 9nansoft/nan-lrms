@@ -49,16 +49,14 @@ const table = (title, rows) => {
 // ---- 1. switches ------------------------------------------------------------
 const transport = process.env.MOPH_TRANSPORT?.trim().toLowerCase() === 'v3.1' ? 'v3.1' : 'bms';
 const v31Ready = Boolean(
-  process.env.MOPH_ALERT_CLIENT_KEY?.trim() &&
-    process.env.MOPH_ALERT_SECRET_KEY?.trim() &&
-    process.env.MOPH_ALERT_TEMPLATE?.trim(),
+  process.env.MOPH_ALERT_CLIENT_KEY?.trim() && process.env.MOPH_ALERT_SECRET_KEY?.trim(),
 );
 console.log(`\n== switches ==`);
 console.log(`  MOPH_ALERTS_ENABLED : ${process.env.MOPH_ALERTS_ENABLED ?? 'true (default)'}`);
 console.log(`  MOPH_TRANSPORT      : ${transport}`);
 console.log(`  ENCRYPTION_KEY      : ${process.env.ENCRYPTION_KEY ? 'set' : 'MISSING — enqueue silently drops alerts with a patient name'}`);
 if (transport === 'v3.1') {
-  console.log(`  v3.1 keys+template  : ${v31Ready ? 'configured' : 'NOT configured — every send dead-letters (fill MOPH_ALERT_TEMPLATE/keys, or set MOPH_TRANSPORT=bms)'}`);
+  console.log(`  v3.1 keys           : ${v31Ready ? 'configured' : 'NOT configured — every send dead-letters (fill MOPH_ALERT_CLIENT_KEY/MOPH_ALERT_SECRET_KEY, or set MOPH_TRANSPORT=bms)'}`);
 }
 
 // ---- 2. recipient readiness -------------------------------------------------

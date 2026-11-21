@@ -14,9 +14,11 @@ export function mophPromptApiUrl(): string {
 }
 
 // ---------------------------------------------------------------------------
-// MOPH Alert Template API v3.1 transport (docs/API MOPH Alert Template
-// V3.1.postman_collection.json): POST <url>/alert/v3.1/template with static
-// client-key/secret-key headers — no per-hospital BMS session. Selected via
+// MOPH Alert Free Form API v3.1 transport (docs/API MOPH Alert Free Form
+// version 3.1.postman_collection.json + docs/API Alert Free Form JSON 3.1.pdf):
+// POST <url>/alert/v3.1/messages with static client-key/secret-key headers —
+// no per-hospital BMS session, and NO MOPH-registered template needed (the
+// message content is caller-built LINE Messaging API objects). Selected via
 // MOPH_TRANSPORT; the default 'bms' keeps every existing deployment unchanged.
 // ---------------------------------------------------------------------------
 
@@ -46,30 +48,20 @@ export function mophAlertKeys(): MophAlertKeys {
   };
 }
 
-export interface MophAlertTemplateConfig {
-  /** Registered template name — REQUIRED, MOPH approves one per app. */
-  template: string;
-  /** Message header; falls back to the template name (samples set both alike). */
-  header: string;
-}
-
-export function mophAlertTemplate(): MophAlertTemplateConfig {
-  const template = process.env.MOPH_ALERT_TEMPLATE?.trim() ?? '';
-  return { template, header: process.env.MOPH_ALERT_HEADER?.trim() || template };
-}
-
 /** Message type tag from the collection samples ('HPT' in every request). */
 export function mophAlertMessageType(): string {
   return process.env.MOPH_ALERT_MESSAGE_TYPE?.trim() || 'HPT';
 }
 
-/** True when the v3.1 transport has everything it needs to send. Missing keys
- *  or the MOPH-approved template name is a configuration error, not a transient
- *  failure — the drain dead-letters rows with a clear last_error instead of
- *  retrying forever. */
-export function mophTemplateConfigured(): boolean {
+/** True when the v3.1 free-form transport has everything it needs to send:
+ *  just the static key pair. Missing keys are a configuration error, not a
+ *  transient failure — the drain dead-letters rows with a clear last_error
+ *  instead of retrying forever. (The old template endpoint also required a
+ *  MOPH-registered template name; free form removed that requirement, and
+ *  MOPH_ALERT_TEMPLATE with it.) */
+export function mophFreeFormConfigured(): boolean {
   const { clientKey, secretKey } = mophAlertKeys();
-  return Boolean(clientKey && secretKey && mophAlertTemplate().template);
+  return Boolean(clientKey && secretKey);
 }
 
 /** Master switch. When false, producers enqueue nothing and the drain is a no-op. */

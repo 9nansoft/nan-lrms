@@ -14,11 +14,11 @@
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 import { sendMophPrompt } from '@/services/moph-prompt';
-import { sendMophTemplateAlert } from '@/services/moph-alert-v31';
+import { sendMophFreeFormAlert } from '@/services/moph-alert-v31';
 import { resolveSessionIdForHospital } from '@/lib/bms-session';
 import {
   mophAlertTransport,
-  mophTemplateConfigured,
+  mophFreeFormConfigured,
   type MophAlertTransport,
 } from '@/config/moph-alert-config';
 
@@ -38,11 +38,16 @@ export interface SelfTestResult {
   messageId: string | null;
 }
 
-/** The fixed test copy — identical content for both transports. */
+/** The fixed test copy — identical content for both transports. The bubble is
+ *  the same shape a real alert sends through the free-form `messages` array
+ *  (a wrapped buildAlertFlex-style bubble), so the self-test exercises the
+ *  real wire content, not a simplified one. Concrete hex colors — LINE Flex
+ *  cannot read CSS vars (see moph-alert-templates.ts). */
 function testMessage(name: string): {
   title: string;
   html: string;
   text: string;
+  bubble: Record<string, unknown>;
 } {
   const when = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
   return {
@@ -57,6 +62,32 @@ function testMessage(name: string): {
       `ระบบ LRMS ทดสอบการส่ง LINE ถึงคุณ${name}\n` +
       `เวลา: ${when}\n` +
       `หากได้รับข้อความนี้ แสดงว่าการแจ้งเตือนของท่านพร้อมใช้งาน`,
+    bubble: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          {
+            type: 'text',
+            text: 'ข้อความทดสอบแจ้งเตือน',
+            weight: 'bold',
+            size: 'xl',
+            color: '#2563eb',
+            wrap: true,
+          },
+          { type: 'text', text: `ระบบ LRMS ทดสอบการส่ง LINE ถึงคุณ${name}`, wrap: true },
+          { type: 'text', text: `เวลา: ${when}`, size: 'sm', wrap: true },
+          {
+            type: 'text',
+            text: 'หากได้รับข้อความนี้ แสดงว่าการแจ้งเตือนของท่านพร้อมใช้งาน',
+            size: 'sm',
+            color: '#6b7280',
+            wrap: true,
+          },
+        ],
+      },
+    },
   };
 }
 
@@ -70,7 +101,7 @@ function thaiReason(error: unknown): string {
     case 'AUTH':
       return 'API ปฏิเสธการยืนยันตัวตน (client-key/secret-key หรือ BMS session ไม่ถูกต้อง)';
     case 'VALIDATION':
-      return 'API ปฏิเสธ template — ตรวจสอบว่า MOPH_ALERT_TEMPLATE ตรงกับชื่อที่ MOPH จดทะเบียน';
+      return 'API ปฏิเสธข้อมูลที่ส่ง (messages/cid ไม่ผ่านเงื่อนไข) — ดู log moph_alert_v31_response บนเซิร์ฟเวอร์';
     case 'CLIENT_ERROR':
       return `API ปฏิเสธคำขอ (${code})`;
     case 'RETRYABLE_EXHAUSTED':
@@ -92,19 +123,19 @@ export async function sendSelfTestNotification(
   const msg = testMessage(input.name);
   try {
     if (transport === 'v3.1') {
-      if (!mophTemplateConfigured()) {
+      if (!mophFreeFormConfigured()) {
         return {
           ok: false,
           transport,
           detail:
-            'ระบบยังไม่พร้อมส่ง: ต้องตั้งค่า MOPH_ALERT_TEMPLATE (ชื่อ template ที่ MOPH จดทะเบียน) ' +
-            'และ MOPH_ALERT_CLIENT_KEY / MOPH_ALERT_SECRET_KEY ก่อน — แจ้งผู้ดูแลระบบ',
+            'ระบบยังไม่พร้อมส่ง: ต้องตั้งค่า MOPH_ALERT_CLIENT_KEY และ MOPH_ALERT_SECRET_KEY ' +
+            '(จาก CMS MOPH ALERTING) ก่อน — แจ้งผู้ดูแลระบบ',
           messageId: null,
         };
       }
-      const res = await sendMophTemplateAlert({
+      const res = await sendMophFreeFormAlert({
         cid: input.cid,
-        name: input.name,
+        messages: [{ type: 'flex', altText: msg.title, contents: msg.bubble }],
         messageTitle: msg.title,
         messageHtml: msg.html,
         messageText: msg.text,
@@ -115,7 +146,7 @@ export async function sendSelfTestNotification(
           transport,
           detail:
             `API ตอบรับคำขอ แต่แจ้งว่ายังไม่ส่ง${res.reason ? ` — เหตุผล: ${res.reason}` : ''}. ` +
-            'ตรวจชื่อ template และ CID กับ MOPH หรือดู log moph_alert_v31_response บนเซิร์ฟเวอร์',
+            'ตรวจ client-key/secret-key และ CID กับ MOPH หรือดู log moph_alert_v31_response บนเซิร์ฟเวอร์',
           messageId: res.messageId,
         };
       }
