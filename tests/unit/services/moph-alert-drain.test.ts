@@ -41,6 +41,12 @@ vi.mock('@/lib/bms-session', async () => {
   };
 });
 
+// Mock the v3.1 template sender — the drain picks it via MOPH_TRANSPORT='v3.1'.
+const mockSendTemplate = vi.fn();
+vi.mock('@/services/moph-alert-v31', () => ({
+  sendMophTemplateAlert: (...args: unknown[]) => mockSendTemplate(...args),
+}));
+
 async function seedPendingRow(
   db: PgliteAdapter,
   hospitalId: string,
@@ -53,6 +59,8 @@ async function seedPendingRow(
     patientName: string | null;
     localDate: string;
     attempts: number;
+    detailLevel: string;
+    recipientName: string | null;
   }> = {},
 ): Promise<string> {
   const id = randomUUID();
@@ -66,9 +74,9 @@ async function seedPendingRow(
   await db.query(
     `INSERT INTO moph_alert_log
        (id, case_id, hospital_id, origin_hcode, hospital_name, recipient_cid, recipient_scope,
-        alert_source, severity, rule_id, title, patient_name_enc, status, attempts,
-        local_date, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$14,$13,NOW(),NOW())`,
+        recipient_name, detail_level, alert_source, severity, rule_id, title, patient_name_enc,
+        status, attempts, local_date, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending',$16,$15,NOW(),NOW())`,
     [
       id,
       overrides.severity === 'emergency' ? 'case-em' : 'case-high',
@@ -77,6 +85,8 @@ async function seedPendingRow(
       'รพ.น่าน',
       overrides.recipientCid ?? '3320500282121',
       scope,
+      overrides.recipientName ?? 'นพ. ผู้รับ',
+      overrides.detailLevel ?? 'full',
       overrides.alertSource ?? 'anc_hr3',
       overrides.severity ?? 'high',
       overrides.ruleId ?? 'hr3',
@@ -88,6 +98,14 @@ async function seedPendingRow(
     ],
   );
   return id;
+}
+
+/** Point the drain at the v3.1 template transport with a fully-configured env. */
+function useV31Transport(): void {
+  process.env.MOPH_TRANSPORT = 'v3.1';
+  process.env.MOPH_ALERT_CLIENT_KEY = 'ck-test';
+  process.env.MOPH_ALERT_SECRET_KEY = 'sk-test';
+  process.env.MOPH_ALERT_TEMPLATE = 'แจ้งเตือนLRMS';
 }
 
 describe('drainMophAlerts', () => {
@@ -108,10 +126,21 @@ describe('drainMophAlerts', () => {
       messageId: 'msg-ok',
       line: { success: true, status: 'success' },
     });
+    mockSendTemplate.mockResolvedValue({ messageId: 'msg-ok', success: true });
+    // Default env is the bms transport — v3.1 tests opt in via useV31Transport().
+    delete process.env.MOPH_TRANSPORT;
   });
   afterEach(async () => {
     await db.close();
     vi.clearAllMocks();
+    for (const k of [
+      'MOPH_TRANSPORT',
+      'MOPH_ALERT_CLIENT_KEY',
+      'MOPH_ALERT_SECRET_KEY',
+      'MOPH_ALERT_TEMPLATE',
+    ]) {
+      delete process.env[k];
+    }
   });
 
   it('pops pending rows, sends each, marks sent + message_id', async () => {
@@ -508,5 +537,101 @@ describe('drainMophAlerts', () => {
     } finally {
       delete process.env.MOPH_ALERT_RETENTION_DAYS;
     }
+  });
+
+  // ---- v3.1 template transport (docs/API MOPH Alert Template V3.1) ----------
+  it('v3.1: sends the template message WITHOUT any BMS session resolution', async () => {
+    useV31Transport();
+    const id = await seedPendingRow(db, hospitalId, { recipientName: 'นพ. ก' });
+    const summary = await drainMophAlerts(db, hospitalId, {
+      maxAlerts: 5,
+      perSendTimeoutMs: 1000,
+      budgetMs: 5000,
+    });
+    expect(summary.sent).toBe(1);
+    // The v3.1 transport authenticates with static keys — no session, no BMS sender.
+    expect(mockResolveSession).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockSendTemplate).toHaveBeenCalledTimes(1);
+    const arg = mockSendTemplate.mock.calls[0][0];
+    expect(arg.cid).toBe('3320500282121');
+    expect(arg.name).toBe('นพ. ก'); // persisted recipient name
+    expect(arg.messageTitle).toBe('แจ้งเตือน');
+    // Full-detail staff row: severity label, hospital, case ref, patient name.
+    expect(arg.messageHtml).toContain('เสี่ยงสูง');
+    expect(arg.messageHtml).toContain('รพ.น่าน');
+    expect(arg.messageHtml).toContain('case-high');
+    expect(arg.messageHtml).toContain('น.ส. A');
+    // text twin has the same content without markup.
+    expect(arg.messageText).toContain('case-high');
+    expect(arg.messageText).not.toContain('<');
+    expect(arg.messageDatetime).toBeTruthy();
+    const rows = await db.query<{ status: string; message_id: string; api_status: string }>(
+      `SELECT status, message_id, api_status FROM moph_alert_log WHERE id = $1`,
+      [id],
+    );
+    expect(rows[0].status).toBe('sent');
+    expect(rows[0].message_id).toBe('msg-ok');
+    expect(rows[0].api_status).toBe('success');
+  });
+
+  it('v3.1: aggregate row strips the case ref and patient name from the message (PDPA)', async () => {
+    useV31Transport();
+    await seedPendingRow(db, hospitalId, {
+      recipientScope: 'self_subscribed',
+      patientName: null,
+      detailLevel: 'aggregate',
+    });
+    await drainMophAlerts(db, hospitalId, {
+      maxAlerts: 5,
+      perSendTimeoutMs: 1000,
+      budgetMs: 5000,
+    });
+    expect(mockSendTemplate).toHaveBeenCalledTimes(1);
+    const html = String(mockSendTemplate.mock.calls[0][0].messageHtml);
+    expect(html).not.toContain('case-high');
+    expect(html).not.toContain('น.ส. A');
+    expect(html).toContain('เสี่ยงสูง');
+    expect(html).toContain('รพ.น่าน');
+  });
+
+  it('v3.1: retryable failure keeps the row pending under the same policy as bms', async () => {
+    useV31Transport();
+    const id = await seedPendingRow(db, hospitalId);
+    mockSendTemplate.mockRejectedValueOnce(
+      Object.assign(new Error('502'), { code: 'RETRYABLE_EXHAUSTED', statusCode: 502 }),
+    );
+    const summary = await drainMophAlerts(db, hospitalId, {
+      maxAlerts: 5,
+      perSendTimeoutMs: 1000,
+      budgetMs: 5000,
+    });
+    expect(summary.sent).toBe(0);
+    expect(summary.retryable).toBe(1);
+    const rows = await db.query<{ status: string; attempts: number }>(
+      `SELECT status, attempts FROM moph_alert_log WHERE id = $1`,
+      [id],
+    );
+    expect(rows[0].status).toBe('pending');
+    expect(rows[0].attempts).toBe(1);
+  });
+
+  it('v3.1: missing key/template configuration dead-letters claimed rows with a config last_error', async () => {
+    process.env.MOPH_TRANSPORT = 'v3.1'; // no keys, no MOPH_ALERT_TEMPLATE
+    const id = await seedPendingRow(db, hospitalId);
+    const summary = await drainMophAlerts(db, hospitalId, {
+      maxAlerts: 5,
+      perSendTimeoutMs: 1000,
+      budgetMs: 5000,
+    });
+    expect(summary.sent).toBe(0);
+    expect(summary.failed).toBe(1);
+    expect(mockSendTemplate).not.toHaveBeenCalled();
+    const rows = await db.query<{ status: string; last_error: string | null }>(
+      `SELECT status, last_error FROM moph_alert_log WHERE id = $1`,
+      [id],
+    );
+    expect(rows[0].status).toBe('failed');
+    expect(rows[0].last_error).toMatch(/MOPH_ALERT_TEMPLATE|configured/i);
   });
 });

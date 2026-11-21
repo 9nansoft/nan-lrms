@@ -2,7 +2,7 @@
 // Pins the PDPA rule (codex #6c): province-center scope MUST NOT carry patient
 // name/cid; hospital-staff scope MAY carry a limited patient reference.
 import { describe, it, expect } from 'vitest';
-import { buildAlertFlex, alertTitle } from '@/config/moph-alert-templates';
+import { buildAlertFlex, buildAlertMessage, alertTitle } from '@/config/moph-alert-templates';
 
 const HOSP = 'รพ.ขอนแก่น';
 const CASE = 'ANC-2026-0001';
@@ -136,5 +136,94 @@ describe('buildAlertFlex', () => {
     expect(alertTitle({ severity: 'high', hospitalName: HOSP })).toContain('เสี่ยงสูง');
     expect(alertTitle({ severity: 'emergency', hospitalName: HOSP })).toContain('ฉุกเฉิน');
     expect(alertTitle({ severity: 'high', hospitalName: HOSP })).toContain(HOSP);
+  });
+});
+
+// buildAlertMessage renders the same scope-aware content as buildAlertFlex, but
+// as the simple HTML/text the MOPH Alert Template API v3.1 expects
+// (message_html / message_text fields — collection samples use
+// <div><strong>…</strong></div>, not LINE Flex).
+describe('buildAlertMessage', () => {
+  it('full hospital-staff message carries severity, hospital, case ref, patient name, and confirm link', () => {
+    const msg = buildAlertMessage({
+      severity: 'high',
+      recipientScope: 'hospital_staff',
+      hospitalName: HOSP,
+      caseRef: CASE,
+      patientName: 'น.ส. A',
+      confirmUrl: 'https://app/case/ANC-2026-0001',
+    });
+    expect(msg.html).toContain('เสี่ยงสูง');
+    expect(msg.html).toContain(HOSP);
+    expect(msg.html).toContain(CASE);
+    expect(msg.html).toContain('น.ส. A');
+    expect(msg.html).toContain('<div');
+    expect(msg.html).toContain('<strong>');
+    expect(msg.html).toContain('href="https://app/case/ANC-2026-0001"');
+    // Plain text version: same content, no tags.
+    expect(msg.text).toContain('เสี่ยงสูง');
+    expect(msg.text).toContain(CASE);
+    expect(msg.text).not.toContain('<');
+    expect(msg.text).not.toContain('>');
+  });
+
+  it('aggregate detail carries NO case reference and NO patient name (PDPA), same as Flex', () => {
+    const CID_CASE = 'ANC-3320500282121-G2';
+    const msg = buildAlertMessage({
+      severity: 'high',
+      recipientScope: 'self_subscribed',
+      detailLevel: 'aggregate',
+      hospitalName: HOSP,
+      caseRef: CID_CASE,
+      patientName: 'น.ส. A',
+      confirmUrl: 'https://app/case/x',
+    });
+    expect(msg.html).not.toContain(CID_CASE);
+    expect(msg.html).not.toContain('3320500282121');
+    expect(msg.html).not.toContain('น.ส. A');
+    // …but still a usable alert: severity and origin hospital remain.
+    expect(msg.html).toContain('เสี่ยงสูง');
+    expect(msg.html).toContain(HOSP);
+    // The deep link is withheld at aggregate detail too.
+    expect(msg.html).not.toContain('https://app/case/x');
+  });
+
+  it('province_center scope contains NO patient name (PDPA)', () => {
+    const msg = buildAlertMessage({
+      severity: 'high',
+      recipientScope: 'province_center',
+      hospitalName: HOSP,
+      caseRef: CASE,
+      patientName: 'น.ส. A',
+    });
+    expect(msg.html).toContain(HOSP);
+    expect(msg.html).toContain(CASE);
+    expect(msg.html).not.toContain('น.ส. A');
+    expect(msg.html).toContain('ศูนย์กลาง');
+  });
+
+  it('emergency severity uses its Thai label and escapes HTML-unsafe characters', () => {
+    const msg = buildAlertMessage({
+      severity: 'emergency',
+      recipientScope: 'hospital_staff',
+      hospitalName: HOSP,
+      caseRef: CASE,
+      patientName: '<script>&x',
+    });
+    expect(msg.html).toContain('ฉุกเฉิน');
+    // Patient-controlled text must not inject markup.
+    expect(msg.html).toContain('&lt;script&gt;&amp;x');
+    expect(msg.html).not.toContain('<script>');
+  });
+
+  it('omits the anchor when no confirmUrl', () => {
+    const msg = buildAlertMessage({
+      severity: 'high',
+      recipientScope: 'hospital_staff',
+      hospitalName: HOSP,
+      caseRef: CASE,
+    });
+    expect(msg.html).not.toContain('<a ');
+    expect(msg.html).not.toContain('href');
   });
 });

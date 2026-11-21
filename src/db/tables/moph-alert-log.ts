@@ -42,6 +42,13 @@ export const mophAlertLogTable: TableDefinition = {
     { name: 'hospital_name', type: 'string', maxLength: 255, nullable: true },
     { name: 'recipient_cid', type: 'string', maxLength: 13 },
     { name: 'recipient_scope', type: 'string', maxLength: 20 },
+    // Display name of the RECIPIENT (consult doctor / center monitor /
+    // subscriber — NOT the patient, that is patient_name_enc). Persisted at
+    // enqueue so the MOPH Alert Template API v3.1's `name` field
+    // (docs/API MOPH Alert Template V3.1.postman_collection.json) can be
+    // filled at drain time. Nullable: rows predating the column send an
+    // empty name.
+    { name: 'recipient_name', type: 'string', maxLength: 200, nullable: true },
     // How much this recipient may see when the drain renders the message.
     // 'full' by default so rows written before this column existed — and every
     // consult-doctor / center-monitor row, which are admin-configured clinical

@@ -137,7 +137,8 @@ describe('risk-alert enqueue orchestrator', () => {
       recipient_scope: string;
       hospital_name: string | null;
       patient_name_enc: string | null;
-    }>(`SELECT recipient_scope, hospital_name, patient_name_enc FROM moph_alert_log`);
+      recipient_name: string | null;
+    }>(`SELECT recipient_scope, hospital_name, patient_name_enc, recipient_name FROM moph_alert_log`);
     const staff = rows.find((r) => r.recipient_scope === 'hospital_staff')!;
     const center = rows.find((r) => r.recipient_scope === 'province_center')!;
     // hospital_name stored on both (it's the sender context, not patient PII)
@@ -147,6 +148,9 @@ describe('risk-alert enqueue orchestrator', () => {
     expect(staff.patient_name_enc).not.toBeNull();
     expect(decryptSafe(staff.patient_name_enc)).toBe('น.ส. เอ');
     expect(center.patient_name_enc).toBeNull();
+    // the RECIPIENT's own name is persisted for the v3.1 template `name` field
+    expect(staff.recipient_name).toBe('นพ. ก');
+    expect(center.recipient_name).toBe('ศูนย์กลาง ขก.');
   });
 
   it('dedup: second enqueue same key same day → no new rows (conflict-skip)', async () => {

@@ -37,6 +37,7 @@ describe('moph_alert_log + moph_center_monitors tables', () => {
       'origin_hcode',
       'recipient_cid',
       'recipient_scope',
+      'recipient_name',
       'alert_source',
       'severity',
       'rule_id',

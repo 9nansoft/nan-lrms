@@ -29,12 +29,20 @@
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 import { sendMophPrompt } from '@/services/moph-prompt';
+import { sendMophTemplateAlert } from '@/services/moph-alert-v31';
 import { resolveSessionIdForHospital } from '@/lib/bms-session';
-import { mophAlertsEnabled, mophAlertLimits, mophAlertLocalDate } from '@/config/moph-alert-config';
+import {
+  mophAlertsEnabled,
+  mophAlertLimits,
+  mophAlertLocalDate,
+  mophAlertTransport,
+  mophTemplateConfigured,
+} from '@/config/moph-alert-config';
 import { decryptSafe } from '@/lib/encryption';
 import { materializeDeferredAlertEvents } from '@/services/risk-alert';
 import {
   buildAlertFlex,
+  buildAlertMessage,
   alertTitle,
   type AlertSeverity,
   type AlertRecipientScope,
@@ -63,6 +71,8 @@ interface ClaimedRow {
   hospital_name: string | null;
   recipient_cid: string;
   recipient_scope: string;
+  /** The RECIPIENT's display name (v3.1 template API `name`); null pre-column. */
+  recipient_name: string | null;
   /** 'full' | 'aggregate'; nullable only defensively — the column has a default. */
   detail_level: string | null;
   alert_source: string;
@@ -72,6 +82,8 @@ interface ClaimedRow {
   patient_name_enc: string | null;
   confirm_url: string | null;
   attempts: number;
+  /** Raised time — becomes the v3.1 message_datetime. */
+  created_at: string;
 }
 
 const RETRYABLE_CODES = new Set(['RETRYABLE', 'RETRYABLE_EXHAUSTED']);
@@ -150,8 +162,8 @@ export async function drainMophAlerts(
        FOR UPDATE SKIP LOCKED
      )
      RETURNING id, case_id, hospital_id, origin_hcode, hospital_name, recipient_cid,
-              recipient_scope, detail_level, alert_source, severity, rule_id, title,
-              patient_name_enc, confirm_url, attempts`,
+              recipient_scope, recipient_name, detail_level, alert_source, severity,
+              rule_id, title, patient_name_enc, confirm_url, attempts, created_at`,
     [hospitalId, maxAlerts],
   );
 
@@ -167,27 +179,48 @@ export async function drainMophAlerts(
 
   if (claimed.length === 0) return summary;
 
-  // Re-derive a session once per drain (covers codex #6a session expiry). If it
-  // fails, release the claims back to pending with a per-row last_error so
-  // operators can see the cause (codex gap-sweep: was silent).
-  let sessionId: string;
-  try {
-    sessionId = await resolveSessionIdForHospital(db, hospitalId);
-  } catch (err) {
-    logger.warn('moph_alert_drain_no_session', { hospitalId, error: String(err) });
-    const msg = `session re-derive failed: ${String((err as Error)?.message ?? err)}`;
-    // Same dead-letter ceiling as a retryable send failure (see sendOne).
-    const released = await db.query<{ status: string }>(
+  // Transport-specific pre-flight. Both paths are terminal on failure here:
+  //   - bms: re-derive the per-hospital session once per drain (codex #6a).
+  //   - v3.1: static keys + the MOPH-approved template name MUST be configured.
+  //     A config gap cannot heal by retrying, so claimed rows are dead-lettered
+  //     with a config last_error the admin MOPH Alerts tab surfaces.
+  const transport = mophAlertTransport();
+  let sessionId = '';
+  if (transport === 'bms') {
+    try {
+      sessionId = await resolveSessionIdForHospital(db, hospitalId);
+    } catch (err) {
+      logger.warn('moph_alert_drain_no_session', { hospitalId, error: String(err) });
+      const msg = `session re-derive failed: ${String((err as Error)?.message ?? err)}`;
+      // Same dead-letter ceiling as a retryable send failure (see sendOne).
+      const released = await db.query<{ status: string }>(
+        `UPDATE moph_alert_log
+         SET status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE 'pending' END,
+             claimed_at = NULL, attempts = attempts + 1,
+             last_error = $1, updated_at = NOW()
+         WHERE id::text = ANY($2::text[]) AND status = 'processing'
+         RETURNING status`,
+        [msg, claimed.map((r) => r.id), limits.max502Retries],
+      );
+      summary.failed = released.filter((r) => r.status === 'failed').length;
+      summary.retryable = released.length - summary.failed;
+      logger.info('moph_alert_drain_done', { hospitalId, ...summary });
+      return summary;
+    }
+  } else if (!mophTemplateConfigured()) {
+    logger.error('moph_alert_v31_not_configured', { hospitalId });
+    const msg =
+      'v3.1 transport not configured: set MOPH_ALERT_TEMPLATE (MOPH-approved name) ' +
+      'and MOPH_ALERT_CLIENT_KEY / MOPH_ALERT_SECRET_KEY';
+    await db.query(
       `UPDATE moph_alert_log
-       SET status = CASE WHEN attempts + 1 >= $3 THEN 'failed' ELSE 'pending' END,
-           claimed_at = NULL, attempts = attempts + 1,
+       SET status = 'failed', claimed_at = NULL, attempts = attempts + 1,
            last_error = $1, updated_at = NOW()
-       WHERE id::text = ANY($2::text[]) AND status = 'processing'
-       RETURNING status`,
-      [msg, claimed.map((r) => r.id), limits.max502Retries],
+       WHERE id::text = ANY($2::text[]) AND status = 'processing'`,
+      [msg, claimed.map((r) => r.id)],
     );
-    summary.failed = released.filter((r) => r.status === 'failed').length;
-    summary.retryable = released.length - summary.failed;
+    summary.failed = claimed.length;
+    logger.info('moph_alert_drain_done', { hospitalId, ...summary });
     return summary;
   }
 
@@ -203,7 +236,11 @@ export async function drainMophAlerts(
       break;
     }
     sentIdx++;
-    await sendOne(db, row, sessionId, summary, limits.max502Retries);
+    if (transport === 'bms') {
+      await sendOne(db, row, sessionId, summary, limits.max502Retries);
+    } else {
+      await sendOneTemplate(db, row, summary, limits.max502Retries);
+    }
   }
   logger.info('moph_alert_drain_done', { hospitalId, ...summary });
   return summary;
@@ -300,35 +337,102 @@ async function sendOne(
     else if (finalStatus === 'skipped') summary.skipped++;
     else summary.failed++;
   } catch (err) {
-    // Duck-type on `.code` rather than `instanceof MophPromptError`: under
-    // vi.mock the imported class identity differs from thrown instances, and
-    // upstream may reject with a decorated Error regardless. Property-check
-    // is resilient to both.
-    const code =
-      typeof err === 'object' && err !== null && 'code' in err
-        ? String((err as { code: unknown }).code)
-        : 'UNKNOWN';
-    const isRetryable = RETRYABLE_CODES.has(code);
-    const nextAttempts = row.attempts + 1;
-    // Dead-letter: a retryable row that has exhausted maxAttempts goes to
-    // `failed` (terminal) so it can't loop forever and starve newer alerts.
-    const status =
-      isRetryable && nextAttempts >= maxAttempts
-        ? 'failed'
-        : isRetryable
-          ? 'pending'
-          : TERMINAL_CODES.has(code)
-            ? 'failed'
-            : 'pending';
+    await finalizeSendError(db, row, err, summary, maxAttempts);
+  }
+}
+
+/** Send one claimed row through the MOPH Alert Template API v3.1. Same claim,
+ *  budget, and error policy as the bms path — only the sender and the message
+ *  rendering differ (message_html/message_text instead of a Flex bubble), with
+ *  IDENTICAL PDPA scope rules via buildAlertMessage. */
+async function sendOneTemplate(
+  db: DatabaseAdapter,
+  row: ClaimedRow,
+  summary: DrainSummary,
+  maxAttempts: number,
+): Promise<void> {
+  try {
+    const severity = row.severity as AlertSeverity;
+    const scope = row.recipient_scope as AlertRecipientScope;
+    const hospitalName = row.hospital_name ?? row.origin_hcode;
+    // Patient name decrypts ONLY for hospital_staff scope (PDPA); center/self
+    // rows store none. Aggregate detail strips identifiers inside the builder.
+    const patientName = scope === 'hospital_staff' ? decryptSafe(row.patient_name_enc) : null;
+    const detailLevel = row.detail_level === 'full' ? 'full' : 'aggregate';
+    const { html, text } = buildAlertMessage({
+      severity,
+      recipientScope: scope,
+      detailLevel,
+      hospitalName,
+      caseRef: row.case_id,
+      patientName,
+      confirmUrl: row.confirm_url ?? null,
+    });
+    const res = await sendMophTemplateAlert({
+      cid: row.recipient_cid,
+      name: row.recipient_name ?? '',
+      messageTitle: row.title,
+      messageHtml: html,
+      messageText: text,
+      confirmUrl: row.confirm_url ?? null,
+      messageDatetime: row.created_at ? new Date(row.created_at).toISOString() : null,
+    });
+    const finalStatus = res.success ? 'sent' : 'failed';
     await db.query(
       `UPDATE moph_alert_log
-       SET status = $1, attempts = attempts + 1, last_error = $2,
-           claimed_at = NULL, updated_at = NOW()
-       WHERE id = $3`,
-      [status, String((err as Error)?.message ?? err), row.id],
+       SET status = $1, message_id = $2, api_status = $3, attempts = attempts + 1,
+           sent_at = $4, last_error = NULL, claimed_at = NULL, updated_at = NOW()
+       WHERE id = $5`,
+      [
+        finalStatus,
+        res.messageId,
+        finalStatus === 'sent' ? 'success' : 'failed',
+        finalStatus === 'sent' ? new Date().toISOString() : null,
+        row.id,
+      ],
     );
-    if (status === 'failed') summary.failed++;
-    else summary.retryable++;
-    logger.warn('moph_alert_send_failed', { id: row.id, code, status, attempts: nextAttempts });
+    if (finalStatus === 'sent') summary.sent++;
+    else summary.failed++;
+  } catch (err) {
+    await finalizeSendError(db, row, err, summary, maxAttempts);
   }
+}
+
+/** Shared send-failure finalizer for both transports. Duck-types on `.code`
+ *  rather than `instanceof MophPromptError`: under vi.mock the imported class
+ *  identity differs from thrown instances, and upstream may reject with a
+ *  decorated Error regardless. Property-check is resilient to both. */
+async function finalizeSendError(
+  db: DatabaseAdapter,
+  row: ClaimedRow,
+  err: unknown,
+  summary: DrainSummary,
+  maxAttempts: number,
+): Promise<void> {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code: unknown }).code)
+      : 'UNKNOWN';
+  const isRetryable = RETRYABLE_CODES.has(code);
+  const nextAttempts = row.attempts + 1;
+  // Dead-letter: a retryable row that has exhausted maxAttempts goes to
+  // `failed` (terminal) so it can't loop forever and starve newer alerts.
+  const status =
+    isRetryable && nextAttempts >= maxAttempts
+      ? 'failed'
+      : isRetryable
+        ? 'pending'
+        : TERMINAL_CODES.has(code)
+          ? 'failed'
+          : 'pending';
+  await db.query(
+    `UPDATE moph_alert_log
+     SET status = $1, attempts = attempts + 1, last_error = $2,
+         claimed_at = NULL, updated_at = NOW()
+     WHERE id = $3`,
+    [status, String((err as Error)?.message ?? err), row.id],
+  );
+  if (status === 'failed') summary.failed++;
+  else summary.retryable++;
+  logger.warn('moph_alert_send_failed', { id: row.id, code, status, attempts: nextAttempts });
 }

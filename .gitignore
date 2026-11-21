@@ -115,3 +115,7 @@ __pycache__/
 sync-bms.sh
 # WinSW binary — placed by hand, never committed (tools/package-agent.ts)
 vendor/winsw/
+
+# Postman collection with LIVE MOPH Alert v3.1 client/secret keys — reference
+# only, never committed (constitution: never commit secrets).
+docs/API MOPH Alert Template V3.1.postman_collection.json

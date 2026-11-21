@@ -153,3 +153,70 @@ export function buildAlertFlex(input: BuildAlertFlexInput): Record<string, unkno
   if (footer) bubble.footer = footer;
   return bubble;
 }
+
+// ---------------------------------------------------------------------------
+// MOPH Alert Template API v3.1 rendering (docs/API MOPH Alert Template
+// V3.1.postman_collection.json). The v3.1 endpoint takes message_html /
+// message_text instead of a LINE Flex bubble, so buildAlertMessage renders the
+// SAME scope-aware content as buildAlertFlex in the API's simple HTML style
+// (<div><strong>…</strong></div> — the only markup its samples show). Values
+// are HTML-escaped: patient names are user-controlled text, not trusted markup.
+// ---------------------------------------------------------------------------
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export interface AlertMessage {
+  /** HTML body for the template API's message_html field. */
+  html: string;
+  /** Plain-text body for message_text (same lines, no markup). */
+  text: string;
+}
+
+/**
+ * Build the message_html/message_text pair for one alert recipient. The PDPA
+ * rules are IDENTICAL to buildAlertMessage's Flex sibling: aggregate detail
+ * strips the case reference (it embeds the patient CID) and the patient name;
+ * the patient name renders ONLY for hospital_staff scope; the confirm-URL
+ * anchor is withheld at aggregate detail.
+ */
+export function buildAlertMessage(input: BuildAlertFlexInput): AlertMessage {
+  const sevLabel = input.acuityLabel?.trim() || SEVERITY_LABEL_TH[input.severity];
+  const scopeLabel = SCOPE_LABEL_TH[input.recipientScope];
+  const isAggregate = input.detailLevel === 'aggregate';
+
+  const lines: { text: string; strong?: boolean }[] = [
+    { text: `แจ้งเตือน${sevLabel}`, strong: true },
+    { text: `โรงพยาบาลต้นทาง: ${input.hospitalName}`, strong: true },
+  ];
+  if (!isAggregate) lines.push({ text: `กรณี: ${input.caseRef}` });
+  lines.push({ text: `แจ้งถึง: ${scopeLabel}` });
+  if (isAggregate) {
+    lines.push({ text: 'ดูรายละเอียดผู้ป่วยได้ที่โรงพยาบาลต้นทาง' });
+  }
+  if (!isAggregate && input.recipientScope === 'hospital_staff' && input.patientName) {
+    lines.push({ text: `ผู้ป่วย: ${input.patientName}` });
+  }
+
+  const htmlLines = lines.map(({ text, strong }) => {
+    const inner = escapeHtml(text);
+    return `<div>${strong ? `<strong>${inner}</strong>` : inner}</div>`;
+  });
+
+  // Same rule as the Flex footer: the action button deep-links to the case, so
+  // it is withheld at aggregate detail.
+  if (input.confirmUrl && !isAggregate) {
+    htmlLines.push(`<div><a href="${escapeHtml(input.confirmUrl)}">เปิดดูกรณี</a></div>`);
+  }
+
+  return {
+    html: htmlLines.join(''),
+    text: lines.map(({ text }) => text).join('\n'),
+  };
+}
