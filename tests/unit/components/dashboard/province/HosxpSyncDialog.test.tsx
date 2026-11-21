@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { HosxpSyncDialog } from '@/components/dashboard/province/HosxpSyncDialog';
 import type { OnboardHosxpSyncState } from '@/hooks/useOnboardHosxpSync';
 
@@ -48,8 +48,13 @@ describe('HosxpSyncDialog', () => {
     const box = (await screen.findByRole('textbox')) as HTMLTextAreaElement;
     expect(box.readOnly).toBe(true);
     expect(box.value).toContain('STATUS: QUERYING');
-    expect(box.selectionStart).toBe(0);
-    expect(box.selectionEnd).toBe(box.value.length);
+    // The auto-select runs in a passive effect AFTER the DOM commit — on a
+    // loaded CI runner findByRole can observe the textarea inside that window.
+    // Wait for the selection instead of racing it (flake: run 44917264864).
+    await waitFor(() => {
+      expect(box.selectionStart).toBe(0);
+      expect(box.selectionEnd).toBe(box.value.length);
+    });
   });
   it('M2: copy state resets when the dialog closes', async () => {
     setClipboard(vi.fn().mockRejectedValue(new Error('denied')));
