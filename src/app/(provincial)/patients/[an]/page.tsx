@@ -6,6 +6,7 @@
 // native width inside a scrolling card (D7).
 
 import { use, useMemo, useRef, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, HeartPulse, LineChart, Printer, Waves } from 'lucide-react';
@@ -97,6 +98,7 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
   const {
     consults,
     doctors: consultDoctors,
+    hub: consultHub,
     isLoading: consultsLoading,
     error: consultsError,
     mutate: mutateConsults,
@@ -108,6 +110,7 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
   // paint of the rest of the page.
   const screenings = useMaternalScreenings(patientId);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('summary');
+  const { data: session } = useSession();
 
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: `AN ${patientId}` }]);
 
@@ -415,6 +418,12 @@ export default function PatientDetailPage({ params }: { params: Promise<{ an: st
               patientId={patientId}
               consults={consults}
               doctors={consultDoctors}
+              hub={consultHub}
+              viewer={{
+                role: session?.user?.role,
+                hospitalCode: session?.user?.hospitalCode,
+                userCid: session?.user?.userCid,
+              }}
               isLoading={consultsLoading}
               error={consultsError}
               onRequestConsult={requestConsult}

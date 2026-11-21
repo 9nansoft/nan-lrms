@@ -1,9 +1,11 @@
 // PATCH /api/patients/[an]/consults/[consultId] — move a consult on.
 //
-// The care team marks the consult reached, answers it, and writes down what
-// the doctor said. The record stays inside the patient-visibility scope: the
-// admission must be readable, and the consult must belong to that
-// admission's hospital.
+// INTERNAL consults belong to the patient's hospital: only that hospital's
+// care team touches them. HUB consults (the question sent up to the
+// provincial hub's OB-GYN team) can be progressed by the requesting
+// hospital, and ANSWERED by a clinician of the hub hospital — the service
+// decides who may write what; this route resolves the actor from the
+// session and the admission stays inside the patient-visibility scope.
 import { NextRequest, NextResponse } from 'next/server';
 import { denyIfPatientOutOfScope, resolveRequestScope } from '@/lib/request-scope';
 import { ensureInit } from '@/lib/ensure-init';
@@ -51,10 +53,22 @@ export async function PATCH(
       typeof body?.status === 'string' ? (body.status as ConsultStatus) : undefined;
     const advice = typeof body?.advice === 'string' ? body.advice : undefined;
 
-    const updated = await updatePatientConsult(db, consultId, patient.hospital_id, {
-      status,
-      advice,
-    });
+    const updated = await updatePatientConsult(
+      db,
+      consultId,
+      {
+        // The actor's OWN hospital decides what they may write: the
+        // requesting hospital progresses its request, the hub's clinicians
+        // answer it. `scope.ownHospitalId` is the hospital the session
+        // logged into, never the patient's — null only for the
+        // province/system accounts, which may not answer consults.
+        hospitalId: scope.ownHospitalId ?? '',
+        role: session.user.role ?? '',
+        userCid: session.user.userCid ?? null,
+        name: auditActorFromSession(session).userName ?? null,
+      },
+      { status, advice },
+    );
     if (!updated.ok) {
       return NextResponse.json(
         { error: { code: 'CONSULT_REJECTED', message: updated.error, details: null } },

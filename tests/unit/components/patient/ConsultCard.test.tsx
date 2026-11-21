@@ -6,7 +6,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConsultCard } from '@/components/patient/detail/ConsultCard';
 import { usePatientConsults } from '@/hooks/usePatientConsults';
-import type { ConsultDoctor, PatientConsult } from '@/types/api';
+import type { ConsultDoctor, ConsultHubInfo, PatientConsult } from '@/types/api';
 import { renderWithSwr, stubMutations } from '../../../helpers/admin-fixtures';
 
 afterEach(() => {
@@ -42,6 +42,12 @@ function consult(over: Partial<PatientConsult> = {}): PatientConsult {
     requestedByName: 'พย.ศิริพร รักดี',
     consultedAt: null,
     createdAt: '2026-11-20T03:00:00.000Z',
+    consultScope: 'INTERNAL',
+    targetHospitalId: null,
+    targetHospitalName: null,
+    targetHospitalHcode: null,
+    urgencyLevel: 'ROUTINE',
+    answeredByName: null,
     ...over,
   };
 }
@@ -63,13 +69,14 @@ function renderCard(props: Partial<Parameters<typeof ConsultCard>[0]> = {}) {
 
 /** The real hook, so the writes go through the API boundary for real. */
 function ConsultHarness() {
-  const { consults, doctors, isLoading, error, requestConsult, updateConsult } =
+  const { consults, doctors, hub, isLoading, error, requestConsult, updateConsult } =
     usePatientConsults(PATIENT_ID);
   return (
     <ConsultCard
       patientId={PATIENT_ID}
       consults={consults}
       doctors={doctors}
+      hub={hub}
       isLoading={isLoading}
       error={error}
       onRequestConsult={requestConsult}
@@ -151,6 +158,7 @@ describe('the consult writes', () => {
           body: JSON.stringify({
             doctorId: 'doc-1',
             reason: 'ความดันสูงตลอด ขอคำแนะนำจากสูติแพทย์',
+            mode: 'INTERNAL',
           }),
         }),
       ),
@@ -243,5 +251,107 @@ describe('the consult writes', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'ขอปรึกษา' }));
     expect(await screen.findByText('กรุณาเลือกแพทย์ที่ต้องการปรึกษา')).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ─── HUB consults — the question sent up to the provincial hub ──────────────
+
+const hub: ConsultHubInfo = {
+  hcode: '10716',
+  name: 'โรงพยาบาลน่าน',
+  available: true,
+  doctors: [
+    {
+      id: 'doc-hub-1',
+      cid: '9999999999999',
+      name: 'นพ.สูติศาสตร์ แม่ข่าย',
+      position: 'สูติแพทย์',
+      phoneNumber: null,
+    },
+  ],
+};
+
+function hubConsult(over: Partial<PatientConsult> = {}): PatientConsult {
+  return consult({
+    id: 'consult-hub',
+    doctorId: 'doc-hub-1',
+    doctorCid: '9999999999999',
+    doctorName: 'นพ.สูติศาสตร์ แม่ข่าย',
+    doctorPhone: null,
+    consultScope: 'HUB',
+    targetHospitalId: 'h-hub',
+    targetHospitalName: 'โรงพยาบาลน่าน',
+    targetHospitalHcode: '10716',
+    urgencyLevel: 'URGENT',
+    ...over,
+  });
+}
+
+const HUB_VIEWER = { role: 'OBSTETRICIAN', hospitalCode: '10716', userCid: '9999999999999' };
+const REQUESTER_VIEWER = { role: 'NURSE', hospitalCode: '10670', userCid: '2222222222222' };
+
+describe('ConsultCard — HUB consults (ปรึกษาขึ้นสู่โรงพยาบาลแม่ข่าย)', () => {
+  it('shows the urgency, the target hospital and the waiting note to the requester', () => {
+    renderCard({
+      consults: [hubConsult()],
+      hub,
+      viewer: REQUESTER_VIEWER,
+    });
+
+    const row = screen.getByTestId('consult-row');
+    expect(within(row).getByText('ด่วน')).toBeInTheDocument();
+    expect(within(row).getByText('ที่ โรงพยาบาลน่าน')).toBeInTheDocument();
+    expect(
+      within(row).getByText(/รอคำตอบจากทีมสูติศาสตร์ โรงพยาบาลน่าน/),
+    ).toBeInTheDocument();
+    // The requester progresses but does not write the advice.
+    expect(within(row).getByRole('button', { name: 'ติดต่อแล้ว' })).toBeInTheDocument();
+    expect(within(row).queryByLabelText('คำแนะนำจากแพทย์')).toBeNull();
+    expect(within(row).queryByRole('button', { name: 'ตอบแล้ว' })).toBeNull();
+  });
+
+  it('gives the hub clinician the advice box and the answer button', () => {
+    renderCard({
+      consults: [hubConsult()],
+      hub,
+      viewer: HUB_VIEWER,
+    });
+
+    const row = screen.getByTestId('consult-row');
+    expect(within(row).getByLabelText('คำแนะนำจากแพทย์')).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'ตอบแล้ว' })).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: 'ติดต่อแล้ว' })).toBeNull();
+  });
+
+  it('the request form offers the hub mode with an urgency, and POSTs it', async () => {
+    const fetchSpy = stubMutations(() => ({
+      ok: true,
+      status: 201,
+      body: { consult: hubConsult({ status: 'REQUESTED' }) },
+    }));
+    renderWithSwr(<ConsultHarness />, {
+      [CONSULT_KEY]: { consults: [], doctors: [doctor], hub },
+    });
+
+    await userEvent.click(await screen.findByRole('button', { name: /ทีมสูติศาสตร์ โรงพยาบาลน่าน/ }));
+    await userEvent.selectOptions(await screen.findByLabelText(/แพทย์ที่ต้องการปรึกษา/), 'doc-hub-1');
+    await userEvent.selectOptions(await screen.findByLabelText('ความเร่งด่วน'), 'URGENT');
+    await userEvent.type(screen.getByLabelText('เหตุผลที่ขอปรึกษา'), 'ความดันสูงมาก');
+    await userEvent.click(screen.getByRole('button', { name: 'ขอปรึกษา' }));
+
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(
+        CONSULT_KEY,
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            doctorId: 'doc-hub-1',
+            reason: 'ความดันสูงมาก',
+            mode: 'HUB',
+            urgency: 'URGENT',
+          }),
+        }),
+      ),
+    );
   });
 });

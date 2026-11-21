@@ -49,6 +49,21 @@ export const patientConsultsTable: TableDefinition = {
     { name: 'status', type: 'string', maxLength: 20, defaultValue: 'REQUESTED' },
     { name: 'advice', type: 'string', maxLength: 1000, nullable: true },
 
+    // INTERNAL = a doctor of the patient's own hospital (the classic flow).
+    // HUB = the question goes UP to the provincial hub hospital's registered
+    // OB-GYN team (`target_hospital_id`); answering is authorized by the
+    // actor's BMS session CID matching `doctor_cid` (or a clinician of the
+    // target hospital), so no users-table join is involved.
+    { name: 'consult_scope', type: 'string', maxLength: 20, defaultValue: 'INTERNAL' },
+    {
+      name: 'target_hospital_id',
+      type: 'uuid',
+      nullable: true,
+      references: { table: 'hospitals', column: 'id' },
+    },
+    { name: 'urgency_level', type: 'string', maxLength: 20, defaultValue: 'ROUTINE' },
+    { name: 'answered_by_name', type: 'string', maxLength: 255, nullable: true },
+
     // Who asked for it.
     { name: 'requested_by_cid', type: 'string', maxLength: 13, nullable: true },
     { name: 'requested_by_name', type: 'string', maxLength: 255, nullable: true },
@@ -61,5 +76,6 @@ export const patientConsultsTable: TableDefinition = {
     { name: 'idx_pc_hospital_an', columns: ['hospital_id', 'an'] },
     { name: 'idx_pc_patient', columns: ['patient_id'] },
     { name: 'idx_pc_hospital_status', columns: ['hospital_id', 'status'] },
+    { name: 'idx_pc_target_status', columns: ['target_hospital_id', 'status'] },
   ],
 };

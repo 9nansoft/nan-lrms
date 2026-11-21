@@ -1,13 +1,22 @@
-// Consults — the care team asking one of the hospital's own doctors for
-// advice about a patient who stays here.
+// Consults — two flows on one card:
+//
+//   INTERNAL — the care team asks a doctor of THEIR OWN hospital (the
+//   admin-managed consult list), contacts them (usually by phone), and
+//   records the answer.
+//
+//   HUB — the care team sends the question UP to the provincial hub
+//   hospital's registered OB-GYN team. The hub's clinicians answer IN the
+//   system: their session CID must match the addressed doctor's CID (or they
+//   are a clinician of that hospital), so the answer box below only appears
+//   for them. The requester sees the status move and the advice arrive.
 //
 // NOT a referral: a referral moves the patient to another hospital (that
-// flow has its own page and its own permissions). A consult asks a doctor of
-// THIS hospital for advice, follows the answer up, and writes down what the
-// doctor said.
+// flow has its own page and its own permissions). A consult asks for advice
+// about a patient who stays here.
 //
-// The doctors come from the hospital's admin-managed consult list; the API
-// sends them with the consults, so the request form never guesses.
+// The doctors come from each hospital's admin-managed consult list; the API
+// sends them (and the hub info) with the consults, so the request form
+// never guesses.
 'use client';
 
 import { useState, type FormEvent } from 'react';
@@ -16,14 +25,27 @@ import { SectionCard } from '@/components/shared/SectionCard';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { StatusChip } from '@/components/shared/StatusChip';
 import { Button } from '@/components/ui/button';
-import type { ConsultDoctor, ConsultStatus, PatientConsult } from '@/types/api';
+import type {
+  ConsultDoctor,
+  ConsultHubInfo,
+  ConsultStatus,
+  ConsultUrgency,
+  PatientConsult,
+} from '@/types/api';
 import type { StatusTone } from '@/config/status-tone';
+import { cn } from '@/lib/utils';
 import { fmtDateTimeTh } from './format';
 
-/** The Thai label of each consult state. */
-const CONSULT_STATUS_LABEL: Record<ConsultStatus, string> = {
+/** The Thai label of each consult state, per flow. */
+const INTERNAL_STATUS_LABEL: Record<ConsultStatus, string> = {
   REQUESTED: 'รอติดต่อ',
   CONTACTED: 'ติดต่อแล้ว',
+  COMPLETED: 'ตอบแล้ว',
+};
+
+const HUB_STATUS_LABEL: Record<ConsultStatus, string> = {
+  REQUESTED: 'รอคำตอบ',
+  CONTACTED: 'กำลังปรึกษา',
   COMPLETED: 'ตอบแล้ว',
 };
 
@@ -34,20 +56,49 @@ const CONSULT_STATUS_TONE: Record<ConsultStatus, StatusTone> = {
   COMPLETED: 'ok',
 };
 
+/** The Thai label and tone of each urgency. */
+const URGENCY_LABEL: Record<ConsultUrgency, string> = {
+  ROUTINE: 'ปกติ',
+  URGENT: 'ด่วน',
+  EMERGENCY: 'ฉุกเฉิน',
+};
+
+const URGENCY_TONE: Record<ConsultUrgency, StatusTone> = {
+  ROUTINE: 'neutral',
+  URGENT: 'warn',
+  EMERGENCY: 'danger',
+};
+
 const fieldCls =
   'w-full rounded-lg border border-border bg-surface-card px-2 py-1.5 text-caption text-ink placeholder:text-ink-subtle focus:border-brand focus:outline-none';
+
+/** The signed-in viewer, as far as the answer gating needs to know. */
+export interface ConsultViewer {
+  role?: string | null;
+  hospitalCode?: string | null;
+  userCid?: string | null;
+}
 
 export interface ConsultCardProps {
   /** The admission in URL form: {hcode}-{an}. */
   patientId: string;
-  /** The consults of this admission, newest first. */
+  /** The consults of this admission, newest first (INTERNAL and HUB). */
   consults: PatientConsult[];
-  /** The doctors of this hospital that can be consulted. */
+  /** The doctors of this hospital that can be consulted (INTERNAL). */
   doctors: ConsultDoctor[];
+  /** The provincial hub this hospital's HUB consults go up to. */
+  hub?: ConsultHubInfo | null;
+  /** The signed-in session, for the HUB answer gating. */
+  viewer?: ConsultViewer | null;
   isLoading?: boolean;
   error?: unknown;
   /** Records a consult request. Throws with a Thai message when refused. */
-  onRequestConsult: (doctorId: string, reason: string) => Promise<unknown>;
+  onRequestConsult: (input: {
+    doctorId: string;
+    reason: string;
+    mode?: 'INTERNAL' | 'HUB';
+    urgency?: ConsultUrgency;
+  }) => Promise<unknown>;
   /** Moves a consult on and writes the advice. Throws when refused. */
   onUpdateConsult: (
     consultId: string,
@@ -55,16 +106,27 @@ export interface ConsultCardProps {
   ) => Promise<unknown>;
 }
 
+/** True when the viewer is a clinician of the hub the consult was sent to. */
+function canAnswerHub(consult: PatientConsult, viewer: ConsultViewer | null | undefined): boolean {
+  if (consult.consultScope !== 'HUB' || !consult.targetHospitalHcode) return false;
+  if (!viewer?.hospitalCode || viewer.hospitalCode !== consult.targetHospitalHcode) return false;
+  return viewer.role === 'OBSTETRICIAN' || viewer.role === 'ADMIN';
+}
+
 export function ConsultCard({
   patientId,
   consults,
   doctors,
+  hub,
+  viewer,
   isLoading,
   error,
   onRequestConsult,
   onUpdateConsult,
 }: ConsultCardProps) {
+  const [mode, setMode] = useState<'INTERNAL' | 'HUB'>('INTERNAL');
   const [doctorId, setDoctorId] = useState('');
+  const [urgency, setUrgency] = useState<ConsultUrgency>('ROUTINE');
   const [reason, setReason] = useState('');
   const [adviceDrafts, setAdviceDrafts] = useState<Record<string, string>>({});
   // Which write is in flight: 'request' or `update:{consultId}`.
@@ -73,6 +135,14 @@ export function ConsultCard({
 
   const doctorFieldId = `consult-doctor-${patientId}`;
   const reasonFieldId = `consult-reason-${patientId}`;
+  const urgencyFieldId = `consult-urgency-${patientId}`;
+
+  // The hub mode exists when the patient's hospital has a provincial hub
+  // with at least one registered consult doctor.
+  const hubModeAvailable = Boolean(hub?.available && hub.doctors.length > 0);
+  const hubDoctors: ConsultDoctor[] = hub?.doctors ?? [];
+  const selectedMode: 'INTERNAL' | 'HUB' = hubModeAvailable ? mode : 'INTERNAL';
+  const modeDoctors = selectedMode === 'HUB' ? hubDoctors : doctors;
 
   async function handleRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,8 +158,14 @@ export function ConsultCard({
     }
     setBusy('request');
     try {
-      await onRequestConsult(doctorId, trimmedReason);
+      await onRequestConsult({
+        doctorId,
+        reason: trimmedReason,
+        mode: selectedMode,
+        urgency: selectedMode === 'HUB' ? urgency : undefined,
+      });
       setDoctorId('');
+      setUrgency('ROUTINE');
       setReason('');
     } catch (e) {
       setFormError(e instanceof Error ? e.message : 'ขอปรึกษาไม่สำเร็จ — ลองใหม่อีกครั้ง');
@@ -112,6 +188,7 @@ export function ConsultCard({
   }
 
   const noDoctors = doctors.length === 0;
+  const formAvailable = selectedMode === 'HUB' ? hubModeAvailable : !noDoctors;
 
   return (
     <SectionCard
@@ -119,7 +196,7 @@ export function ConsultCard({
       description={
         error
           ? 'ดึงข้อมูลการปรึกษาไม่สำเร็จ — ข้อมูลส่วนอื่นยังใช้ได้ตามปกติ'
-          : `บันทึกการขอคำปรึกษาจากแพทย์ที่ปรึกษาได้ของโรงพยาบาล · ${consults.length} รายการ`
+          : `บันทึกการขอคำปรึกษา — ภายในโรงพยาบาล และขึ้นสู่ทีมสูติศาสตร์ของโรงพยาบาลแม่ข่าย · ${consults.length} รายการ`
       }
       testId="consult-card"
       actions={<Stethoscope aria-hidden="true" className="h-5 w-5 text-brand" />}
@@ -144,6 +221,9 @@ export function ConsultCard({
               {consults.map((consult) => {
                 const advice = adviceDrafts[consult.id] ?? consult.advice ?? '';
                 const updating = busy === `update:${consult.id}`;
+                const isHub = consult.consultScope === 'HUB';
+                const statusLabel = isHub ? HUB_STATUS_LABEL[consult.status] : INTERNAL_STATUS_LABEL[consult.status];
+                const answerer = canAnswerHub(consult, viewer);
                 return (
                   <li
                     key={consult.id}
@@ -151,15 +231,23 @@ export function ConsultCard({
                     className="flex flex-col gap-2 rounded-xl border border-border bg-surface-card px-3 py-2"
                   >
                     <div className="flex flex-wrap items-center gap-2">
-                      <StatusChip
-                        tone={CONSULT_STATUS_TONE[consult.status]}
-                        label={CONSULT_STATUS_LABEL[consult.status]}
-                      />
+                      <StatusChip tone={CONSULT_STATUS_TONE[consult.status]} label={statusLabel} />
+                      {isHub && (
+                        <StatusChip
+                          tone={URGENCY_TONE[consult.urgencyLevel]}
+                          label={URGENCY_LABEL[consult.urgencyLevel]}
+                        />
+                      )}
                       <span className="text-label font-semibold text-ink">{consult.doctorName}</span>
                       {consult.doctorPosition && (
                         <span className="text-caption text-ink-muted">{consult.doctorPosition}</span>
                       )}
-                      {consult.doctorPhone && (
+                      {isHub && consult.targetHospitalName && (
+                        <span className="text-caption text-ink-muted">
+                          ที่ {consult.targetHospitalName}
+                        </span>
+                      )}
+                      {!isHub && consult.doctorPhone && (
                         <span className="text-caption text-ink-muted">โทร {consult.doctorPhone}</span>
                       )}
                       <span className="ml-auto text-caption text-ink-muted">
@@ -188,27 +276,48 @@ export function ConsultCard({
                         <span className="font-semibold">คำแนะนำ:</span> {consult.advice}
                       </p>
                     )}
+                    {isHub && consult.answeredByName && (
+                      <p className="text-caption text-ink-muted">
+                        ตอบโดย: <span className="text-ink">{consult.answeredByName}</span>
+                      </p>
+                    )}
 
                     {consult.status !== 'COMPLETED' && (
                       <div className="flex flex-col gap-2 border-t border-border pt-2">
-                        <label
-                          htmlFor={`consult-advice-${consult.id}`}
-                          className="text-caption font-semibold text-ink"
-                        >
-                          คำแนะนำจากแพทย์
-                        </label>
-                        <textarea
-                          id={`consult-advice-${consult.id}`}
-                          value={advice}
-                          rows={2}
-                          placeholder="เช่น แนะนำเฝ้าระวังความดันและปรึกษาสูติแพทย์"
-                          onChange={(e) =>
-                            setAdviceDrafts((current) => ({ ...current, [consult.id]: e.target.value }))
-                          }
-                          className={fieldCls}
-                        />
+                        {/* INTERNAL: the care team records what the doctor
+                            said. HUB: only the clinicians being asked see
+                            the advice box; the requester just progresses. */}
+                        {(!isHub || answerer) && (
+                          <>
+                            <label
+                              htmlFor={`consult-advice-${consult.id}`}
+                              className="text-caption font-semibold text-ink"
+                            >
+                              คำแนะนำจากแพทย์
+                            </label>
+                            <textarea
+                              id={`consult-advice-${consult.id}`}
+                              value={advice}
+                              rows={2}
+                              placeholder="เช่น แนะนำเฝ้าระวังความดันและปรึกษาสูติแพทย์"
+                              onChange={(e) =>
+                                setAdviceDrafts((current) => ({
+                                  ...current,
+                                  [consult.id]: e.target.value,
+                                }))
+                              }
+                              className={fieldCls}
+                            />
+                          </>
+                        )}
+                        {isHub && !answerer && (
+                          <p className="text-caption text-ink-muted">
+                            รอคำตอบจากทีมสูติศาสตร์ {consult.targetHospitalName ?? 'โรงพยาบาลแม่ข่าย'} —
+                            ทีมผู้ขอบันทึกความคืบหน้าได้จากปุ่มด้านล่าง
+                          </p>
+                        )}
                         <div className="flex flex-wrap gap-2">
-                          {consult.status === 'REQUESTED' && (
+                          {consult.status === 'REQUESTED' && (!isHub || !answerer) && (
                             <Button
                               type="button"
                               disabled={updating}
@@ -218,14 +327,16 @@ export function ConsultCard({
                               ติดต่อแล้ว
                             </Button>
                           )}
-                          <Button
-                            type="button"
-                            disabled={updating}
-                            onClick={() => void handleUpdate(consult, 'COMPLETED')}
-                            className="h-8 bg-brand px-3 text-label text-white hover:bg-brand-strong"
-                          >
-                            ตอบแล้ว
-                          </Button>
+                          {(!isHub || answerer) && (
+                            <Button
+                              type="button"
+                              disabled={updating}
+                              onClick={() => void handleUpdate(consult, 'COMPLETED')}
+                              className="h-8 bg-brand px-3 text-label text-white hover:bg-brand-strong"
+                            >
+                              ตอบแล้ว
+                            </Button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -241,19 +352,58 @@ export function ConsultCard({
             </p>
           )}
 
-          {noDoctors ? (
-            <p className="text-caption text-warn-text">
-              ยังไม่ได้เพิ่มรายชื่อแพทย์ที่ปรึกษาได้ — ให้ผู้ดูแลระบบเพิ่มที่หน้าโรงพยาบาล
-            </p>
-          ) : (
+          {formAvailable ? (
             <form
               onSubmit={(e) => void handleRequest(e)}
               className="flex flex-col gap-2 rounded-xl border border-border bg-surface-muted px-3 py-3"
             >
               <h3 className="text-label font-semibold text-brand">ขอคำปรึกษา</h3>
 
+              {hubModeAvailable && (
+                <div
+                  role="group"
+                  aria-label="ประเภทการปรึกษา"
+                  className="inline-flex w-fit overflow-hidden rounded-lg border border-border bg-surface-card"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={selectedMode === 'INTERNAL'}
+                    onClick={() => {
+                      setMode('INTERNAL');
+                      setDoctorId('');
+                    }}
+                    className={cn(
+                      'px-3 py-1.5 text-caption',
+                      selectedMode === 'INTERNAL'
+                        ? 'bg-brand-soft font-semibold text-brand-strong'
+                        : 'text-ink-muted hover:bg-surface-muted',
+                    )}
+                  >
+                    แพทย์ในโรงพยาบาล
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={selectedMode === 'HUB'}
+                    onClick={() => {
+                      setMode('HUB');
+                      setDoctorId('');
+                    }}
+                    className={cn(
+                      'border-l border-border px-3 py-1.5 text-caption',
+                      selectedMode === 'HUB'
+                        ? 'bg-brand-soft font-semibold text-brand-strong'
+                        : 'text-ink-muted hover:bg-surface-muted',
+                    )}
+                  >
+                    ทีมสูติศาสตร์ {hub?.name ?? ''}
+                  </button>
+                </div>
+              )}
+
               <label htmlFor={doctorFieldId} className="text-caption font-semibold text-ink">
-                แพทย์ที่ต้องการปรึกษา
+                {selectedMode === 'HUB'
+                  ? `แพทย์ที่ต้องการปรึกษา (ทีมสูติศาสตร์ ${hub?.name ?? ''})`
+                  : 'แพทย์ที่ต้องการปรึกษา'}
               </label>
               <select
                 id={doctorFieldId}
@@ -262,13 +412,31 @@ export function ConsultCard({
                 className={fieldCls}
               >
                 <option value="">— เลือกแพทย์ —</option>
-                {doctors.map((doctor) => (
+                {modeDoctors.map((doctor) => (
                   <option key={doctor.id} value={doctor.id}>
                     {doctor.name}
                     {doctor.position ? ` (${doctor.position})` : ''}
                   </option>
                 ))}
               </select>
+
+              {selectedMode === 'HUB' && (
+                <>
+                  <label htmlFor={urgencyFieldId} className="text-caption font-semibold text-ink">
+                    ความเร่งด่วน
+                  </label>
+                  <select
+                    id={urgencyFieldId}
+                    value={urgency}
+                    onChange={(e) => setUrgency(e.target.value as ConsultUrgency)}
+                    className={fieldCls}
+                  >
+                    <option value="ROUTINE">ปกติ</option>
+                    <option value="URGENT">ด่วน</option>
+                    <option value="EMERGENCY">ฉุกเฉิน</option>
+                  </select>
+                </>
+              )}
 
               <label htmlFor={reasonFieldId} className="text-caption font-semibold text-ink">
                 เหตุผลที่ขอปรึกษา
@@ -293,6 +461,10 @@ export function ConsultCard({
                 </Button>
               </div>
             </form>
+          ) : (
+            <p className="text-caption text-warn-text">
+              ยังไม่ได้เพิ่มรายชื่อแพทย์ที่ปรึกษาได้ — ให้ผู้ดูแลระบบเพิ่มที่หน้าโรงพยาบาล
+            </p>
           )}
         </div>
       )}

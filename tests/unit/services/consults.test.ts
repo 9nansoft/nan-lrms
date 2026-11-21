@@ -13,8 +13,10 @@ import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
 import {
+  countPendingHubConsults,
   createPatientConsult,
   listConsultDoctors,
+  listHubConsultInbox,
   listPatientConsults,
   resolveConsultTarget,
   updatePatientConsult,
@@ -228,7 +230,12 @@ describe('the consult records', () => {
     expect(created.ok).toBe(true);
     if (!created.ok) return;
 
-    const updated = await updatePatientConsult(db, created.consult.id, hospitalA, {
+    const updated = await updatePatientConsult(db, created.consult.id, {
+      hospitalId: hospitalA,
+      role: 'NURSE',
+      userCid: null,
+      name: null,
+    }, {
       status: 'COMPLETED',
       advice: 'ให้ตรวจ proteinuria และคุมความดัน',
     });
@@ -256,16 +263,16 @@ describe('the consult records', () => {
     expect(created.ok).toBe(true);
     if (!created.ok) return;
 
-    const updated = await updatePatientConsult(
-      db,
-      created.consult.id,
-      await hospitalId(B),
-      { status: 'COMPLETED' },
-    );
+    const updated = await updatePatientConsult(db, created.consult.id, {
+      hospitalId: await hospitalId(B),
+      role: 'NURSE',
+      userCid: null,
+      name: null,
+    }, { status: 'COMPLETED' });
 
     expect(updated.ok).toBe(false);
     if (updated.ok) return;
-    expect(updated.status).toBe(404);
+    expect(updated.status).toBe(403);
   });
 
   it('refuses a status that is not a consult state', async () => {
@@ -283,9 +290,12 @@ describe('the consult records', () => {
     expect(created.ok).toBe(true);
     if (!created.ok) return;
 
-    const updated = await updatePatientConsult(db, created.consult.id, hospitalA, {
-      status: 'WHATEVER' as never,
-    });
+    const updated = await updatePatientConsult(db, created.consult.id, {
+      hospitalId: hospitalA,
+      role: 'NURSE',
+      userCid: null,
+      name: null,
+    }, { status: 'WHATEVER' as never });
 
     expect(updated.ok).toBe(false);
   });
@@ -303,5 +313,243 @@ describe('resolveConsultTarget', () => {
     const target = await resolveConsultTarget(db, AN, B);
 
     expect(target).toBeNull();
+  });
+});
+
+// ─── HUB consults — the question sent UP to the provincial hub ──────────────
+//
+// A community hospital's care team sends the question to the provincial hub
+// hospital's registered OB-GYN team. The requester only progresses it; a
+// clinician of the hub hospital answers it in the system.
+describe('HUB consults (ปรึกษาขึ้นสู่โรงพยาบาลแม่ข่าย)', () => {
+  const HUB = '10716'; // the PROVINCIAL_HUB of the seeded network
+
+  async function seedHubPatient(an: string): Promise<string> {
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT INTO cached_patients
+         (id, hospital_id, hn, an, name, age, admit_date, labor_status, synced_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'enc-name', 30, '2026-11-19T00:00:00Z', 'ACTIVE', ?, ?, ?)`,
+      [`p-${an}`, await hospitalId(HUB), `HN-${an}`, an, now, now, now],
+    );
+    return `p-${an}`;
+  }
+
+  async function seedPatientForA(): Promise<void> {
+    // The patient at A already exists (seeded in beforeEach).
+  }
+
+  it('sends the question to the hub and records it as a HUB consult', async () => {
+    await seedDoctor(HUB, 'doc-hub-1', { name: 'ศูติแพทย์ รพ.น่าน' });
+
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: await hospitalId(A),
+      patientId: `p-${AN}`,
+      journeyId: null,
+      doctorId: 'doc-hub-1',
+      reason: 'ความดันสูง BP 160/110',
+      mode: 'HUB',
+      urgency: 'URGENT',
+      requestedByCid: null,
+      requestedByName: 'พว.ท่าวังผา',
+    });
+
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.consult.consultScope).toBe('HUB');
+    expect(created.consult.targetHospitalId).toBe(await hospitalId(HUB));
+    expect(created.consult.targetHospitalName).toBe('โรงพยาบาลน่าน');
+    expect(created.consult.urgencyLevel).toBe('URGENT');
+    expect(created.consult.doctorName).toBe('ศูติแพทย์ รพ.น่าน');
+    expect(created.consult.status).toBe('REQUESTED');
+  });
+
+  it('refuses a HUB consult for a patient already at the hub', async () => {
+    const hubPatientAn = 'AN-AT-HUB';
+    await seedHubPatient(hubPatientAn);
+
+    await seedDoctor(HUB, 'doc-hub-2');
+    const created = await createPatientConsult(db, {
+      an: hubPatientAn,
+      hospitalId: await hospitalId(HUB),
+      patientId: `p-${hubPatientAn}`,
+      journeyId: null,
+      doctorId: 'doc-hub-2',
+      reason: 'ปรึกษาขึ้นไปได้อย่างไร',
+      mode: 'HUB',
+      requestedByCid: null,
+      requestedByName: null,
+    });
+
+    expect(created.ok).toBe(false);
+    if (created.ok) return;
+    expect(created.status).toBe(400);
+  });
+
+  it('refuses an urgency that is not one of the three levels', async () => {
+    await seedDoctor(HUB, 'doc-hub-3');
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: await hospitalId(A),
+      patientId: `p-${AN}`,
+      journeyId: null,
+      doctorId: 'doc-hub-3',
+      reason: 'ขอความเห็น',
+      mode: 'HUB',
+      urgency: 'WHENEVER' as never,
+      requestedByCid: null,
+      requestedByName: null,
+    });
+
+    expect(created.ok).toBe(false);
+    if (created.ok) return;
+    expect(created.status).toBe(400);
+  });
+
+  it('refuses a HUB consult when the hub has no registered doctor', async () => {
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: await hospitalId(A),
+      patientId: `p-${AN}`,
+      journeyId: null,
+      doctorId: 'doc-nobody',
+      reason: 'ขอความเห็น',
+      mode: 'HUB',
+      requestedByCid: null,
+      requestedByName: null,
+    });
+
+    expect(created.ok).toBe(false);
+    if (created.ok) return;
+    expect(created.status).toBe(400);
+  });
+
+  it('lets the requester progress the status but not write the advice', async () => {
+    await seedDoctor(HUB, 'doc-hub-4');
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: await hospitalId(A),
+      patientId: `p-${AN}`,
+      journeyId: null,
+      doctorId: 'doc-hub-4',
+      reason: 'ความดันสูง',
+      mode: 'HUB',
+      requestedByCid: null,
+      requestedByName: null,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const progressed = await updatePatientConsult(db, created.consult.id, {
+      hospitalId: await hospitalId(A),
+      role: 'NURSE',
+      userCid: null,
+      name: null,
+    }, { status: 'CONTACTED', advice: 'จดเองไม่ได้' });
+
+    expect(progressed.ok).toBe(false);
+    if (progressed.ok) return;
+    expect(progressed.status).toBe(403);
+
+    const statusOnly = await updatePatientConsult(db, created.consult.id, {
+      hospitalId: await hospitalId(A),
+      role: 'NURSE',
+      userCid: null,
+      name: null,
+    }, { status: 'CONTACTED' });
+    expect(statusOnly.ok).toBe(true);
+  });
+
+  it('lets a clinician of the hub answer it, recording who answered', async () => {
+    await seedDoctor(HUB, 'doc-hub-5', { name: 'ศูติแพทย์ รพ.น่าน' });
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: await hospitalId(A),
+      patientId: `p-${AN}`,
+      journeyId: null,
+      doctorId: 'doc-hub-5',
+      reason: 'ความดันสูง',
+      mode: 'HUB',
+      urgency: 'URGENT',
+      requestedByCid: null,
+      requestedByName: null,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const answered = await updatePatientConsult(db, created.consult.id, {
+      hospitalId: await hospitalId(HUB),
+      role: 'OBSTETRICIAN',
+      userCid: '1100700200001',
+      name: 'นพ.สูติศาสตร์',
+    }, {
+      status: 'COMPLETED',
+      advice: 'ให้ยาลดความดันและประเมินส่งต่อ',
+    });
+
+    expect(answered.ok).toBe(true);
+    if (!answered.ok) return;
+    expect(answered.consult.status).toBe('COMPLETED');
+    expect(answered.consult.advice).toBe('ให้ยาลดความดันและประเมินส่งต่อ');
+    expect(answered.consult.answeredByName).toBe('นพ.สูติศาสตร์');
+    expect(answered.consult.consultedAt).not.toBeNull();
+  });
+
+  it('refuses a third hospital from answering the HUB consult', async () => {
+    await seedDoctor(HUB, 'doc-hub-6');
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: await hospitalId(A),
+      patientId: `p-${AN}`,
+      journeyId: null,
+      doctorId: 'doc-hub-6',
+      reason: 'ขอความเห็น',
+      mode: 'HUB',
+      requestedByCid: null,
+      requestedByName: null,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const answered = await updatePatientConsult(db, created.consult.id, {
+      hospitalId: await hospitalId(B),
+      role: 'OBSTETRICIAN',
+      userCid: null,
+      name: null,
+    }, { status: 'COMPLETED', advice: 'ไม่มีสิทธิ์' });
+
+    expect(answered.ok).toBe(false);
+    if (answered.ok) return;
+    expect(answered.status).toBe(403);
+  });
+
+  it('shows the hub consult only in the hub inbox', async () => {
+    await seedDoctor(HUB, 'doc-hub-7');
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: await hospitalId(A),
+      patientId: `p-${AN}`,
+      journeyId: null,
+      doctorId: 'doc-hub-7',
+      reason: 'ความดันสูง',
+      mode: 'HUB',
+      urgency: 'EMERGENCY',
+      requestedByCid: null,
+      requestedByName: null,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const hubInbox = await listHubConsultInbox(db, await hospitalId(HUB));
+    expect(hubInbox).toHaveLength(1);
+    expect(hubInbox[0].id).toBe(created.consult.id);
+    expect(hubInbox[0].requesterHospitalName).toContain('บ้านไผ่');
+
+    const otherInbox = await listHubConsultInbox(db, await hospitalId(B));
+    expect(otherInbox).toHaveLength(0);
+
+    expect(await countPendingHubConsults(db, await hospitalId(HUB))).toBe(1);
+    expect(await countPendingHubConsults(db, await hospitalId(B))).toBe(0);
   });
 });

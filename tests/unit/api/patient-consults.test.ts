@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server';
 import { createTestDb } from '../../helpers/testDb';
 import { SeedOrchestrator } from '@/db/seeds/index';
 import type { DatabaseAdapter } from '@/db/adapter';
+import { UserRole } from '@/types/domain';
 import { testSessionUser } from '../../helpers/session';
 
 let db: DatabaseAdapter;
@@ -52,8 +53,14 @@ async function seedPatient(hcode: string, an: string): Promise<void> {
   );
 }
 
-function signInAs(hcode: string): void {
-  mockSessionUser = testSessionUser({ hospitalCode: hcode }) as unknown as Record<string, unknown>;
+function signInAs(
+  hcode: string,
+  overrides: { role?: UserRole; userCid?: string; name?: string } = {},
+): void {
+  mockSessionUser = testSessionUser({
+    hospitalCode: hcode,
+    ...overrides,
+  }) as unknown as Record<string, unknown>;
 }
 
 function jsonRequest(body: unknown): Request {
@@ -204,5 +211,90 @@ describe('PATCH /api/patients/[an]/consults/[consultId]', () => {
     );
 
     expect(res.status).toBe(403);
+  });
+});
+
+// ─── HUB consults — the question sent up to the provincial hub ──────────────
+//
+// The hub is 10716 (PROVINCIAL_HUB of the seeded network). Its doctors are
+// addressed by their contact-list row; a clinician of the hub answers with
+// their BMS session (their CID must match the addressed doctor's).
+describe('HUB consults over the patient routes', () => {
+  const HUB = '10716';
+
+  it('reports the hub with its registered doctors on GET', async () => {
+    signInAs(A);
+    seedDoctor(HUB, 'doc-hub-get');
+
+    const res = await GET(
+      new NextRequest(`http://test/api/patients/${A}-${AN}/consults`) as never,
+      { params: Promise.resolve({ an: `${A}-${AN}` }) },
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.hub.hcode).toBe(HUB);
+    expect(body.hub.available).toBe(true);
+    expect(body.hub.doctors.map((d: { id: string }) => d.id)).toContain('doc-hub-get');
+  });
+
+  it('creates a HUB consult addressed to the hub’s doctor', async () => {
+    signInAs(A);
+    seedDoctor(HUB, 'doc-hub-post');
+
+    const res = await POST(
+      jsonRequest({
+        doctorId: 'doc-hub-post',
+        reason: 'ความดันสูง BP 160/110',
+        mode: 'HUB',
+        urgency: 'URGENT',
+      }) as never,
+      { params: Promise.resolve({ an: `${A}-${AN}` }) },
+    );
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.consult.consultScope).toBe('HUB');
+    expect(body.consult.urgencyLevel).toBe('URGENT');
+    expect(body.consult.targetHospitalName).toBe('โรงพยาบาลน่าน');
+  });
+
+  it('lets the hub clinician answer it, and refuses the requester’s advice', async () => {
+    signInAs(A);
+    seedDoctor(HUB, 'doc-hub-patch');
+    const created = await POST(
+      jsonRequest({ doctorId: 'doc-hub-patch', reason: 'ความดันสูง', mode: 'HUB' }) as never,
+      { params: Promise.resolve({ an: `${A}-${AN}` }) },
+    );
+    const { consult } = await created.json();
+
+    // The requesting team may only progress the status — the advice must
+    // come from the doctors being asked.
+    signInAs(A);
+    const refused = await PATCH(
+      new NextRequest('http://test/api', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ advice: 'จดเองไม่ได้' }),
+      }) as never,
+      { params: Promise.resolve({ an: `${A}-${AN}`, consultId: consult.id }) },
+    );
+    expect(refused.status).toBe(403);
+
+    // The hub clinician answers in the system.
+    signInAs(HUB, { role: UserRole.OBSTETRICIAN, userCid: '1007000100999', name: 'นพ.สูติศาสตร์' });
+    const answered = await PATCH(
+      new NextRequest('http://test/api', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'COMPLETED', advice: 'คุมความดันและประเมินส่งต่อ' }),
+      }) as never,
+      { params: Promise.resolve({ an: `${A}-${AN}`, consultId: consult.id }) },
+    );
+    expect(answered.status).toBe(200);
+    const body = await answered.json();
+    expect(body.consult.status).toBe('COMPLETED');
+    expect(body.consult.advice).toBe('คุมความดันและประเมินส่งต่อ');
+    expect(body.consult.answeredByName).toBe('นพ.สูติศาสตร์');
   });
 });

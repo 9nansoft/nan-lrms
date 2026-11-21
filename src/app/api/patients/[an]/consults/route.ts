@@ -14,6 +14,7 @@ import { denyIfPatientOutOfScope, resolveRequestScope } from '@/lib/request-scop
 import { ensureInit } from '@/lib/ensure-init';
 import { parsePatientId } from '@/lib/utils';
 import {
+  consultHubInfoFor,
   createPatientConsult,
   listConsultDoctors,
   listPatientConsults,
@@ -22,7 +23,7 @@ import {
 import { tryLogAccess } from '@/services/audit';
 import { auditActorFromSession } from '@/lib/audit-actor';
 import { logger } from '@/lib/logger';
-import type { PatientConsultsResponse } from '@/types/api';
+import type { ConsultUrgency, PatientConsultsResponse } from '@/types/api';
 
 export async function GET(
   _request: NextRequest,
@@ -60,12 +61,13 @@ export async function GET(
       resourceId: an,
     });
 
-    const [consults, doctors] = await Promise.all([
+    const [consults, doctors, hub] = await Promise.all([
       listPatientConsults(db, an, patient.hospital_id),
       listConsultDoctors(db, patient.hospital_id),
+      consultHubInfoFor(db, patient.hospital_id),
     ]);
 
-    const response: PatientConsultsResponse = { consults, doctors };
+    const response: PatientConsultsResponse = { consults, doctors, hub };
     return NextResponse.json(response);
   } catch (error) {
     logger.error('patient_consults_api_failed', { error });
@@ -108,9 +110,16 @@ export async function POST(
     const body = (await request.json().catch(() => null)) as {
       doctorId?: unknown;
       reason?: unknown;
+      mode?: unknown;
+      urgency?: unknown;
     } | null;
     const doctorId = typeof body?.doctorId === 'string' ? body.doctorId.trim() : '';
     const reason = typeof body?.reason === 'string' ? body.reason : '';
+    const mode = body?.mode === 'HUB' ? 'HUB' : 'INTERNAL';
+    const urgency =
+      body?.urgency === 'URGENT' || body?.urgency === 'EMERGENCY' || body?.urgency === 'ROUTINE'
+        ? (body.urgency as ConsultUrgency)
+        : undefined;
     if (!doctorId) {
       return NextResponse.json(
         { error: 'กรุณาเลือกแพทย์ที่ต้องการปรึกษา', code: 'DOCTOR_REQUIRED' },
@@ -126,6 +135,8 @@ export async function POST(
       journeyId: patient.journey_id,
       doctorId,
       reason,
+      mode,
+      urgency,
       requestedByCid: session.user.userCid ?? null,
       requestedByName: actor.userName ?? null,
     });

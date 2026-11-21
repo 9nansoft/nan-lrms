@@ -9,11 +9,23 @@
 // The doctors come from the hospital's admin-managed consult list; the API
 // sends them together with the consults, so the request form never has to
 // guess who may be asked.
+// SWR hook — the consults of one admission, the doctors of its hospital,
+// and the provincial hub its HUB consults go up to.
+//
+// INTERNAL consults ask a doctor of the patient's OWN hospital (the classic
+// flow). HUB consults send the question UP to the provincial hub hospital's
+// registered OB-GYN team — the hub's doctors come with the response, so the
+// request form never has to guess who may be asked.
 'use client';
 
 import { useCallback } from 'react';
 import useSWR from 'swr';
-import type { ConsultStatus, PatientConsult, PatientConsultsResponse } from '@/types/api';
+import type {
+  ConsultStatus,
+  ConsultUrgency,
+  PatientConsult,
+  PatientConsultsResponse,
+} from '@/types/api';
 
 /** What the API answers when a write is refused. */
 interface ApiErrorBody {
@@ -48,6 +60,15 @@ export interface UpdateConsultInput {
   advice?: string;
 }
 
+/** What a consult request carries: the addressed doctor, the reason, and —
+ *  for a HUB request — how urgent it is. */
+export interface RequestConsultInput {
+  doctorId: string;
+  reason: string;
+  mode?: 'INTERNAL' | 'HUB';
+  urgency?: ConsultUrgency;
+}
+
 export function usePatientConsults(patientId: string | null) {
   const { data, isLoading, error, mutate } = useSWR<PatientConsultsResponse>(
     patientId ? `/api/patients/${patientId}/consults` : null,
@@ -56,7 +77,7 @@ export function usePatientConsults(patientId: string | null) {
 
   /** Records a consult request. Throws with a Thai message when refused. */
   const requestConsult = useCallback(
-    async (doctorId: string, reason: string): Promise<PatientConsult> => {
+    async (input: RequestConsultInput): Promise<PatientConsult> => {
       if (!patientId) {
         throw new Error('ไม่พบข้อมูลผู้คลอด — กลับไปเปิดหน้าผู้คลอดแล้วลองใหม่อีกครั้ง');
       }
@@ -64,7 +85,7 @@ export function usePatientConsults(patientId: string | null) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ doctorId, reason }),
+        body: JSON.stringify(input),
       });
       const body = (await res.json().catch(() => null)) as { consult?: PatientConsult } | null;
       if (!res.ok || !body?.consult) {
@@ -102,6 +123,7 @@ export function usePatientConsults(patientId: string | null) {
   return {
     consults: data?.consults ?? [],
     doctors: data?.doctors ?? [],
+    hub: data?.hub ?? null,
     isLoading,
     error,
     mutate,

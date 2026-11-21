@@ -930,10 +930,20 @@ export interface ReferralInsightsResponse {
   destinations: Array<{ id: string; name: string; count: number }>;
 }
 
-// ─── Consults (ปรึกษาแพทย์ที่ปรึกษาได้จากรายชื่อแพทย์ของโรง) ──────────
+// ─── Consults (ปรึกษาแพทย์ — ภายในโรง และขึ้นสู่ทีมสูติศาสตร์ รพ.แม่ข่าย) ──
 
 /** The state of a consult: asked for, reached the doctor, answered. */
 export type ConsultStatus = 'REQUESTED' | 'CONTACTED' | 'COMPLETED';
+
+/**
+ * Where a consult is directed. INTERNAL is the existing in-hospital flow
+ * (a doctor from the patient's own hospital's contact list); HUB sends the
+ * question up to the provincial hub hospital's registered OB-GYN team.
+ */
+export type ConsultScope = 'INTERNAL' | 'HUB';
+
+/** How urgent a consult is — the same vocabulary referrals use. */
+export type ConsultUrgency = 'ROUTINE' | 'URGENT' | 'EMERGENCY';
 
 /** A doctor from the hospital's consult list. */
 export interface ConsultDoctor {
@@ -942,6 +952,16 @@ export interface ConsultDoctor {
   name: string;
   position: string | null;
   phoneNumber: string | null;
+}
+
+/** The provincial hub a hospital's HUB consults go up to. */
+export interface ConsultHubInfo {
+  hcode: string;
+  name: string;
+  /** True when the hub has at least one active consult doctor registered. */
+  available: boolean;
+  /** The hub hospital's registered consult doctors. */
+  doctors: ConsultDoctor[];
 }
 
 /** One consult record of one admission. */
@@ -961,6 +981,15 @@ export interface PatientConsult {
   requestedByName: string | null;
   consultedAt: string | null;
   createdAt: string;
+  /** INTERNAL = a doctor of the patient's hospital; HUB = the hub's OB team. */
+  consultScope: ConsultScope;
+  /** The hub hospital the question was sent up to (HUB consults only). */
+  targetHospitalId: string | null;
+  targetHospitalName: string | null;
+  targetHospitalHcode: string | null;
+  urgencyLevel: ConsultUrgency;
+  /** The hub clinician who wrote the answer (HUB consults only). */
+  answeredByName: string | null;
 }
 
 export interface PatientConsultsResponse {
@@ -968,4 +997,22 @@ export interface PatientConsultsResponse {
   consults: PatientConsult[];
   /** The doctors of the patient's hospital that can be consulted. */
   doctors: ConsultDoctor[];
+  /** The provincial hub this hospital's HUB consults go up to — null when the
+   *  patient's hospital IS the hub (or none is registered). */
+  hub: ConsultHubInfo | null;
+}
+
+/** One consult in the hub's inbox (a HUB consult addressed to this hospital's
+ *  OB team), with the requesting context joined in. */
+export interface HubConsultInboxItem extends PatientConsult {
+  patientName: string | null;
+  /** The URL-form patient id ({hcode}-{an}) of the consulted admission. */
+  patientUrlId: string;
+  requesterHospitalName: string;
+}
+
+export interface ConsultInboxResponse {
+  consults: HubConsultInboxItem[];
+  /** HUB consults of this hospital that have not been answered yet. */
+  pendingCount: number;
 }
