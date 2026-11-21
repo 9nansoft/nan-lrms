@@ -70,6 +70,14 @@ export const NOTIFICATION_EVENTS: readonly NotificationEvent[] = [
     implemented: true,
   },
   {
+    key: 'consult_message',
+    tier: 'urgent',
+    detail: 'patient',
+    labelTh: 'ข้อความใหม่ในคำปรึกษา',
+    descriptionTh: 'มีข้อความใหม่ในบทสนทนาของคำปรึกษาที่ท่านเกี่ยวข้อง (แชทในระบบ)',
+    implemented: true,
+  },
+  {
     key: 'anc_overdue',
     tier: 'digest',
     detail: 'patient',

@@ -16,7 +16,7 @@
 // these builders return a bare bubble, not a full {type:'flex',altText,...}
 // envelope. `alertTitle` produces the Thai alt-text/title string.
 
-export type AlertSeverity = 'high' | 'emergency';
+export type AlertSeverity = 'high' | 'emergency' | 'notify';
 export type AlertRecipientScope =
   | 'hospital_staff'
   | 'province_center'
@@ -49,11 +49,15 @@ export interface BuildAlertFlexInput {
 const SEVERITY_COLOR: Record<AlertSeverity, string> = {
   high: '#ef4444',
   emergency: '#ef4444',
+  // Consult-chat notices — deliberately not a risk color: nothing is wrong,
+  // someone is talking.
+  notify: '#2563eb',
 };
 
 const SEVERITY_LABEL_TH: Record<AlertSeverity, string> = {
   high: 'เสี่ยงสูง',
   emergency: 'ฉุกเฉิน',
+  notify: 'คำปรึกษา',
 };
 
 const SCOPE_LABEL_TH: Record<AlertRecipientScope, string> = {

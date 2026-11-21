@@ -118,6 +118,10 @@ const REFERRAL_INCOMING_ALERT_SOURCE = 'referral_incoming';
 const REFERRAL_INCOMING_RULE_ID = 'referral_incoming';
 const REFERRAL_OVERDUE_ALERT_SOURCE = 'referral_overdue';
 const REFERRAL_OVERDUE_RULE_ID = 'referral_overdue';
+// The consult chat notice (see enqueueConsultMessageAlert). ruleId is set
+// PER MESSAGE by that producer — the day-granular dedup index would
+// otherwise collapse a whole conversation into one LINE per day.
+const CONSULT_MESSAGE_ALERT_SOURCE = 'consult_message';
 
 /** Resolve active recipients for a hospital + province.
  *  P1-C contract (codex gap-sweep):
@@ -233,12 +237,13 @@ async function enqueueAlertEvent(
   severity: AlertSeverity,
   alertSource: string,
   ruleId: string,
+  options: { titleOverride?: string; excludeCid?: string | null } = {},
 ): Promise<number> {
   if (!mophAlertsEnabled()) {
     logger.debug('moph_alert_skipped_disabled', { caseRef: ctx.caseRef });
     return 0;
   }
-  const title = alertTitle({ severity, hospitalName: ctx.hospitalName });
+  const title = options.titleOverride ?? alertTitle({ severity, hospitalName: ctx.hospitalName });
   const key = getEncryptionKey();
   if (ctx.patientName && !key) {
     logger.error('moph_alert_encryption_key_missing', { hospitalId: ctx.hospitalId });
@@ -264,13 +269,9 @@ async function enqueueAlertEvent(
   // of the hospitals row, which is also what the profile UI shows users when
   // they subscribe. ctx.originHcode is the code the event arrived under and is
   // not guaranteed to be the same string.
-  const recipients = await resolveRecipients(
-    db,
-    ctx.hospitalId,
-    ctx.province,
-    undefined,
-    alertSource,
-  );
+  const recipients = (
+    await resolveRecipients(db, ctx.hospitalId, ctx.province, undefined, alertSource)
+  ).filter((r) => !options.excludeCid || r.cid !== options.excludeCid);
   if (recipients.length === 0) {
     const queued = await queueAlertEvent(db, event);
     if (queued) {
@@ -606,6 +607,31 @@ export async function enqueueReferralOverdueAlert(
     REFERRAL_OVERDUE_ALERT_SOURCE,
     REFERRAL_OVERDUE_RULE_ID,
   );
+}
+
+/**
+ * New-message-in-a-consult-thread producer (consult_message).
+ *
+ * `ctx.hospitalId` is the RECEIVING hospital: the other side of the
+ * conversation for a HUB consult, the hospital itself for an INTERNAL one —
+ * recipient resolution is roster-wide for that hospital, and knows nothing
+ * about who spoke, so `options.excludeCid` (the sender) is filtered here at
+ * the producer.
+ *
+ * `options.messageId` becomes the ruleId and is what keeps the day-granular
+ * dedup index from collapsing a conversation into one LINE per day: every
+ * message carries its own rule, so every message delivers. Caller decides
+ * policy (drain is best-effort elsewhere); this only enqueues.
+ */
+export async function enqueueConsultMessageAlert(
+  db: DatabaseAdapter,
+  ctx: AlertEventContext,
+  options: { messageId: string; excludeCid: string | null },
+): Promise<number> {
+  return enqueueAlertEvent(db, ctx, 'notify', CONSULT_MESSAGE_ALERT_SOURCE, options.messageId, {
+    titleOverride: `ข้อความใหม่ในคำปรึกษา — ${ctx.hospitalName}`,
+    excludeCid: options.excludeCid,
+  });
 }
 
 // crypto.randomUUID is available in Node 20+; isolated here so tests/dev can

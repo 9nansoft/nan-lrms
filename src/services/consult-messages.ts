@@ -24,6 +24,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
+import { resolveAlertOrigin, decryptPatientName } from '@/services/alert-context';
+import { enqueueConsultMessageAlert } from '@/services/risk-alert';
+import { drainMophAlerts } from '@/services/moph-alert-drain';
 import type { ConsultMessage, PatientConsult } from '@/types/api';
 import {
   announceConsult,
@@ -246,6 +249,52 @@ export async function createConsultMessage(
     an: consult.an,
     consultId: consult.id,
   });
+
+  // LINE: the other side's opted-in roster learns a message arrived (the
+  // roster is CID-keyed — see enqueueConsultMessageAlert). Best effort by
+  // contract: a dead notification pipeline must never fail the message.
+  try {
+    const senderIsRequester = actor.hospitalId === consult.hospitalId;
+    const receivingHospitalId =
+      consult.consultScope === 'HUB'
+        ? senderIsRequester
+          ? consult.targetHospitalId
+          : consult.hospitalId
+        : consult.hospitalId;
+    if (receivingHospitalId) {
+      const hcodeRows = await db.query<{ hcode: string }>(
+        'SELECT hcode FROM hospitals WHERE id = ?',
+        [receivingHospitalId],
+      );
+      const hcode = hcodeRows[0]?.hcode ?? '';
+      const origin = await resolveAlertOrigin(db, receivingHospitalId, hcode);
+      const patientRows = await db.query<{ name: string | null }>(
+        'SELECT name FROM cached_patients WHERE hospital_id = ? AND an = ? LIMIT 1',
+        [consult.hospitalId, consult.an],
+      );
+      const enqueued = await enqueueConsultMessageAlert(
+        db,
+        {
+          hospitalId: receivingHospitalId,
+          originHcode: hcode,
+          hospitalName: origin.hospitalName,
+          province: origin.province,
+          caseRef: `AN ${consult.an}`,
+          localDate: origin.localDate,
+          patientName: decryptPatientName(patientRows[0]?.name ?? null),
+          confirmUrl: null,
+        },
+        { messageId, excludeCid: actor.userCid },
+      );
+      if (enqueued > 0) {
+        // Push-path drains only ride syncs and webhooks — give this message
+        // a drain of its own so the LINE lands while the chat is still open.
+        await drainMophAlerts(db, receivingHospitalId);
+      }
+    }
+  } catch (error) {
+    logger.warn('consult_message_alert_failed', { error });
+  }
 
   const message = await getConsultMessage(db, messageId);
   if (!message) {

@@ -22,6 +22,9 @@ describe('notification event catalog', () => {
     // (webhook.ts severity-change loop) and cpd_high (sync/cpd-persist.ts).
     // Phase 2-B adds referral_incoming (sync/referrals.ts create branch) and
     // referral_overdue (referral-alerts.ts, on the sync tick).
+    // consult_message arrives with the consult thread (consult-messages.ts —
+    // per-message rule_id, or the day-granular dedup would collapse a whole
+    // conversation into one LINE).
     // This list may only grow when a producer actually ships — a checkbox for
     // an event with no producer promises a notification that cannot arrive.
     expect(
@@ -30,6 +33,7 @@ describe('notification event catalog', () => {
         .sort(),
     ).toEqual([
       'anc_hr3',
+      'consult_message',
       'cpd_high',
       'maternal_triage',
       'partograph_critical',
