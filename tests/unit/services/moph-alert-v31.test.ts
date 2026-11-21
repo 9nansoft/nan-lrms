@@ -208,6 +208,49 @@ describe('sendMophTemplateAlert', () => {
     expect(res.reason).toBe('template not found');
     expect(res.messageId).toBeNull();
   });
+
+  it('treats the v3.1 lowercase message_code ≠ 200 envelope as failure', async () => {
+    // The live v3.1 endpoint's own envelope is lowercase {app_message,
+    // line_message, message_code} — a non-200 code there is the same trap as
+    // the PascalCase BMS one and must not pass as success.
+    mockFetchSeq([jsonResponse(200, { app_message: '', line_message: '', message_code: 400 })]);
+    const res = await sendMophTemplateAlert(BASE_INPUT);
+    expect(res.success).toBe(false);
+    expect(res.reason).toBe('message_code 400');
+    expect(res.messageId).toBeNull();
+  });
+
+  it('treats line_message "Error template" as failure even with message_code 200', async () => {
+    // Observed live body: MOPH accepts the request (message_code 200) but its
+    // template render failed and it substitutes the sentinel line_message
+    // "Error template" — nothing usable reaches LINE. Must NOT count as sent.
+    mockFetchSeq([
+      jsonResponse(200, {
+        app_message: '',
+        line_message: 'Error template',
+        message_code: 200,
+      }),
+    ]);
+    const res = await sendMophTemplateAlert(BASE_INPUT);
+    expect(res.success).toBe(false);
+    expect(res.reason).toContain('Error template');
+    expect(res.messageId).toBeNull();
+  });
+
+  it('still succeeds on the v3.1 envelope when line_message carries real content', async () => {
+    // Guard against over-flagging: a rendered line_message (any real text) with
+    // message_code 200 is a genuine success, not the sentinel.
+    mockFetchSeq([
+      jsonResponse(200, {
+        app_message: '',
+        line_message: 'แจ้งเตือนกรณีเสี่ยงสูง — รพ.ทดสอบ',
+        message_code: 200,
+      }),
+    ]);
+    const res = await sendMophTemplateAlert(BASE_INPUT);
+    expect(res.success).toBe(true);
+    expect(res.reason).toBeNull();
+  });
 });
 
 describe('mophTemplateConfigured', () => {

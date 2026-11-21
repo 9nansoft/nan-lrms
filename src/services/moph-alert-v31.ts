@@ -15,9 +15,13 @@
 // is transport-agnostic (it duck-types on `.code`).
 //
 // The v3.1 API's success response shape is not documented (the collection saves
-// no responses), so 2xx is parsed defensively: any 2xx counts as success unless
-// the body explicitly says failure, and the message id is extracted from the
-// common `message_id` / `data.message_id` / `id` fields.
+// no responses). Observed live envelope: {app_message, line_message,
+// message_code} with message_code 200 = accepted — but message_code 200 does
+// NOT guarantee delivery: a failed template render comes back as line_message
+// "Error template" (sentinel, see parseResponse). 2xx is parsed defensively:
+// any 2xx counts as success unless the body explicitly says failure, and the
+// message id is extracted from the common `message_id` / `data.message_id` /
+// `id` fields.
 //
 // This module performs NO audit write — the authoritative per-recipient record
 // lives in moph_alert_log (same rule as moph-prompt.ts: no dual-audit).
@@ -69,22 +73,39 @@ interface RawTemplateResponse {
   /** BMS-ecosystem envelope (hosxp.net PasteJSON, bmscloud): MessageCode 200
    *  = ok, anything else = failure — regardless of the HTTP status. */
   MessageCode?: number | string;
+  /** The v3.1 endpoint's own envelope (observed live): lowercase
+   *  {app_message, line_message, message_code} — same contract as MessageCode,
+   *  200 = ok. line_message carries the RENDERED LINE content, and MOPH
+   *  substitutes the sentinel "Error template" when its template render fails
+   *  (wrong/missing registered template name or variables) while still
+   *  returning message_code 200. */
+  message_code?: number | string;
+  line_message?: string | null;
+  app_message?: string | null;
 }
 
 function parseResponse(raw: RawTemplateResponse): MophTemplateAlertResponse {
   const bodyMessage = raw.message ?? raw.Message;
   // Body-level failure detection (defensive — no documented failure shape):
-  // explicit success:false, a status string that reads like a failure, or a
-  // BMS-style MessageCode envelope carrying a non-200 code on HTTP 2xx.
-  const messageCodeFail =
-    raw.MessageCode !== undefined && raw.MessageCode !== null && String(raw.MessageCode) !== '200';
+  // explicit success:false, a status string that reads like a failure, a
+  // MessageCode/message_code envelope carrying a non-200 code on HTTP 2xx, or
+  // the v3.1 "Error template" render-failure sentinel in line_message.
+  const code = raw.message_code ?? raw.MessageCode;
+  const messageCodeFail = code !== undefined && code !== null && String(code) !== '200';
+  const lineMessageError =
+    typeof raw.line_message === 'string' &&
+    raw.line_message.trim().toLowerCase() === 'error template';
   const explicitFail =
     raw.success === false ||
     messageCodeFail ||
+    lineMessageError ||
     (typeof raw.status === 'string' && /fail|error|invalid|not_found|not found/i.test(raw.status));
   const reason = explicitFail
     ? (bodyMessage ??
-      (messageCodeFail ? `MessageCode ${raw.MessageCode}` : null) ??
+      (lineMessageError
+        ? `template render failed: line_message "${raw.line_message}" — ตรวจ MOPH_ALERT_TEMPLATE กับชื่อที่ MOPH จดทะเบียน`
+        : null) ??
+      (messageCodeFail ? `message_code ${code}` : null) ??
       (typeof raw.status === 'string' ? raw.status : null) ??
       'unknown')
     : null;
