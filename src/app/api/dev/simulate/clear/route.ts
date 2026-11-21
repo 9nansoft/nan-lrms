@@ -79,7 +79,9 @@ export async function POST() {
       'cached_anc_lab_results',
       'cached_newborns',
       'cached_referrals',
-      // Consults hang off the patients — they go before them (FK).
+      // Consults hang off the patients — they go before them (FK). The
+      // threads hang off the consults, so they go before the consults.
+      'consult_messages',
       'patient_consults',
       'cached_patients',
       'maternal_journeys',

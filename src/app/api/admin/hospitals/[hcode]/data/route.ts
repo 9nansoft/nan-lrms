@@ -275,6 +275,12 @@ export async function DELETE(
     await db.execute('DELETE FROM moph_alert_log WHERE hospital_id = ?', [hospitalId]);
     await db.execute('DELETE FROM moph_alert_event_queue WHERE hospital_id = ?', [hospitalId]);
     // Consults are the patient's clinical records — they go with the patient.
+    // The threads hang off the consults, so they go first (FK).
+    await db.execute(
+      `DELETE FROM consult_messages
+        WHERE consult_id IN (SELECT id FROM patient_consults WHERE hospital_id = ?)`,
+      [hospitalId],
+    );
     await db.execute('DELETE FROM patient_consults WHERE hospital_id = ?', [hospitalId]);
     // cached_patients references maternal_journeys.id, so it must go before
     // maternal_journeys to satisfy the FK.

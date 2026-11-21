@@ -62,6 +62,8 @@ export const CONSULT_URGENCIES: readonly ConsultUrgency[] = [
 export const MAX_CONSULT_REASON_LENGTH = 500;
 /** The longest advice a consult may carry. */
 export const MAX_CONSULT_ADVICE_LENGTH = 1000;
+/** The longest one message in a consult's thread may carry. */
+export const MAX_CONSULT_MESSAGE_LENGTH = 2000;
 
 interface ConsultRow {
   id: string;
@@ -87,6 +89,9 @@ interface ConsultRow {
   requested_by_name: string | null;
   consulted_at: string | Date | null;
   created_at: string | Date;
+  // Subquery in CONSULT_COLUMNS — the thread's human message count. COUNT
+  // may arrive as a string depending on the driver, so it is normalized.
+  message_count: string | number | null;
 }
 
 interface DoctorRow {
@@ -125,12 +130,15 @@ function toConsult(row: ConsultRow): PatientConsult {
     requestedByName: row.requested_by_name,
     consultedAt: toIso(row.consulted_at),
     createdAt: toIso(row.created_at) ?? '',
+    messageCount: Number(row.message_count ?? 0),
   };
 }
 
 // The consult SELECT, shared by every read. `th` is the target (hub)
 // hospital, joined left because INTERNAL rows have no target. The columns
-// and the FROM are separate so the inbox can add its own joins.
+// and the FROM are separate so the inbox can add its own joins. The trailing
+// subquery counts the thread's human messages (SYSTEM notes excluded — the
+// status is already visible on the row itself).
 const CONSULT_COLUMNS = `
     pc.id, pc.hospital_id, pc.patient_id, pc.an, pc.journey_id,
     pc.doctor_id, pc.doctor_cid, pc.doctor_name, pc.doctor_position,
@@ -138,11 +146,34 @@ const CONSULT_COLUMNS = `
     pc.target_hospital_id, th.name AS target_hospital_name,
     th.hcode AS target_hospital_hcode, pc.urgency_level,
     pc.answered_by_name, pc.requested_by_cid, pc.requested_by_name,
-    pc.consulted_at, pc.created_at`;
+    pc.consulted_at, pc.created_at,
+    (SELECT COUNT(*) FROM consult_messages cm
+      WHERE cm.consult_id = pc.id AND cm.message_type = 'TEXT') AS message_count`;
 
 const CONSULT_FROM = `
       FROM patient_consults pc
       LEFT JOIN hospitals th ON th.id = pc.target_hospital_id`;
+
+/**
+ * One consult by id — the shared read the service re-selects through after
+ * every write, and the thread service loads the consult through.
+ *
+ * No hospital scope inside the query: AN-keyed reads filter by (an,
+ * hospital) themselves, and id-keyed callers must check the row's admission
+ * against their own scope before trusting it.
+ */
+export async function loadConsultById(
+  db: DatabaseAdapter,
+  id: string,
+): Promise<PatientConsult | null> {
+  const rows = await db.query<ConsultRow>(
+    `SELECT ${CONSULT_COLUMNS}
+       ${CONSULT_FROM}
+      WHERE pc.id = ?`,
+    [id],
+  );
+  return rows[0] ? toConsult(rows[0]) : null;
+}
 
 /**
  * The admission a consult belongs to.
@@ -243,16 +274,8 @@ export async function listPatientConsults(
   hospitalId: string,
 ): Promise<PatientConsult[]> {
   const rows = await db.query<ConsultRow>(
-    `SELECT
-    pc.id, pc.hospital_id, pc.patient_id, pc.an, pc.journey_id,
-    pc.doctor_id, pc.doctor_cid, pc.doctor_name, pc.doctor_position,
-    pc.doctor_phone, pc.reason, pc.status, pc.advice, pc.consult_scope,
-    pc.target_hospital_id, th.name AS target_hospital_name,
-    th.hcode AS target_hospital_hcode, pc.urgency_level,
-    pc.answered_by_name, pc.requested_by_cid, pc.requested_by_name,
-    pc.consulted_at, pc.created_at
-FROM patient_consults pc
-      LEFT JOIN hospitals th ON th.id = pc.target_hospital_id
+    `SELECT ${CONSULT_COLUMNS}
+       ${CONSULT_FROM}
      WHERE pc.an = ? AND pc.hospital_id = ?
      ORDER BY pc.created_at DESC`,
     [an, hospitalId],
@@ -403,20 +426,11 @@ export async function createPatientConsult(
     });
   }
 
-  const stored = await db.query<ConsultRow>(
-    `SELECT
-    pc.id, pc.hospital_id, pc.patient_id, pc.an, pc.journey_id,
-    pc.doctor_id, pc.doctor_cid, pc.doctor_name, pc.doctor_position,
-    pc.doctor_phone, pc.reason, pc.status, pc.advice, pc.consult_scope,
-    pc.target_hospital_id, th.name AS target_hospital_name,
-    th.hcode AS target_hospital_hcode, pc.urgency_level,
-    pc.answered_by_name, pc.requested_by_cid, pc.requested_by_name,
-    pc.consulted_at, pc.created_at
-FROM patient_consults pc
-      LEFT JOIN hospitals th ON th.id = pc.target_hospital_id WHERE pc.id = ?`,
-    [id],
-  );
-  return { ok: true, consult: toConsult(stored[0]) };
+  const stored = await loadConsultById(db, id);
+  if (!stored) {
+    return { ok: false, error: 'ไม่พบรายการปรึกษานี้', status: 500 };
+  }
+  return { ok: true, consult: stored };
 }
 
 export interface UpdateConsultInput {
@@ -451,29 +465,16 @@ export async function updatePatientConsult(
   actor: ConsultActor,
   input: UpdateConsultInput,
 ): Promise<{ ok: true; consult: PatientConsult } | { ok: false; error: string; status: number }> {
-  const existing = await db.query<ConsultRow>(
-    `SELECT
-    pc.id, pc.hospital_id, pc.patient_id, pc.an, pc.journey_id,
-    pc.doctor_id, pc.doctor_cid, pc.doctor_name, pc.doctor_position,
-    pc.doctor_phone, pc.reason, pc.status, pc.advice, pc.consult_scope,
-    pc.target_hospital_id, th.name AS target_hospital_name,
-    th.hcode AS target_hospital_hcode, pc.urgency_level,
-    pc.answered_by_name, pc.requested_by_cid, pc.requested_by_name,
-    pc.consulted_at, pc.created_at
-FROM patient_consults pc
-      LEFT JOIN hospitals th ON th.id = pc.target_hospital_id WHERE pc.id = ?`,
-    [id],
-  );
-  const row = existing[0];
-  if (!row) {
+  const existing = await loadConsultById(db, id);
+  if (!existing) {
     return { ok: false, error: 'ไม่พบรายการปรึกษานี้', status: 404 };
   }
 
-  const isHub = (row.consult_scope ?? 'INTERNAL') === 'HUB';
-  const isRequester = actor.hospitalId === row.hospital_id;
+  const isHub = existing.consultScope === 'HUB';
+  const isRequester = actor.hospitalId === existing.hospitalId;
   const isTargetClinician =
     isHub &&
-    actor.hospitalId === row.target_hospital_id &&
+    actor.hospitalId === existing.targetHospitalId &&
     (actor.role === 'OBSTETRICIAN' || actor.role === 'ADMIN');
 
   if (!isRequester && !isTargetClinician) {
@@ -482,7 +483,12 @@ FROM patient_consults pc
 
   // Only the clinicians being asked may write the advice.
   const mayWriteAdvice = !isHub || isTargetClinician;
-  if (input.advice !== undefined && input.advice !== null && input.advice !== row.advice && !mayWriteAdvice) {
+  if (
+    input.advice !== undefined &&
+    input.advice !== null &&
+    input.advice !== existing.advice &&
+    !mayWriteAdvice
+  ) {
     return {
       ok: false,
       error: 'คำแนะนำต้องมาจากทีมแพทย์ปลายทาง — ผู้ขอบันทึกสถานะได้อย่างเดียว',
@@ -490,12 +496,12 @@ FROM patient_consults pc
     };
   }
 
-  const status = input.status ?? (row.status as ConsultStatus) ?? 'REQUESTED';
+  const status = input.status ?? existing.status;
   if (!CONSULT_STATUSES.includes(status)) {
     return { ok: false, error: 'สถานะการปรึกษาไม่ถูกต้อง', status: 400 };
   }
 
-  let advice = input.advice === undefined ? row.advice : input.advice;
+  let advice = input.advice === undefined ? existing.advice : input.advice;
   if (advice !== null && advice !== undefined) {
     advice = advice.trim();
     if (advice.length > MAX_CONSULT_ADVICE_LENGTH) {
@@ -510,13 +516,13 @@ FROM patient_consults pc
 
   const now = new Date().toISOString();
   // The consult is "done" the moment it is answered.
-  const consultedAt = status === 'COMPLETED' ? row.consulted_at ?? now : row.consulted_at;
+  const consultedAt = status === 'COMPLETED' ? existing.consultedAt ?? now : existing.consultedAt;
   // The hub clinician who wrote the answer is recorded, so the requester
   // knows whose advice it was.
   const answeredByName =
     isHub && isTargetClinician && (advice !== null || status === 'COMPLETED')
-      ? row.answered_by_name ?? actor.name
-      : row.answered_by_name;
+      ? existing.answeredByName ?? actor.name
+      : existing.answeredByName;
 
   await db.execute(
     `UPDATE patient_consults
@@ -525,42 +531,99 @@ FROM patient_consults pc
     [status, advice, consultedAt, answeredByName, now, id],
   );
 
-  if (isHub) {
-    await announceConsult(db, {
-      type: 'consult_updated',
-      patientHospitalId: row.hospital_id,
-      hubHospitalId: row.target_hospital_id,
-      an: row.an,
-      consultId: row.id,
+  // The thread records the consult's own moves: a HUB consult that actually
+  // changed state gets a SYSTEM note, so the conversation reads as the
+  // complete record of the case.
+  if (isHub && status !== existing.status) {
+    await insertConsultMessage(db, {
+      consultId: id,
+      senderHospitalId: actor.hospitalId,
+      senderCid: actor.userCid ?? '',
+      senderName: actor.name ?? 'ระบบ',
+      senderRole: actor.role,
+      body: consultSystemNote(status, actor.name),
+      messageType: 'SYSTEM',
     });
   }
 
-  const stored = await db.query<ConsultRow>(
-    `SELECT
-    pc.id, pc.hospital_id, pc.patient_id, pc.an, pc.journey_id,
-    pc.doctor_id, pc.doctor_cid, pc.doctor_name, pc.doctor_position,
-    pc.doctor_phone, pc.reason, pc.status, pc.advice, pc.consult_scope,
-    pc.target_hospital_id, th.name AS target_hospital_name,
-    th.hcode AS target_hospital_hcode, pc.urgency_level,
-    pc.answered_by_name, pc.requested_by_cid, pc.requested_by_name,
-    pc.consulted_at, pc.created_at
-FROM patient_consults pc
-      LEFT JOIN hospitals th ON th.id = pc.target_hospital_id WHERE pc.id = ?`,
-    [id],
+  if (isHub) {
+    await announceConsult(db, {
+      type: 'consult_updated',
+      patientHospitalId: existing.hospitalId,
+      hubHospitalId: existing.targetHospitalId,
+      an: existing.an,
+      consultId: existing.id,
+    });
+  }
+
+  const stored = await loadConsultById(db, id);
+  if (!stored) {
+    return { ok: false, error: 'ไม่พบรายการปรึกษานี้', status: 500 };
+  }
+  return { ok: true, consult: stored };
+}
+
+/**
+ * Append one row to a consult's thread — a human message or the consult's
+ * own status note. The sender is a snapshot taken from the caller-resolved
+ * actor; the consult id is trusted (callers load the consult first).
+ */
+export async function insertConsultMessage(
+  db: DatabaseAdapter,
+  input: {
+    consultId: string;
+    senderHospitalId: string;
+    senderCid: string;
+    senderName: string;
+    senderRole: string | null;
+    body: string;
+    messageType: 'TEXT' | 'SYSTEM';
+  },
+): Promise<string> {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO consult_messages
+       (id, consult_id, sender_hospital_id, sender_cid, sender_name,
+        sender_role, body, message_type, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      input.consultId,
+      input.senderHospitalId,
+      input.senderCid,
+      input.senderName,
+      input.senderRole,
+      input.body,
+      input.messageType,
+      now,
+      now,
+    ],
   );
-  return { ok: true, consult: toConsult(stored[0]) };
+  return id;
+}
+
+/** The SYSTEM note a HUB consult's thread records when its state moves. */
+function consultSystemNote(status: ConsultStatus, actorName: string | null): string {
+  const base: Record<ConsultStatus, string> = {
+    REQUESTED: 'คำปรึกษาถูกเปิดขึ้นใหม่ — รอคำตอบ',
+    CONTACTED: 'กำลังปรึกษา — เปิดบทสนทนาให้ทั้งสองฝั่งโต้ตอบได้',
+    COMPLETED: 'ปิดคำปรึกษาแล้ว — บทสนทนาอ่านได้อย่างเดียว',
+  };
+  return actorName ? `${base[status]} (โดย ${actorName})` : base[status];
 }
 
 /**
  * Announce a HUB consult over SSE. One payload names BOTH hospitals — the
  * patient's (`hcode`, the requester's patient page listens for it) and the
  * hub's (`toHcode`, the inbox listens for it) — because eventReachesClient
- * delivers to any scoped client that can see at least one of them.
+ * delivers to any scoped client that can see at least one of them. The
+ * thread service reuses it to announce each new message.
  */
-async function announceConsult(
+export async function announceConsult(
   db: DatabaseAdapter,
   event: {
-    type: 'consult_requested' | 'consult_updated';
+    type: 'consult_requested' | 'consult_updated' | 'consult_message';
     patientHospitalId: string;
     hubHospitalId: string | null;
     an: string;

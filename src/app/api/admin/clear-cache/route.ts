@@ -38,7 +38,9 @@ export async function POST() {
     const patientsDeleted = await db.query<{ cnt: number }>(
       'SELECT COUNT(*) as cnt FROM cached_patients',
     );
-    // Consults hang off the patients — they go before them (FK).
+    // Consults hang off the patients — they go before them (FK). The
+    // threads hang off the consults, so they go first.
+    await db.execute('DELETE FROM consult_messages');
     await db.execute('DELETE FROM patient_consults');
     await db.execute('DELETE FROM cached_patients');
 

@@ -13,6 +13,8 @@ import { ArrowUpRight } from 'lucide-react';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { StatusChip } from '@/components/shared/StatusChip';
 import { Button } from '@/components/ui/button';
+import { ConsultThread } from '@/components/consult/ConsultThread';
+import type { ConsultViewer } from '@/components/consult/ConsultThread';
 import type { ConsultStatus, ConsultUrgency, HubConsultInboxItem } from '@/types/api';
 import type { StatusTone } from '@/config/status-tone';
 import { fmtDateTimeTh } from '@/components/patient/detail/format';
@@ -46,13 +48,15 @@ const fieldCls =
 
 export interface ConsultInboxListProps {
   consults: HubConsultInboxItem[];
+  /** The signed-in session, for the thread's read/write gating. */
+  viewer?: ConsultViewer | null;
   /** Answers one consult (COMPLETED + advice). Throws with a Thai message. */
   onAnswer: (consult: HubConsultInboxItem, advice: string) => Promise<unknown>;
   /** Progresses a consult without answering (REQUESTED → กำลังปรึกษา). */
   onProgress: (consult: HubConsultInboxItem) => Promise<unknown>;
 }
 
-export function ConsultInboxList({ consults, onAnswer, onProgress }: ConsultInboxListProps) {
+export function ConsultInboxList({ consults, viewer, onAnswer, onProgress }: ConsultInboxListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [adviceDrafts, setAdviceDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -97,6 +101,11 @@ export function ConsultInboxList({ consults, onAnswer, onProgress }: ConsultInbo
               <span className="text-label font-semibold text-ink">{consult.doctorName}</span>
               {consult.doctorPosition && (
                 <span className="text-caption text-ink-muted">{consult.doctorPosition}</span>
+              )}
+              {consult.messageCount > 0 && (
+                <span className="text-caption text-ink-muted">
+                  บทสนทนา ({consult.messageCount})
+                </span>
               )}
               <span className="ml-auto text-caption text-ink-muted">
                 ขอเมื่อ {fmtDateTimeTh(consult.createdAt)}
@@ -147,6 +156,15 @@ export function ConsultInboxList({ consults, onAnswer, onProgress }: ConsultInbo
                 </button>
                 {expanded && (
                   <>
+                    {/* The conversation with the asking team — the advice
+                        below stays the formal final answer. */}
+                    <ConsultThread
+                      patientId={consult.patientUrlId}
+                      consult={consult}
+                      viewer={viewer}
+                      patientName={consult.patientName}
+                      requesterHospitalName={consult.requesterHospitalName}
+                    />
                     <label
                       htmlFor={`inbox-advice-${consult.id}`}
                       className="text-caption font-semibold text-ink"

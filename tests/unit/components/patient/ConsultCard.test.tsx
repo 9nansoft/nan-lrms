@@ -48,6 +48,7 @@ function consult(over: Partial<PatientConsult> = {}): PatientConsult {
     targetHospitalHcode: null,
     urgencyLevel: 'ROUTINE',
     answeredByName: null,
+    messageCount: 0,
     ...over,
   };
 }
@@ -321,6 +322,32 @@ describe('ConsultCard — HUB consults (ปรึกษาขึ้นสู่�
     expect(within(row).getByLabelText('คำแนะนำจากแพทย์')).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: 'ตอบแล้ว' })).toBeInTheDocument();
     expect(within(row).queryByRole('button', { name: 'ติดต่อแล้ว' })).toBeNull();
+  });
+
+  it('offers the thread only on HUB consults, with its message count', () => {
+    renderCard({
+      consults: [consult(), hubConsult({ messageCount: 2 })],
+      hub,
+      viewer: REQUESTER_VIEWER,
+    });
+
+    const rows = screen.getAllByTestId('consult-row');
+    // INTERNAL consults are a phone call — no thread.
+    expect(within(rows[0]).queryByTestId('consult-thread-toggle')).toBeNull();
+    expect(within(rows[1]).getByTestId('consult-thread-toggle')).toHaveTextContent('บทสนทนา (2)');
+  });
+
+  it('opens the conversation thread in place, and hides it again', async () => {
+    stubMutations();
+    renderCard({ consults: [hubConsult()], hub, viewer: REQUESTER_VIEWER });
+
+    await userEvent.click(screen.getByTestId('consult-thread-toggle'));
+    const thread = await screen.findByTestId('consult-thread');
+    // The thread names the admission it belongs to — two patients never blur.
+    expect(within(thread).getByText(/บทสนทนา · AN 69000123/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('consult-thread-toggle'));
+    await waitFor(() => expect(screen.queryByTestId('consult-thread')).toBeNull());
   });
 
   it('the request form offers the hub mode with an urgency, and POSTs it', async () => {

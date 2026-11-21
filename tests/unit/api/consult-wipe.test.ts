@@ -52,6 +52,22 @@ async function consultCount(hospitalId?: string): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
+async function seedThreadMessage(consultId: string, id: string): Promise<void> {
+  const now = new Date().toISOString();
+  await db.execute(
+    `INSERT INTO consult_messages
+       (id, consult_id, sender_hospital_id, sender_cid, sender_name, body, message_type, created_at, updated_at)
+     SELECT ?, id, hospital_id, '1007000100999', 'พย.ทดสอบ', 'ข้อความ', 'TEXT', ?, ?
+       FROM patient_consults WHERE id = ?`,
+    [id, now, now, consultId],
+  );
+}
+
+async function messageCount(): Promise<number> {
+  const rows = await db.query<{ n: number }>('SELECT COUNT(*) AS n FROM consult_messages');
+  return Number(rows[0]?.n ?? 0);
+}
+
 beforeEach(async () => {
   db = await createTestDb();
   await new SeedOrchestrator().run(db);
@@ -89,20 +105,23 @@ describe('the consult records are wiped with the hospital data', () => {
     expect(await consultCount()).toBe(0);
   });
 
-  it('empties them on /api/admin/clear-cache', async () => {
+  it('empties them on /api/admin/clear-cache, threads included', async () => {
     await seedConsult(await hospitalIdOf(HCODE), 'pc-admin-1', 'AN-WIPE-3');
+    await seedThreadMessage('pc-admin-1', 'cm-admin-1');
 
     const res = await clearCacheRoute();
 
     expect(res.status).toBe(200);
     expect(await consultCount()).toBe(0);
+    expect(await messageCount()).toBe(0);
   });
 
-  it('removes the consults of ONE hospital on /api/admin/hospitals/[hcode]/data', async () => {
+  it('removes the consults of ONE hospital on /api/admin/hospitals/[hcode]/data, threads included', async () => {
     const otherHcode = '11002';
     const mine = await hospitalIdOf(HCODE);
     const theirs = await hospitalIdOf(otherHcode);
     await seedConsult(mine, 'pc-one-1', 'AN-WIPE-4');
+    await seedThreadMessage('pc-one-1', 'cm-one-1');
     await seedConsult(theirs, 'pc-one-2', 'AN-WIPE-5');
 
     const res = await hospitalDataRoute(
@@ -116,6 +135,7 @@ describe('the consult records are wiped with the hospital data', () => {
 
     expect(res.status).toBe(200);
     expect(await consultCount(mine)).toBe(0);
+    expect(await messageCount()).toBe(0);
     // The other hospital keeps its own.
     expect(await consultCount(theirs)).toBe(1);
   });

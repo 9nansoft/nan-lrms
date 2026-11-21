@@ -25,6 +25,8 @@ import { SectionCard } from '@/components/shared/SectionCard';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { StatusChip } from '@/components/shared/StatusChip';
 import { Button } from '@/components/ui/button';
+import { ConsultThread } from '@/components/consult/ConsultThread';
+import type { ConsultViewer } from '@/components/consult/ConsultThread';
 import type {
   ConsultDoctor,
   ConsultHubInfo,
@@ -72,12 +74,9 @@ const URGENCY_TONE: Record<ConsultUrgency, StatusTone> = {
 const fieldCls =
   'w-full rounded-lg border border-border bg-surface-card px-2 py-1.5 text-caption text-ink placeholder:text-ink-subtle focus:border-brand focus:outline-none';
 
-/** The signed-in viewer, as far as the answer gating needs to know. */
-export interface ConsultViewer {
-  role?: string | null;
-  hospitalCode?: string | null;
-  userCid?: string | null;
-}
+/** The signed-in viewer, as far as the gating needs to know. Defined by the
+ *  thread (it gates read AND write) and re-exported here for the answer box. */
+export type { ConsultViewer } from '@/components/consult/ConsultThread';
 
 export interface ConsultCardProps {
   /** The admission in URL form: {hcode}-{an}. */
@@ -129,6 +128,9 @@ export function ConsultCard({
   const [urgency, setUrgency] = useState<ConsultUrgency>('ROUTINE');
   const [reason, setReason] = useState('');
   const [adviceDrafts, setAdviceDrafts] = useState<Record<string, string>>({});
+  // Which HUB consult's thread is expanded — the thread component fetches
+  // (and polls) only while it is open.
+  const [threadOpen, setThreadOpen] = useState<Record<string, boolean>>({});
   // Which write is in flight: 'request' or `update:{consultId}`.
   const [busy, setBusy] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -224,6 +226,7 @@ export function ConsultCard({
                 const isHub = consult.consultScope === 'HUB';
                 const statusLabel = isHub ? HUB_STATUS_LABEL[consult.status] : INTERNAL_STATUS_LABEL[consult.status];
                 const answerer = canAnswerHub(consult, viewer);
+                const threadOpenFor = threadOpen[consult.id] ?? false;
                 return (
                   <li
                     key={consult.id}
@@ -280,6 +283,29 @@ export function ConsultCard({
                       <p className="text-caption text-ink-muted">
                         ตอบโดย: <span className="text-ink">{consult.answeredByName}</span>
                       </p>
+                    )}
+
+                    {/* HUB consults carry a thread: both teams talk it
+                        through here, bound to this admission's AN. */}
+                    {isHub && (
+                      <button
+                        type="button"
+                        data-testid="consult-thread-toggle"
+                        onClick={() =>
+                          setThreadOpen((current) => ({
+                            ...current,
+                            [consult.id]: !current[consult.id],
+                          }))
+                        }
+                        className="w-fit text-caption text-brand underline"
+                      >
+                        {threadOpenFor
+                          ? 'ซ่อนบทสนทนา'
+                          : `บทสนทนา${consult.messageCount > 0 ? ` (${consult.messageCount})` : ''}`}
+                      </button>
+                    )}
+                    {isHub && threadOpenFor && (
+                      <ConsultThread patientId={patientId} consult={consult} viewer={viewer} />
                     )}
 
                     {consult.status !== 'COMPLETED' && (

@@ -344,10 +344,22 @@ export interface ErrorResponse {
 
 // SSE Events
 export interface SsePatientUpdateEvent {
-  type: 'new_admission' | 'vital_update' | 'delivered';
+  type:
+    | 'new_admission'
+    | 'vital_update'
+    | 'delivered'
+    // The consult announcements — a HUB consult (or one of its thread
+    // messages) changed. Both named hospitals are meant to listen.
+    | 'consult_requested'
+    | 'consult_updated'
+    | 'consult_message';
   hcode: string;
+  /** The hub's hcode, when the event names a second hospital. */
+  toHcode?: string | null;
   an: string;
   riskLevel?: RiskLevel;
+  /** The consult the event is about (consult_* events only). */
+  consultId?: string;
 }
 
 export interface SseConnectionStatusEvent {
@@ -990,6 +1002,8 @@ export interface PatientConsult {
   urgencyLevel: ConsultUrgency;
   /** The hub clinician who wrote the answer (HUB consults only). */
   answeredByName: string | null;
+  /** How many messages the consult's thread carries (HUB consults only). */
+  messageCount: number;
 }
 
 export interface PatientConsultsResponse {
@@ -1015,4 +1029,26 @@ export interface ConsultInboxResponse {
   consults: HubConsultInboxItem[];
   /** HUB consults of this hospital that have not been answered yet. */
   pendingCount: number;
+}
+
+/** One message in a HUB consult's thread. The sender is a snapshot taken at
+ *  send time (identity from the session), exactly like the consult itself. */
+export interface ConsultMessage {
+  id: string;
+  consultId: string;
+  senderHospitalId: string;
+  senderHospitalName: string | null;
+  senderHospitalHcode: string | null;
+  senderCid: string;
+  senderName: string;
+  senderRole: string | null;
+  body: string;
+  /** TEXT = a human message; SYSTEM = the consult's own status note. */
+  messageType: 'TEXT' | 'SYSTEM';
+  createdAt: string;
+}
+
+export interface ConsultMessagesResponse {
+  /** The thread of one consult, oldest first. */
+  messages: ConsultMessage[];
 }

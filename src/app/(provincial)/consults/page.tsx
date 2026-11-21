@@ -9,6 +9,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { Stethoscope } from 'lucide-react';
 import { ListPageLayout } from '@/components/shared/ListPageLayout';
 import { LoadingState } from '@/components/shared/LoadingState';
@@ -29,6 +30,7 @@ const FILTERS: Array<{ key: InboxFilter; label: string }> = [
 
 export default function ConsultInboxPage() {
   const [filter, setFilter] = useState<InboxFilter>('all');
+  const { data: session } = useSession();
   const { consults, pendingCount, isLoading, error, mutate, answerConsult, progressConsult } =
     useConsultInbox();
   useSetBreadcrumbs([{ label: 'แดชบอร์ด', href: '/' }, { label: 'คำปรึกษา' }]);
@@ -89,7 +91,18 @@ export default function ConsultInboxPage() {
             </p>
           )}
 
-          {!error && <ConsultInboxList consults={filtered} onAnswer={answerConsult} onProgress={(consult) => progressConsult(consult, 'CONTACTED')} />}
+          {!error && (
+            <ConsultInboxList
+              consults={filtered}
+              viewer={{
+                role: session?.user?.role,
+                hospitalCode: session?.user?.hospitalCode,
+                userCid: session?.user?.userCid,
+              }}
+              onAnswer={answerConsult}
+              onProgress={(consult) => progressConsult(consult, 'CONTACTED')}
+            />
+          )}
         </SectionCard>
       )}
     </ListPageLayout>

@@ -1,0 +1,221 @@
+// Consult messages — the thread two teams talk in while a HUB consult is
+// open.
+//
+// The care team of the patient's hospital and the provincial hub's OB-GYN
+// team see the SAME conversation, bound to the consult, which is bound to
+// the admission's AN — the threads of one patient never mix with another's.
+//
+// The rules this service owns:
+//   1. Only HUB consults carry a thread. The INTERNAL flow is a phone call
+//      the team records itself; its doctors are a contact list, not users.
+//   2. The side rule the consult itself uses (see updatePatientConsult):
+//      the requesting hospital's care team and the TARGET hospital's team
+//      may READ the thread; WRITING additionally requires the hub's side to
+//      be a clinician (OBSTETRICIAN / ADMIN) and the consult to still be
+//      open. Once the consult is COMPLETED the thread is a record — read
+//      only.
+//   3. A message is clinical data of the patient. It is read and written
+//      through the same patient-visibility scope as every other patient
+//      resource — the service never decides who may SEE it; it does decide
+//      who may join the conversation.
+//   4. Every write is announced over SSE, naming BOTH hospitals, so the
+//      other side sees the message arrive live (SWR polling is the
+//      fallback).
+import type { DatabaseAdapter } from '@/db/adapter';
+import { logger } from '@/lib/logger';
+import type { ConsultMessage, PatientConsult } from '@/types/api';
+import {
+  announceConsult,
+  insertConsultMessage,
+  loadConsultById,
+  MAX_CONSULT_MESSAGE_LENGTH,
+  type ConsultActor,
+} from './consults';
+
+interface MessageRow {
+  id: string;
+  consult_id: string;
+  sender_hospital_id: string;
+  sender_hospital_name: string | null;
+  sender_hospital_hcode: string | null;
+  sender_cid: string;
+  sender_name: string;
+  sender_role: string | null;
+  body: string;
+  message_type: string | null;
+  created_at: string | Date;
+}
+
+function toIso(value: string | Date | null): string | null {
+  if (!value) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function toMessage(row: MessageRow): ConsultMessage {
+  return {
+    id: row.id,
+    consultId: row.consult_id,
+    senderHospitalId: row.sender_hospital_id,
+    senderHospitalName: row.sender_hospital_name,
+    senderHospitalHcode: row.sender_hospital_hcode,
+    senderCid: row.sender_cid,
+    senderName: row.sender_name,
+    senderRole: row.sender_role,
+    body: row.body,
+    messageType: row.message_type === 'SYSTEM' ? 'SYSTEM' : 'TEXT',
+    createdAt: toIso(row.created_at) ?? '',
+  };
+}
+
+const MESSAGE_COLUMNS = `
+      SELECT cm.id, cm.consult_id, cm.sender_hospital_id,
+             h.name AS sender_hospital_name, h.hcode AS sender_hospital_hcode,
+             cm.sender_cid, cm.sender_name, cm.sender_role, cm.body,
+             cm.message_type, cm.created_at
+        FROM consult_messages cm
+        LEFT JOIN hospitals h ON h.id = cm.sender_hospital_id`;
+
+/** One thread message by id — what a successful send returns. */
+async function getConsultMessage(
+  db: DatabaseAdapter,
+  id: string,
+): Promise<ConsultMessage | null> {
+  const rows = await db.query<MessageRow>(`${MESSAGE_COLUMNS} WHERE cm.id = ?`, [id]);
+  return rows[0] ? toMessage(rows[0]) : null;
+}
+
+/**
+ * The thread of one consult, oldest first — SYSTEM notes (the consult's own
+ * status moves) sit in the stream between the human messages.
+ */
+export async function listConsultMessages(
+  db: DatabaseAdapter,
+  consultId: string,
+): Promise<ConsultMessage[]> {
+  const rows = await db.query<MessageRow>(
+    `${MESSAGE_COLUMNS}
+      WHERE cm.consult_id = ?
+      ORDER BY cm.created_at ASC, cm.id ASC`,
+    [consultId],
+  );
+  return rows.map(toMessage);
+}
+
+/**
+ * What the actor may do in one consult's thread — the side rule the consult
+ * itself applies. The route's patient-visibility scope has already decided
+ * the actor may see this patient; this decides whether they are one of the
+ * two sides talking.
+ *
+ *   READ  — the requesting hospital's care team, or the target (hub)
+ *           hospital's team (any role: the hub's nurses follow along, the
+ *           province's outside accounts do not).
+ *   WRITE — one of the sides, but the hub's side must be a clinician
+ *           (OBSTETRICIAN / ADMIN), exactly like answering the consult —
+ *           and the consult must not be COMPLETED yet.
+ */
+export function consultThreadAccess(
+  consult: PatientConsult,
+  actor: ConsultActor,
+): { mayRead: boolean; mayWrite: boolean } {
+  const isHub = consult.consultScope === 'HUB';
+  const isRequester = actor.hospitalId === consult.hospitalId;
+  const isTargetHospital = isHub && actor.hospitalId === consult.targetHospitalId;
+  const isTargetClinician =
+    isTargetHospital && (actor.role === 'OBSTETRICIAN' || actor.role === 'ADMIN');
+  return {
+    mayRead: isRequester || isTargetHospital,
+    mayWrite: (isRequester || isTargetClinician) && consult.status !== 'COMPLETED',
+  };
+}
+
+export type CreateMessageResult =
+  | { ok: true; message: ConsultMessage }
+  | { ok: false; error: string; status: number };
+
+/**
+ * Send one message into a HUB consult's thread.
+ *
+ * INTERNAL consults refuse (no thread — the classic flow is a phone call),
+ * closed consults refuse (the thread is the record now), and anyone who is
+ * not one of the two sides refuses. The sender is SNAPSHOTTED from the
+ * actor: identity comes from the session at send time, the message stays
+ * truthful forever after.
+ */
+export async function createConsultMessage(
+  db: DatabaseAdapter,
+  consultId: string,
+  actor: ConsultActor,
+  input: { body: string },
+): Promise<CreateMessageResult> {
+  const consult = await loadConsultById(db, consultId);
+  if (!consult) {
+    return { ok: false, error: 'ไม่พบรายการปรึกษานี้', status: 404 };
+  }
+  if (consult.consultScope !== 'HUB') {
+    return {
+      ok: false,
+      error:
+        'บทสนทนามีเฉพาะคำปรึกษาที่ส่งขึ้นโรงพยาบาลแม่ข่าย — คำปรึกษาภายในโรงพยาบาลติดต่อกันทางโทรศัพท์ตามเดิม',
+      status: 400,
+    };
+  }
+
+  const { mayRead, mayWrite } = consultThreadAccess(consult, actor);
+  if (!mayRead) {
+    return { ok: false, error: 'ไม่มีสิทธิ์เข้าบทสนทนาของคำปรึกษานี้', status: 403 };
+  }
+  if (!mayWrite) {
+    return {
+      ok: false,
+      error:
+        consult.status === 'COMPLETED'
+          ? 'ปิดคำปรึกษาแล้ว — บทสนทนาอ่านได้อย่างเดียว'
+          : 'ไม่มีสิทธิ์ส่งข้อความในบทสนทนานี้ — ฝั่งโรงพยาบาลแม่ข่ายต้องเป็นแพทย์เท่านั้น',
+      status: 403,
+    };
+  }
+
+  const body = input.body.trim();
+  if (!body) {
+    return { ok: false, error: 'พิมพ์ข้อความก่อนกดส่ง', status: 400 };
+  }
+  if (body.length > MAX_CONSULT_MESSAGE_LENGTH) {
+    return {
+      ok: false,
+      error: `ข้อความยาวเกิน ${MAX_CONSULT_MESSAGE_LENGTH} ตัวอักษร`,
+      status: 400,
+    };
+  }
+
+  const messageId = await insertConsultMessage(db, {
+    consultId: consult.id,
+    senderHospitalId: actor.hospitalId,
+    senderCid: actor.userCid ?? '',
+    senderName: actor.name ?? 'ไม่ทราบชื่อ',
+    senderRole: actor.role || null,
+    body,
+    messageType: 'TEXT',
+  });
+
+  logger.info('consult_message_created', {
+    consultId: consult.id,
+    an: consult.an,
+    hospitalId: actor.hospitalId,
+    role: actor.role,
+  });
+
+  await announceConsult(db, {
+    type: 'consult_message',
+    patientHospitalId: consult.hospitalId,
+    hubHospitalId: consult.targetHospitalId,
+    an: consult.an,
+    consultId: consult.id,
+  });
+
+  const message = await getConsultMessage(db, messageId);
+  if (!message) {
+    return { ok: false, error: 'ส่งข้อความไม่สำเร็จ — ลองใหม่อีกครั้ง', status: 500 };
+  }
+  return { ok: true, message };
+}
