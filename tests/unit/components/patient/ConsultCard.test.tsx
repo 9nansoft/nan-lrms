@@ -109,10 +109,12 @@ describe('ConsultCard', () => {
     expect(screen.getByText('ยังไม่มีการปรึกษา')).toBeInTheDocument();
   });
 
-  it('says what to do when the hospital has no consult doctors, and hides the form', () => {
+  it('says what to do when neither roster has consult doctors, and hides the form', () => {
     renderCard({ doctors: [] });
     expect(
-      screen.getByText('ยังไม่ได้เพิ่มรายชื่อแพทย์ที่ปรึกษาได้ — ให้ผู้ดูแลระบบเพิ่มที่หน้าโรงพยาบาล'),
+      screen.getByText(
+        'ยังไม่ได้เพิ่มรายชื่อแพทย์ที่ปรึกษาได้ — ให้ผู้ดูแลระบบเพิ่มรายชื่อของโรงพยาบาลนี้ และของโรงพยาบาลแม่ข่าย (รพ.น่าน) ที่หน้า "ตั้งค่า → โรงพยาบาล"',
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText('แพทย์ที่ต้องการปรึกษา')).toBeNull();
     expect(screen.queryByRole('button', { name: 'ขอปรึกษา' })).toBeNull();
@@ -348,6 +350,41 @@ describe('ConsultCard — HUB consults (ปรึกษาขึ้นสู่�
 
     await userEvent.click(screen.getByTestId('consult-thread-toggle'));
     await waitFor(() => expect(screen.queryByTestId('consult-thread')).toBeNull());
+  });
+
+  it('a hospital with an empty own roster still reaches the hub — the form opens in HUB mode', async () => {
+    const fetchSpy = stubMutations(() => ({
+      ok: true,
+      status: 201,
+      body: { consult: hubConsult({ status: 'REQUESTED' }) },
+    }));
+    renderWithSwr(<ConsultHarness />, {
+      [CONSULT_KEY]: { consults: [], doctors: [], hub },
+    });
+
+    // The hub doctors are the only ones the form can offer, so the form
+    // opens with the hub mode already selected.
+    await userEvent.selectOptions(
+      await screen.findByLabelText(/แพทย์ที่ต้องการปรึกษา/),
+      'doc-hub-1',
+    );
+    await userEvent.type(screen.getByLabelText('เหตุผลที่ขอปรึกษา'), 'ความดันสูงมาก');
+    await userEvent.click(screen.getByRole('button', { name: 'ขอปรึกษา' }));
+
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(
+        CONSULT_KEY,
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            doctorId: 'doc-hub-1',
+            reason: 'ความดันสูงมาก',
+            mode: 'HUB',
+            urgency: 'ROUTINE',
+          }),
+        }),
+      ),
+    );
   });
 
   it('the request form offers the hub mode with an urgency, and POSTs it', async () => {

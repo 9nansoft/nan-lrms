@@ -140,10 +140,14 @@ export function ConsultCard({
   const urgencyFieldId = `consult-urgency-${patientId}`;
 
   // The hub mode exists when the patient's hospital has a provincial hub
-  // with at least one registered consult doctor.
+  // with at least one registered consult doctor. A hospital with an EMPTY
+  // own roster still reaches the hub — its doctors are the only ones the
+  // form could ever offer, so it becomes the default mode.
+  const noDoctors = doctors.length === 0;
   const hubModeAvailable = Boolean(hub?.available && hub.doctors.length > 0);
   const hubDoctors: ConsultDoctor[] = hub?.doctors ?? [];
-  const selectedMode: 'INTERNAL' | 'HUB' = hubModeAvailable ? mode : 'INTERNAL';
+  const selectedMode: 'INTERNAL' | 'HUB' =
+    noDoctors && hubModeAvailable ? 'HUB' : hubModeAvailable ? mode : 'INTERNAL';
   const modeDoctors = selectedMode === 'HUB' ? hubDoctors : doctors;
 
   async function handleRequest(event: FormEvent<HTMLFormElement>) {
@@ -189,7 +193,6 @@ export function ConsultCard({
     }
   }
 
-  const noDoctors = doctors.length === 0;
   const formAvailable = selectedMode === 'HUB' ? hubModeAvailable : !noDoctors;
 
   return (
@@ -489,7 +492,8 @@ export function ConsultCard({
             </form>
           ) : (
             <p className="text-caption text-warn-text">
-              ยังไม่ได้เพิ่มรายชื่อแพทย์ที่ปรึกษาได้ — ให้ผู้ดูแลระบบเพิ่มที่หน้าโรงพยาบาล
+              ยังไม่ได้เพิ่มรายชื่อแพทย์ที่ปรึกษาได้ — ให้ผู้ดูแลระบบเพิ่มรายชื่อของโรงพยาบาลนี้
+              และของโรงพยาบาลแม่ข่าย (รพ.น่าน) ที่หน้า "ตั้งค่า → โรงพยาบาล"
             </p>
           )}
         </div>
