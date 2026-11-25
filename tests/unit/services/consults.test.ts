@@ -552,4 +552,42 @@ describe('HUB consults (ปรึกษาขึ้นสู่โรงพย�
     expect(await countPendingHubConsults(db, await hospitalId(HUB))).toBe(1);
     expect(await countPendingHubConsults(db, await hospitalId(B))).toBe(0);
   });
+
+  it('lets a parent hospital (รพ.แม่ข่าย) proactively inbox the patient hospital without waiting for a consult request', async () => {
+    const hubId = await hospitalId(HUB);
+    const spokeId = await hospitalId(A);
+
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: spokeId,
+      patientId: `p-${AN}`,
+      journeyId: null,
+      reason: 'พบความเสี่ยงจากผลประเมิน แนะนำให้เฝ้าระวังใกล้ชิดและเตรียมส่งต่อ',
+      mode: 'HUB',
+      urgency: 'URGENT',
+      requestedByCid: '1100700200001',
+      requestedByName: 'นพ.สูติศาสตร์ แม่ข่าย',
+      actorHospitalId: hubId,
+      actorRole: 'OBSTETRICIAN',
+    });
+
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.consult.consultScope).toBe('HUB');
+    expect(created.consult.hospitalId).toBe(spokeId);
+    expect(created.consult.targetHospitalId).toBe(hubId);
+    expect(created.consult.doctorId).toBeNull();
+    expect(created.consult.status).toBe('CONTACTED');
+    expect(created.consult.urgencyLevel).toBe('URGENT');
+    expect(created.consult.messageCount).toBe(1);
+
+    // The patient's hospital sees 1 unread message in the thread right away.
+    const spokeView = await listPatientConsults(db, AN, spokeId, '1100200000099');
+    expect(spokeView).toHaveLength(1);
+    expect(spokeView[0].unreadCount).toBe(1);
+
+    // The sender at the parent hospital already has their read receipt stamped.
+    const senderView = await listPatientConsults(db, AN, spokeId, '1100700200001');
+    expect(senderView[0].unreadCount).toBe(0);
+  });
 });

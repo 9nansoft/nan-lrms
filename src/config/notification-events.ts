@@ -78,6 +78,14 @@ export const NOTIFICATION_EVENTS: readonly NotificationEvent[] = [
     implemented: true,
   },
   {
+    key: 'maternity_assessment',
+    tier: 'urgent',
+    detail: 'patient',
+    labelTh: 'แบบประเมินห้องคลอด 3 ใบ (แรกรับ / ระยะคลอด / หลังคลอด)',
+    descriptionTh: 'รพ.ลูกข่ายเพิ่มข้อมูลแบบประเมินแรกรับ ระยะคลอด หรือหลังคลอดใบใหม่',
+    implemented: true,
+  },
+  {
     key: 'anc_overdue',
     tier: 'digest',
     detail: 'patient',

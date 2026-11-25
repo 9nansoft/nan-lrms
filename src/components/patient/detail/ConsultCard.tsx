@@ -35,7 +35,7 @@ import type {
   PatientConsult,
 } from '@/types/api';
 import type { StatusTone } from '@/config/status-tone';
-import { cn } from '@/lib/utils';
+import { cn, parsePatientId } from '@/lib/utils';
 import { fmtDateTimeTh } from './format';
 
 /** The Thai label of each consult state, per flow. */
@@ -91,9 +91,9 @@ export interface ConsultCardProps {
   viewer?: ConsultViewer | null;
   isLoading?: boolean;
   error?: unknown;
-  /** Records a consult request. Throws with a Thai message when refused. */
+  /** Records a consult request (or a proactive inbox warning from a parent hospital). Throws with a Thai message when refused. */
   onRequestConsult: (input: {
-    doctorId: string;
+    doctorId?: string;
     reason: string;
     mode?: 'INTERNAL' | 'HUB';
     urgency?: ConsultUrgency;
@@ -109,6 +109,7 @@ export interface ConsultCardProps {
 function canAnswerHub(consult: PatientConsult, viewer: ConsultViewer | null | undefined): boolean {
   if (consult.consultScope !== 'HUB' || !consult.targetHospitalHcode) return false;
   if (!viewer?.hospitalCode || viewer.hospitalCode !== consult.targetHospitalHcode) return false;
+  if (consult.doctorId === null) return true;
   return viewer.role === 'OBSTETRICIAN' || viewer.role === 'ADMIN';
 }
 
@@ -139,6 +140,15 @@ export function ConsultCard({
   const reasonFieldId = `consult-reason-${patientId}`;
   const urgencyFieldId = `consult-urgency-${patientId}`;
 
+  // When the viewer belongs to a different hospital than the patient's own
+  // hospital (e.g. รพ.แม่ข่าย / รพ.โหนด viewing a spoke hospital's patient),
+  // they can proactively send an inbox warning/advice message directly to the
+  // patient's hospital without waiting for a consult request first.
+  const patientHcode = parsePatientId(patientId)?.hcode ?? '';
+  const isParentHospitalViewer = Boolean(
+    viewer?.hospitalCode && patientHcode && viewer.hospitalCode !== patientHcode,
+  );
+
   // The hub mode exists when the patient's hospital has a provincial hub
   // with at least one registered consult doctor. A hospital with an EMPTY
   // own roster still reaches the hub — its doctors are the only ones the
@@ -147,29 +157,48 @@ export function ConsultCard({
   const hubModeAvailable = Boolean(hub?.available && hub.doctors.length > 0);
   const hubDoctors: ConsultDoctor[] = hub?.doctors ?? [];
   const selectedMode: 'INTERNAL' | 'HUB' =
-    noDoctors && hubModeAvailable ? 'HUB' : hubModeAvailable ? mode : 'INTERNAL';
+    isParentHospitalViewer || (noDoctors && hubModeAvailable)
+      ? 'HUB'
+      : hubModeAvailable
+        ? mode
+        : 'INTERNAL';
   const modeDoctors = selectedMode === 'HUB' ? hubDoctors : doctors;
 
   async function handleRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
     const trimmedReason = reason.trim();
-    if (!doctorId) {
+    if (!isParentHospitalViewer && !doctorId) {
       setFormError('กรุณาเลือกแพทย์ที่ต้องการปรึกษา');
       return;
     }
     if (!trimmedReason) {
-      setFormError('กรุณาระบุเหตุผลที่ขอปรึกษา');
+      setFormError(
+        isParentHospitalViewer
+          ? 'กรุณาระบุข้อความแจ้งเตือนถึงโรงพยาบาลต้นทาง'
+          : 'กรุณาระบุเหตุผลที่ขอปรึกษา',
+      );
       return;
     }
     setBusy('request');
     try {
-      await onRequestConsult({
-        doctorId,
-        reason: trimmedReason,
-        mode: selectedMode,
-        urgency: selectedMode === 'HUB' ? urgency : undefined,
-      });
+      const result = (await onRequestConsult(
+        isParentHospitalViewer
+          ? {
+              reason: trimmedReason,
+              mode: 'HUB',
+              urgency,
+            }
+          : {
+              doctorId,
+              reason: trimmedReason,
+              mode: selectedMode,
+              urgency: selectedMode === 'HUB' ? urgency : undefined,
+            },
+      )) as PatientConsult | undefined;
+      if (isParentHospitalViewer && result?.id) {
+        setThreadOpen((current) => ({ ...current, [result.id]: true }));
+      }
       setDoctorId('');
       setUrgency('ROUTINE');
       setReason('');
@@ -193,7 +222,11 @@ export function ConsultCard({
     }
   }
 
-  const formAvailable = selectedMode === 'HUB' ? hubModeAvailable : !noDoctors;
+  const formAvailable = isParentHospitalViewer
+    ? true
+    : selectedMode === 'HUB'
+      ? hubModeAvailable
+      : !noDoctors;
 
   return (
     <SectionCard
@@ -392,9 +425,13 @@ export function ConsultCard({
               onSubmit={(e) => void handleRequest(e)}
               className="flex flex-col gap-2 rounded-xl border border-border bg-surface-muted px-3 py-3"
             >
-              <h3 className="text-label font-semibold text-brand">ขอคำปรึกษา</h3>
+              <h3 className="text-label font-semibold text-brand">
+                {isParentHospitalViewer
+                  ? 'ส่งข้อความแจ้งเตือนไปยังโรงพยาบาลต้นทาง (Inbox)'
+                  : 'ขอคำปรึกษา'}
+              </h3>
 
-              {hubModeAvailable && (
+              {!isParentHospitalViewer && hubModeAvailable && (
                 <div
                   role="group"
                   aria-label="ประเภทการปรึกษา"
@@ -435,27 +472,31 @@ export function ConsultCard({
                 </div>
               )}
 
-              <label htmlFor={doctorFieldId} className="text-caption font-semibold text-ink">
-                {selectedMode === 'HUB'
-                  ? `แพทย์ที่ต้องการปรึกษา (ทีมสูติศาสตร์ ${hub?.name ?? ''})`
-                  : 'แพทย์ที่ต้องการปรึกษา'}
-              </label>
-              <select
-                id={doctorFieldId}
-                value={doctorId}
-                onChange={(e) => setDoctorId(e.target.value)}
-                className={fieldCls}
-              >
-                <option value="">— เลือกแพทย์ —</option>
-                {modeDoctors.map((doctor) => (
-                  <option key={doctor.id} value={doctor.id}>
-                    {doctor.name}
-                    {doctor.position ? ` (${doctor.position})` : ''}
-                  </option>
-                ))}
-              </select>
+              {!isParentHospitalViewer && (
+                <>
+                  <label htmlFor={doctorFieldId} className="text-caption font-semibold text-ink">
+                    {selectedMode === 'HUB'
+                      ? `แพทย์ที่ต้องการปรึกษา (ทีมสูติศาสตร์ ${hub?.name ?? ''})`
+                      : 'แพทย์ที่ต้องการปรึกษา'}
+                  </label>
+                  <select
+                    id={doctorFieldId}
+                    value={doctorId}
+                    onChange={(e) => setDoctorId(e.target.value)}
+                    className={fieldCls}
+                  >
+                    <option value="">— เลือกแพทย์ —</option>
+                    {modeDoctors.map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>
+                        {doctor.name}
+                        {doctor.position ? ` (${doctor.position})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
 
-              {selectedMode === 'HUB' && (
+              {(selectedMode === 'HUB' || isParentHospitalViewer) && (
                 <>
                   <label htmlFor={urgencyFieldId} className="text-caption font-semibold text-ink">
                     ความเร่งด่วน
@@ -474,14 +515,20 @@ export function ConsultCard({
               )}
 
               <label htmlFor={reasonFieldId} className="text-caption font-semibold text-ink">
-                เหตุผลที่ขอปรึกษา
+                {isParentHospitalViewer
+                  ? 'ข้อความแจ้งเตือน / คำแนะนำถึงโรงพยาบาลต้นทาง'
+                  : 'เหตุผลที่ขอปรึกษา'}
               </label>
               <textarea
                 id={reasonFieldId}
                 value={reason}
                 rows={2}
                 maxLength={500}
-                placeholder="เช่น ความดันสูงตลอด ขอคำแนะนำจากสูติแพทย์"
+                placeholder={
+                  isParentHospitalViewer
+                    ? 'เช่น พบความเสี่ยงจากผลประเมิน แนะนำประเมินซ้ำและเตรียมส่งต่อ'
+                    : 'เช่น ความดันสูงตลอด ขอคำแนะนำจากสูติแพทย์'
+                }
                 onChange={(e) => setReason(e.target.value)}
                 className={fieldCls}
               />
@@ -492,7 +539,7 @@ export function ConsultCard({
                   disabled={busy === 'request'}
                   className="h-8 bg-brand px-3 text-label text-white hover:bg-brand-strong"
                 >
-                  ขอปรึกษา
+                  {isParentHospitalViewer ? 'ส่งข้อความเตือน' : 'ขอปรึกษา'}
                 </Button>
               </div>
             </form>

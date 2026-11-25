@@ -36,6 +36,7 @@ describe('notification event catalog', () => {
       'consult_message',
       'cpd_high',
       'maternal_triage',
+      'maternity_assessment',
       'partograph_critical',
       'referral_incoming',
       'referral_overdue',

@@ -28,6 +28,7 @@ export const mophAlertEventQueueTable: TableDefinition = {
     { name: 'local_date', type: 'string', maxLength: 10 },
     { name: 'status', type: 'string', maxLength: 30, defaultValue: 'awaiting_recipients' },
     { name: 'materialized_at', type: 'datetime', nullable: true },
+    { name: 'read_at', type: 'datetime', nullable: true },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },
   ],

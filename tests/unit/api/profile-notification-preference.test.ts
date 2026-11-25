@@ -213,6 +213,7 @@ describe('multi-hospital preference API', () => {
       'consult_message',
       'cpd_high',
       'maternal_triage',
+      'maternity_assessment',
       'partograph_critical',
       'referral_incoming',
       'referral_overdue',

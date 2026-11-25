@@ -42,10 +42,16 @@ import {
   ASSESSMENT_METADATA_CACHE_TTL_MS,
   ASSESSMENT_RECONCILE_WINDOW_DAYS,
   ASSESSMENT_RECONCILE_WINDOW_MAX_PAGES,
+  assessmentFormByKey,
   assessmentFormByTable,
   type MaternityAssessmentForm,
   type MaternityAssessmentKey,
 } from '@/config/maternity-assessments';
+import { mophAlertLocalDate } from '@/config/moph-alert-config';
+import {
+  enqueueMaternityAssessmentAlert,
+  resolveParentHospitalsForAlert,
+} from '@/services/risk-alert';
 import {
   assessmentMetadataCoversAllForms,
   isAssessmentMetadataCacheFresh,
@@ -386,11 +392,8 @@ export async function syncMaternityAssessments(
     }
   }
 
-  const { upserted, failed, persistedPks, failedPks, purged } = await upsertMaternityAssessments(
-    db,
-    hospitalId,
-    normalized,
-  );
+  const { upserted, failed, persistedPks, failedPks, purged, insertedRows } =
+    await upsertMaternityAssessments(db, hospitalId, normalized);
 
   // A form stored before its patient reached the cache keeps a null
   // patient_id until the row happens to be re-pulled (below-cursor rows
@@ -409,6 +412,18 @@ export async function syncMaternityAssessments(
         hospitalId,
         error: errorMessage(error),
       });
+    }
+
+    if (insertedRows.length > 0) {
+      try {
+        await notifyParentHospitalsOfNewAssessments(db, hospitalId, insertedRows);
+      } catch (error) {
+        // Best-effort: alerting must never fail the assessment sync.
+        logger.warn('assessment_parent_alert_failed', {
+          hospitalId,
+          error: errorMessage(error),
+        });
+      }
     }
   }
 
@@ -448,16 +463,31 @@ export async function upsertMaternityAssessments(
   /** The hospital was purged while the batch was being written — the write
    *  was refused and the batch stopped. */
   purged: boolean;
+  /** Rows that were newly created (not already in cached_maternity_assessments). */
+  insertedRows: MaternityAssessmentRow[];
 }> {
   if (rows.length === 0) {
-    return { upserted: 0, failed: 0, persistedPks: {}, failedPks: {}, purged: false };
+    return {
+      upserted: 0,
+      failed: 0,
+      persistedPks: {},
+      failedPks: {},
+      purged: false,
+      insertedRows: [],
+    };
   }
+  const existingSourcePks = await findExistingAssessmentSourcePks(
+    db,
+    hospitalId,
+    rows.map((r) => r.sourcePk),
+  );
   const now = new Date().toISOString();
   let upserted = 0;
   let failed = 0;
   let purged = false;
   const persistedPks: Record<string, string[]> = {};
   const failedPks: Record<string, string[]> = {};
+  const insertedRows: MaternityAssessmentRow[] = [];
   const pkOf = (row: MaternityAssessmentRow) => row.sourcePk.slice(row.sourcePk.indexOf(':') + 1);
 
   for (const row of rows) {
@@ -524,6 +554,10 @@ export async function upsertMaternityAssessments(
       }
       upserted += 1;
       (persistedPks[row.formTable] ??= []).push(pkOf(row));
+      if (!existingSourcePks.has(row.sourcePk)) {
+        existingSourcePks.add(row.sourcePk);
+        insertedRows.push(row);
+      }
     } catch {
       // One bad row must not cost the form its other rows.
       failed += 1;
@@ -531,7 +565,97 @@ export async function upsertMaternityAssessments(
     }
   }
 
-  return { upserted, failed, persistedPks, failedPks, purged };
+  return { upserted, failed, persistedPks, failedPks, purged, insertedRows };
+}
+
+async function findExistingAssessmentSourcePks(
+  db: DatabaseAdapter,
+  hospitalId: string,
+  sourcePks: string[],
+): Promise<Set<string>> {
+  const existing = new Set<string>();
+  const unique = [...new Set(sourcePks)];
+  if (unique.length === 0) return existing;
+  const CHUNK = 500;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const chunk = unique.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(', ');
+    try {
+      const rows = await db.query<{ source_pk: string }>(
+        `SELECT source_pk
+           FROM cached_maternity_assessments
+          WHERE hospital_id = ? AND source_system = 'HOSXP' AND source_pk IN (${placeholders})`,
+        [hospitalId, ...chunk],
+      );
+      for (const row of rows) existing.add(row.source_pk);
+    } catch {
+      // Defensive: if a mock adapter refuses the pre-read, treat as empty so
+      // the upsert itself still runs.
+    }
+  }
+  return existing;
+}
+
+/**
+ * Enqueue maternity_assessment alerts to every parent hospital (รพ.แม่ข่าย —
+ * provincial hub and any supervising node hospital) for newly inserted rows
+ * across the 3 forms (first_pregnant, birth_period, after_birth).
+ */
+async function notifyParentHospitalsOfNewAssessments(
+  db: DatabaseAdapter,
+  spokeHospitalId: string,
+  insertedRows: MaternityAssessmentRow[],
+): Promise<void> {
+  const parents = await resolveParentHospitalsForAlert(db, spokeHospitalId);
+  if (parents.length === 0) return;
+
+  const spokeRows = await db.query<{
+    hcode: string;
+    name: string;
+    province_code: string | null;
+  }>('SELECT hcode, name, province_code FROM hospitals WHERE id = ? LIMIT 1', [spokeHospitalId]);
+  const spoke = spokeRows[0];
+  if (!spoke) return;
+
+  const ans = [...new Set(insertedRows.map((r) => r.an))];
+  const patientNameByAn = new Map<string, string | null>();
+  if (ans.length > 0) {
+    const placeholders = ans.map(() => '?').join(', ');
+    const patients = await db.query<{ an: string; name: string | null }>(
+      `SELECT an, name FROM cached_patients WHERE hospital_id = ? AND an IN (${placeholders})`,
+      [spokeHospitalId, ...ans],
+    );
+    for (const p of patients) {
+      patientNameByAn.set(p.an, decryptSafe(p.name));
+    }
+  }
+
+  const localDate = mophAlertLocalDate();
+  for (const row of insertedRows) {
+    const form = assessmentFormByKey(row.formKey);
+    const formTitleTh = form?.titleTh ?? row.formName;
+    const patientName = patientNameByAn.get(row.an) ?? null;
+    const confirmUrl = spoke.hcode ? `/patients/${spoke.hcode}-${row.an}` : null;
+    for (const parent of parents) {
+      await enqueueMaternityAssessmentAlert(
+        db,
+        {
+          hospitalId: parent.id,
+          originHcode: spoke.hcode,
+          hospitalName: spoke.name,
+          province: parent.provinceCode || spoke.province_code || '',
+          caseRef: `AN ${row.an} (${formTitleTh})`,
+          localDate,
+          patientName,
+          confirmUrl,
+        },
+        {
+          sourcePk: row.sourcePk,
+          formTitleTh,
+        },
+      );
+    }
+  }
 }
 
 /**

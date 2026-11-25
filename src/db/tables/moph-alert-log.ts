@@ -69,6 +69,7 @@ export const mophAlertLogTable: TableDefinition = {
     { name: 'local_date', type: 'string', maxLength: 10 },
     { name: 'claimed_at', type: 'datetime', nullable: true },
     { name: 'sent_at', type: 'datetime', nullable: true },
+    { name: 'read_at', type: 'datetime', nullable: true },
     { name: 'created_at', type: 'datetime' },
     { name: 'updated_at', type: 'datetime' },
   ],

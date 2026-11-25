@@ -418,4 +418,37 @@ describe('ConsultCard — HUB consults (ปรึกษาขึ้นสู่�
       ),
     );
   });
+
+  it('lets a parent hospital viewer (รพ.แม่ข่าย) proactively inbox the patient hospital without picking a doctor', async () => {
+    const onRequestConsult = vi.fn().mockResolvedValue(
+      hubConsult({
+        id: 'proactive-1',
+        doctorId: null,
+        status: 'CONTACTED',
+        messageCount: 1,
+      }),
+    );
+    renderCard({
+      consults: [],
+      doctors: [],
+      hub: null,
+      viewer: HUB_VIEWER,
+      onRequestConsult,
+    });
+
+    await userEvent.selectOptions(await screen.findByLabelText('ความเร่งด่วน'), 'EMERGENCY');
+    await userEvent.type(
+      screen.getByLabelText('ข้อความแจ้งเตือน / คำแนะนำถึงโรงพยาบาลต้นทาง'),
+      'พบความเสี่ยงจากผลประเมิน ให้เฝ้าระวังใกล้ชิด',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'ส่งข้อความเตือน' }));
+
+    await waitFor(() =>
+      expect(onRequestConsult).toHaveBeenCalledWith({
+        reason: 'พบความเสี่ยงจากผลประเมิน ให้เฝ้าระวังใกล้ชิด',
+        mode: 'HUB',
+        urgency: 'EMERGENCY',
+      }),
+    );
+  });
 });

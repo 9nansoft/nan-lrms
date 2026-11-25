@@ -84,6 +84,7 @@ function canWriteThread(
   if (consult.status === 'COMPLETED') return false;
   if (!viewer?.hospitalCode) return false;
   if (viewer.hospitalCode === consult.targetHospitalHcode) {
+    if (consult.doctorId === null) return true;
     return viewer.role === 'OBSTETRICIAN' || viewer.role === 'ADMIN';
   }
   // The requesting side (and every INTERNAL consult): the viewer is signed

@@ -122,6 +122,7 @@ const REFERRAL_OVERDUE_RULE_ID = 'referral_overdue';
 // PER MESSAGE by that producer — the day-granular dedup index would
 // otherwise collapse a whole conversation into one LINE per day.
 const CONSULT_MESSAGE_ALERT_SOURCE = 'consult_message';
+const MATERNITY_ASSESSMENT_ALERT_SOURCE = 'maternity_assessment';
 
 /** Resolve active recipients for a hospital + province.
  *  P1-C contract (codex gap-sweep):
@@ -629,12 +630,145 @@ export async function enqueueReferralOverdueAlert(
 export async function enqueueConsultMessageAlert(
   db: DatabaseAdapter,
   ctx: AlertEventContext,
-  options: { messageId: string; excludeCid: string | null },
+  options: { messageId: string; excludeCid: string | null; titleOverride?: string },
 ): Promise<number> {
   return enqueueAlertEvent(db, ctx, 'notify', CONSULT_MESSAGE_ALERT_SOURCE, options.messageId, {
-    titleOverride: `ข้อความใหม่ในคำปรึกษา — ${ctx.hospitalName}`,
+    titleOverride: options.titleOverride ?? `ข้อความใหม่ในคำปรึกษา — ${ctx.hospitalName}`,
     excludeCid: options.excludeCid,
   });
+}
+
+/**
+ * Spoke-hospital maternity-assessment producer (maternity_assessment) for
+ * the 3 forms: first_pregnant (แรกรับ), birth_period (ระยะคลอด),
+ * after_birth (หลังคลอด).
+ *
+ * `ctx.hospitalId` MUST be the PARENT hospital (รพ.แม่ข่าย — provincial hub
+ * or supervising node hospital), while `ctx.originHcode` and
+ * `ctx.hospitalName` name the SPOKE hospital (รพ.ลูกข่าย) where the
+ * assessment was recorded. `options.sourcePk` (`<table>:<pk>`, maximum 60
+ * chars) becomes the ruleId so each of the 3 forms and each assessment
+ * instance delivers independently.
+ */
+export async function enqueueMaternityAssessmentAlert(
+  db: DatabaseAdapter,
+  ctx: AlertEventContext,
+  options: { sourcePk: string; formTitleTh: string },
+): Promise<number> {
+  const ruleId = options.sourcePk.slice(0, 60);
+  return enqueueAlertEvent(db, ctx, 'notify', MATERNITY_ASSESSMENT_ALERT_SOURCE, ruleId, {
+    titleOverride: `แจ้งเตือนแบบประเมิน (${options.formTitleTh}) — ${ctx.hospitalName}`,
+  });
+}
+
+/**
+ * Resolve every parent hospital (รพ.แม่ข่าย) that supervises `spokeHospitalId`:
+ *   1. Ancestor node hospitals in `hospital_nodes` (transitively, cycle-safe);
+ *   2. The active `PROVINCIAL_HUB` of the same province (when `spokeHospitalId`
+ *      is not itself that hub).
+ */
+export async function resolveParentHospitalsForAlert(
+  db: DatabaseAdapter,
+  spokeHospitalId: string,
+): Promise<Array<{ id: string; hcode: string; name: string; provinceCode: string }>> {
+  const spokeRows = await db.query<{
+    id: string;
+    service_type: string | null;
+    province_code: string | null;
+  }>('SELECT id, service_type, province_code FROM hospitals WHERE id = ? LIMIT 1', [
+    spokeHospitalId,
+  ]);
+  const spoke = spokeRows[0];
+  if (!spoke) return [];
+
+  const nodeEdges = await db.query<{ node_hospital_id: string; child_hospital_id: string }>(
+    'SELECT node_hospital_id, child_hospital_id FROM hospital_nodes',
+  );
+  const parentsOf = new Map<string, string[]>();
+  for (const edge of nodeEdges) {
+    const list = parentsOf.get(edge.child_hospital_id) ?? [];
+    list.push(edge.node_hospital_id);
+    parentsOf.set(edge.child_hospital_id, list);
+  }
+
+  const visited = new Set<string>([spokeHospitalId]);
+  const ancestorIds: string[] = [];
+  const queue: string[] = [spokeHospitalId];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    for (const parentId of parentsOf.get(current) ?? []) {
+      if (visited.has(parentId)) continue;
+      visited.add(parentId);
+      ancestorIds.push(parentId);
+      queue.push(parentId);
+    }
+  }
+
+  const results = new Map<string, { id: string; hcode: string; name: string; provinceCode: string }>();
+
+  if (ancestorIds.length > 0) {
+    const placeholders = ancestorIds.map(() => '?').join(', ');
+    const nodeHospitals = await db.query<{
+      id: string;
+      hcode: string;
+      name: string;
+      province_code: string | null;
+    }>(
+      `SELECT id, hcode, name, province_code
+         FROM hospitals
+        WHERE id IN (${placeholders}) AND is_active = true`,
+      ancestorIds,
+    );
+    for (const h of nodeHospitals) {
+      results.set(h.id, {
+        id: h.id,
+        hcode: h.hcode,
+        name: h.name,
+        provinceCode: h.province_code ?? spoke.province_code ?? '',
+      });
+    }
+  }
+
+  if (spoke.service_type !== 'PROVINCIAL_HUB') {
+    const hubs = spoke.province_code
+      ? await db.query<{
+          id: string;
+          hcode: string;
+          name: string;
+          province_code: string | null;
+        }>(
+          `SELECT id, hcode, name, province_code
+             FROM hospitals
+            WHERE service_type = 'PROVINCIAL_HUB'
+              AND is_active = true
+              AND id <> ?
+              AND province_code = ?`,
+          [spokeHospitalId, spoke.province_code],
+        )
+      : await db.query<{
+          id: string;
+          hcode: string;
+          name: string;
+          province_code: string | null;
+        }>(
+          `SELECT id, hcode, name, province_code
+             FROM hospitals
+            WHERE service_type = 'PROVINCIAL_HUB'
+              AND is_active = true
+              AND id <> ?`,
+          [spokeHospitalId],
+        );
+    for (const hub of hubs) {
+      results.set(hub.id, {
+        id: hub.id,
+        hcode: hub.hcode,
+        name: hub.name,
+        provinceCode: hub.province_code ?? spoke.province_code ?? '',
+      });
+    }
+  }
+
+  return [...results.values()];
 }
 
 // crypto.randomUUID is available in Node 20+; isolated here so tests/dev can

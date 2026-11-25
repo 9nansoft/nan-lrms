@@ -63,7 +63,7 @@ export interface UpdateConsultInput {
 /** What a consult request carries: the addressed doctor, the reason, and —
  *  for a HUB request — how urgent it is. */
 export interface RequestConsultInput {
-  doctorId: string;
+  doctorId?: string;
   reason: string;
   mode?: 'INTERNAL' | 'HUB';
   urgency?: ConsultUrgency;

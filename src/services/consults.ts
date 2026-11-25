@@ -35,6 +35,9 @@ import type { DatabaseAdapter } from '@/db/adapter';
 import { logger } from '@/lib/logger';
 import { SseManager } from '@/lib/sse';
 import { decrypt, getEncryptionKey } from '@/lib/encryption';
+import { resolveAlertOrigin } from '@/services/alert-context';
+import { enqueueConsultMessageAlert } from '@/services/risk-alert';
+import { drainMophAlerts } from '@/services/moph-alert-drain';
 import type {
   ConsultDoctor,
   ConsultHubInfo,
@@ -308,14 +311,19 @@ export interface CreateConsultInput {
   hospitalId: string;
   patientId: string | null;
   journeyId: string | null;
-  doctorId: string;
+  doctorId?: string | null;
   reason: string;
   requestedByCid: string | null;
   requestedByName: string | null;
   /** INTERNAL (default) = the patient's hospital's own doctor; HUB = the
-   *  provincial hub's registered OB-GYN team. */
+   *  provincial hub's registered OB-GYN team (or proactive warning from a
+   *  parent hospital to the patient's hospital). */
   mode?: 'INTERNAL' | 'HUB';
   urgency?: ConsultUrgency;
+  /** Parent hospital id when a parent hospital (รพ.แม่ข่าย) proactively
+   *  inboxes the patient's hospital without waiting for a consult request. */
+  actorHospitalId?: string | null;
+  actorRole?: string | null;
 }
 
 export type CreateConsultResult =
@@ -328,13 +336,13 @@ function normalizeUrgency(input: ConsultUrgency | undefined): ConsultUrgency | n
 }
 
 /**
- * Record a consult request.
+ * Record a consult request — or a proactive inbox warning initiated by a
+ * parent hospital (รพ.แม่ข่าย) to the patient's hospital (รพ.ของคนไข้).
  *
  * INTERNAL: the doctor must be on THIS hospital's active list. HUB: the
- * doctor must be on the provincial hub's list, and the hub must exist and
- * not be the patient's own hospital. Neither flow moves the patient — that
- * is a referral, and it has its own flow (with its own permissions and its
- * own trail).
+ * doctor must be on the provincial hub's list (or, when initiated proactively
+ * by a parent hospital without a doctorId, the parent hospital itself opens
+ * the HUB thread and sends the first message immediately).
  */
 export async function createPatientConsult(
   db: DatabaseAdapter,
@@ -355,6 +363,138 @@ export async function createPatientConsult(
   const urgency = normalizeUrgency(input.urgency);
   if (urgency === null) {
     return { ok: false, error: 'ระดับความเร่งด่วนไม่ถูกต้อง', status: 400 };
+  }
+
+  const trimmedDoctorId = (input.doctorId ?? '').trim();
+  const isProactiveParentInbox =
+    !trimmedDoctorId &&
+    Boolean(input.actorHospitalId && input.actorHospitalId !== input.hospitalId);
+
+  if (isProactiveParentInbox) {
+    const parentHospitals = await db.query<{ id: string; hcode: string; name: string }>(
+      'SELECT id, hcode, name FROM hospitals WHERE id = ? AND is_active = true LIMIT 1',
+      [input.actorHospitalId],
+    );
+    const parentHospital = parentHospitals[0];
+    if (!parentHospital) {
+      return {
+        ok: false,
+        error: 'ไม่พบข้อมูลโรงพยาบาลแม่ข่ายของผู้ส่งข้อความ',
+        status: 400,
+      };
+    }
+
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    const senderName = input.requestedByName?.trim() || `ทีมสูติศาสตร์ ${parentHospital.name}`;
+    const senderCid = input.requestedByCid ?? '';
+
+    await db.execute(
+      `INSERT INTO patient_consults
+         (id, hospital_id, patient_id, an, journey_id, doctor_id, doctor_cid,
+          doctor_name, doctor_position, doctor_phone, reason, status,
+          consult_scope, target_hospital_id, urgency_level,
+          requested_by_cid, requested_by_name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 'โรงพยาบาลแม่ข่าย', NULL, ?, 'CONTACTED', 'HUB', ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        input.hospitalId,
+        input.patientId,
+        input.an,
+        input.journeyId,
+        senderCid,
+        senderName,
+        reason,
+        parentHospital.id,
+        urgency,
+        input.requestedByCid,
+        input.requestedByName,
+        now,
+        now,
+      ],
+    );
+
+    const messageId = await insertConsultMessage(db, {
+      consultId: id,
+      senderHospitalId: parentHospital.id,
+      senderCid,
+      senderName,
+      senderRole: input.actorRole ?? null,
+      body: reason,
+      messageType: 'TEXT',
+    });
+
+    if (senderCid) {
+      const readTime = new Date(Date.now() + 1).toISOString();
+      await db.execute(
+        `INSERT INTO consult_thread_reads
+           (id, consult_id, user_cid, last_read_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (consult_id, user_cid)
+           DO UPDATE SET last_read_at = EXCLUDED.last_read_at, updated_at = EXCLUDED.updated_at`,
+        [uuidv4(), id, senderCid, readTime, readTime, readTime],
+      );
+    }
+
+    logger.info('patient_consult_proactive_inbox_created', {
+      hospitalId: input.hospitalId,
+      targetHospitalId: parentHospital.id,
+      an: input.an,
+      urgency,
+    });
+
+    await announceConsult(db, {
+      type: 'consult_message',
+      patientHospitalId: input.hospitalId,
+      hubHospitalId: parentHospital.id,
+      an: input.an,
+      consultId: id,
+    });
+
+    // Notify the patient's hospital (รพ.ของคนไข้) via BMS / LINE OA หมอพร้อม + in-app alert
+    try {
+      const hcodeRows = await db.query<{ hcode: string }>(
+        'SELECT hcode FROM hospitals WHERE id = ? LIMIT 1',
+        [input.hospitalId],
+      );
+      const patientHcode = hcodeRows[0]?.hcode ?? '';
+      const origin = await resolveAlertOrigin(db, input.hospitalId, patientHcode);
+      const patientRows = await db.query<{ name: string | null }>(
+        'SELECT name FROM cached_patients WHERE hospital_id = ? AND an = ? LIMIT 1',
+        [input.hospitalId, input.an],
+      );
+      const enqueued = await enqueueConsultMessageAlert(
+        db,
+        {
+          hospitalId: input.hospitalId,
+          originHcode: patientHcode,
+          hospitalName: origin.hospitalName,
+          province: origin.province,
+          caseRef: `AN ${input.an}`,
+          localDate: origin.localDate,
+          patientName: decryptPatientName(patientRows[0]?.name ?? null),
+          confirmUrl: patientHcode ? `/patients/${patientHcode}-${input.an}` : null,
+        },
+        {
+          messageId,
+          excludeCid: input.requestedByCid,
+          titleOverride: `แจ้งเตือนจากโรงพยาบาลแม่ข่าย (${parentHospital.name}) — ${origin.hospitalName}`,
+        },
+      );
+      if (enqueued > 0) {
+        await drainMophAlerts(db, input.hospitalId);
+      }
+    } catch (error) {
+      logger.warn('proactive_consult_alert_failed', { error });
+    }
+
+    const stored = await loadConsultById(db, id);
+    if (!stored) {
+      return { ok: false, error: 'ไม่พบรายการปรึกษานี้', status: 500 };
+    }
+    const reRead = await listPatientConsults(db, input.an, input.hospitalId, input.requestedByCid);
+    const matched = reRead.find((c) => c.id === id);
+    return { ok: true, consult: matched ?? stored };
   }
 
   const mode = input.mode ?? 'INTERNAL';
@@ -491,11 +631,12 @@ export async function updatePatientConsult(
   }
 
   const isHub = existing.consultScope === 'HUB';
+  const isProactiveInbox = isHub && existing.doctorId === null;
   const isRequester = actor.hospitalId === existing.hospitalId;
   const isTargetClinician =
     isHub &&
     actor.hospitalId === existing.targetHospitalId &&
-    (actor.role === 'OBSTETRICIAN' || actor.role === 'ADMIN');
+    (isProactiveInbox || actor.role === 'OBSTETRICIAN' || actor.role === 'ADMIN');
 
   if (!isRequester && !isTargetClinician) {
     return { ok: false, error: 'ไม่มีสิทธิ์อัปเดตรายการปรึกษานี้', status: 403 };

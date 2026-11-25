@@ -123,10 +123,12 @@ export function consultThreadAccess(
   actor: ConsultActor,
 ): { mayRead: boolean; mayWrite: boolean } {
   const isHub = consult.consultScope === 'HUB';
+  const isProactiveInbox = isHub && consult.doctorId === null;
   const isRequester = actor.hospitalId === consult.hospitalId;
   const isTargetHospital = isHub && actor.hospitalId === consult.targetHospitalId;
   const isTargetClinician =
-    isTargetHospital && (actor.role === 'OBSTETRICIAN' || actor.role === 'ADMIN');
+    isTargetHospital &&
+    (isProactiveInbox || actor.role === 'OBSTETRICIAN' || actor.role === 'ADMIN');
   return {
     mayRead: isRequester || isTargetHospital,
     mayWrite: (isRequester || isTargetClinician) && consult.status !== 'COMPLETED',

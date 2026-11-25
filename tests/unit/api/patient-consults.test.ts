@@ -297,4 +297,28 @@ describe('HUB consults over the patient routes', () => {
     expect(body.consult.advice).toBe('คุมความดันและประเมินส่งต่อ');
     expect(body.consult.answeredByName).toBe('นพ.สูติศาสตร์');
   });
+
+  it('allows the parent hospital (รพ.แม่ข่าย) to POST a proactive inbox warning without doctorId', async () => {
+    signInAs(HUB, {
+      role: UserRole.OBSTETRICIAN,
+      userCid: '1100700200001',
+      name: 'นพ.แม่ข่าย เตือน',
+    });
+
+    const res = await POST(
+      jsonRequest({
+        reason: 'ผลประเมินพบความเสี่ยงสูง กรุณาประเมินซ้ำและเตรียมส่งต่อ',
+        mode: 'HUB',
+        urgency: 'EMERGENCY',
+      }) as never,
+      { params: Promise.resolve({ an: `${A}-${AN}` }) },
+    );
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.consult.consultScope).toBe('HUB');
+    expect(body.consult.status).toBe('CONTACTED');
+    expect(body.consult.urgencyLevel).toBe('EMERGENCY');
+    expect(body.consult.messageCount).toBe(1);
+  });
 });

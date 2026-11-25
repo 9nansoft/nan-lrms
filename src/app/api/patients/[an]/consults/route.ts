@@ -120,7 +120,9 @@ export async function POST(
       body?.urgency === 'URGENT' || body?.urgency === 'EMERGENCY' || body?.urgency === 'ROUTINE'
         ? (body.urgency as ConsultUrgency)
         : undefined;
-    if (!doctorId) {
+    const isParentHospitalActor =
+      Boolean(scope.ownHospitalId && scope.ownHospitalId !== patient.hospital_id);
+    if (!doctorId && !isParentHospitalActor) {
       return NextResponse.json(
         { error: 'กรุณาเลือกแพทย์ที่ต้องการปรึกษา', code: 'DOCTOR_REQUIRED' },
         { status: 400 },
@@ -133,12 +135,14 @@ export async function POST(
       hospitalId: patient.hospital_id,
       patientId: patient.id,
       journeyId: patient.journey_id,
-      doctorId,
+      doctorId: doctorId || null,
       reason,
-      mode,
+      mode: !doctorId && isParentHospitalActor ? 'HUB' : mode,
       urgency,
       requestedByCid: session.user.userCid ?? null,
       requestedByName: actor.userName ?? null,
+      actorHospitalId: scope.ownHospitalId,
+      actorRole: session.user.role ?? null,
     });
     if (!created.ok) {
       return NextResponse.json(

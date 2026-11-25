@@ -6,6 +6,7 @@ import { useRef, type ReactNode } from 'react';
 import { useBreadcrumbs, type Breadcrumb } from '@/components/layout/BreadcrumbContext';
 import { OnlineUsersBadge } from '@/components/dashboard/OnlineUsersBadge';
 import { CallDirectoryButton } from '@/components/calls/CallDirectoryButton';
+import { NotificationBellButton } from '@/components/layout/NotificationBellButton';
 import { useCssHeightVar } from '@/hooks/useCssHeightVar';
 
 export interface AppHeaderProps {
@@ -71,6 +72,7 @@ export function AppHeader({
               {hospitalName}
             </span>
           )}
+          <NotificationBellButton />
           <Link
             href="/profile"
             aria-label="การตั้งค่าการแจ้งเตือน"
