@@ -263,13 +263,35 @@ export async function createConsultMessage(
           ? consult.targetHospitalId
           : consult.hospitalId
         : consult.hospitalId;
+    const senderHospitalId =
+      consult.consultScope === 'HUB'
+        ? senderIsRequester
+          ? consult.hospitalId
+          : (actor.hospitalId || consult.targetHospitalId || consult.hospitalId)
+        : consult.hospitalId;
     if (receivingHospitalId) {
-      const hcodeRows = await db.query<{ hcode: string }>(
-        'SELECT hcode FROM hospitals WHERE id = ?',
-        [receivingHospitalId],
+      const hcodeRows = await db.query<{ id: string; hcode: string }>(
+        'SELECT id, hcode FROM hospitals WHERE id IN (?, ?)',
+        [receivingHospitalId, senderHospitalId],
       );
-      const hcode = hcodeRows[0]?.hcode ?? '';
-      const origin = await resolveAlertOrigin(db, receivingHospitalId, hcode);
+      const receivingHcode =
+        hcodeRows.find((r) => r.id === receivingHospitalId)?.hcode ?? '';
+      const senderHcode =
+        hcodeRows.find((r) => r.id === senderHospitalId)?.hcode ?? receivingHcode;
+      const patientHcodeRows =
+        consult.hospitalId === receivingHospitalId || consult.hospitalId === senderHospitalId
+          ? hcodeRows
+          : await db.query<{ id: string; hcode: string }>(
+              'SELECT id, hcode FROM hospitals WHERE id = ?',
+              [consult.hospitalId],
+            );
+      const patientHcode =
+        patientHcodeRows.find((r) => r.id === consult.hospitalId)?.hcode ?? '';
+
+      // Resolve the SENDER hospital's name so "โรงพยาบาลต้นทาง:" in the
+      // alert message names who sent the message (รพ.แม่ข่าย when hub sends
+      // to รพช.; รพช. when รพช. sends to รพ.แม่ข่าย).
+      const senderOrigin = await resolveAlertOrigin(db, senderHospitalId, senderHcode);
       const patientRows = await db.query<{ name: string | null }>(
         'SELECT name FROM cached_patients WHERE hospital_id = ? AND an = ? LIMIT 1',
         [consult.hospitalId, consult.an],
@@ -278,15 +300,22 @@ export async function createConsultMessage(
         db,
         {
           hospitalId: receivingHospitalId,
-          originHcode: hcode,
-          hospitalName: origin.hospitalName,
-          province: origin.province,
+          originHcode: senderHcode,
+          hospitalName: senderOrigin.hospitalName,
+          province: senderOrigin.province,
           caseRef: `AN ${consult.an}`,
-          localDate: origin.localDate,
+          localDate: senderOrigin.localDate,
           patientName: decryptPatientName(patientRows[0]?.name ?? null),
-          confirmUrl: null,
+          confirmUrl: patientHcode ? `/patients/${patientHcode}-${consult.an}` : null,
         },
-        { messageId, excludeCid: actor.userCid },
+        {
+          messageId,
+          excludeCid: actor.userCid,
+          excludeHospitalId:
+            consult.consultScope === 'HUB' && senderHospitalId !== receivingHospitalId
+              ? senderHospitalId
+              : null,
+        },
       );
       if (enqueued > 0) {
         // Push-path drains only ride syncs and webhooks — give this message

@@ -167,6 +167,53 @@ describe('enqueueConsultMessageAlert via createConsultMessage', () => {
     expect(rows[0].recipient_cid).not.toBe(requesterActor.userCid);
   });
 
+  it('when รพ.แม่ข่าย sends a proactive consult to รพช., it alerts ONLY รพช. and names รพ.แม่ข่าย as the origin hospital', async () => {
+    const hubId = await hospitalId(HUB);
+    const spokeId = await hospitalId(A);
+
+    // Seed a center monitor at the hub to prove center monitors are NOT
+    // notified when the hub sends a consult message TO a community hospital.
+    await db.execute(
+      `INSERT INTO moph_center_monitors (id, province, cid, name, is_active, created_at, updated_at)
+       VALUES ('mon-1', '55', ?, 'ศูนย์กลาง รพ.แม่ข่าย', true, NOW(), NOW())`,
+      [HUB_ROSTER_CID],
+    );
+
+    const created = await createPatientConsult(db, {
+      an: AN,
+      hospitalId: spokeId,
+      patientId: `p-${AN}`,
+      journeyId: null,
+      reason: 'รพ.แม่ข่าย แจ้งเตือนให้ประเมินซ้ำ',
+      mode: 'HUB',
+      urgency: 'URGENT',
+      requestedByCid: hubDoctorActor.userCid,
+      requestedByName: hubDoctorActor.name,
+      actorHospitalId: hubId,
+      actorRole: hubDoctorActor.role,
+    });
+    expect(created.ok).toBe(true);
+
+    const rows = await db.query<{
+      hospital_id: string;
+      origin_hcode: string;
+      hospital_name: string | null;
+      recipient_cid: string;
+      title: string;
+    }>(
+      `SELECT hospital_id, origin_hcode, hospital_name, recipient_cid, title
+         FROM moph_alert_log ORDER BY created_at`,
+    );
+
+    // ONLY รพช. (spokeId) receives the alert — never รพ.แม่ข่าย (hubId)!
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hospital_id).toBe(spokeId);
+    expect(rows[0].recipient_cid).toBe(A_ROSTER_CID);
+    // And the origin hospital shown in the message is รพ.แม่ข่าย (HUB), NOT รพช.!
+    expect(rows[0].origin_hcode).toBe(HUB);
+    expect(rows[0].hospital_name).toContain('น่าน');
+  });
+
   it('alerts off leaves the message untouched — the pipeline is best effort', async () => {
     process.env.MOPH_ALERTS_ENABLED = 'false';
     try {

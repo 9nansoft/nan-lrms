@@ -105,11 +105,26 @@ export interface ConsultCardProps {
   ) => Promise<unknown>;
 }
 
-/** True when the viewer is a clinician of the hub the consult was sent to. */
-function canAnswerHub(consult: PatientConsult, viewer: ConsultViewer | null | undefined): boolean {
-  if (consult.consultScope !== 'HUB' || !consult.targetHospitalHcode) return false;
-  if (!viewer?.hospitalCode || viewer.hospitalCode !== consult.targetHospitalHcode) return false;
-  if (consult.doctorId === null) return true;
+/** True when the viewer is on the answering side of a HUB consult:
+ *  - Type 1 (รพช. ส่งมาให้ รพ.แม่ข่าย, doctorId !== null): รพ.แม่ข่าย ตอบกลับ
+ *  - Type 2 (รพ.แม่ข่าย ส่งหา รพช., doctorId === null): รพช. ตอบกลับ */
+function canAnswerHub(
+  consult: PatientConsult,
+  viewer: ConsultViewer | null | undefined,
+  patientHcode: string,
+): boolean {
+  if (consult.consultScope !== 'HUB' || !viewer?.hospitalCode) return false;
+  if (consult.doctorId === null) {
+    if (patientHcode && viewer.hospitalCode === patientHcode) return true;
+    return Boolean(
+      consult.targetHospitalHcode &&
+        viewer.hospitalCode === consult.targetHospitalHcode &&
+        (viewer.role === 'OBSTETRICIAN' || viewer.role === 'ADMIN'),
+    );
+  }
+  if (!consult.targetHospitalHcode || viewer.hospitalCode !== consult.targetHospitalHcode) {
+    return false;
+  }
   return viewer.role === 'OBSTETRICIAN' || viewer.role === 'ADMIN';
 }
 
@@ -261,7 +276,7 @@ export function ConsultCard({
                 const updating = busy === `update:${consult.id}`;
                 const isHub = consult.consultScope === 'HUB';
                 const statusLabel = isHub ? HUB_STATUS_LABEL[consult.status] : INTERNAL_STATUS_LABEL[consult.status];
-                const answerer = canAnswerHub(consult, viewer);
+                const answerer = canAnswerHub(consult, viewer, patientHcode);
                 const threadOpenFor = threadOpen[consult.id] ?? false;
                 return (
                   <li

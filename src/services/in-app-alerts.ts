@@ -115,11 +115,20 @@ export async function listInAppAlerts(
 
   const logConditions: string[] = [];
   const logParams: unknown[] = [];
-  if (cid) {
+  if (cid && hospitalId) {
+    // For point-to-point consult notifications (`consult_message`),
+    // `hospital_id` is ALWAYS the receiving hospital. Require `hospital_id = ?`
+    // for `consult_message` when the viewer belongs to a hospital so an
+    // outgoing consult sent FROM รพ.แม่ข่าย TO รพช. only lights up the badge at
+    // รพช. (the receiver) and never echoes back on รพ.แม่ข่าย's badge.
+    logConditions.push("(recipient_cid = ? AND (alert_source <> 'consult_message' OR hospital_id = ?))");
+    logParams.push(cid, hospitalId);
+    logConditions.push('hospital_id = ?');
+    logParams.push(hospitalId);
+  } else if (cid) {
     logConditions.push('recipient_cid = ?');
     logParams.push(cid);
-  }
-  if (hospitalId) {
+  } else if (hospitalId) {
     logConditions.push('hospital_id = ?');
     logParams.push(hospitalId);
   }

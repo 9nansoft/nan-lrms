@@ -148,20 +148,25 @@ async function resolveRecipients(
   eventKey: string,
 ): Promise<Recipient[]> {
   // hospital_code for the preference gate — resolve from hospitalId if not given.
-  let hospitalCode = hospitalCodeOverride ?? '';
-  if (!hospitalCode) {
-    const h = await db.query<{ hcode: string }>(`SELECT hcode FROM hospitals WHERE id = ?`, [
-      hospitalId,
-    ]);
-    hospitalCode = h[0]?.hcode ?? '';
-  }
+  const h = await db.query<{ hcode: string; service_type: string | null }>(
+    `SELECT hcode, service_type FROM hospitals WHERE id = ?`,
+    [hospitalId],
+  );
+  const hospitalCode = hospitalCodeOverride || (h[0]?.hcode ?? '');
+  const isProvincialHub = h[0]?.service_type === 'PROVINCIAL_HUB';
   const staff = await db.query<{ cid: string; name: string }>(
     `SELECT cid, name FROM hospital_consult_doctors
      WHERE hospital_id = ? AND is_active = true`,
     [hospitalId],
   );
+  // For consult_message, the alert is a direct conversation notification for
+  // the RECEIVING hospital (`hospitalId`). Province center monitors (who sit
+  // at the provincial hub) should only be included when the receiving hospital
+  // IS the provincial hub — otherwise a message sent FROM the hub TO a
+  // community hospital (รพช.) would notify the hub's own center monitors.
+  const includeCenterMonitors = eventKey !== CONSULT_MESSAGE_ALERT_SOURCE || isProvincialHub;
   const center =
-    province && province.trim()
+    includeCenterMonitors && province && province.trim()
       ? await db.query<{ cid: string; name: string }>(
           `SELECT cid, name FROM moph_center_monitors
            WHERE province = ? AND is_active = true`,
@@ -238,7 +243,11 @@ async function enqueueAlertEvent(
   severity: AlertSeverity,
   alertSource: string,
   ruleId: string,
-  options: { titleOverride?: string; excludeCid?: string | null } = {},
+  options: {
+    titleOverride?: string;
+    excludeCid?: string | null;
+    excludeHospitalId?: string | null;
+  } = {},
 ): Promise<number> {
   if (!mophAlertsEnabled()) {
     logger.debug('moph_alert_skipped_disabled', { caseRef: ctx.caseRef });
@@ -270,17 +279,37 @@ async function enqueueAlertEvent(
   // of the hospitals row, which is also what the profile UI shows users when
   // they subscribe. ctx.originHcode is the code the event arrived under and is
   // not guaranteed to be the same string.
-  const recipients = (
-    await resolveRecipients(db, ctx.hospitalId, ctx.province, undefined, alertSource)
-  ).filter((r) => !options.excludeCid || r.cid !== options.excludeCid);
+  const allRecipients = await resolveRecipients(
+    db,
+    ctx.hospitalId,
+    ctx.province,
+    undefined,
+    alertSource,
+  );
+  const excludedCids = new Set<string>();
+  if (options.excludeCid) excludedCids.add(options.excludeCid);
+  if (options.excludeHospitalId && options.excludeHospitalId !== ctx.hospitalId) {
+    const senderDoctors = await db.query<{ cid: string }>(
+      'SELECT cid FROM hospital_consult_doctors WHERE hospital_id = ?',
+      [options.excludeHospitalId],
+    );
+    for (const d of senderDoctors) excludedCids.add(d.cid);
+  }
+  const recipients = allRecipients.filter((r) => !excludedCids.has(r.cid));
   if (recipients.length === 0) {
-    const queued = await queueAlertEvent(db, event);
-    if (queued) {
-      logger.warn('moph_alert_no_recipients', {
-        hospitalId: ctx.hospitalId,
-        caseRef: ctx.caseRef,
-        deferred: true,
-      });
+    // Only queue into moph_alert_event_queue when the receiving hospital has no
+    // recipients at all (allRecipients.length === 0). If allRecipients had only
+    // excluded sender CIDs, queuing would let materializeDeferredAlertEvents
+    // re-resolve without excludeCid and deliver the alert back to the sender.
+    if (allRecipients.length === 0) {
+      const queued = await queueAlertEvent(db, event);
+      if (queued) {
+        logger.warn('moph_alert_no_recipients', {
+          hospitalId: ctx.hospitalId,
+          caseRef: ctx.caseRef,
+          deferred: true,
+        });
+      }
     }
     return 0;
   }
@@ -630,11 +659,17 @@ export async function enqueueReferralOverdueAlert(
 export async function enqueueConsultMessageAlert(
   db: DatabaseAdapter,
   ctx: AlertEventContext,
-  options: { messageId: string; excludeCid: string | null; titleOverride?: string },
+  options: {
+    messageId: string;
+    excludeCid: string | null;
+    excludeHospitalId?: string | null;
+    titleOverride?: string;
+  },
 ): Promise<number> {
   return enqueueAlertEvent(db, ctx, 'notify', CONSULT_MESSAGE_ALERT_SOURCE, options.messageId, {
     titleOverride: options.titleOverride ?? `ข้อความใหม่ในคำปรึกษา — ${ctx.hospitalName}`,
     excludeCid: options.excludeCid,
+    excludeHospitalId: options.excludeHospitalId,
   });
 }
 

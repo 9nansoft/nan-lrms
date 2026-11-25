@@ -451,13 +451,15 @@ export async function createPatientConsult(
       consultId: id,
     });
 
-    // Notify the patient's hospital (รพ.ของคนไข้) via BMS / LINE OA หมอพร้อม + in-app alert
+    // Notify ONLY the patient's hospital (รพช.) via BMS / LINE OA หมอพร้อม + in-app alert.
+    // The sender (โรงพยาบาลต้นทาง) is the parent hospital (รพ.แม่ข่าย), NOT รพช.!
     try {
-      const hcodeRows = await db.query<{ hcode: string }>(
-        'SELECT hcode FROM hospitals WHERE id = ? LIMIT 1',
+      const hcodeRows = await db.query<{ hcode: string; name: string }>(
+        'SELECT hcode, name FROM hospitals WHERE id = ? LIMIT 1',
         [input.hospitalId],
       );
       const patientHcode = hcodeRows[0]?.hcode ?? '';
+      const patientHospitalName = hcodeRows[0]?.name ?? patientHcode;
       const origin = await resolveAlertOrigin(db, input.hospitalId, patientHcode);
       const patientRows = await db.query<{ name: string | null }>(
         'SELECT name FROM cached_patients WHERE hospital_id = ? AND an = ? LIMIT 1',
@@ -467,10 +469,12 @@ export async function createPatientConsult(
         db,
         {
           hospitalId: input.hospitalId,
-          originHcode: patientHcode,
-          hospitalName: origin.hospitalName,
+          originHcode: parentHospital.hcode,
+          hospitalName: parentHospital.name,
           province: origin.province,
-          caseRef: `AN ${input.an}`,
+          caseRef: patientHospitalName
+            ? `AN ${input.an} (${patientHospitalName})`
+            : `AN ${input.an}`,
           localDate: origin.localDate,
           patientName: decryptPatientName(patientRows[0]?.name ?? null),
           confirmUrl: patientHcode ? `/patients/${patientHcode}-${input.an}` : null,
@@ -478,7 +482,8 @@ export async function createPatientConsult(
         {
           messageId,
           excludeCid: input.requestedByCid,
-          titleOverride: `แจ้งเตือนจากโรงพยาบาลแม่ข่าย (${parentHospital.name}) — ${origin.hospitalName}`,
+          excludeHospitalId: parentHospital.id,
+          titleOverride: `แจ้งเตือนคำปรึกษาจาก ${parentHospital.name} — AN ${input.an}`,
         },
       );
       if (enqueued > 0) {
@@ -642,8 +647,9 @@ export async function updatePatientConsult(
     return { ok: false, error: 'ไม่มีสิทธิ์อัปเดตรายการปรึกษานี้', status: 403 };
   }
 
-  // Only the clinicians being asked may write the advice.
-  const mayWriteAdvice = !isHub || isTargetClinician;
+  // Type 1 (รพช. -> รพ.แม่ข่าย, doctorId !== null): only the hub clinicians write advice.
+  // Type 2 (รพ.แม่ข่าย -> รพช., doctorId === null): รพช. (isRequester) answers back.
+  const mayWriteAdvice = !isHub || isProactiveInbox || isTargetClinician;
   if (
     input.advice !== undefined &&
     input.advice !== null &&
@@ -681,7 +687,7 @@ export async function updatePatientConsult(
   // The hub clinician who wrote the answer is recorded, so the requester
   // knows whose advice it was.
   const answeredByName =
-    isHub && isTargetClinician && (advice !== null || status === 'COMPLETED')
+    isHub && (isTargetClinician || (isProactiveInbox && isRequester)) && (advice !== null || status === 'COMPLETED')
       ? existing.answeredByName ?? actor.name
       : existing.answeredByName;
 
