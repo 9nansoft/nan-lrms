@@ -62,13 +62,31 @@ describe('PregnancyRiskSection', () => {
     expect(within(dialog).getByText('ประวัติอดีต')).toBeTruthy();
     expect(within(dialog).getByText('ประวัติปัจจุบัน')).toBeTruthy();
     expect(within(dialog).getByText('ครรภ์แฝด')).toBeTruthy();
-    expect(within(dialog).queryByText(/ยังไม่มีข้อมูลบันทึกใน HOSxP/)).toBeNull();
 
     await userEvent.click(within(dialog).getByRole('button', { name: 'ปิด' }));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('summarizes positive risk items with specify text inline and highlights them in the modal', async () => {
+  it('replaces generic HOSxP placeholder labels with the 16 LR1 item descriptions', async () => {
+    const fields: MaternityAssessmentField[] = (RISK_SPEC.numberedPairs ?? []).flatMap((pair) => [
+      chk(pair.noColumn, pair.itemNumber === 12 ? 'N' : 'Y', `ไม่มี (การประเมินความเสี่ยงสตรีตั้งครรภ์ และการคลอดบุตร ข้อ ${pair.itemNumber})`),
+      chk(pair.yesColumn, pair.itemNumber === 12 ? 'Y' : 'N', `มี (การประเมินความเสี่ยงสตรีตั้งครรภ์ และการคลอดบุตร ข้อ ${pair.itemNumber})`),
+    ]);
+
+    render(<PregnancyRiskSection spec={RISK_SPEC} fields={fields} />);
+
+    expect(screen.getByText('พบความเสี่ยง 1 ข้อ')).toBeTruthy();
+    expect(screen.getByText('ข้อ 12 BP>=140/90 mmHg')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: 'ดูรายละเอียด (16 ข้อ)' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('เคยมีทารกตายในครรภ์และเสียชีวิตแรกเกิด (1เดือนแรก)')).toBeTruthy();
+    expect(within(dialog).getByText('เคยแท้ง3ครั้ง ติดต่อกันหรือมากกว่าติดต่อกัน')).toBeTruthy();
+    expect(within(dialog).getByText('BP>=140/90 mmHg')).toBeTruthy();
+    expect(within(dialog).getByText('โรคทางศัลยกรรม เช่น ผ่าตัดไส้ติ่ง, อุบัติเหตุ')).toBeTruthy();
+  });
+
+  it('summarizes positive risk items with specify text inline and shows all 16 items in the modal', async () => {
     const fields: MaternityAssessmentField[] = [
       chk('asm_chk15', 'Y', 'ไม่มี (1. เคยมีทารกตายในครรภ์)'),
       chk('asm_chk16', 'N', 'มี (1. เคยมีทารกตายในครรภ์)'),
@@ -96,7 +114,9 @@ describe('PregnancyRiskSection', () => {
     expect(within(dialog).getByText('เคยผ่าตัดอวัยวะภายในระบบสืบพันธุ์')).toBeTruthy();
     expect(within(dialog).getByText('ผ่าตัดคลอด ปี 2566')).toBeTruthy();
     expect(within(dialog).getByText('ธัยรอยด์')).toBeTruthy();
-    expect(within(dialog).getByText(/ยังไม่มีข้อมูลบันทึกใน HOSxP: ข้อ 2, 3/)).toBeTruthy();
+    expect(within(dialog).getByText('ประเมินแล้ว 3/16 ข้อ', { exact: false })).toBeTruthy();
+    // Unrecorded items still appear with their standard LR1 text under ประวัติอดีต / ประวัติปัจจุบัน.
+    expect(within(dialog).getByText('ครรภ์แฝด')).toBeTruthy();
   });
 
   it('shows unassessed message and still preserves extra specify notes when checkboxes are unticked', async () => {

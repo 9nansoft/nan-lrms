@@ -43,6 +43,13 @@ export interface AssessmentNumberedPair {
   itemNumber: number;
   /** Subsection heading on the paper form (ประวัติอดีต / ประวัติปัจจุบัน). */
   group?: string;
+  /**
+   * Standard Thai text printed on the LR1 form for this item. HOSxP's
+   * `assessment_items_note` for `asm_chk15..46` only carries a generic
+   * placeholder (`ไม่มี (การประเมินความเสี่ยง... ข้อ N)`), so the viewer
+   * uses this text whenever the site did not provide a custom description.
+   */
+  defaultLabel?: string;
   noColumn: string;
   yesColumn: string;
   /** Optional "ระบุ ..." text column attached to this item (e.g. items 6, 15, 16). */
@@ -202,29 +209,109 @@ const FIRST_PREGNANT_LAYOUT: AssessmentFormLayout = {
       title: 'การประเมินความเสี่ยงสตรีตั้งครรภ์ และการคลอดบุตร',
       style: 'numbered-risk',
       numberedPairs: [
-        { itemNumber: 1, group: 'ประวัติอดีต', noColumn: 'asm_chk15', yesColumn: 'asm_chk16' },
-        { itemNumber: 2, group: 'ประวัติอดีต', noColumn: 'asm_chk17', yesColumn: 'asm_chk18' },
-        { itemNumber: 3, group: 'ประวัติอดีต', noColumn: 'asm_chk19', yesColumn: 'asm_chk20' },
-        { itemNumber: 4, group: 'ประวัติอดีต', noColumn: 'asm_chk21', yesColumn: 'asm_chk22' },
-        { itemNumber: 5, group: 'ประวัติอดีต', noColumn: 'asm_chk23', yesColumn: 'asm_chk24' },
+        {
+          itemNumber: 1,
+          group: 'ประวัติอดีต',
+          defaultLabel: 'เคยมีทารกตายในครรภ์และเสียชีวิตแรกเกิด (1เดือนแรก)',
+          noColumn: 'asm_chk15',
+          yesColumn: 'asm_chk16',
+        },
+        {
+          itemNumber: 2,
+          group: 'ประวัติอดีต',
+          defaultLabel: 'เคยแท้ง3ครั้ง ติดต่อกันหรือมากกว่าติดต่อกัน',
+          noColumn: 'asm_chk17',
+          yesColumn: 'asm_chk18',
+        },
+        {
+          itemNumber: 3,
+          group: 'ประวัติอดีต',
+          defaultLabel: 'เคยคลอดบุตรน้ำหนักน้อยกว่า 2,500 กรัม',
+          noColumn: 'asm_chk19',
+          yesColumn: 'asm_chk20',
+        },
+        {
+          itemNumber: 4,
+          group: 'ประวัติอดีต',
+          defaultLabel: 'เคยคลอดบุตรน้ำหนักมากกว่า 4,000 กรัม',
+          noColumn: 'asm_chk21',
+          yesColumn: 'asm_chk22',
+        },
+        {
+          itemNumber: 5,
+          group: 'ประวัติอดีต',
+          defaultLabel: 'เคยเข้ารับการรักษาในรพ.ด้วย BPสูงขณะตั้งครรภ์(PIH)',
+          noColumn: 'asm_chk23',
+          yesColumn: 'asm_chk24',
+        },
         {
           itemNumber: 6,
           group: 'ประวัติอดีต',
+          defaultLabel: 'เคยผ่าตัดอวัยวะภายในระบบสืบพันธ์เช่นเนื้องอกมดลูก ผ่าตัดปากมดลูก, ผูกปากมดลูก, ผ่าตัดคลอด',
           noColumn: 'asm_chk25',
           yesColumn: 'asm_chk26',
           specifyColumn: 'asm_text56',
         },
-        { itemNumber: 7, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk27', yesColumn: 'asm_chk28' },
-        { itemNumber: 8, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk29', yesColumn: 'asm_chk30' },
-        { itemNumber: 9, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk31', yesColumn: 'asm_chk32' },
-        { itemNumber: 10, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk33', yesColumn: 'asm_chk34' },
-        { itemNumber: 11, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk35', yesColumn: 'asm_chk36' },
-        { itemNumber: 12, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk37', yesColumn: 'asm_chk38' },
-        { itemNumber: 13, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk39', yesColumn: 'asm_chk40' },
-        { itemNumber: 14, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk41', yesColumn: 'asm_chk42' },
+        {
+          itemNumber: 7,
+          group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'ครรภ์แฝด',
+          noColumn: 'asm_chk27',
+          yesColumn: 'asm_chk28',
+        },
+        {
+          itemNumber: 8,
+          group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'อายุ <17 ปี / อายุ >35 ปี (นับถึง EDC)',
+          noColumn: 'asm_chk29',
+          yesColumn: 'asm_chk30',
+        },
+        {
+          itemNumber: 9,
+          group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'Rh Negative',
+          noColumn: 'asm_chk31',
+          yesColumn: 'asm_chk32',
+        },
+        {
+          itemNumber: 10,
+          group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'มีเลือดออกทางช่องคลอด',
+          noColumn: 'asm_chk33',
+          yesColumn: 'asm_chk34',
+        },
+        {
+          itemNumber: 11,
+          group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'มีก้อนในอุ้งเชิงกราน/บริเวณอวัยวะสืบพันธุ์',
+          noColumn: 'asm_chk35',
+          yesColumn: 'asm_chk36',
+        },
+        {
+          itemNumber: 12,
+          group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'BP>=140/90 mmHg',
+          noColumn: 'asm_chk37',
+          yesColumn: 'asm_chk38',
+        },
+        {
+          itemNumber: 13,
+          group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'โรคเบาหวาน/โรคไต/โรคหัวใจ',
+          noColumn: 'asm_chk39',
+          yesColumn: 'asm_chk40',
+        },
+        {
+          itemNumber: 14,
+          group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'ติดยาเสพติด/ดื่มสุรา/สูบบุหรี่',
+          noColumn: 'asm_chk41',
+          yesColumn: 'asm_chk42',
+        },
         {
           itemNumber: 15,
           group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'โรคอายุรกรรม เช่น โลหิตจาง, ธัยรอยด์, SLE',
           noColumn: 'asm_chk43',
           yesColumn: 'asm_chk44',
           specifyColumn: 'asm_text57',
@@ -232,6 +319,7 @@ const FIRST_PREGNANT_LAYOUT: AssessmentFormLayout = {
         {
           itemNumber: 16,
           group: 'ประวัติปัจจุบัน',
+          defaultLabel: 'โรคทางศัลยกรรม เช่น ผ่าตัดไส้ติ่ง, อุบัติเหตุ',
           noColumn: 'asm_chk45',
           yesColumn: 'asm_chk46',
           specifyColumn: 'asm_text58',

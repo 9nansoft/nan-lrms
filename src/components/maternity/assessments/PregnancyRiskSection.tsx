@@ -38,11 +38,11 @@ export interface PregnancyRiskItem {
 
 export interface PregnancyRiskSummary {
   totalCount: number;
+  allItems: PregnancyRiskItem[];
   recordedItems: PregnancyRiskItem[];
   yesItems: PregnancyRiskItem[];
   noItems: PregnancyRiskItem[];
-  unrecordedCheckedCount: number;
-  missingItemNumbers: number[];
+  assessedCount: number;
   orphanSpecifyItems: PregnancyRiskItem[];
   extraSpecify: MaternityAssessmentField[];
   headline: string;
@@ -50,22 +50,31 @@ export interface PregnancyRiskSummary {
   tone: Extract<StatusTone, 'warn' | 'ok' | 'neutral'>;
 }
 
-function isGenericChoiceWord(text: string): boolean {
+const GENERIC_RISK_PLACEHOLDER = /^(?:การประเมินความเสี่ยง.*ข้อ\s*\d+|ข้อ\s*\d+)$/;
+
+function isGenericItemLabel(text: string): boolean {
   const normalized = text.trim();
-  return normalized === '' || normalized === 'ไม่มี' || normalized === 'มี';
+  return (
+    normalized === '' ||
+    normalized === 'ไม่มี' ||
+    normalized === 'มี' ||
+    GENERIC_RISK_PLACEHOLDER.test(normalized)
+  );
 }
 
 function extractItemText(
+  defaultLabel: string | undefined,
   noField?: MaternityAssessmentField,
   yesField?: MaternityAssessmentField,
 ): string {
   const candidates = [yesField, noField].filter((f): f is MaternityAssessmentField => f !== undefined);
   for (const candidate of candidates) {
     const cleaned = stripChoicePrefix(candidate.label).replace(/^\d+[.)]\s*/, '').trim();
-    if (!isGenericChoiceWord(cleaned) && cleaned !== candidate.column) {
+    if (!isGenericItemLabel(cleaned) && cleaned !== candidate.column) {
       return cleaned;
     }
   }
+  if (defaultLabel) return defaultLabel;
   const fallback = candidates[0];
   if (!fallback) return '';
   return stripChoicePrefix(fallback.label).replace(/^\d+[.)]\s*/, '').trim();
@@ -90,7 +99,7 @@ export function buildPregnancyRiskSummary(
       itemNumber: pair.itemNumber ?? idx + 1,
       group: pair.group ?? 'รายการประเมิน',
       key: pair.noColumn,
-      text: extractItemText(noField, yesField),
+      text: extractItemText(pair.defaultLabel, noField, yesField),
       status,
       noField,
       yesField,
@@ -102,8 +111,7 @@ export function buildPregnancyRiskSummary(
   const recordedItems = allItems.filter((item) => item.hasData);
   const yesItems = recordedItems.filter((item) => item.status === 'yes');
   const noItems = recordedItems.filter((item) => item.status === 'no');
-  const unrecordedCheckedCount = recordedItems.filter((item) => item.status === 'unrecorded').length;
-  const missingItemNumbers = allItems.filter((item) => !item.hasData).map((item) => item.itemNumber);
+  const assessedCount = yesItems.length + noItems.length;
   const orphanSpecifyItems = recordedItems.filter(
     (item) => item.status !== 'yes' && item.specifyField !== undefined,
   );
@@ -140,11 +148,11 @@ export function buildPregnancyRiskSummary(
 
   return {
     totalCount,
+    allItems,
     recordedItems,
     yesItems,
     noItems,
-    unrecordedCheckedCount,
-    missingItemNumbers,
+    assessedCount,
     orphanSpecifyItems,
     extraSpecify,
     headline,
@@ -153,7 +161,7 @@ export function buildPregnancyRiskSummary(
   };
 }
 
-function groupRecordedItems(items: readonly PregnancyRiskItem[]): Array<{ group: string; items: PregnancyRiskItem[] }> {
+function groupRiskItems(items: readonly PregnancyRiskItem[]): Array<{ group: string; items: PregnancyRiskItem[] }> {
   const groups: Array<{ group: string; items: PregnancyRiskItem[] }> = [];
   for (const item of items) {
     const existing = groups.find((g) => g.group === item.group);
@@ -175,7 +183,7 @@ export function PregnancyRiskSection({
 }) {
   const [open, setOpen] = useState(false);
   const summary = useMemo(() => buildPregnancyRiskSummary(spec, fields), [spec, fields]);
-  const groupedItems = useMemo(() => groupRecordedItems(summary.recordedItems), [summary.recordedItems]);
+  const groupedItems = useMemo(() => groupRiskItems(summary.allItems), [summary.allItems]);
 
   if (summary.recordedItems.length === 0 && summary.extraSpecify.length === 0) {
     return null;
@@ -240,8 +248,9 @@ export function PregnancyRiskSection({
             <DialogTitle className="text-body-lg font-semibold text-brand">{spec.title}</DialogTitle>
             <DialogDescription className="text-caption tabular-nums text-ink-muted">
               พบความเสี่ยง {summary.yesItems.length} ข้อ · ไม่มี {summary.noItems.length} ข้อ
-              {summary.unrecordedCheckedCount > 0 ? ` · ยังไม่ได้เลือก ${summary.unrecordedCheckedCount} ข้อ` : ''}
-              {` (จากทั้งหมด ${summary.totalCount} ข้อ)`}
+              {summary.assessedCount < summary.totalCount
+                ? ` · ประเมินแล้ว ${summary.assessedCount}/${summary.totalCount} ข้อ`
+                : ` (จากทั้งหมด ${summary.totalCount} ข้อ)`}
             </DialogDescription>
           </DialogHeader>
 
@@ -258,6 +267,7 @@ export function PregnancyRiskSection({
                       className={cn(
                         'flex flex-wrap items-start gap-x-2 gap-y-1 rounded-lg px-2.5 py-1.5 text-label text-ink',
                         item.status === 'yes' && 'border border-warn/50 bg-warn-tint/60',
+                        !item.hasData && 'text-ink-muted',
                       )}
                     >
                       <span className="w-6 shrink-0 text-right text-caption font-medium tabular-nums text-ink-muted">
@@ -266,8 +276,8 @@ export function PregnancyRiskSection({
                       <div className="min-w-0 flex-1">
                         <span>{item.text || `ข้อ ${item.itemNumber}`}</span>
                         {item.specifyField && (
-                          <p className="mt-0.5 text-caption text-ink-muted">
-                            {item.specifyField.label}:{' '}
+                          <p title={item.specifyField.label} className="mt-0.5 text-caption text-ink-muted">
+                            ระบุ:{' '}
                             <span className="font-medium text-ink">{item.specifyField.value}</span>
                           </p>
                         )}
@@ -282,15 +292,12 @@ export function PregnancyRiskSection({
             {summary.extraSpecify.length > 0 && (
               <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 border-t border-border pt-3 sm:grid-cols-2">
                 {summary.extraSpecify.map((field) => (
-                  <FieldLine key={field.column} field={field} />
+                  <FieldLine
+                    key={field.column}
+                    field={field.label === field.column ? { ...field, label: 'ระบุ' } : field}
+                  />
                 ))}
               </div>
-            )}
-
-            {summary.missingItemNumbers.length > 0 && (
-              <p className="border-t border-border pt-3 text-caption tabular-nums text-ink-muted">
-                ยังไม่มีข้อมูลบันทึกใน HOSxP: ข้อ {summary.missingItemNumbers.join(', ')}
-              </p>
             )}
           </div>
 
