@@ -42,8 +42,9 @@ describe('groupAssessmentRecord', () => {
     const history = grouped.sections.find((s) => s.spec.id === 'history');
     expect(history?.fields.map((f) => f.column)).toEqual(['asm_text1', 'asm_text5']);
 
-    // ประวัติที่เกี่ยวกับปัจจุบัน picks up the first numbered pair.
+    // การประเมินความเสี่ยงสตรีตั้งครรภ์ และการคลอดบุตร picks up the first numbered pair.
     const current = grouped.sections.find((s) => s.spec.id === 'current-history');
+    expect(current?.spec.title).toBe('การประเมินความเสี่ยงสตรีตั้งครรภ์ และการคลอดบุตร');
     expect(current?.fields.map((f) => f.column)).toEqual(['asm_chk15']);
 
     // Problem Lists is its own section.
@@ -57,7 +58,7 @@ describe('groupAssessmentRecord', () => {
   it('puts the Lab cells of one row together under their shared name', () => {
     const grouped = groupAssessmentRecord(
       record('first_pregnant', [
-        field('asm_text13', 'A'),
+        field('asm_text14', 'A'),
         field('asm_text21', 'O'),
         field('asm_text29', 'AB'),
       ]),
@@ -66,7 +67,41 @@ describe('groupAssessmentRecord', () => {
     if (grouped.kind !== 'fields') return;
 
     const lab = grouped.sections.find((s) => s.spec.id === 'lab');
-    expect(lab?.fields.map((f) => f.column)).toEqual(['asm_text13', 'asm_text21', 'asm_text29']);
+    expect(lab?.fields.map((f) => f.column)).toEqual(['asm_text14', 'asm_text21', 'asm_text29']);
+  });
+
+  it('aligns LR1 BMI, Vital sign, specify fields, and Dx to lr1-colum.png columns', () => {
+    const grouped = groupAssessmentRecord(
+      record('first_pregnant', [
+        field('asm_text13', '24.5'),
+        field('asm_text36', 'G6PD normal'),
+        field('asm_text37', '120/80'),
+        field('asm_text42', '2'),
+        field('asm_text55', 'Good'),
+        field('asm_text56', 'เคยผ่าตัดคลอด'),
+        field('asm_text57', 'โลหิตจาง'),
+        field('asm_text61', 'อื่นๆ'),
+        field('asm_text62', 'G1P0 term labour'),
+      ]),
+    );
+    expect(grouped.kind).toBe('fields');
+    if (grouped.kind !== 'fields') return;
+
+    expect(grouped.sections.find((s) => s.spec.id === 'history')?.fields.map((f) => f.column)).toEqual(['asm_text13']);
+    expect(grouped.sections.find((s) => s.spec.id === 'lab')?.fields.map((f) => f.column)).toEqual(['asm_text36']);
+    expect(grouped.sections.find((s) => s.spec.id === 'vital')?.fields.map((f) => f.column)).toEqual([
+      'asm_text37',
+      'asm_text42',
+    ]);
+    expect(grouped.sections.find((s) => s.spec.id === 'appearance')?.fields.map((f) => f.column)).toEqual([
+      'asm_text55',
+    ]);
+    expect(grouped.sections.find((s) => s.spec.id === 'current-history')?.fields.map((f) => f.column)).toEqual([
+      'asm_text56',
+      'asm_text57',
+      'asm_text61',
+    ]);
+    expect(grouped.sections.find((s) => s.spec.id === 'dx')?.fields.map((f) => f.column)).toEqual(['asm_text62']);
   });
 
   it('walks the หลังคลอด grid row by row and leaves empty rows out', () => {

@@ -28,10 +28,10 @@ const FIRST_PREGNANT: MaternityAssessmentDto = {
   fields: [
     field('asm_text2', '138', 'TextEdit', 'Systolic'),
     // The Lab grid, one row: Blood gr × (LAB1 / LAB2 / ข้อความ)
-    field('asm_text13', 'A', 'TextEdit', 'Blood gr (มารดา : LAB1)'),
+    field('asm_text14', 'A', 'TextEdit', 'Blood gr (มารดา : LAB1)'),
     field('asm_text21', 'O', 'TextEdit', 'Blood gr (มารดา : LAB2)'),
     field('asm_text29', 'AB', 'TextEdit', 'Blood gr (อื่น)'),
-    // A ไม่มี/มี pair of the numbered current history
+    // A ไม่มี/มี pair of the numbered pregnancy risk checklist
     field('asm_chk15', 'Y', 'CheckBox', 'ไม่มี (เคยชัก/มึนงง หลังคลอด)'),
     field('asm_chk16', 'N', 'CheckBox', 'มี (เคยชัก/มึนงง หลังคลอด)'),
     // A column the standard layout does not name must not be lost.
@@ -121,7 +121,7 @@ describe('AssessmentForms', () => {
     expect(screen.getByText('แพทย์หญิงชญานิษฐ์')).toBeTruthy();
   });
 
-  it('draws the แรกรับ Lab grid and the numbered risk pair', () => {
+  it('draws the แรกรับ Lab grid, risk summary, and opens the detail modal', async () => {
     render(<AssessmentForms assessments={[FIRST_PREGNANT]} />);
 
     // The Lab row label is the shared part of the site's own cell labels.
@@ -130,8 +130,19 @@ describe('AssessmentForms', () => {
     expect(screen.getByText('O')).toBeTruthy();
     expect(screen.getByText('AB')).toBeTruthy();
 
-    // The numbered item text comes from the ไม่มี/มี pair's label.
+    // The 1–16 pregnancy risk section shows a text summary inline first.
+    expect(screen.getByText('การประเมินความเสี่ยงสตรีตั้งครรภ์ และการคลอดบุตร')).toBeTruthy();
+    expect(screen.getByText('ไม่พบความเสี่ยง')).toBeTruthy();
+    expect(screen.queryByText('เคยชัก/มึนงง หลังคลอด')).toBeNull();
+
+    // Clicking the button opens the detail modal with the full item text.
+    await userEvent.click(screen.getByRole('button', { name: /ดูรายละเอียด/ }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByText('ประวัติอดีต')).toBeTruthy();
     expect(screen.getByText('เคยชัก/มึนงง หลังคลอด')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: 'ปิด' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
 
     // A column outside the standard layout lands in the อื่น ๆ group.
     expect(screen.getByText('อื่น ๆ ในแบบฟอร์ม')).toBeTruthy();

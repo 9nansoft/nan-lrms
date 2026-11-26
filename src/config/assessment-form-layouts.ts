@@ -37,10 +37,16 @@ export interface AssessmentRiskBlock {
   memoColumn?: string;
 }
 
-/** One numbered item of ประวัติที่เกี่ยวกับปัจจุบัน: the ไม่มี/มี pair. */
+/** One numbered item of การประเมินความเสี่ยงสตรีตั้งครรภ์ และการคลอดบุตร: the ไม่มี/มี pair. */
 export interface AssessmentNumberedPair {
+  /** 1-based item number on the LR1 paper form (1..16). */
+  itemNumber: number;
+  /** Subsection heading on the paper form (ประวัติอดีต / ประวัติปัจจุบัน). */
+  group?: string;
   noColumn: string;
   yesColumn: string;
+  /** Optional "ระบุ ..." text column attached to this item (e.g. items 6, 15, 16). */
+  specifyColumn?: string;
 }
 
 export interface AssessmentSectionSpec {
@@ -92,7 +98,10 @@ const FIRST_PREGNANT_LAYOUT: AssessmentFormLayout = {
       title: 'ประวัติ',
       style: 'fields',
       columns: [
-        'asm_lk1',
+        'asm_date1',
+        'asm_time1',
+        'asm_text59',
+        'asm_text60',
         'asm_text1',
         'asm_text2',
         'asm_text3',
@@ -105,27 +114,28 @@ const FIRST_PREGNANT_LAYOUT: AssessmentFormLayout = {
         'asm_text8',
         'asm_text9',
         'asm_chk3',
-        'asm_text10',
         'asm_chk4',
+        'asm_text10',
         'asm_chk5',
         'asm_text11',
         'asm_text12',
+        'asm_text13',
       ],
     },
     {
       id: 'lab',
       title: 'Lab',
       style: 'lab-table',
-      columns: ['asm_date1', 'asm_date2', 'asm_date3'],
+      columns: ['asm_date2', 'asm_date3', 'asm_text36'],
       labRows: [
         { cells: [null, null, 'asm_text28'] },
-        { cells: ['asm_text13', 'asm_text21', 'asm_text29'] },
-        { cells: ['asm_text14', 'asm_text22', 'asm_text30'] },
-        { cells: ['asm_text15', 'asm_text23', 'asm_text31'] },
-        { cells: ['asm_text16', 'asm_text24', 'asm_text32'] },
-        { cells: ['asm_text17', 'asm_text25', 'asm_text33'] },
-        { cells: ['asm_text18', 'asm_text26', 'asm_text34'] },
-        { cells: ['asm_text19', 'asm_text27', 'asm_text35'] },
+        { cells: ['asm_text14', 'asm_text21', 'asm_text29'] },
+        { cells: ['asm_text15', 'asm_text22', 'asm_text30'] },
+        { cells: ['asm_text16', 'asm_text23', 'asm_text31'] },
+        { cells: ['asm_text17', 'asm_text24', 'asm_text32'] },
+        { cells: ['asm_text18', 'asm_text25', 'asm_text33'] },
+        { cells: ['asm_text19', 'asm_text26', 'asm_text34'] },
+        { cells: ['asm_text20', 'asm_text27', 'asm_text35'] },
       ],
     },
     {
@@ -144,12 +154,12 @@ const FIRST_PREGNANT_LAYOUT: AssessmentFormLayout = {
       title: 'Vital sign',
       style: 'vital-row',
       columns: [
-        'asm_text57',
-        'asm_text58',
-        'asm_text59',
-        'asm_text60',
-        'asm_text61',
-        'asm_text62',
+        'asm_text37',
+        'asm_text38',
+        'asm_text39',
+        'asm_text40',
+        'asm_text41',
+        'asm_text42',
       ],
     },
     {
@@ -162,7 +172,6 @@ const FIRST_PREGNANT_LAYOUT: AssessmentFormLayout = {
         'asm_text45',
         'asm_text46',
         'asm_text47',
-        'asm_text48',
       ],
     },
     {
@@ -172,53 +181,63 @@ const FIRST_PREGNANT_LAYOUT: AssessmentFormLayout = {
       columns: [
         'asm_chk12',
         'asm_chk13',
-        'asm_text49',
+        'asm_text48',
         'asm_chk14',
+        'asm_text49',
         'asm_text50',
         'asm_text51',
         'asm_text52',
         'asm_text53',
         'asm_text54',
-        'asm_text55',
       ],
     },
     {
       id: 'appearance',
       title: 'General Appearance',
       style: 'fields',
-      columns: ['asm_text56'],
+      columns: ['asm_text55'],
     },
     {
       id: 'current-history',
-      title: 'ประวัติที่เกี่ยวกับปัจจุบัน',
+      title: 'การประเมินความเสี่ยงสตรีตั้งครรภ์ และการคลอดบุตร',
       style: 'numbered-risk',
       numberedPairs: [
-        { noColumn: 'asm_chk15', yesColumn: 'asm_chk16' },
-        { noColumn: 'asm_chk17', yesColumn: 'asm_chk18' },
-        { noColumn: 'asm_chk19', yesColumn: 'asm_chk20' },
-        { noColumn: 'asm_chk21', yesColumn: 'asm_chk22' },
-        { noColumn: 'asm_chk23', yesColumn: 'asm_chk24' },
-        { noColumn: 'asm_chk25', yesColumn: 'asm_chk26' },
-        { noColumn: 'asm_chk27', yesColumn: 'asm_chk28' },
-        { noColumn: 'asm_chk29', yesColumn: 'asm_chk30' },
-        { noColumn: 'asm_chk31', yesColumn: 'asm_chk32' },
-        { noColumn: 'asm_chk33', yesColumn: 'asm_chk34' },
-        { noColumn: 'asm_chk35', yesColumn: 'asm_chk36' },
-        { noColumn: 'asm_chk37', yesColumn: 'asm_chk38' },
-        { noColumn: 'asm_chk39', yesColumn: 'asm_chk40' },
-        { noColumn: 'asm_chk41', yesColumn: 'asm_chk42' },
-        { noColumn: 'asm_chk43', yesColumn: 'asm_chk44' },
-        { noColumn: 'asm_chk45', yesColumn: 'asm_chk46' },
+        { itemNumber: 1, group: 'ประวัติอดีต', noColumn: 'asm_chk15', yesColumn: 'asm_chk16' },
+        { itemNumber: 2, group: 'ประวัติอดีต', noColumn: 'asm_chk17', yesColumn: 'asm_chk18' },
+        { itemNumber: 3, group: 'ประวัติอดีต', noColumn: 'asm_chk19', yesColumn: 'asm_chk20' },
+        { itemNumber: 4, group: 'ประวัติอดีต', noColumn: 'asm_chk21', yesColumn: 'asm_chk22' },
+        { itemNumber: 5, group: 'ประวัติอดีต', noColumn: 'asm_chk23', yesColumn: 'asm_chk24' },
+        {
+          itemNumber: 6,
+          group: 'ประวัติอดีต',
+          noColumn: 'asm_chk25',
+          yesColumn: 'asm_chk26',
+          specifyColumn: 'asm_text56',
+        },
+        { itemNumber: 7, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk27', yesColumn: 'asm_chk28' },
+        { itemNumber: 8, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk29', yesColumn: 'asm_chk30' },
+        { itemNumber: 9, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk31', yesColumn: 'asm_chk32' },
+        { itemNumber: 10, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk33', yesColumn: 'asm_chk34' },
+        { itemNumber: 11, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk35', yesColumn: 'asm_chk36' },
+        { itemNumber: 12, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk37', yesColumn: 'asm_chk38' },
+        { itemNumber: 13, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk39', yesColumn: 'asm_chk40' },
+        { itemNumber: 14, group: 'ประวัติปัจจุบัน', noColumn: 'asm_chk41', yesColumn: 'asm_chk42' },
+        {
+          itemNumber: 15,
+          group: 'ประวัติปัจจุบัน',
+          noColumn: 'asm_chk43',
+          yesColumn: 'asm_chk44',
+          specifyColumn: 'asm_text57',
+        },
+        {
+          itemNumber: 16,
+          group: 'ประวัติปัจจุบัน',
+          noColumn: 'asm_chk45',
+          yesColumn: 'asm_chk46',
+          specifyColumn: 'asm_text58',
+        },
       ],
-      numberedSpecifyColumns: [
-        'asm_text37',
-        'asm_text38',
-        'asm_text39',
-        'asm_text40',
-        'asm_text41',
-        'asm_text42',
-        'asm_text63',
-      ],
+      numberedSpecifyColumns: ['asm_text61'],
     },
     {
       id: 'problems',
@@ -230,19 +249,20 @@ const FIRST_PREGNANT_LAYOUT: AssessmentFormLayout = {
       id: 'dx',
       title: 'Dx',
       style: 'fields',
-      columns: ['asm_text66'],
+      columns: ['asm_text62'],
     },
     {
       id: 'delivery',
       title: 'การคลอด/การวางเด็ก',
       style: 'fields',
       columns: [
+        'asm_text63',
         'asm_date4',
-        'asm_time1',
+        'asm_time2',
         'asm_cbx1',
         'asm_cur1',
-        'asm_text65',
-        'asm_text36',
+        'asm_text64',
+        'asm_lk1',
       ],
     },
   ],

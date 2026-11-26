@@ -89,7 +89,15 @@ function groupFieldsRecord(record: MaternityAssessmentDto): GroupedFieldRecord {
         );
       }
       for (const pair of spec.numberedPairs ?? []) {
-        fields.push(...fieldsForColumns([pair.noColumn, pair.yesColumn], byColumn, consumed));
+        fields.push(
+          ...fieldsForColumns(
+            [pair.noColumn, pair.yesColumn, pair.specifyColumn].filter(
+              (c): c is string => c !== undefined,
+            ),
+            byColumn,
+            consumed,
+          ),
+        );
       }
       if (spec.numberedSpecifyColumns) {
         fields.push(...fieldsForColumns(spec.numberedSpecifyColumns, byColumn, consumed));

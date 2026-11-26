@@ -14,45 +14,17 @@ import {
   CheckboxLine,
   FieldLine,
   MemoBox,
+  PairChips,
   UnmappedFields,
   ValueBox,
-  isCheckboxFalse,
-  isCheckboxTrue,
   stripChoicePrefix,
   stripParenthetical,
 } from './assessment-field-ui';
+import { PregnancyRiskSection } from './PregnancyRiskSection';
 import { groupAssessmentRecord, type GroupedFieldSection } from './group-assessment-fields';
 
 function SectionHeading({ title }: { title: string }) {
   return <h3 className="border-b border-border pb-1 text-label font-semibold text-brand">{title}</h3>;
-}
-
-/** ไม่มี / มี chips of one checkbox pair. */
-function PairChips({ noField, yesField }: { noField?: MaternityAssessmentField; yesField?: MaternityAssessmentField }) {
-  const noYes = noField !== undefined && isCheckboxTrue(noField);
-  const noNo = noField !== undefined && isCheckboxFalse(noField);
-  const yesYes = yesField !== undefined && isCheckboxTrue(yesField);
-  const yesNo = yesField !== undefined && isCheckboxFalse(yesField);
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1">
-      <span
-        className={cn(
-          'rounded-full border px-2 py-0.5 text-caption',
-          noYes ? 'border-ok bg-ok-tint font-semibold text-ok-text' : 'border-border text-ink-muted',
-        )}
-      >
-        ไม่มี{noYes ? ' ✓' : noNo ? ' ✗' : ''}
-      </span>
-      <span
-        className={cn(
-          'rounded-full border px-2 py-0.5 text-caption',
-          yesYes ? 'border-warn bg-warn-tint font-semibold text-warn-text' : 'border-border text-ink-muted',
-        )}
-      >
-        มี{yesYes ? ' ✓' : yesNo ? ' ✗' : ''}
-      </span>
-    </span>
-  );
 }
 
 /** The Lab grid — rows × (มารดา: LAB1 / LAB2 / ข้อความ). */
@@ -131,50 +103,6 @@ function RiskBlocks({ spec, fields }: { spec: AssessmentSectionSpec; fields: Mat
   );
 }
 
-function NumberedRisk({ spec, fields }: { spec: AssessmentSectionSpec; fields: MaternityAssessmentField[] }) {
-  const byColumn = new Map(fields.map((field) => [field.column, field]));
-  const items = (spec.numberedPairs ?? []).map((pair) => {
-    const noField = byColumn.get(pair.noColumn);
-    const yesField = byColumn.get(pair.yesColumn);
-    if (!noField && !yesField) return null;
-    return {
-      key: pair.noColumn,
-      text: stripChoicePrefix((noField ?? yesField)?.label ?? ''),
-      noField,
-      yesField,
-    };
-  }).filter((item) => item !== null);
-
-  const specify = (spec.numberedSpecifyColumns ?? [])
-    .map((column) => byColumn.get(column))
-    .filter((field) => field !== undefined);
-
-  if (items.length === 0 && specify.length === 0) return null;
-
-  return (
-    <div className="flex flex-col gap-2">
-      {items.length > 0 && (
-        <ol className="flex flex-col gap-1.5">
-          {items.map((item, i) => (
-            <li key={item.key} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-label text-ink">
-              <span className="w-5 shrink-0 text-right text-caption tabular-nums text-ink-muted">{i + 1}.</span>
-              <span className="min-w-0 flex-1">{item.text}</span>
-              <PairChips noField={item.noField} yesField={item.yesField} />
-            </li>
-          ))}
-        </ol>
-      )}
-      {specify.length > 0 && (
-        <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
-          {specify.map((field) => (
-            <FieldLine key={field.column} field={field} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function FieldsSection({ fields }: { fields: MaternityAssessmentField[] }) {
   return (
     <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
@@ -223,7 +151,7 @@ function SectionView({ section }: { section: GroupedFieldSection }) {
         </>
       )}
       {spec.style === 'risk-blocks' && <RiskBlocks spec={spec} fields={fields} />}
-      {spec.style === 'numbered-risk' && <NumberedRisk spec={spec} fields={fields} />}
+      {spec.style === 'numbered-risk' && <PregnancyRiskSection spec={spec} fields={fields} />}
       {spec.style === 'vital-row' && <VitalRow fields={fields} />}
       {spec.style === 'fields' && <FieldsSection fields={fields} />}
     </section>

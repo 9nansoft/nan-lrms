@@ -107,6 +107,40 @@ export function CheckboxLine({ field }: { field: MaternityAssessmentField }) {
   );
 }
 
+/** ไม่มี / มี chips of one checkbox pair. */
+export function PairChips({
+  noField,
+  yesField,
+}: {
+  noField?: MaternityAssessmentField;
+  yesField?: MaternityAssessmentField;
+}) {
+  const noYes = noField !== undefined && isCheckboxTrue(noField);
+  const noNo = noField !== undefined && isCheckboxFalse(noField);
+  const yesYes = yesField !== undefined && isCheckboxTrue(yesField);
+  const yesNo = yesField !== undefined && isCheckboxFalse(yesField);
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1">
+      <span
+        className={cn(
+          'rounded-full border px-2 py-0.5 text-caption',
+          noYes ? 'border-ok bg-ok-tint font-semibold text-ok-text' : 'border-border text-ink-muted',
+        )}
+      >
+        ไม่มี{noYes ? ' ✓' : noNo ? ' ✗' : ''}
+      </span>
+      <span
+        className={cn(
+          'rounded-full border px-2 py-0.5 text-caption',
+          yesYes ? 'border-warn bg-warn-tint font-semibold text-warn-text' : 'border-border text-ink-muted',
+        )}
+      >
+        มี{yesYes ? ' ✓' : yesNo ? ' ✗' : ''}
+      </span>
+    </span>
+  );
+}
+
 /** Label and value on one wrapping line ("BP / mmHg  120/80"). */
 export function FieldLine({ field, className }: { field: MaternityAssessmentField; className?: string }) {
   return (
