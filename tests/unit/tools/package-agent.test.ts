@@ -71,9 +71,21 @@ describe('assembleAgentPackage', () => {
     const onDisk = (await readdir(outDir)).sort();
     expect(onDisk).toEqual([...PACKAGE_FILES].sort());
 
-    // The wrapper must sit next to its own XML with the same base name.
+    // The wrapper must sit next to its own XML with the same base name,
+    // using WinSW v2 <domain> + <user> syntax matching WinSW-x64.exe.
     const serviceXml = await readFile(join(outDir, 'NN-LRMS-agent-service.xml'), 'utf8');
     expect(serviceXml).toContain('%BASE%\\nn-lrms-agent.exe');
+    expect(serviceXml).toContain('<domain>NT AUTHORITY</domain>');
+    expect(serviceXml).toContain('<user>LocalService</user>');
+    expect(serviceXml).toContain('<allowservicelogon>true</allowservicelogon>');
+    expect(serviceXml).not.toContain('<username>');
+
+    // Windows batch scripts must have CRLF line endings and UTF-8 codepage so
+    // Run as administrator works and stays open on failure.
+    const installCmd = await readFile(join(outDir, 'install-service.cmd'), 'utf8');
+    expect(installCmd).toContain('\r\n');
+    expect(installCmd).toContain('chcp 65001');
+    expect(installCmd).toContain('pause');
 
     // VERSION.txt carries the version.
     expect((await readFile(join(outDir, 'VERSION.txt'), 'utf8')).trim()).toBe('1.2.3');

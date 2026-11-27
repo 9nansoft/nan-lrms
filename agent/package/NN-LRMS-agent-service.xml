@@ -39,12 +39,13 @@
     <keepFiles>8</keepFiles>
   </log>
 
-  <!-- LocalService: no interactive logon, least privilege. The service
-       account must be able to READ agent.config.json and reach the local
-       HOSxP gateway on 127.0.0.1:45011. -->
+  <!-- LocalService: no interactive logon, least privilege. WinSW v2 requires
+       separate <domain> and <user> elements (not the v3-only username tag)
+       and allowservicelogon=true so SeServiceLogonRight is granted. -->
   <serviceaccount>
-    <username>NT AUTHORITY\LocalService</username>
-    <allowservicelogon>false</allowservicelogon>
+    <domain>NT AUTHORITY</domain>
+    <user>LocalService</user>
+    <allowservicelogon>true</allowservicelogon>
   </serviceaccount>
 
   <!-- Where the agent keeps its config. The agent also finds it next to its

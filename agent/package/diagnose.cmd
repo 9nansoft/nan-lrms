@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 REM ============================================================================
 REM NN-LRMS agent — รวบรวมอาการเพื่อหาสาเหตุว่าทำไม agent ไม่ขึ้น / service ไม่ทำงาน
 REM รันด้วยสิทธิ์ Administrator: diagnose.cmd
