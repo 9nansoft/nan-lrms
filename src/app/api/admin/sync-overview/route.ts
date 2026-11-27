@@ -11,6 +11,11 @@ import { ensureInit } from '@/lib/ensure-init';
 import { requireAdmin } from '@/lib/admin-guard';
 import { logger } from '@/lib/logger';
 import { getLatestSyncRun, type SyncProgressRun } from '@/services/sync/progress-store';
+import {
+  getAgentHeartbeat,
+  isAgentHeartbeatFresh,
+  type AgentHeartbeat,
+} from '@/services/sync/agent-heartbeat';
 import { isSyncFailureStatus } from '@/config/sync-status';
 
 interface HospitalRow {
@@ -48,6 +53,7 @@ export interface SyncOverviewEntry {
   dataPurgedAt: string | null;
   hasBmsConfig: boolean;
   latestRun: SyncProgressRun | null;
+  agentHeartbeat: (AgentHeartbeat & { fresh: boolean }) | null;
 }
 
 export async function GET() {
@@ -76,7 +82,10 @@ export async function GET() {
     // future-proof for larger provinces.
     const entries: SyncOverviewEntry[] = await Promise.all(
       rows.map(async (h) => {
-        const latest = await getLatestSyncRun(h.id);
+        const [latest, heartbeat] = await Promise.all([
+          getLatestSyncRun(h.id),
+          getAgentHeartbeat(h.id),
+        ]);
         return {
           hcode: h.hcode,
           name: h.name,
@@ -93,6 +102,9 @@ export async function GET() {
           dataPurgedAt: h.data_purged_at,
           hasBmsConfig: h.has_bms_config === true || h.has_bms_config === 1,
           latestRun: latest,
+          agentHeartbeat: heartbeat
+            ? { ...heartbeat, fresh: isAgentHeartbeatFresh(heartbeat) }
+            : null,
         };
       }),
     );

@@ -46,7 +46,7 @@ echo [4] ไฟล์ตั้งค่า >> %REPORT%
 if exist agent.config.json (
   echo พบ agent.config.json >> %REPORT%
   powershell -NoProfile -Command ^
-    "$c = Get-Content 'agent.config.json' -Raw | ConvertFrom-Json;" ^
+    "$c = Get-Content 'agent.config.json' -Raw -Encoding UTF8 | ConvertFrom-Json;" ^
     "Write-Output ('  serverUrl        = ' + $c.serverUrl);" ^
     "Write-Output ('  intervalMinutes = ' + $c.intervalMinutes);" ^
     "Write-Output ('  localGateway     = ' + $c.localGateway);" ^
@@ -58,11 +58,12 @@ if exist agent.config.json (
 )
 echo. >> %REPORT%
 
-echo [5] รัน agent 10 วินาทีแล้วดูข้อความ >> %REPORT%
+echo [5] รัน agent 12 วินาทีแล้วดูข้อความ >> %REPORT%
 if exist nn-lrms-agent.exe (
   powershell -NoProfile -Command ^
+    "if (Test-Path '.\agent.config.json') { $env:AGENT_CONFIG = (Resolve-Path '.\agent.config.json').Path };" ^
     "$p = Start-Process -FilePath '.\nn-lrms-agent.exe' -NoNewWindow -PassThru -RedirectStandardOutput '.\diag-agent.out.log' -RedirectStandardError '.\diag-agent.err.log';" ^
-    "Start-Sleep -Seconds 10;" ^
+    "Start-Sleep -Seconds 12;" ^
     "if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Write-Output 'agent ยังทำงานอยู่ (ปกติ)' }" ^
     "else { Write-Output ('agent จบการทำงานเอง exit=' + $p.ExitCode + ' — ดูข้อความด้านล่าง') }" >> %REPORT% 2>&1
   type diag-agent.out.log >> %REPORT% 2>&1
@@ -73,17 +74,36 @@ if exist nn-lrms-agent.exe (
 )
 echo. >> %REPORT%
 
-echo [6] BMS gateway บนเครื่องนี้ >> %REPORT%
+echo [6] BMS gateway บนเครื่องนี้ + PasteJSON >> %REPORT%
 powershell -NoProfile -Command ^
   "$ErrorActionPreference='SilentlyContinue';" ^
-  "$c = Get-Content 'agent.config.json' -Raw | ConvertFrom-Json;" ^
+  "$c = Get-Content 'agent.config.json' -Raw -Encoding UTF8 | ConvertFrom-Json;" ^
+  "$gw = if ($c.localGateway) { $c.localGateway.TrimEnd('/') } else { 'http://127.0.0.1:45011' };" ^
   "try {" ^
-  "  $r = Invoke-RestMethod -Uri ($c.localGateway + '/api/GetBMSSessionID') -Headers @{Authorization=('Bearer ' + $c.gatewayToken)} -TimeoutSec 10;" ^
-  "  Write-Output ('  gateway_state = ' + $r.data.gateway_state + '  expires_at = ' + $r.data.expires_at)" ^
+  "  $r = Invoke-RestMethod -Uri ($gw + '/api/GetBMSSessionID') -Headers @{Authorization=('Bearer ' + $c.gatewayToken)} -TimeoutSec 10;" ^
+  "  Write-Output ('  gateway_state = ' + $r.data.gateway_state + '  expires_at = ' + $r.data.expires_at);" ^
+  "  if ($r.data.bms_session_id) {" ^
+  "    $pj = Invoke-RestMethod -Uri ('https://hosxp.net/phapi/PasteJSON?Action=GET&code=' + [uri]::EscapeDataString($r.data.bms_session_id)) -TimeoutSec 15;" ^
+  "    Write-Output ('  pastejson     = ' + $(if ($pj.result.user_info.bms_session_code -or $pj.result.key_value) { 'OK' } else { 'FAIL (no session code)' }))" ^
+  "  }" ^
   "} catch { Write-Output ('  FAIL — ' + $_.Exception.Message) }" >> %REPORT% 2>&1
 echo. >> %REPORT%
 
-echo [7] service >> %REPORT%
+echo [7] ทดสอบ API Key กับเซิร์ฟเวอร์ (/api/sync/agent-push) >> %REPORT%
+powershell -NoProfile -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$c = Get-Content 'agent.config.json' -Raw -Encoding UTF8 | ConvertFrom-Json;" ^
+  "$srv = $c.serverUrl.TrimEnd('/');" ^
+  "try {" ^
+  "  $r = Invoke-WebRequest -Uri ($srv + '/api/sync/agent-push') -Headers @{Authorization=('Bearer ' + $c.apiKey)} -TimeoutSec 15 -UseBasicParsing;" ^
+  "  Write-Output ('  HTTP ' + $r.StatusCode + ' — OK')" ^
+  "} catch {" ^
+  "  $resp = $_.Exception.Response;" ^
+  "  if ($resp) { Write-Output ('  FAIL — HTTP ' + [int]$resp.StatusCode) } else { Write-Output ('  FAIL — ' + $_.Exception.Message) }" ^
+  "}" >> %REPORT% 2>&1
+echo. >> %REPORT%
+
+echo [8] service >> %REPORT%
 echo -- sc query NN-LRMS-agent (ถาม Windows service manager ตรง ๆ) -- >> %REPORT%
 sc query NN-LRMS-agent >> %REPORT% 2>&1
 echo. >> %REPORT%
@@ -98,7 +118,7 @@ if exist NN-LRMS-agent-service.exe (
 )
 echo. >> %REPORT%
 
-echo [8] log ของ service >> %REPORT%
+echo [9] log ของ service >> %REPORT%
 if exist logs (
   dir /b logs >> %REPORT% 2>&1
   for %%F in (logs\*.log) do (

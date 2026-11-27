@@ -56,6 +56,7 @@ describe('isAuthRefusal', () => {
   it('recognises the push statuses a retry cannot fix', () => {
     expect(isAuthRefusal(new Error('browser-push HTTP 401: invalid_api_key'))).toBe(true);
     expect(isAuthRefusal(new Error('browser-push HTTP 403: hospital_inactive'))).toBe(true);
+    expect(isAuthRefusal('permanently_blocked: hospital_purged_pending_reonboard')).toBe(true);
   });
 
   it('leaves every other failure on the normal interval', () => {

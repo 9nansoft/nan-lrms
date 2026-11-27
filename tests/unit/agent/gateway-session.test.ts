@@ -6,7 +6,7 @@
 // session in the background and expires it), so this is the one call that
 // decides whether a cycle can run at all.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readGatewaySession } from '../../../agent/src/session';
+import { acquireSession, readGatewaySession } from '../../../agent/src/session';
 
 const GATEWAY = 'http://127.0.0.1:45011';
 const TOKEN = 'gateway-token-abc';
@@ -65,5 +65,75 @@ describe('readGatewaySession', () => {
       vi.fn().mockResolvedValue(gatewayResponse({ MessageCode: 200, Message: 'OK', data: {} })),
     );
     await expect(readGatewaySession(GATEWAY, TOKEN)).rejects.toThrow(/bms_session_id/);
+  });
+});
+
+describe('acquireSession', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to PasteJSON user_info.marketplace_token when config omits it', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/api/GetBMSSessionID')) {
+        return gatewayResponse({
+          MessageCode: 200,
+          data: {
+            bms_session_id: 'SID-1',
+            bms_url: 'https://10716-test.tunnel.hosxp.net',
+            expires_at: '2026-11-27T12:00:00',
+            gateway_state: 'running',
+          },
+        });
+      }
+      if (url.includes('PasteJSON')) {
+        return gatewayResponse({
+          result: {
+            user_info: {
+              bms_url: 'https://10716-test.tunnel.hosxp.net',
+              bms_session_code: 'BEARER-1',
+              marketplace_token: 'mkt-from-pastejson',
+            },
+          },
+        });
+      }
+      if (url.startsWith('http://127.0.0.1:45012/api/sql')) {
+        return gatewayResponse({ MessageCode: 200, data: [{ test: 1 }] });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const session = await acquireSession('http://127.0.0.1:45012', TOKEN, null);
+    expect(session.mode).toBe('local');
+    expect(session.apiUrl).toBe('http://127.0.0.1:45012');
+    expect(session.marketplaceToken).toBe('mkt-from-pastejson');
+  });
+
+  it('prefers explicit config marketplaceToken over PasteJSON', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/api/GetBMSSessionID')) {
+        return gatewayResponse({
+          MessageCode: 200,
+          data: { bms_session_id: 'SID-2', bms_url: 'https://10716-test.tunnel.hosxp.net' },
+        });
+      }
+      if (url.includes('PasteJSON')) {
+        return gatewayResponse({
+          result: {
+            user_info: {
+              bms_url: 'https://10716-test.tunnel.hosxp.net',
+              bms_session_code: 'BEARER-2',
+              marketplace_token: 'mkt-from-pastejson',
+            },
+          },
+        });
+      }
+      return gatewayResponse({ MessageCode: 200, data: [{ test: 1 }] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const session = await acquireSession(GATEWAY, TOKEN, 'mkt-explicit');
+    expect(session.marketplaceToken).toBe('mkt-explicit');
   });
 });

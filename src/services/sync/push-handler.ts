@@ -51,7 +51,7 @@ import { resolveAlertOrigin } from '@/services/alert-context';
 import { drainMophAlerts } from '@/services/moph-alert-drain';
 import { classifyAncItems } from '@/config/anc-classifying-canon';
 import type { AncLabIngestStats } from '@/services/anc-lab-ingest';
-import { AncRiskLevel } from '@/types/domain';
+import { AncRiskLevel, ConnectionStatus } from '@/types/domain';
 import {
   processWebhookPayload,
   processAncWebhook,
@@ -894,12 +894,18 @@ export async function handlePush(request: NextRequest, actor: PushActor): Promis
       logger.warn('auto_arrive_referrals_failed', { hospitalId, error: e });
     }
 
-    // Mark hospital ONLINE — browser successfully reached HOSxP and pushed
+    // Mark hospital ONLINE — browser/agent successfully reached HOSxP and pushed
     // a bundle, so we know the upstream is reachable from somewhere.
+    const syncedAt = new Date().toISOString();
     await db.execute(
       "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE id = ?",
-      [new Date().toISOString(), hospitalId],
+      [syncedAt, hospitalId],
     );
+    sseManager.broadcast('connection-status', {
+      hcode,
+      status: ConnectionStatus.ONLINE,
+      lastSyncAt: syncedAt,
+    });
 
     // MOPH Prompt alert drain (codex #1 hybrid) — the ONLY LINE I/O site, run
     // as a bounded final step on this live browser-push path. Sends pending

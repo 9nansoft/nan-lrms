@@ -55,6 +55,15 @@ interface SyncRun {
   steps: SyncStep[];
 }
 
+interface OverviewAgentHeartbeat {
+  at: string;
+  version: string;
+  mode: 'local' | 'tunnel' | 'unknown';
+  pushed: boolean;
+  detail?: string;
+  fresh?: boolean;
+}
+
 interface OverviewEntry {
   hcode: string;
   name: string;
@@ -71,6 +80,7 @@ interface OverviewEntry {
   dataPurgedAt: string | null;
   hasBmsConfig: boolean;
   latestRun: SyncRun | null;
+  agentHeartbeat?: OverviewAgentHeartbeat | null;
 }
 
 interface OverviewResponse {
@@ -82,10 +92,14 @@ interface OverviewResponse {
 type FilterKey = 'all' | 'failing' | 'never' | 'ok';
 
 function effectiveOutcome(entry: OverviewEntry): SyncOverviewOutcome {
-  if (!entry.hasBmsConfig) return 'never';
+  if (!entry.hasBmsConfig && !entry.agentHeartbeat) return 'never';
   if (entry.authenticity.isFailure) return 'failed';
-  if (!entry.latestRun) return 'never';
-  return entry.latestRun.outcome;
+  if (entry.latestRun) return entry.latestRun.outcome;
+  if (entry.agentHeartbeat) {
+    if (entry.agentHeartbeat.detail) return 'failed';
+    if (entry.agentHeartbeat.fresh) return 'success';
+  }
+  return 'never';
 }
 
 export function SyncOverviewTab() {
@@ -196,15 +210,46 @@ export function SyncOverviewTab() {
                 </div>
               ),
             },
-            { key: 'trigger', header: 'เริ่มโดย', cell: (h) => <span className="text-label text-ink-muted">{syncTriggerLabel(h.latestRun?.trigger)}</span> },
+            {
+              key: 'trigger',
+              header: 'เริ่มโดย',
+              cell: (h) => {
+                const trigger = h.latestRun?.trigger ?? (h.agentHeartbeat ? 'agent' : null);
+                const hb = h.agentHeartbeat;
+                return (
+                  <div>
+                    <span className="text-label text-ink-muted">{syncTriggerLabel(trigger)}</span>
+                    {hb && (
+                      <div
+                        className={cn(
+                          'text-caption',
+                          hb.detail
+                            ? 'text-warn-text'
+                            : hb.fresh
+                              ? 'text-ok-text'
+                              : 'text-ink-muted',
+                        )}
+                      >
+                        {hb.fresh
+                          ? `agent v${hb.version} · ${hb.mode}`
+                          : `agent เงียบ ${formatRelativeTime(hb.at)}`}
+                      </div>
+                    )}
+                  </div>
+                );
+              },
+            },
             {
               key: 'started',
               header: 'เริ่มเมื่อ',
-              cell: (h) => (
-                <span className="text-label text-ink-muted" title={h.latestRun?.startedAt ? new Date(h.latestRun.startedAt).toLocaleString('th-TH') : ''}>
-                  {formatRelativeTime(h.latestRun?.startedAt ?? null)}
-                </span>
-              ),
+              cell: (h) => {
+                const startedAt = h.latestRun?.startedAt ?? h.agentHeartbeat?.at ?? null;
+                return (
+                  <span className="text-label text-ink-muted" title={startedAt ? new Date(startedAt).toLocaleString('th-TH') : ''}>
+                    {formatRelativeTime(startedAt)}
+                  </span>
+                );
+              },
             },
             { key: 'duration', header: 'ใช้เวลา', numeric: true, cell: (h) => formatSyncDuration(h.latestRun?.durationMs ?? null) },
             {
@@ -212,10 +257,16 @@ export function SyncOverviewTab() {
               header: 'สรุป · ข้อผิดพลาด',
               cell: (h) => {
                 const run = h.latestRun;
+                const hb = h.agentHeartbeat;
                 const outcome = effectiveOutcome(h);
+                const heartbeatText = hb
+                  ? hb.detail
+                    ? `Agent: ${hb.detail}`
+                    : `Agent ออนไลน์ (${hb.mode})`
+                  : null;
                 const text = h.authenticity.isFailure
                   ? `${h.authenticity.status}${h.authenticity.reason ? ` — ${h.authenticity.reason}` : ''}`
-                  : run?.errorMessage ?? run?.finalMessage ?? (run?.steps[run.steps.length - 1]?.message ?? '—');
+                  : run?.errorMessage ?? run?.finalMessage ?? run?.steps[run.steps.length - 1]?.message ?? heartbeatText ?? '—';
                 return (
                   <span
                     title={text}

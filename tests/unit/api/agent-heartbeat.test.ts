@@ -132,4 +132,49 @@ describe('POST /api/sync/agent-heartbeat', () => {
     );
     expect(res.status).toBe(403);
   });
+
+  it('marks hospital ONLINE and updates last_sync_at on a clean skipped-push heartbeat', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+    await db.execute(
+      "UPDATE hospitals SET connection_status = 'UNKNOWN', last_sync_at = NULL WHERE id = ?",
+      [id],
+    );
+
+    const res = await POST(
+      request({ version: '1.0.0', mode: 'local', pushed: false }, key.rawKey) as never,
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await db.query<{ connection_status: string; last_sync_at: string | null }>(
+      'SELECT connection_status, last_sync_at FROM hospitals WHERE id = ?',
+      [id],
+    );
+    expect(rows[0]?.connection_status).toBe('ONLINE');
+    expect(rows[0]?.last_sync_at).not.toBeNull();
+  });
+
+  it('does not mark hospital ONLINE when heartbeat reports a failed cycle', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+    await db.execute(
+      "UPDATE hospitals SET connection_status = 'OFFLINE', last_sync_at = NULL WHERE id = ?",
+      [id],
+    );
+
+    const res = await POST(
+      request(
+        { version: '1.0.0', mode: 'unknown', pushed: false, detail: 'gateway down' },
+        key.rawKey,
+      ) as never,
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await db.query<{ connection_status: string; last_sync_at: string | null }>(
+      'SELECT connection_status, last_sync_at FROM hospitals WHERE id = ?',
+      [id],
+    );
+    expect(rows[0]?.connection_status).toBe('OFFLINE');
+    expect(rows[0]?.last_sync_at).toBeNull();
+  });
 });

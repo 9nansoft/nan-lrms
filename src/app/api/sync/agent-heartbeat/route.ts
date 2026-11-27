@@ -15,6 +15,8 @@ import { logger } from '@/lib/logger';
 import { readBearer, resolveApiKeyActor } from '@/services/sync/push-auth';
 import { API_KEY_SCOPES } from '@/services/webhook';
 import { recordAgentHeartbeat } from '@/services/sync/agent-heartbeat';
+import { SseManager } from '@/lib/sse';
+import { ConnectionStatus } from '@/types/domain';
 
 const MAX_DETAIL_LEN = 300;
 
@@ -56,13 +58,31 @@ export async function POST(request: NextRequest) {
         ? body.detail.slice(0, MAX_DETAIL_LEN)
         : undefined;
 
+    const nowIso = new Date().toISOString();
     await recordAgentHeartbeat(resolution.actor.hospitalId, {
-      at: new Date().toISOString(),
+      at: nowIso,
       version,
       mode,
       pushed,
       ...(detail ? { detail } : {}),
     });
+
+    // A clean heartbeat where the agent skipped agent-push (nothing changed on
+    // the ward) still proves HOSxP is reachable and current — keep the
+    // dashboard's ONLINE status and last_sync_at fresh without needing a dummy
+    // data push. Failed cycles (mode='unknown' or non-empty detail) never mark
+    // the hospital ONLINE.
+    if (!pushed && mode !== 'unknown' && !detail) {
+      await db.execute(
+        "UPDATE hospitals SET connection_status = 'ONLINE', last_sync_at = ? WHERE id = ?",
+        [nowIso, resolution.actor.hospitalId],
+      );
+      SseManager.getInstance().broadcast('connection-status', {
+        hcode: resolution.actor.hcode,
+        status: ConnectionStatus.ONLINE,
+        lastSyncAt: nowIso,
+      });
+    }
 
     logger.info('agent_heartbeat', {
       hcode: resolution.actor.hcode,

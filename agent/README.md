@@ -122,9 +122,9 @@ Get-Content .\logs\NN-LRMS-agent-service.out.log -Tail 50
 
 ## ตรวจว่าทำงานอยู่
 
-- ดู console ของ agent: ต้องมีบรรทัด `cycle_done` ทุก 5 นาที
-- ใน NN-LRMS: `/admin` → สถานะการซิงค์ → คอลัมน์ "เริ่มโดย" ต้องขึ้น `agent ที่ รพ.`
-- ถ้าขึ้น `–` แปลว่า agent ยังไม่เคยส่งข้อมูล (ดู log ของ agent)
+- ดู console / log (`logs\NN-LRMS-agent-service.out.log`): ต้องมีบรรทัด `cycle_done` ทุก 5 นาที (หากไม่มีข้อมูลเปลี่ยนแปลง จะขึ้น `"pushed":false,"skipReason":"no_changes"` แต่ยังส่ง heartbeat แจ้งเซิร์ฟเวอร์ให้ รพ. ออนไลน์ต่อเนื่อง)
+- ใน NN-LRMS: `/admin` → สถานะการซิงค์ → คอลัมน์ "เริ่มโดย" ต้องขึ้น `agent ที่ รพ.` และแสดงสถานะ `agent v... · local`
+- ถ้าขึ้น `–` แปลว่า agent ยังไม่เคยส่งข้อมูลหรือ heartbeat ถึงเซิร์ฟเวอร์ (รัน `check.cmd` หรือ `diagnose.cmd` แล้วตรวจ `diagnose-report.txt`)
 
 ## เกิดข้อผิดพลาด
 

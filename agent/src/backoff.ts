@@ -39,5 +39,5 @@ export function nextWait(
  */
 export function isAuthRefusal(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /browser-push HTTP 40[13]/.test(message);
+  return /browser-push HTTP 40[13]|permanently_blocked/.test(message);
 }

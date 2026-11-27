@@ -50,12 +50,14 @@ export async function POST(
       key: created.rawKey,
       keyPrefix: created.keyPrefix,
       label: AGENT_KEY_LABEL,
-      // The agent config the hospital needs — everything except the key.
+      // The agent config the hospital needs — admin fills gatewayToken from
+      // the hospital workstation's BMS gateway.
       agentConfig: {
         serverUrl: process.env.NEXT_PUBLIC_NN_LRMS_PUBLIC_URL ?? 'https://kk-lrms.bmscloud.in.th',
         apiKey: created.rawKey,
         intervalMinutes: 5,
         localGateway: 'http://127.0.0.1:45011',
+        gatewayToken: 'ใส่ gateway token ของเครื่องนี้',
         marketplaceToken: null,
       },
     });

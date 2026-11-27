@@ -44,9 +44,9 @@ async function sendHeartbeat(
   mode: 'local' | 'tunnel' | 'unknown',
   pushed: boolean,
   detail?: string,
-): Promise<void> {
+): Promise<{ authRefused: boolean }> {
   try {
-    await fetch(`${config.serverUrl}/api/sync/agent-heartbeat`, {
+    const res = await fetch(`${config.serverUrl}/api/sync/agent-heartbeat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -60,9 +60,16 @@ async function sendHeartbeat(
       }),
       signal: AbortSignal.timeout(15_000),
     });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      logError('heartbeat_rejected', `HTTP ${res.status}: ${text.slice(0, 200)}`);
+      return { authRefused: res.status === 401 || res.status === 403 };
+    }
+    return { authRefused: false };
   } catch (e) {
     // The heartbeat is best-effort — a failed one must not stop the pull.
     logError('heartbeat_failed', e);
+    return { authRefused: false };
   }
 }
 
@@ -92,7 +99,7 @@ async function cycle(): Promise<{ blocked: boolean }> {
         bearerToken: session.bearerToken,
         appIdentifier: 'NN-LRMS.Web',
       },
-      marketplaceToken: config.marketplaceToken,
+      marketplaceToken: session.marketplaceToken,
       bmsSessionId: session.sessionId,
       pushUrl: `${config.serverUrl}/api/sync/agent-push`,
       authenticityUrl: `${config.serverUrl}/api/sync/agent-authenticity`,
@@ -102,30 +109,49 @@ async function cycle(): Promise<{ blocked: boolean }> {
       // the backstop) instead of waiting for a browser tab.
       hosxpFacts: {
         bmsUrl: session.bmsUrl,
-        marketplaceToken: config.marketplaceToken,
+        marketplaceToken: session.marketplaceToken,
       },
     });
+
+    const assessmentsRead = result.assessments?.rowsRead ?? 0;
+    const newbornsRead =
+      (result.newborns?.infantsRead ?? 0) + (result.newborns?.pregnanciesRead ?? 0);
+    const referralsRead =
+      (result.referrals?.referoutsRead ?? 0) + (result.referrals?.referinsRead ?? 0);
 
     log('cycle_done', {
       mode: session.mode,
       sessionExpiresAt: session.expiresAt,
       gatewayState: session.gatewayState,
       pushed: result.pushedToServer,
+      ...(!result.pushedToServer && !result.error ? { skipReason: 'no_changes' } : {}),
+      ...(result.authenticity ? { authenticity: result.authenticity.status } : {}),
       laborRead: result.labor.read,
       laborSent: result.labor.sent,
       ancRead: result.anc.read,
       ancSent: result.anc.sent,
       partographSent: result.partograph.sent,
+      assessmentsRead,
+      newbornsRead,
+      referralsRead,
       durationMs: Date.now() - startedAt,
       ...(result.error ? { error: result.error } : {}),
     });
 
-    await sendHeartbeat(session.mode, result.pushedToServer, result.error);
-    return { blocked: result.permanentBlock === true };
+    const hb = await sendHeartbeat(session.mode, result.pushedToServer, result.error);
+    const blocked =
+      result.permanentBlock === true ||
+      (result.error ? isAuthRefusal(result.error) : false) ||
+      hb.authRefused;
+    return { blocked };
   } catch (error) {
     logError('cycle_failed', error);
-    await sendHeartbeat(mode, false, error instanceof Error ? error.message : String(error));
-    return { blocked: isAuthRefusal(error) };
+    const hb = await sendHeartbeat(
+      mode,
+      false,
+      error instanceof Error ? error.message : String(error),
+    );
+    return { blocked: isAuthRefusal(error) || hb.authRefused };
   }
 }
 

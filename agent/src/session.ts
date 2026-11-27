@@ -37,6 +37,8 @@ export interface HosxpSession {
   expiresAt: string | null;
   /** The gateway's own state — 'running' when it is serving HOSxP. */
   gatewayState: string | null;
+  /** Effective marketplace token (config overrides PasteJSON fallback). */
+  marketplaceToken: string | null;
 }
 
 const SESSION_ID_TIMEOUT_MS = 15_000;
@@ -100,13 +102,26 @@ export async function readGatewaySession(
   };
 }
 
+function extractMarketplaceTokenFromSession(response: unknown): string | null {
+  if (!response || typeof response !== 'object') return null;
+  const result = (response as { result?: unknown }).result;
+  const userInfo =
+    result && typeof result === 'object'
+      ? (result as { user_info?: unknown }).user_info
+      : (response as { user_info?: unknown }).user_info;
+  if (!userInfo || typeof userInfo !== 'object') return null;
+  const raw = (userInfo as { marketplace_token?: unknown }).marketplace_token;
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null;
+}
+
 /**
  * A live session + the connection to use.
  *
  * `marketplaceToken` is optional: the LOCAL gateway serves the hospital's
  * real rows, so the token (which unlocks the marketplace's own scopes and
  * stops it randomising CID/HN) is only needed when we fall back to the
- * public tunnel.
+ * public tunnel. When omitted in config, falls back to any token returned
+ * by PasteJSON `user_info.marketplace_token`.
  */
 export async function acquireSession(
   localGateway: string,
@@ -116,6 +131,7 @@ export async function acquireSession(
   const gateway = await readGatewaySession(localGateway, gatewayToken);
   const response = await retrieveBmsSession(gateway.bmsSessionId);
   const connection = extractConnectionConfig(response);
+  const effectiveToken = marketplaceToken ?? extractMarketplaceTokenFromSession(response);
   // The gateway knows the hospital's tunnel; prefer it over whatever
   // PasteJSON reported (same value, but the gateway is the authority).
   if (gateway.bmsUrl) {
@@ -124,7 +140,7 @@ export async function acquireSession(
   // Probe the gateway THIS agent is configured with (agent.config.json may
   // name a non-default port) — not the compile-time default. A reachable
   // gateway on another port must still win over the tunnel.
-  const { config, isLocal } = await probeLocalApi(connection, marketplaceToken, localGateway);
+  const { config, isLocal } = await probeLocalApi(connection, effectiveToken, localGateway);
   return {
     sessionId: gateway.bmsSessionId,
     apiUrl: config.apiUrl,
@@ -133,6 +149,7 @@ export async function acquireSession(
     mode: isLocal ? 'local' : 'tunnel',
     expiresAt: gateway.expiresAt,
     gatewayState: gateway.gatewayState,
+    marketplaceToken: effectiveToken,
   };
 }
 

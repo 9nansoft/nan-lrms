@@ -138,6 +138,31 @@ describe('operations tabs — direction-C', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('โหลดสถานะการซิงค์ไม่สำเร็จ');
     expect(screen.getByRole('button', { name: /ลองใหม่/ })).toBeInTheDocument();
   });
+  it('SyncOverviewTab: shows agent heartbeat status even before first sync run', async () => {
+    renderWithSwr(<SyncOverviewTab />, {
+      '/api/admin/sync-overview': {
+        total: 1,
+        updatedAt: '2026-10-11T03:00:00Z',
+        hospitals: [{
+          hcode: '10670', name: 'รพ.น่าน', level: 'A_S', isActive: true, connectionStatus: 'ONLINE', lastSyncAt: '2026-10-11T02:59:00Z',
+          authenticity: { status: null, reason: null, checkedAt: null, isFailure: false }, dataPurgedAt: null, hasBmsConfig: true,
+          latestRun: null,
+          agentHeartbeat: {
+            at: '2026-10-11T02:59:30Z',
+            version: '1.0.0',
+            mode: 'local',
+            pushed: false,
+            fresh: true,
+          },
+        }],
+      },
+    });
+    const table = await screen.findByRole('table', { name: 'สถานะการซิงค์รายโรงพยาบาล' });
+    expect(within(table).getByText('สำเร็จ')).toBeInTheDocument();
+    expect(within(table).getByText('agent ที่ รพ.')).toBeInTheDocument();
+    expect(within(table).getByText('agent v1.0.0 · local')).toBeInTheDocument();
+    expect(within(table).getByText('Agent ออนไลน์ (local)')).toBeInTheDocument();
+  });
   it('OnlineUsersTab: KPI tile with the server total and an empty state', async () => {
     renderWithSwr(<OnlineUsersTab />, {
       '/api/admin/online-users': { users: [], total: 0, cache: { backend: 'redis', available: true }, updatedAt: '2026-10-11T03:00:00Z' },

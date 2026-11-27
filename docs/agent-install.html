@@ -77,22 +77,23 @@
   <h2>3. ตรวจว่าเครื่องพร้อม</h2>
   <div class="card">
     <p>คลิกขวา <code>check.cmd</code> → Run as administrator</p>
-    <pre><code>== 1/4 ไฟล์ตั้งค่า ==     OK — พบ agent.config.json
-== 2/4 ตัว agent ==          OK — พบ nn-lrms-agent.exe
-== 3/4 BMS gateway ==        OK — gateway_state=running expires_at=2026-11-20T21:07:51
-== 4/4 เซิร์ฟเวอร์ NN-LRMS ==  OK — HTTP 200</code></pre>
+    <pre><code>== 1/5 ไฟล์ตั้งค่า ==                      OK — serverUrl=... localGateway=...
+== 2/5 ตัว agent และตำแหน่งโฟลเดอร์ ==     OK — พบ nn-lrms-agent.exe
+== 3/5 BMS gateway บนเครื่องนี้ + PasteJSON == OK — PasteJSON (hosxp.net) แลก session สำเร็จ
+== 4/5 เซิร์ฟเวอร์ NN-LRMS (/api/health) ==    OK — HTTP 200
+== 5/5 สิทธิ์ API Key (/api/sync/agent-push) == OK — API Key ใช้งานได้ (HTTP 200)</code></pre>
     <p>ผ่านทุกข้อจึงไปขั้นตอนถัดไปได้ ถ้าข้อไหน FAIL ให้ดูหัวข้อ "เจอปัญหา" ท้ายคู่มือ</p>
   </div>
 
   <h2>4. ติดตั้งเป็น service</h2>
   <div class="card">
-    <p>คลิกขวา <code>install-service.cmd</code> → Run as administrator จะสั่ง install + start ให้</p>
+    <p>คลิกขวา <code>install-service.cmd</code> → Run as administrator จะสั่ง install + start แล้วรอตรวจสถานะ <code>RUNNING</code> ให้</p>
     <p>service จะเริ่มอัตโนมัติเมื่อเปิดเครื่อง และ restart เอง 2 ครั้งถ้าตัว agent ล้ม (30 วินาที และ 60 วินาที)
       แล้วหยุดให้ IT ตรวจจาก log</p>
     <pre><code>NN-LRMS-agent-service.exe status
 Get-Content .\logs\NN-LRMS-agent-service.out.log -Tail 50</code></pre>
     <p>ในหน้า NN-LRMS: <b>ตั้งค่า → สถานะการซิงค์</b> คอลัมน์ "เริ่มโดย" ของโรงพยาบาลนี้ต้องขึ้น
-      <code>agent ที่ รพ.</code> และเวลา "ซิงค์ล่าสุด" ต้องเดินเรื่อย</p>
+      <code>agent ที่ รพ.</code> พร้อมสถานะ <code>agent v... · local</code> และเวลา "ซิงค์ล่าสุด" ต้องเดินเรื่อย</p>
   </div>
 
   <h2>5. ถอนการติดตั้ง</h2>

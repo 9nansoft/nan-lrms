@@ -25,10 +25,16 @@ if not exist NN-LRMS-agent-service.exe (
   exit /b 1
 )
 
+echo %CD% | findstr /I /B "C:\Users\" >nul
+if not errorlevel 1 (
+  echo [!] คำเตือน: โฟลเดอร์อยู่ใน C:\Users\... บัญชี LocalService ของ service อาจไม่มีสิทธิ์อ่าน
+  echo     หาก service ไม่ขึ้น ให้ย้ายทั้งโฟลเดอร์ไปไว้ที่ C:\NN-LRMS-agent\
+)
+
 echo == 1/4 ติดตั้ง service ==
 NN-LRMS-agent-service.exe install
 if errorlevel 1 (
-  echo [X] คำสั่ง install ล้มเหลวว (ด้างบน = ข้อความจาก WinSW)
+  echo [X] คำสั่ง install ล้มเหลว (ดูข้อความจาก WinSW ข้างบน)
   exit /b 1
 )
 
@@ -43,12 +49,21 @@ if errorlevel 1 (
 echo == 3/4 เริ่ม service ==
 NN-LRMS-agent-service.exe start
 if errorlevel 1 (
-  echo [!] start ไม่สำเร็จ — service อาจจะดับทันที ดู log: logs\NN-LRMS-agent-service.err.log
+  echo [!] start ไม่สำเร็จ — ดู log: logs\NN-LRMS-agent-service.err.log
   exit /b 1
 )
 
-echo == 4/4 สถานะ ==
+echo == 4/4 รอ 3 วินาทีแล้วตรวจว่า service ยังทำงานอยู่จริง ==
+timeout /t 3 /nobreak >nul
 sc query NN-LRMS-agent
+sc query NN-LRMS-agent | findstr /C:"RUNNING" >nul
+if errorlevel 1 (
+  echo.
+  echo [!] คำเตือน: service ไม่ได้อยู่ในสถานะ RUNNING — น่าจะดับหลังเริ่มทำงาน
+  echo     ตรวจดู log: logs\NN-LRMS-agent-service.err.log และ logs\NN-LRMS-agent-service.out.log
+  echo     หรือรัน diagnose.cmd แล้วส่ง diagnose-report.txt ให้ผู้ดูแลระบบ
+  exit /b 1
+)
 echo.
 echo ติดตั้งเสร็จ — ดู log: logs\NN-LRMS-agent-service.out.log
 echo ถ้าต้องการรายงานปัญหา: รัน diagnose.cmd

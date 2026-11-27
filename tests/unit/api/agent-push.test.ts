@@ -428,4 +428,25 @@ describe('POST /api/sync/agent-push — the headless agent path', () => {
     const body = (await res.json()) as { newbornCutoff?: string };
     expect(typeof body.newbornCutoff).toBe('string');
   });
+
+  it('marks hospital ONLINE and updates last_sync_at after an agent push', async () => {
+    const id = await hospitalId();
+    const key = await createApiKey(db, id, 'NN-LRMS agent', AGENT_SCOPES);
+    await db.execute(
+      "UPDATE hospitals SET connection_status = 'UNKNOWN', last_sync_at = NULL WHERE id = ?",
+      [id],
+    );
+
+    const res = await POST(
+      jsonRequest({ labor: { patients: [], activeAns: [] } }, key.rawKey) as never,
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await db.query<{ connection_status: string; last_sync_at: string | null }>(
+      'SELECT connection_status, last_sync_at FROM hospitals WHERE id = ?',
+      [id],
+    );
+    expect(rows[0]?.connection_status).toBe('ONLINE');
+    expect(rows[0]?.last_sync_at).not.toBeNull();
+  });
 });

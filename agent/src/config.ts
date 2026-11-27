@@ -57,15 +57,20 @@ export function configPath(): string {
   return join(here, '..', 'agent.config.json');
 }
 
+function isPackagedBinary(entry: string | undefined): boolean {
+  if ('pkg' in process && (process as { pkg?: unknown }).pkg !== undefined) return true;
+  if (!entry) return false;
+  // Bun compiled binaries report /$bunfs/...; pkg binaries report C:\snapshot\... or /snapshot/...
+  return entry.startsWith('/$bunfs/') || /^(?:[a-zA-Z]:)?[\\/]+snapshot(?:[\\/]|$)/.test(entry);
+}
+
 /** Directory of the running script (the .mjs, or the packaged .exe). */
-function scriptDir(): string {
-  const entry = process.argv[1];
-  // A compiled binary reports its own path inside the runtime's virtual
-  // filesystem (/$bunfs/...), which is NOT where the config sits — the
-  // config lives next to the .exe on disk, and process.execPath is that
-  // path. A plain script (node agent.mjs) has a real path in argv[1].
-  const fromEntry = entry && !entry.startsWith('/$bunfs/') ? entry : null;
-  const target = fromEntry ?? process.execPath;
+export function scriptDir(
+  entry: string | undefined = process.argv[1],
+  execPath: string = process.execPath,
+): string {
+  const fromEntry = entry && !isPackagedBinary(entry) ? entry : null;
+  const target = fromEntry ?? execPath;
   if (target && target.length > 0) return dirname(resolve(target));
   return process.cwd();
 }
