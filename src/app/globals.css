@@ -6,6 +6,8 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --font-sarabun: 'Sarabun', ui-sans-serif, system-ui, sans-serif;
+  --font-jetbrains-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* ── Direction C tokens — mirror of src/config/design-tokens.ts ──
      (parity-tested in tests/unit/config/design-tokens.test.ts) */
