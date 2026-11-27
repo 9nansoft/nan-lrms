@@ -40,6 +40,29 @@ describe('WebhookKeysTab — characterization (must not change)', () => {
     await userEvent.click(screen.getByTitle('ปิด'));
     expect(screen.queryByText('kklrms_SECRET')).toBeNull();
   });
+  it('creates a scoped Agent Key via /agent-key and reveals agent.config.json', async () => {
+    const fetchSpy = stubMutations(() => ({
+      ok: true,
+      body: {
+        hcode: '10670',
+        key: 'kklrms_AGENT_SECRET',
+        keyPrefix: 'kklrms_AGENT',
+        label: 'NN-LRMS agent',
+        agentConfig: { serverUrl: 'https://kk-lrms.bmscloud.in.th', apiKey: 'kklrms_AGENT_SECRET', intervalMinutes: 5 },
+      },
+    }));
+    renderWithSwr(<WebhookKeysTab />, KEYS);
+    await userEvent.selectOptions(await screen.findByLabelText(/ประเภทคีย์/), 'agent');
+    await userEvent.selectOptions(screen.getByLabelText(/โรงพยาบาล/), '10670');
+    await userEvent.click(screen.getByRole('button', { name: /สร้าง/ }));
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith('/api/admin/hospitals/10670/agent-key', {
+        method: 'POST',
+      }),
+    );
+    expect(await screen.findByText('kklrms_AGENT_SECRET')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /คัดลอก agent\.config\.json/ })).toBeInTheDocument();
+  });
   it('revoke stays disabled until the key prefix is typed, then DELETEs', async () => {
     const fetchSpy = stubMutations();
     renderWithSwr(<WebhookKeysTab />, KEYS);

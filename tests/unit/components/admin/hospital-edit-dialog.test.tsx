@@ -61,4 +61,26 @@ describe('HospitalEditDialog — Thai labels on the tokens', () => {
     expect(screen.getByText('ใช้งาน')).toBeInTheDocument();
     expect(screen.queryByText(/Hospital Operations Profile|Danger Zone|LAST SYNC/)).toBeNull();
   });
+  it('can mint a scoped Agent Key from the คีย์ Webhook section', async () => {
+    const fetchSpy = stubMutations(() => ({
+      ok: true,
+      body: {
+        hcode: '10670',
+        key: 'kklrms_DIALOG_AGENT',
+        keyPrefix: 'kklrms_DIALO',
+        label: 'NN-LRMS agent',
+        agentConfig: { apiKey: 'kklrms_DIALOG_AGENT', intervalMinutes: 5 },
+      },
+    }));
+    open();
+    await userEvent.click(await screen.findByRole('button', { name: /คีย์ Webhook/ }));
+    await userEvent.selectOptions(await screen.findByLabelText(/ประเภทคีย์/), 'agent');
+    await userEvent.click(screen.getByRole('button', { name: /สร้าง Key/ }));
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith('/api/admin/hospitals/10670/agent-key', {
+        method: 'POST',
+      }),
+    );
+    expect(await screen.findByText('kklrms_DIALOG_AGENT')).toBeInTheDocument();
+  });
 });

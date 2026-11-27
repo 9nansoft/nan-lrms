@@ -96,6 +96,24 @@ class BmsClientError extends Error {
   }
 }
 
+function formatTransportErrorDetail(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = error.cause as { code?: unknown; message?: unknown } | undefined;
+  const parts = [error.message];
+  if (cause && typeof cause === 'object') {
+    const code = typeof cause.code === 'string' && cause.code ? cause.code : null;
+    const msg =
+      typeof cause.message === 'string' && cause.message && cause.message !== error.message
+        ? cause.message
+        : null;
+    const causeDetail = [code, msg].filter(Boolean).join(' ');
+    if (causeDetail && !error.message.includes(causeDetail)) {
+      parts.push(`(${causeDetail})`);
+    }
+  }
+  return parts.join(' ');
+}
+
 export async function retrieveBmsSession(sessionId: string): Promise<BmsSessionResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SESSION_TIMEOUT_MS);
@@ -121,7 +139,9 @@ export async function retrieveBmsSession(sessionId: string): Promise<BmsSessionR
       throw new Error('BMS session retrieval timed out after 30 seconds');
     }
     if (error instanceof Error && error.message.startsWith('BMS session retrieval')) throw error;
-    throw new Error(`Cannot connect to BMS session API: ${(error as Error).message}`);
+    throw new Error(`Cannot connect to BMS session API: ${formatTransportErrorDetail(error)}`, {
+      cause: error,
+    });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -328,9 +348,10 @@ export async function executeSql<T = Record<string, unknown>>(
       );
     }
     if (error instanceof BmsClientError) throw error;
-    throw new Error('Unable to connect to the BMS API. Please check your connection.', {
-      cause: error,
-    });
+    throw new Error(
+      `Unable to connect to the BMS API (${formatTransportErrorDetail(error)}). Please check your connection.`,
+      { cause: error },
+    );
   } finally {
     clearTimeout(timeoutId);
   }

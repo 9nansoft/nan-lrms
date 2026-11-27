@@ -11,6 +11,7 @@
 // One implementation, two drivers — the agent cannot drift from the browser.
 //
 // Logging is PHI-free on purpose: counts and status only.
+import './install-fetch';
 import { runBrowserPoll } from '@/lib/browser-poll';
 import { loadConfig } from './config';
 import { acquireSession } from './session';

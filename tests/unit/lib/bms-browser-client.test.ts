@@ -62,6 +62,17 @@ describe('bms-browser-client.retrieveBmsSession', () => {
     });
     await expect(retrieveBmsSession('SID-X')).rejects.toThrow();
   });
+
+  it('includes transport cause details when fetch throws', async () => {
+    mockFetch.mockRejectedValueOnce(
+      new TypeError('terminated', {
+        cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }),
+      }),
+    );
+    await expect(retrieveBmsSession('SID-X')).rejects.toThrow(
+      /Cannot connect to BMS session API: terminated \(ECONNRESET socket hang up\)/,
+    );
+  });
 });
 
 describe('probeLocalApi', () => {
@@ -281,6 +292,17 @@ describe('executeSql', () => {
       json: async () => ({ data: [], MessageCode: 500, Message: 'Session unauthorized — fake' }),
     });
     await expect(executeSql('SELECT 1', cfg)).rejects.toThrow(/Session unauthorized — fake/);
+  });
+
+  it('includes transport cause details when fetch rejects', async () => {
+    mockFetch.mockRejectedValueOnce(
+      new TypeError('fetch failed', {
+        cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+      }),
+    );
+    await expect(executeSql('SELECT 1', cfg)).rejects.toThrow(
+      /Unable to connect to the BMS API \(fetch failed \(ECONNREFUSED connect ECONNREFUSED\)\)/,
+    );
   });
 });
 

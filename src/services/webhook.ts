@@ -659,6 +659,7 @@ export async function listApiKeys(
     lastUsedAt: string | null;
     createdAt: string;
     revokedAt: string | null;
+    scopes: string[];
   }>
 > {
   const whereClause = hospitalId ? 'WHERE wak.hospital_id = ?' : '';
@@ -675,10 +676,11 @@ export async function listApiKeys(
     last_used_at: string | null;
     created_at: string;
     revoked_at: string | null;
+    scopes: string | null;
   }>(
     `SELECT wak.id, wak.hospital_id, h.hcode, h.name as hospital_name,
             wak.key_prefix, wak.label, wak.is_active, wak.last_used_at,
-            wak.created_at, wak.revoked_at
+            wak.created_at, wak.revoked_at, wak.scopes
      FROM webhook_api_keys wak
      JOIN hospitals h ON h.id = wak.hospital_id
      ${whereClause}
@@ -697,6 +699,7 @@ export async function listApiKeys(
     lastUsedAt: r.last_used_at,
     createdAt: r.created_at,
     revokedAt: r.revoked_at,
+    scopes: r.scopes ? r.scopes.split(',').filter(Boolean) : [],
   }));
 }
 

@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 import useSWR from 'swr';
-import { Copy, Check, AlertTriangle, Trash2, Plus, X } from 'lucide-react';
+import { AlertTriangle, Trash2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -24,6 +24,13 @@ import { DataTable } from '@/components/shared/DataTable';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { DEFAULT_ACTION_REMEDY } from '@/lib/action-failure';
 import { SELECT_CLASS, StatusPill } from './admin-ui';
+import {
+  CreatedKeyBanner,
+  isAgentScopedKey,
+  mintHospitalApiKey,
+  type AdminKeyKind,
+  type CreatedKeyInfo,
+} from './CreatedKeyBanner';
 
 interface WebhookKey {
   id: string;
@@ -36,6 +43,7 @@ interface WebhookKey {
   lastUsedAt: string | null;
   createdAt: string;
   revokedAt: string | null;
+  scopes?: string[];
 }
 
 interface AdminHospital {
@@ -78,11 +86,11 @@ export function WebhookKeysTab() {
   } = useSWR<{ hospitals: AdminHospital[] }>('/api/admin/hospitals');
 
   const [formHcode, setFormHcode] = useState('');
+  const [keyType, setKeyType] = useState<AdminKeyKind>('webhook');
   const [formLabel, setFormLabel] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [justCreated, setJustCreated] = useState<JustCreatedKey | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [justCreated, setJustCreated] = useState<CreatedKeyInfo | null>(null);
 
   const [revokeTarget, setRevokeTarget] = useState<WebhookKey | null>(null);
   const [revokeInput, setRevokeInput] = useState('');
@@ -99,33 +107,25 @@ export function WebhookKeysTab() {
 
   const handleCreate = async (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    if (!formHcode || !formLabel.trim()) return;
+    if (!formHcode || (keyType === 'webhook' && !formLabel.trim())) return;
 
     setCreating(true);
     setCreateError(null);
-    setCopied(false);
 
     try {
-      const res = await fetch('/api/admin/webhooks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hcode: formHcode, label: formLabel.trim() }),
+      const hospitalName = hospitals.find((h) => h.hcode === formHcode)?.name;
+      const outcome = await mintHospitalApiKey({
+        kind: keyType,
+        hcode: formHcode,
+        hospitalName,
+        label: formLabel,
       });
-      const result = await res.json();
-
-      if (!res.ok) {
-        setCreateError(result.error ?? 'สร้าง API Key ไม่สำเร็จ');
+      if (!outcome.ok) {
+        setCreateError(outcome.error);
         return;
       }
 
-      setJustCreated({
-        id: result.id,
-        apiKey: result.apiKey,
-        keyPrefix: result.keyPrefix,
-        hospitalName: result.hospitalName,
-        hcode: result.hcode,
-        label: result.label,
-      });
+      setJustCreated(outcome.data);
       setFormHcode('');
       setFormLabel('');
       mutate();
@@ -133,17 +133,6 @@ export function WebhookKeysTab() {
       setCreateError('เกิดข้อผิดพลาดในการสร้าง API Key');
     } finally {
       setCreating(false);
-    }
-  };
-
-  const handleCopy = async () => {
-    if (!justCreated) return;
-    try {
-      await navigator.clipboard.writeText(justCreated.apiKey);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // clipboard blocked — leave the banner; user can triple-click to select
     }
   };
 
@@ -203,9 +192,24 @@ export function WebhookKeysTab() {
 
       <SectionCard
         title="สร้าง API Key ใหม่"
-        description="เลือกโรงพยาบาลและตั้งชื่อคีย์ — คีย์เต็มจะแสดงเพียงครั้งเดียวหลังสร้าง"
+        description="เลือกโรงพยาบาลและประเภทคีย์ — คีย์เต็มจะแสดงเพียงครั้งเดียวหลังสร้าง"
       >
         <form onSubmit={handleCreate}>
+          <div className="mb-3">
+            <label htmlFor="key-type" className="mb-1 block text-label text-ink">
+              ประเภทคีย์
+            </label>
+            <select
+              id="key-type"
+              value={keyType}
+              onChange={(e) => setKeyType(e.target.value as AdminKeyKind)}
+              disabled={creating}
+              className={SELECT_CLASS}
+            >
+              <option value="webhook">Webhook Key (สำหรับ API / Webhook ภายนอก)</option>
+              <option value="agent">Agent Key (nn-lrms-agent.exe — มี scope agent:push / heartbeat)</option>
+            </select>
+          </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[220px_minmax(0,1fr)_auto]">
             <div>
               <label htmlFor="hcode" className="mb-1 block text-label text-ink">
@@ -233,18 +237,18 @@ export function WebhookKeysTab() {
               </label>
               <Input
                 id="label"
-                value={formLabel}
+                value={keyType === 'agent' ? 'NN-LRMS agent' : formLabel}
                 onChange={(e) => setFormLabel(e.target.value)}
                 placeholder="เช่น Production webhook — Chiang Rai"
-                disabled={creating}
-                required
+                disabled={creating || keyType === 'agent'}
+                required={keyType === 'webhook'}
                 className="h-11 text-body"
               />
             </div>
             <div className="flex items-end">
               <Button
                 type="submit"
-                disabled={creating || !formHcode || !formLabel.trim()}
+                disabled={creating || !formHcode || (keyType === 'webhook' && !formLabel.trim())}
                 className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong"
               >
                 <Plus aria-hidden="true" className="h-4 w-4" />
@@ -263,49 +267,7 @@ export function WebhookKeysTab() {
         </form>
       </SectionCard>
 
-      {justCreated && (
-        <div className="rounded-2xl border border-warn/40 bg-warn-tint p-4">
-          <div className="mb-2 flex items-start justify-between gap-3">
-            <div className="flex items-start gap-2">
-              <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warn-text" />
-              <div>
-                <div className="text-body font-semibold text-warn-text">
-                  บันทึก API Key นี้ไว้ทันที — ระบบจะไม่แสดงให้เห็นอีก
-                </div>
-                <div className="mt-0.5 text-label text-ink-muted">
-                  {justCreated.hospitalName} ({justCreated.hcode}) · {justCreated.label}
-                </div>
-              </div>
-            </div>
-            <button
-              onClick={() => setJustCreated(null)}
-              className="rounded-lg p-2 text-ink-muted hover:bg-brand-soft hover:text-brand"
-              title="ปิด"
-              aria-label="ปิด"
-            >
-              <X aria-hidden="true" className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2">
-            <code className="flex-1 overflow-x-auto font-mono text-label text-ink">{justCreated.apiKey}</code>
-            <Button onClick={handleCopy} variant="outline" size="sm" className="h-9 gap-1.5 text-label">
-              {copied ? (
-                <Check aria-hidden="true" className="h-4 w-4 text-ok-text" />
-              ) : (
-                <Copy aria-hidden="true" className="h-4 w-4" />
-              )}
-              {copied ? 'คัดลอกแล้ว' : 'คัดลอก'}
-            </Button>
-          </div>
-          <div className="mt-2 text-label text-ink-muted">
-            ใช้ค่านี้ในส่วน{' '}
-            <code className="rounded border border-border bg-surface-card px-1 font-mono text-caption">
-              Authorization: Bearer &lt;key&gt;
-            </code>{' '}
-            เมื่อส่ง webhook
-          </div>
-        </div>
-      )}
+      {justCreated && <CreatedKeyBanner created={justCreated} onClose={() => setJustCreated(null)} />}
 
       <SectionCard title="API Key ทั้งหมด">
         <DataTable
@@ -331,7 +293,16 @@ export function WebhookKeysTab() {
                 </div>
               ),
             },
-            { key: 'label', header: 'ชื่อคีย์', cell: (k) => <span className="text-body text-ink">{k.label}</span> },
+            {
+              key: 'label',
+              header: 'ชื่อคีย์',
+              cell: (k) => (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-body text-ink">{k.label}</span>
+                  {isAgentScopedKey(k.scopes) && <StatusPill tone="brand">Agent</StatusPill>}
+                </div>
+              ),
+            },
             {
               key: 'prefix',
               header: 'รหัสขึ้นต้น',

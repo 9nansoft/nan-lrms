@@ -23,8 +23,6 @@ import {
   WifiOff,
   AlertTriangle,
   Plus,
-  Copy,
-  Check,
   Trash2,
   Database,
   CheckCircle2,
@@ -55,6 +53,13 @@ import type { StatusTone } from '@/config/status-tone';
 import { DEFAULT_ACTION_REMEDY } from '@/lib/action-failure';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { Field, SELECT_CLASS, StatusPill, TONE_CLASSES } from './admin-ui';
+import {
+  CreatedKeyBanner,
+  isAgentScopedKey,
+  mintHospitalApiKey,
+  type AdminKeyKind,
+  type CreatedKeyInfo,
+} from './CreatedKeyBanner';
 import { HospitalLevel, HospitalServiceType } from '@/types/domain';
 
 const LEVEL_OPTIONS = Object.values(HospitalLevel);
@@ -168,6 +173,7 @@ interface WebhookKey {
   lastUsedAt: string | null;
   createdAt: string;
   revokedAt: string | null;
+  scopes?: string[];
 }
 
 interface ConsultDoctor {
@@ -1076,15 +1082,11 @@ function TunnelSection({ hospital }: { hospital: AdminHospital }) {
 
 function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
   const { data, mutate } = useSWR<{ keys: WebhookKey[] }>('/api/admin/webhooks');
+  const [keyType, setKeyType] = useState<AdminKeyKind>('webhook');
   const [label, setLabel] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [justCreated, setJustCreated] = useState<{
-    apiKey: string;
-    keyPrefix: string;
-    label: string;
-  } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [justCreated, setJustCreated] = useState<CreatedKeyInfo | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<WebhookKey | null>(null);
   const [revokeInput, setRevokeInput] = useState('');
   const [revoking, setRevoking] = useState(false);
@@ -1098,44 +1100,28 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
   const activeKeyCount = keys.filter((key) => key.isActive).length;
 
   const handleCreate = async () => {
-    if (!label.trim()) return;
+    if (keyType === 'webhook' && !label.trim()) return;
     setCreating(true);
     setCreateError(null);
     setJustCreated(null);
-    setCopied(false);
     try {
-      const res = await fetch('/api/admin/webhooks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hcode: hospital.hcode, label: label.trim() }),
+      const outcome = await mintHospitalApiKey({
+        kind: keyType,
+        hcode: hospital.hcode,
+        hospitalName: hospital.name,
+        label,
       });
-      const result = await res.json();
-      if (!res.ok) {
-        setCreateError(result.error ?? 'สร้างไม่สำเร็จ');
+      if (!outcome.ok) {
+        setCreateError(outcome.error);
         return;
       }
-      setJustCreated({
-        apiKey: result.apiKey,
-        keyPrefix: result.keyPrefix,
-        label: result.label,
-      });
+      setJustCreated(outcome.data);
       setLabel('');
       await mutate();
     } catch {
       setCreateError('เกิดข้อผิดพลาดในการสร้าง API Key');
     } finally {
       setCreating(false);
-    }
-  };
-
-  const handleCopy = async () => {
-    if (!justCreated) return;
-    try {
-      await navigator.clipboard.writeText(justCreated.apiKey);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // clipboard blocked — user can select manually
     }
   };
 
@@ -1180,19 +1166,34 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
           <span className="text-ink-muted">· {hospital.hcode}</span>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <div className="min-w-[260px] flex-1">
+          <div className="min-w-[220px]">
+            <Field label="ประเภทคีย์">
+              <select
+                aria-label="ประเภทคีย์"
+                value={keyType}
+                onChange={(e) => setKeyType(e.target.value as AdminKeyKind)}
+                disabled={creating}
+                className={SELECT_CLASS}
+              >
+                <option value="webhook">Webhook Key</option>
+                <option value="agent">Agent Key (nn-lrms-agent.exe)</option>
+              </select>
+            </Field>
+          </div>
+          <div className="min-w-[220px] flex-1">
             <Field label="ชื่อคีย์">
               <Input
-                value={label}
+                value={keyType === 'agent' ? 'NN-LRMS agent' : label}
                 onChange={(e) => setLabel(e.target.value)}
                 placeholder="เช่น Production webhook"
+                disabled={creating || keyType === 'agent'}
                 className="h-11 text-body"
               />
             </Field>
           </div>
           <Button
             onClick={handleCreate}
-            disabled={creating || !label.trim()}
+            disabled={creating || (keyType === 'webhook' && !label.trim())}
             className="h-11 gap-1.5 bg-brand text-white hover:bg-brand-strong"
           >
             <Plus aria-hidden="true" className="h-4 w-4" />
@@ -1206,28 +1207,7 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
 
       {/* Just-created reveal */}
       {justCreated ? (
-        <div className="rounded-2xl border border-warn/40 bg-warn-tint px-4 py-3">
-          <div className="mb-2 flex items-start gap-2">
-            <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warn-text" />
-            <div>
-              <div className="text-body font-semibold text-warn-text">
-                บันทึก API Key นี้ไว้ทันที — ระบบจะไม่แสดงอีก
-              </div>
-              <div className="mt-0.5 text-label text-ink-muted">{justCreated.label}</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2">
-            <code className="flex-1 overflow-x-auto font-mono text-label text-ink">{justCreated.apiKey}</code>
-            <Button onClick={handleCopy} variant="outline" size="sm" className="h-9 gap-1.5 text-label">
-              {copied ? (
-                <Check aria-hidden="true" className="h-4 w-4 text-ok-text" />
-              ) : (
-                <Copy aria-hidden="true" className="h-4 w-4" />
-              )}
-              {copied ? 'คัดลอกแล้ว' : 'คัดลอก'}
-            </Button>
-          </div>
-        </div>
+        <CreatedKeyBanner created={justCreated} onClose={() => setJustCreated(null)} />
       ) : null}
 
       {/* Keys list */}
@@ -1250,7 +1230,10 @@ function WebhooksSection({ hospital }: { hospital: AdminHospital }) {
                 !k.isActive && 'text-ink-muted',
               )}
             >
-              <div className="truncate">{k.label}</div>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate">{k.label}</span>
+                {isAgentScopedKey(k.scopes) ? <StatusPill tone="brand">Agent</StatusPill> : null}
+              </div>
               <code className="rounded border border-border bg-surface-muted px-1.5 py-0.5 font-mono text-caption text-ink-muted">
                 {k.keyPrefix}…
               </code>
