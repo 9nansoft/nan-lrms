@@ -16,8 +16,34 @@ import { createApiKey, API_KEY_SCOPES } from '@/services/webhook';
 
 const AGENT_KEY_LABEL = 'NN-LRMS agent';
 
+function firstHeaderValue(value: string | null): string {
+  return (value ?? '').split(',')[0]?.trim() ?? '';
+}
+
+function resolveAgentServerUrl(request: NextRequest): string {
+  const configured =
+    process.env.NEXTAUTH_URL?.trim() ||
+    process.env.NEXT_PUBLIC_NN_LRMS_PUBLIC_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/+$/, '');
+  }
+  const host =
+    firstHeaderValue(request.headers.get('x-forwarded-host')) ||
+    firstHeaderValue(request.headers.get('host'));
+  const proto =
+    firstHeaderValue(request.headers.get('x-forwarded-proto')) ||
+    request.nextUrl.protocol.replace(/:$/, '');
+  if (host && proto) {
+    return `${proto}://${host}`.replace(/\/+$/, '');
+  }
+  if (request.nextUrl?.origin && request.nextUrl.origin !== 'null') {
+    return request.nextUrl.origin.replace(/\/+$/, '');
+  }
+  return 'https://kk-lrms.bmscloud.in.th';
+}
+
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ hcode: string }> },
 ) {
   try {
@@ -53,7 +79,7 @@ export async function POST(
       // The agent config the hospital needs — admin fills gatewayToken from
       // the hospital workstation's BMS gateway.
       agentConfig: {
-        serverUrl: process.env.NEXT_PUBLIC_NN_LRMS_PUBLIC_URL ?? 'https://kk-lrms.bmscloud.in.th',
+        serverUrl: resolveAgentServerUrl(request),
         apiKey: created.rawKey,
         intervalMinutes: 5,
         localGateway: 'http://127.0.0.1:45011',
